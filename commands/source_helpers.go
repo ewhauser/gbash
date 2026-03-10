@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"path"
 )
 
@@ -63,4 +64,41 @@ func readNamedInputs(ctx context.Context, inv *Invocation, names []string, defau
 		})
 	}
 	return inputs, nil
+}
+
+func readTwoInputs(ctx context.Context, inv *Invocation, leftName, rightName string) (leftData, rightData []byte, err error) {
+	if leftName == "-" && rightName == "-" {
+		return nil, nil, &ExitError{
+			Code: 1,
+			Err:  errors.New("only one input may be read from stdin"),
+		}
+	}
+
+	var stdinData []byte
+	stdinLoaded := false
+	load := func(name string) ([]byte, error) {
+		if name != "-" {
+			data, _, err := readAllFile(ctx, inv, name)
+			return data, err
+		}
+		if !stdinLoaded {
+			data, err := readAllStdin(inv)
+			if err != nil {
+				return nil, err
+			}
+			stdinData = data
+			stdinLoaded = true
+		}
+		return stdinData, nil
+	}
+
+	leftData, err = load(leftName)
+	if err != nil {
+		return nil, nil, err
+	}
+	rightData, err = load(rightName)
+	if err != nil {
+		return nil, nil, err
+	}
+	return leftData, rightData, nil
 }

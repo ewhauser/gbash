@@ -517,6 +517,8 @@ Initial MVP command set:
 - `file`
 - `find`
 - `grep`
+- `rg`
+- `awk`
 - `head`
 - `tail`
 - `wc`
@@ -524,6 +526,17 @@ Initial MVP command set:
 - `uniq`
 - `cut`
 - `sed`
+- `printf`
+- `comm`
+- `paste`
+- `tr`
+- `rev`
+- `nl`
+- `join`
+- `split`
+- `tac`
+- `diff`
+- `base64`
 - `jq`
 - `curl` when network access is configured
 - `mkdir`
@@ -552,6 +565,21 @@ For `sed`, the runtime should continue to expose an explicitly documented subset
 - alternate substitution delimiters such as `s#/old#/new#`
 
 The unsupported `sed` surface remains broad by design: no hold-space commands, multiline pattern-space commands, branching, grouping, file side-effect commands, or shell-evaluating `e`.
+
+For the text/search batch, the runtime should expose useful, explicitly documented subsets instead of implying parity with GNU coreutils, ripgrep, or awk implementations:
+
+- `printf` supports the core shell format verbs used by automation scripts, including `%b` escape decoding and `\c` early termination
+- `rg` supports recursive regex search with `-n`, `-i`, `-l`, `-c`, `-g`, `--hidden`, and `--files`
+- `awk` is backed by `goawk` and supports `-F`, `-v`, and `-f`, but keeps `system()`, shell pipes, file writes, and extra file reads disabled inside the sandbox
+- `comm` supports two-input comparisons plus column suppression via `-1`, `-2`, and `-3`
+- `paste` supports parallel and serial modes via `-s` and `-d`, including repeated `-` stdin inputs
+- `tr` supports translate, delete, squeeze, complement, ranges, escapes, and a focused set of POSIX character classes
+- `rev` and `tac` support Unicode-safe line reversal and reverse-line streaming
+- `nl` supports body numbering styles plus width, separator, start, and increment controls
+- `join` supports keyed joins via `-1`, `-2`, `-t`, `-a`, `-v`, `-e`, `-o`, and `-i`
+- `split` supports line-based and byte-based splits via `-l`, `-b`, `-d`, and `-a`
+- `diff` supports unified output plus `-q`, `-s`, and `-i`
+- `base64` supports encode/decode, wrap control, and whitespace-tolerant decoding
 
 For network access, the runtime now exposes a safe `curl` subset instead of ambient host networking. That subset is enabled only when `runtime.Config.Network` or a prebuilt `NetworkClient` is provided. The sandboxed network layer must:
 
@@ -813,8 +841,7 @@ The gap analysis against `just-bash` yields two categories: gaps we should close
 
 ### 18.1 Gaps To Close
 
-- persistent session semantics
-- broader command coverage for agent workflows, especially the missing file/path, text/search, shell/helper, and archive/data command families
+- broader command coverage for agent workflows, especially the missing shell/helper and archive/data command families plus deeper parity for the newer text/search tools
 - stronger execution budgets and policy enforcement, including richer CPU and memory accounting
 - host-backed overlay filesystem support so real directories can be mounted read-only underneath an in-memory writable layer
 - fuller `jq` and `curl` compatibility for structured data flows and safe networked workflows

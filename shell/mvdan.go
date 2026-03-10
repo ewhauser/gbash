@@ -251,6 +251,15 @@ func (m *MVdan) callHandler(exec *Execution, budget *executionBudget) interp.Cal
 		recordCommand(exec.Trace, trace.EventCallExpanded, commandInfo)
 
 		if interp.IsBuiltin(args[0]) {
+			if _, ok := exec.Registry.Lookup(args[0]); ok {
+				rewritten := make([]string, len(args))
+				copy(rewritten[1:], args[1:])
+				rewritten[0] = path.Join("/bin", args[0])
+				return rewritten, nil
+			}
+		}
+
+		if interp.IsBuiltin(args[0]) {
 			if err := allowBuiltin(ctx, exec.Policy, args[0], args); err != nil {
 				recordPolicyDenied(exec.Trace, err, "", "", args[0], 126, "builtin")
 				return nil, shellFailure(ctx, 126, "%v", err)

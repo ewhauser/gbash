@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"io"
 	"os"
 	"path"
 	"testing"
@@ -89,4 +90,20 @@ func writeSessionFile(t *testing.T, session *Session, name string, data []byte) 
 	if _, err := file.Write(data); err != nil {
 		t.Fatalf("Write(%q) error = %v", name, err)
 	}
+}
+
+func readSessionFile(t *testing.T, session *Session, name string) []byte {
+	t.Helper()
+
+	file, err := session.FileSystem().Open(context.Background(), name)
+	if err != nil {
+		t.Fatalf("Open(%q) error = %v", name, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatalf("ReadAll(%q) error = %v", name, err)
+	}
+	return data
 }

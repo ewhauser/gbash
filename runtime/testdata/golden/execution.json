@@ -39,6 +39,24 @@
         }
       },
       {
+        "kind": "command.start",
+        "command": {
+          "name": "/bin/echo",
+          "argv": ["/bin/echo", "hi"],
+          "dir": "/home/agent/project",
+          "exit_code": 0
+        }
+      },
+      {
+        "kind": "command.exit",
+        "command": {
+          "name": "/bin/echo",
+          "argv": ["/bin/echo", "hi"],
+          "dir": "/home/agent/project",
+          "exit_code": 0
+        }
+      },
+      {
         "kind": "call.expanded",
         "command": {
           "name": "cat",
