@@ -30,6 +30,53 @@ func FuzzFilePathCommands(f *testing.F) {
 		copyPath := fuzzPath(rawName) + ".copy"
 		movedPath := fuzzPath(rawName) + ".moved"
 		linkPath := fuzzPath(rawName) + ".ln"
+		data := clampFuzzData(rawData)
+
+		writeSessionFile(t, session, inputPath, data)
+
+		script := []byte(fmt.Sprintf(
+			"touch %s\ncp %s %s\nmv %s %s\nln -s -f %s %s\nreadlink %s >/tmp/readlink.out\nstat %s >/tmp/stat.out\nbasename %s >/tmp/base.out\ndirname %s >/tmp/dir.out\nchmod 600 %s\nmkdir -p /tmp/fuzz-empty/sub\nrmdir /tmp/fuzz-empty/sub\nfile -b %s >/tmp/file.out\nrm %s %s %s\n",
+			shellQuote(inputPath),
+			shellQuote(inputPath),
+			shellQuote(copyPath),
+			shellQuote(copyPath),
+			shellQuote(movedPath),
+			shellQuote(movedPath),
+			shellQuote(linkPath),
+			shellQuote(linkPath),
+			shellQuote(movedPath),
+			shellQuote(movedPath),
+			shellQuote(movedPath),
+			shellQuote(movedPath),
+			shellQuote(movedPath),
+			shellQuote(linkPath),
+			shellQuote(movedPath),
+			shellQuote(inputPath),
+		))
+
+		result, err := runFuzzSessionScript(t, session, script)
+		assertSuccessfulFuzzExecution(t, script, result, err)
+	})
+}
+
+func FuzzDirectoryTraversalCommands(f *testing.F) {
+	rt := newFuzzRuntime(f)
+
+	seeds := []struct {
+		name string
+		data []byte
+	}{
+		{"alpha", []byte("hello\n")},
+		{"notes-1", []byte("# title\nbody\n")},
+		{"data.bin", []byte{0x00, 0x01, 0x02, 0x03, 0xff}},
+	}
+	for _, seed := range seeds {
+		f.Add(seed.name, seed.data)
+	}
+
+	f.Fuzz(func(t *testing.T, rawName string, rawData []byte) {
+		session := newFuzzSession(t, rt)
+		inputPath := fuzzPath(rawName) + ".txt"
 		treeDir := path.Join("/tmp", "fuzz-tree")
 		treeFile := path.Join(treeDir, "sub", "item.txt")
 		treeLink := path.Join(treeDir, "item.ln")
@@ -38,31 +85,15 @@ func FuzzFilePathCommands(f *testing.F) {
 		writeSessionFile(t, session, inputPath, data)
 
 		script := []byte(fmt.Sprintf(
-			"touch %s\ncp %s %s\nmv %s %s\nln -s -f %s %s\nreadlink %s >/tmp/readlink.out\nstat %s >/tmp/stat.out\nbasename %s >/tmp/base.out\ndirname %s >/tmp/dir.out\nchmod 600 %s\nmkdir -p /tmp/fuzz-empty/sub\nrmdir /tmp/fuzz-empty/sub\nfile -b %s >/tmp/file.out\nmkdir -p %s\ncp %s %s\nln -s -f %s %s\ndu -a %s >/tmp/du.out\ntree -a -L 2 %s >/tmp/tree.out\nrm -r -f %s\nrm %s %s %s\n",
-			shellQuote(inputPath),
-			shellQuote(inputPath),
-			shellQuote(copyPath),
-			shellQuote(copyPath),
-			shellQuote(movedPath),
-			shellQuote(movedPath),
-			shellQuote(linkPath),
-			shellQuote(linkPath),
-			shellQuote(movedPath),
-			shellQuote(movedPath),
-			shellQuote(movedPath),
-			shellQuote(movedPath),
-			shellQuote(movedPath),
+			"mkdir -p %s\ncp %s %s\nln -s -f %s %s\ndu -a %s >/tmp/du.out\ntree -a -L 2 %s >/tmp/tree.out\nrm -r -f %s\n",
 			shellQuote(path.Dir(treeFile)),
-			shellQuote(movedPath),
+			shellQuote(inputPath),
 			shellQuote(treeFile),
 			shellQuote(treeFile),
 			shellQuote(treeLink),
 			shellQuote(treeDir),
 			shellQuote(treeDir),
 			shellQuote(treeDir),
-			shellQuote(linkPath),
-			shellQuote(movedPath),
-			shellQuote(inputPath),
 		))
 
 		result, err := runFuzzSessionScript(t, session, script)
@@ -241,8 +272,25 @@ func FuzzSQLiteCommands(f *testing.F) {
 		value := prepareStructuredDataFixtures(t, session, rawValue, rawJSON)
 
 		script := []byte(fmt.Sprintf(
-			"sqlite3 :memory: \"create table t(value text); insert into t values ('%s'); select value from t;\" >/tmp/sqlite-value.txt\nsqlite3 -json /tmp/data.db \"create table if not exists items(value text); insert into items values ('%s'); select value from items order by value;\" >/tmp/sqlite-json.txt\n",
+			"sqlite3 :memory: \"create table t(value text); insert into t values ('%s'); select value from t;\" >/tmp/sqlite-value.txt\n",
 			sqliteStringLiteral(value),
+		))
+
+		result, err := runFuzzSessionScript(t, session, script)
+		assertSuccessfulFuzzExecution(t, script, result, err)
+	})
+}
+
+func FuzzSQLiteFileCommands(f *testing.F) {
+	rt := newFuzzRuntime(f)
+	addStructuredDataSeeds(f)
+
+	f.Fuzz(func(t *testing.T, rawValue string, rawJSON []byte) {
+		session := newFuzzSession(t, rt)
+		value := prepareStructuredDataFixtures(t, session, rawValue, rawJSON)
+
+		script := []byte(fmt.Sprintf(
+			"sqlite3 -json /tmp/data.db \"create table if not exists items(value text); insert into items values ('%s'); select value from items order by value;\" >/tmp/sqlite-json.txt\n",
 			sqliteStringLiteral(value),
 		))
 

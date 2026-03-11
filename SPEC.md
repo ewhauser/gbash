@@ -70,6 +70,8 @@ There is no runtime mode where command execution falls back to `exec.Command`, `
 
 We do not reimplement parsing, quoting, command substitution, loops, or shell AST traversal from scratch. Those responsibilities stay in `mvdan/sh/v3`.
 
+The shell adapter may pre-validate parsed AST forms that are known to trigger `mvdan/sh` interpreter panics and convert them into normal shell errors instead. Unsupported descriptor-dup redirections are one example: they should surface as `invalid redirection`, not crash the runtime.
+
 ### 5.3 Project-owned boundaries
 
 The runtime owns:
