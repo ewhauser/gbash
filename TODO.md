@@ -401,12 +401,12 @@ Commands that exist in both repos but have flags in upstream not yet ported.
 
 #### `mv`
 
-- [ ] `--force`
-- [ ] `--no-clobber`
-- [ ] `--verbose`
-- [ ] `-f`
-- [ ] `-n`
-- [ ] `-v`
+- [x] `--force`
+- [x] `--no-clobber`
+- [x] `--verbose`
+- [x] `-f`
+- [x] `-n`
+- [x] `-v`
 
 #### `nl`
 
