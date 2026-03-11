@@ -20,6 +20,7 @@ jobs:
     outputs:
       exit_code: ${{ steps.run-compat.outputs.exit_code }}
       publishable: ${{ steps.publish-state.outputs.publishable }}
+      deployable: ${{ steps.publish-state.outputs.deployable }}
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +59,8 @@ jobs:
         env:
           PAGES_ROOT: ${{ runner.temp }}/compat-pages
           GNU_RESULTS_DIR: ${{ runner.temp }}/compat-pages/compat/latest
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
@@ -68,6 +71,12 @@ jobs:
           fi
 
           if [ -f "$GNU_RESULTS_DIR/summary.json" ] && [ -f "$GNU_RESULTS_DIR/index.html" ] && [ -f "$GNU_RESULTS_DIR/badge.svg" ]; then
+            echo "publishable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publishable=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ -f "$GNU_RESULTS_DIR/summary.json" ] && [ -f "$GNU_RESULTS_DIR/index.html" ] && [ -f "$GNU_RESULTS_DIR/badge.svg" ] && [ "$REF_NAME" = "$DEFAULT_BRANCH" ]; then
             mkdir -p "$PAGES_ROOT"
             cat > "$PAGES_ROOT/index.html" <<'EOF'
           <!DOCTYPE html>
@@ -82,9 +91,9 @@ jobs:
           </body>
           </html>
           EOF
-            echo "publishable=true" >> "$GITHUB_OUTPUT"
+            echo "deployable=true" >> "$GITHUB_OUTPUT"
           else
-            echo "publishable=false" >> "$GITHUB_OUTPUT"
+            echo "deployable=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Summarize compat run
@@ -93,14 +102,19 @@ jobs:
           PAGE_URL: https://ewhauser.github.io/jbgo/compat/latest/
           COMPAT_EXIT_CODE: ${{ steps.run-compat.outputs.exit_code }}
           PUBLISHABLE: ${{ steps.publish-state.outputs.publishable }}
+          DEPLOYABLE: ${{ steps.publish-state.outputs.deployable }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           {
             echo "## Compatibility"
             echo
             echo "Harness exit code: \`$COMPAT_EXIT_CODE\`"
             echo
-            if [ "$PUBLISHABLE" = "true" ]; then
+            if [ "$DEPLOYABLE" = "true" ]; then
               echo "Published latest report: $PAGE_URL"
+            elif [ "$PUBLISHABLE" = "true" ]; then
+              echo "Report bundle generated, but not deployed because ref \`$REF_NAME\` is not the default branch \`$DEFAULT_BRANCH\`."
             else
               echo "No new report published. The previous report remains in place at $PAGE_URL"
             fi
@@ -115,13 +129,13 @@ jobs:
           retention-days: 30
 
       - name: Upload Pages artifact
-        if: always() && steps.publish-state.outputs.publishable == 'true'
+        if: always() && steps.publish-state.outputs.deployable == 'true'
         uses: actions/upload-pages-artifact@v4
         with:
           path: ${{ runner.temp }}/compat-pages
 
   publish:
-    if: always() && needs.compat.outputs.publishable == 'true'
+    if: always() && needs.compat.outputs.deployable == 'true'
     needs: compat
     runs-on: ubuntu-24.04
     environment:
