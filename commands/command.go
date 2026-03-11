@@ -8,7 +8,6 @@ import (
 	stdfs "io/fs"
 
 	jbfs "github.com/ewhauser/jbgo/fs"
-	"github.com/ewhauser/jbgo/network"
 	"github.com/ewhauser/jbgo/policy"
 	"github.com/ewhauser/jbgo/trace"
 )
@@ -18,22 +17,42 @@ type Command interface {
 	Run(ctx context.Context, inv *Invocation) error
 }
 
+type CommandFunc func(ctx context.Context, inv *Invocation) error
+
 type Invocation struct {
-	Args   []string
-	Env    map[string]string
-	Dir    string
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
-	FS     jbfs.FileSystem
-	Net    network.Client
-	Policy policy.Policy
-	Trace  trace.Recorder
-	// Exec runs a nested shell execution inside the same sandbox session.
-	// It inherits the current command's environment and working directory by default.
-	// Commands should prefer direct filesystem access for data-plane operations and
-	// reserve Exec for orchestration-style behavior such as subcommands or shell snippets.
-	Exec func(context.Context, *ExecutionRequest) (*ExecutionResult, error)
+	Args                  []string
+	Env                   map[string]string
+	Cwd                   string
+	Stdin                 io.Reader
+	Stdout                io.Writer
+	Stderr                io.Writer
+	FS                    *CommandFS
+	Fetch                 FetchFunc
+	Exec                  func(context.Context, *ExecutionRequest) (*ExecutionResult, error)
+	Limits                policy.Limits
+	GetRegisteredCommands func() []string
+
+	trace trace.Recorder
+}
+
+type definedCommand struct {
+	name string
+	fn   CommandFunc
+}
+
+func DefineCommand(name string, fn CommandFunc) Command {
+	return &definedCommand{name: name, fn: fn}
+}
+
+func (c *definedCommand) Name() string {
+	return c.name
+}
+
+func (c *definedCommand) Run(ctx context.Context, inv *Invocation) error {
+	if c.fn == nil {
+		return nil
+	}
+	return c.fn(ctx, inv)
 }
 
 type ExitError struct {
@@ -60,15 +79,19 @@ func ExitCode(err error) (int, bool) {
 	return exitErr.Code, true
 }
 
-func exitf(inv *Invocation, code int, format string, args ...any) error {
+func Exitf(inv *Invocation, code int, format string, args ...any) error {
 	msg := fmt.Sprintf(format, args...)
-	if inv.Stderr != nil {
+	if inv != nil && inv.Stderr != nil {
 		_, _ = fmt.Fprintln(inv.Stderr, msg)
 	}
 	return &ExitError{
 		Code: code,
 		Err:  errors.New(msg),
 	}
+}
+
+func exitf(inv *Invocation, code int, format string, args ...any) error {
+	return Exitf(inv, code, format, args...)
 }
 
 func exitCodeForError(err error) int {
@@ -78,24 +101,11 @@ func exitCodeForError(err error) int {
 	return 1
 }
 
-func allowPath(ctx context.Context, inv *Invocation, action policy.FileAction, name string) (string, error) {
-	abs := jbfs.Resolve(inv.Dir, name)
-	if inv.Policy != nil {
-		if err := policy.CheckPath(ctx, inv.Policy, inv.FS, action, abs); err != nil {
-			recordPolicyDenied(inv.Trace, err, action, abs, "", exitCodeForError(err))
-			return "", exitf(inv, exitCodeForError(err), "%v", err)
-		}
+func allowPath(_ context.Context, inv *Invocation, _ policy.FileAction, name string) (string, error) {
+	if inv == nil || inv.FS == nil {
+		return jbfs.Clean(name), nil
 	}
-	if inv.Trace != nil {
-		inv.Trace.Record(&trace.Event{
-			Kind: trace.EventFileAccess,
-			File: &trace.FileEvent{
-				Action: string(action),
-				Path:   abs,
-			},
-		})
-	}
-	return abs, nil
+	return inv.FS.Resolve(name), nil
 }
 
 func openRead(ctx context.Context, inv *Invocation, name string) (jbfs.File, string, error) {
@@ -105,7 +115,7 @@ func openRead(ctx context.Context, inv *Invocation, name string) (jbfs.File, str
 	}
 	file, err := inv.FS.Open(ctx, abs)
 	if err != nil {
-		return nil, "", &ExitError{Code: 1, Err: err}
+		return nil, "", err
 	}
 	return file, abs, nil
 }
@@ -117,7 +127,7 @@ func readDir(ctx context.Context, inv *Invocation, name string) ([]stdfs.DirEntr
 	}
 	entries, err := inv.FS.ReadDir(ctx, abs)
 	if err != nil {
-		return nil, "", &ExitError{Code: 1, Err: err}
+		return nil, "", err
 	}
 	return entries, abs, nil
 }
@@ -129,7 +139,7 @@ func statPath(ctx context.Context, inv *Invocation, name string) (stdfs.FileInfo
 	}
 	info, err := inv.FS.Stat(ctx, abs)
 	if err != nil {
-		return nil, "", &ExitError{Code: 1, Err: err}
+		return nil, "", err
 	}
 	return info, abs, nil
 }
@@ -141,7 +151,7 @@ func lstatPath(ctx context.Context, inv *Invocation, name string) (stdfs.FileInf
 	}
 	info, err := inv.FS.Lstat(ctx, abs)
 	if err != nil {
-		return nil, "", &ExitError{Code: 1, Err: err}
+		return nil, "", err
 	}
 	return info, abs, nil
 }
@@ -156,7 +166,7 @@ func statMaybe(ctx context.Context, inv *Invocation, action policy.FileAction, n
 		if errors.Is(err, stdfs.ErrNotExist) {
 			return nil, abs, false, nil
 		}
-		return nil, "", false, &ExitError{Code: 1, Err: err}
+		return nil, "", false, err
 	}
 	return info, abs, true, nil
 }
@@ -171,7 +181,7 @@ func lstatMaybe(ctx context.Context, inv *Invocation, action policy.FileAction, 
 		if errors.Is(err, stdfs.ErrNotExist) {
 			return nil, abs, false, nil
 		}
-		return nil, "", false, &ExitError{Code: 1, Err: err}
+		return nil, "", false, err
 	}
 	return info, abs, true, nil
 }

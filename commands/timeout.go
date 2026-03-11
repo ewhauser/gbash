@@ -29,7 +29,7 @@ func (c *Timeout) Run(ctx context.Context, inv *Invocation) error {
 	result, err := executeCommand(ctx, inv, &executeCommandOptions{
 		Argv:    argv,
 		Env:     inv.Env,
-		WorkDir: inv.Dir,
+		WorkDir: inv.Cwd,
 		Stdin:   inv.Stdin,
 		Timeout: timeout,
 	})

@@ -6,8 +6,6 @@ import (
 	stdfs "io/fs"
 	"strconv"
 	"strings"
-
-	"github.com/ewhauser/jbgo/policy"
 )
 
 type Chmod struct{}
@@ -66,9 +64,6 @@ func (c *Chmod) Run(ctx context.Context, inv *Invocation) error {
 }
 
 func applyModeSpec(ctx context.Context, inv *Invocation, abs string, info stdfs.FileInfo, modeSpec string, verbose bool) error {
-	if _, err := allowPath(ctx, inv, policy.FileActionWrite, abs); err != nil {
-		return err
-	}
 	mode, err := computeChmodMode(info.Mode(), modeSpec)
 	if err != nil {
 		return exitf(inv, 1, "chmod: invalid mode: %s", modeSpec)
@@ -76,7 +71,6 @@ func applyModeSpec(ctx context.Context, inv *Invocation, abs string, info stdfs.
 	if err := inv.FS.Chmod(ctx, abs, mode); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	recordFileMutation(inv.Trace, "chmod", abs, abs, abs)
 	if verbose {
 		if _, err := fmt.Fprintf(inv.Stdout, "mode of %q changed to %s\n", abs, formatModeOctal(mode)); err != nil {
 			return &ExitError{Code: 1, Err: err}

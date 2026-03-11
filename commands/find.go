@@ -82,7 +82,7 @@ func (c *Find) Run(ctx context.Context, inv *Invocation) error {
 
 	exitCode := 0
 	for _, root := range paths {
-		rootAbs := path.Join(inv.Dir, root)
+		rootAbs := path.Join(inv.Cwd, root)
 		if strings.HasPrefix(root, "/") {
 			rootAbs = root
 		}
@@ -327,7 +327,6 @@ func deleteFindResults(ctx context.Context, inv *Invocation, results []string) (
 			exitCode = 1
 			continue
 		}
-		recordFileMutation(inv.Trace, "remove", abs, abs, "")
 	}
 	return exitCode, nil
 }

@@ -299,7 +299,7 @@ func runTarExtract(ctx context.Context, inv *Invocation, opts *tarOptions) error
 
 func tarBaseDir(ctx context.Context, inv *Invocation, opts *tarOptions) (string, error) {
 	if opts.chdir == "" {
-		return inv.Dir, nil
+		return inv.Cwd, nil
 	}
 	info, abs, err := statPath(ctx, inv, opts.chdir)
 	if err != nil {
@@ -514,7 +514,6 @@ func tarEnsureDir(ctx context.Context, inv *Invocation, targetAbs string, perm s
 	if err := inv.FS.MkdirAll(ctx, targetAbs, perm.Perm()); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	recordFileMutation(inv.Trace, "mkdir", targetAbs, "", targetAbs)
 	return nil
 }
 
@@ -553,7 +552,7 @@ func tarExtractFile(ctx context.Context, inv *Invocation, tr *tar.Reader, target
 			return &ExitError{Code: 1, Err: err}
 		}
 	}
-	recordFileMutation(inv.Trace, "write", targetAbs, "", targetAbs)
+	recordFileMutation(inv.trace, "write", targetAbs, "", targetAbs)
 	return nil
 }
 
@@ -580,7 +579,6 @@ func tarExtractSymlink(ctx context.Context, inv *Invocation, entryName, targetAb
 	if err := inv.FS.Symlink(ctx, header.Linkname, targetAbs); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	recordFileMutation(inv.Trace, "symlink", targetAbs, header.Linkname, targetAbs)
 	return nil
 }
 
@@ -612,7 +610,6 @@ func tarExtractHardlink(ctx context.Context, inv *Invocation, baseDir, targetAbs
 	if err := inv.FS.Link(ctx, linkAbs, targetAbs); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	recordFileMutation(inv.Trace, "link", targetAbs, linkAbs, targetAbs)
 	return nil
 }
 

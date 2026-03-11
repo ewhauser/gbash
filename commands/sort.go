@@ -118,7 +118,7 @@ func (c *Sort) Run(ctx context.Context, inv *Invocation) error {
 	}
 
 	if opts.outputFile != "" {
-		targetAbs := jbfs.Resolve(inv.Dir, opts.outputFile)
+		targetAbs := jbfs.Resolve(inv.Cwd, opts.outputFile)
 		if err := writeFileContents(ctx, inv, targetAbs, []byte(output), 0o644); err != nil {
 			return err
 		}

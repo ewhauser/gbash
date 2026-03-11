@@ -103,7 +103,7 @@ func (c *Curl) Run(ctx context.Context, inv *Invocation) error {
 	if opts == nil {
 		return nil
 	}
-	if inv.Net == nil {
+	if inv.Fetch == nil {
 		return exitf(inv, 1, "curl: internal error: network client not available")
 	}
 
@@ -118,7 +118,7 @@ func (c *Curl) Run(ctx context.Context, inv *Invocation) error {
 	}
 	headers := prepareCurlHeaders(opts, contentType)
 
-	resp, err := inv.Net.Do(ctx, &network.Request{
+	resp, err := inv.Fetch(ctx, &FetchRequest{
 		Method:          opts.method,
 		URL:             requestURL,
 		Headers:         headers,
@@ -147,7 +147,7 @@ func (c *Curl) Run(ctx context.Context, inv *Invocation) error {
 		if filename == "" {
 			filename = extractCurlFilename(requestURL)
 		}
-		if err := writeFileContents(ctx, inv, jbfs.Resolve(inv.Dir, filename), curlOutputFileBody(opts, resp), 0o644); err != nil {
+		if err := writeFileContents(ctx, inv, jbfs.Resolve(inv.Cwd, filename), curlOutputFileBody(opts, resp), 0o644); err != nil {
 			return err
 		}
 		if !opts.verbose {
@@ -557,7 +557,7 @@ func saveCurlCookies(ctx context.Context, inv *Invocation, opts *curlOptions, re
 	if setCookie == "" {
 		return nil
 	}
-	return writeFileContents(ctx, inv, jbfs.Resolve(inv.Dir, opts.cookieJar), []byte(setCookie), 0o644)
+	return writeFileContents(ctx, inv, jbfs.Resolve(inv.Cwd, opts.cookieJar), []byte(setCookie), 0o644)
 }
 
 func buildCurlOutput(opts *curlOptions, resp *network.Response, requestURL string) *bytes.Buffer {

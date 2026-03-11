@@ -206,19 +206,15 @@ func runGzipItem(ctx context.Context, inv *Invocation, opts *gzipOptions, name, 
 	if writeErr != nil {
 		return exitf(inv, 1, "%s: %v", commandName, writeErr)
 	}
-	recordFileMutation(inv.Trace, "write", targetAbs, sourceAbs, targetAbs)
+	recordFileMutation(inv.trace, "write", targetAbs, sourceAbs, targetAbs)
 
 	if opts.verbose {
 		_, _ = fmt.Fprintf(inv.Stderr, "%s -> %s\n", sourceAbs, targetAbs)
 	}
 	if !opts.keep {
-		if _, err := allowPath(ctx, inv, policy.FileActionRemove, sourceAbs); err != nil {
-			return err
-		}
 		if err := inv.FS.Remove(ctx, sourceAbs, false); err != nil {
 			return &ExitError{Code: 1, Err: err}
 		}
-		recordFileMutation(inv.Trace, "remove", sourceAbs, sourceAbs, "")
 	}
 	return nil
 }

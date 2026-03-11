@@ -61,7 +61,7 @@ func (c *Tee) Run(ctx context.Context, inv *Invocation) error {
 			return &ExitError{Code: 1, Err: err}
 		}
 		_ = file.Close()
-		recordFileMutation(inv.Trace, map[bool]string{true: "append", false: "write"}[appendMode], abs, abs, abs)
+		recordFileMutation(inv.trace, map[bool]string{true: "append", false: "write"}[appendMode], abs, abs, abs)
 	}
 	return nil
 }

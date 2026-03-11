@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/ewhauser/jbgo v0.0.0
+	github.com/klauspost/compress v1.18.4
 	github.com/ncruces/go-sqlite3 v0.31.1
 	github.com/openai/openai-go v1.12.0
 	golang.org/x/term v0.40.0

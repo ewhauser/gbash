@@ -260,22 +260,35 @@ type Command interface {
     Run(ctx context.Context, inv *Invocation) error
 }
 
+type CommandFunc func(ctx context.Context, inv *Invocation) error
+
+func DefineCommand(name string, fn CommandFunc) Command
+
 type Invocation struct {
-    Args   []string
-    Env    map[string]string
-    Dir    string
-    Stdin  io.Reader
-    Stdout io.Writer
-    Stderr io.Writer
-    FS     FileSystem
-    Net    network.Client
-    Policy Policy
-    Trace  trace.Recorder
-    Exec   func(context.Context, *ExecutionRequest) (*ExecutionResult, error)
+    Args                  []string
+    Env                   map[string]string
+    Cwd                   string
+    Stdin                 io.Reader
+    Stdout                io.Writer
+    Stderr                io.Writer
+    FS                    *CommandFS
+    Fetch                 FetchFunc
+    Exec                  func(context.Context, *ExecutionRequest) (*ExecutionResult, error)
+    Limits                Limits
+    GetRegisteredCommands func() []string
 }
+
+type CommandFS struct {
+    // runtime-owned, policy-aware filesystem facade for commands
+}
+
+type FetchFunc func(context.Context, *network.Request) (*network.Response, error)
+
+type LazyCommandLoader func() (Command, error)
 
 type CommandRegistry interface {
     Register(cmd Command) error
+    RegisterLazy(name string, loader LazyCommandLoader) error
     Lookup(name string) (Command, bool)
     Names() []string
 }
@@ -330,6 +343,10 @@ type PolicyEvent struct {
     ResolutionSource string
 }
 ```
+
+The command-facing `Invocation` is capability-only. Custom commands get sandboxed filesystem and fetch helpers plus nested execution and limits metadata, but they do not receive the raw policy object, raw trace recorder, or raw network client. Policy checks and file-access tracing happen behind `Invocation.FS`, and `Invocation.Fetch` is nil unless network access is configured.
+
+Registry semantics are override-friendly: later registrations replace earlier ones so embedders can swap in custom implementations for built-ins, and `RegisterLazy` defers expensive command setup until first execution while still participating in `PATH` resolution and `Names()`.
 
 Key design decisions:
 
@@ -830,7 +847,9 @@ MVP excludes:
 
 ### Phase 5: Invocation model and higher-order commands
 
+- move commands onto a capability-based `Invocation` surface
 - allow commands to invoke sub-executions through runtime-owned callbacks
+- support eager and lazy custom-command registration with override semantics
 - broaden command flag coverage and higher-order patterns without leaving the sandbox
 - add regression tests for compound command behavior
 

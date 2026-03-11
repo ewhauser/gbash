@@ -239,7 +239,7 @@ func runXArgsCommand(ctx context.Context, inv *Invocation, argv []string, verbos
 	result, err := executeCommand(ctx, inv, &executeCommandOptions{
 		Argv:    argv,
 		Env:     inv.Env,
-		WorkDir: inv.Dir,
+		WorkDir: inv.Cwd,
 	})
 	if err != nil {
 		return err

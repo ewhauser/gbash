@@ -81,7 +81,7 @@ func (c *Touch) Run(ctx context.Context, inv *Invocation) error {
 			if err := file.Close(); err != nil {
 				return &ExitError{Code: 1, Err: err}
 			}
-			recordFileMutation(inv.Trace, "touch", abs, "", abs)
+			recordFileMutation(inv.trace, "touch", abs, "", abs)
 		} else if info.IsDir() {
 			// Touching directories updates metadata only.
 			if _, err := allowPath(ctx, inv, policy.FileActionWrite, name); err != nil {

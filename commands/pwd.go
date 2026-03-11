@@ -19,7 +19,7 @@ func (c *Pwd) Run(_ context.Context, inv *Invocation) error {
 	if len(inv.Args) != 0 {
 		return exitf(inv, 1, "pwd: unexpected arguments")
 	}
-	_, err := fmt.Fprintln(inv.Stdout, inv.Dir)
+	_, err := fmt.Fprintln(inv.Stdout, inv.Cwd)
 	if err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}

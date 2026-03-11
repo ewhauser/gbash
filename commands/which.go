@@ -30,7 +30,7 @@ func (c *Which) Run(ctx context.Context, inv *Invocation) error {
 	}
 	exitCode := 0
 	for _, name := range names {
-		matches, err := resolveAllCommands(ctx, inv, inv.Env, inv.Dir, name)
+		matches, err := resolveAllCommands(ctx, inv, inv.Env, inv.Cwd, name)
 		if err != nil {
 			return err
 		}

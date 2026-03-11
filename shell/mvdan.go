@@ -357,19 +357,25 @@ func (m *MVdan) execHandler(exec *Execution, budget *executionBudget) interp.Exe
 			}))
 		}
 
-		err = resolved.command.Run(ctx, &commands.Invocation{
-			Args:   args[1:],
-			Env:    currentEnv,
-			Dir:    virtualWD,
-			Stdin:  hc.Stdin,
-			Stdout: hc.Stdout,
-			Stderr: hc.Stderr,
-			FS:     exec.FS,
-			Net:    exec.Network,
-			Policy: exec.Policy,
-			Trace:  exec.Trace,
-			Exec:   subexecInvoker(exec.Exec, currentEnv, virtualWD),
-		})
+		err = resolved.command.Run(ctx, commands.NewInvocation(&commands.InvocationOptions{
+			Args:       args[1:],
+			Env:        currentEnv,
+			Cwd:        virtualWD,
+			Stdin:      hc.Stdin,
+			Stdout:     hc.Stdout,
+			Stderr:     hc.Stderr,
+			FileSystem: exec.FS,
+			Network:    exec.Network,
+			Policy:     exec.Policy,
+			Trace:      exec.Trace,
+			Exec:       subexecInvoker(exec.Exec, currentEnv, virtualWD),
+			GetRegisteredCommands: func() []string {
+				if exec.Registry == nil {
+					return nil
+				}
+				return exec.Registry.Names()
+			},
+		}))
 
 		if err == nil {
 			if !internal {

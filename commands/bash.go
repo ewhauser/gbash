@@ -41,7 +41,7 @@ func (c *Bash) Run(ctx context.Context, inv *Invocation) error {
 		result, err := inv.Exec(ctx, &ExecutionRequest{
 			Script:  string(data),
 			Env:     inv.Env,
-			WorkDir: inv.Dir,
+			WorkDir: inv.Cwd,
 		})
 		if err != nil {
 			return err
@@ -65,7 +65,7 @@ func (c *Bash) Run(ctx context.Context, inv *Invocation) error {
 			Script:  script,
 			Args:    positional,
 			Env:     inv.Env,
-			WorkDir: inv.Dir,
+			WorkDir: inv.Cwd,
 			Stdin:   inv.Stdin,
 		})
 		if err != nil {
@@ -85,7 +85,7 @@ func (c *Bash) Run(ctx context.Context, inv *Invocation) error {
 		Script:  string(scriptData),
 		Args:    inv.Args[1:],
 		Env:     inv.Env,
-		WorkDir: inv.Dir,
+		WorkDir: inv.Cwd,
 		Stdin:   inv.Stdin,
 	})
 	if err != nil {

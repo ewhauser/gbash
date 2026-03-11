@@ -50,7 +50,7 @@ func (c *Split) Run(ctx context.Context, inv *Invocation) error {
 
 	chunks := splitData(data, opts)
 	for i, chunk := range chunks {
-		target := jbfs.Resolve(inv.Dir, prefix+splitSuffix(i, opts))
+		target := jbfs.Resolve(inv.Cwd, prefix+splitSuffix(i, opts))
 		if opts.additionalSuffix != "" {
 			target += opts.additionalSuffix
 		}

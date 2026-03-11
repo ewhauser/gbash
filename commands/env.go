@@ -48,7 +48,7 @@ func (c *Env) Run(ctx context.Context, inv *Invocation) error {
 		Argv:       argv,
 		Env:        env,
 		SearchEnv:  inv.Env,
-		WorkDir:    inv.Dir,
+		WorkDir:    inv.Cwd,
 		ReplaceEnv: replaceEnv,
 		Stdin:      inv.Stdin,
 	})

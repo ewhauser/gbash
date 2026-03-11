@@ -75,7 +75,6 @@ func (c *LN) Run(ctx context.Context, inv *Invocation) error {
 		if err := inv.FS.Symlink(ctx, target, linkAbs); err != nil {
 			return &ExitError{Code: 1, Err: err}
 		}
-		recordFileMutation(inv.Trace, "symlink", linkAbs, target, linkAbs)
 	} else {
 		info, sourceAbs, err := lstatPath(ctx, inv, target)
 		if err != nil {
@@ -90,7 +89,6 @@ func (c *LN) Run(ctx context.Context, inv *Invocation) error {
 			}
 			return &ExitError{Code: 1, Err: err}
 		}
-		recordFileMutation(inv.Trace, "link", linkAbs, sourceAbs, linkAbs)
 	}
 
 	if verbose {

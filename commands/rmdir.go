@@ -79,7 +79,6 @@ func removeEmptyDir(ctx context.Context, inv *Invocation, abs string, verbose bo
 			return &ExitError{Code: 1, Err: err}
 		}
 	}
-	recordFileMutation(inv.Trace, "remove", abs, abs, "")
 	if verbose {
 		if _, err := fmt.Fprintf(inv.Stdout, "rmdir: removing directory, %q\n", abs); err != nil {
 			return &ExitError{Code: 1, Err: err}

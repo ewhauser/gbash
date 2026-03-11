@@ -54,7 +54,6 @@ func (c *RM) Run(ctx context.Context, inv *Invocation) error {
 			}
 			return &ExitError{Code: 1, Err: err}
 		}
-		recordFileMutation(inv.Trace, "remove", abs, abs, "")
 	}
 
 	return nil

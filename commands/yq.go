@@ -341,7 +341,7 @@ func yqLooksLikeInput(inv *Invocation, token string) bool {
 		return true
 	}
 
-	info, err := inv.FS.Stat(context.Background(), jbfs.Resolve(inv.Dir, token))
+	info, err := inv.FS.Stat(context.Background(), jbfs.Resolve(inv.Cwd, token))
 	return err == nil && !info.IsDir()
 }
 

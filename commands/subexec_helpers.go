@@ -38,7 +38,7 @@ func executeCommand(ctx context.Context, inv *Invocation, opts *executeCommandOp
 	}
 	workDir := opts.WorkDir
 	if workDir == "" {
-		workDir = inv.Dir
+		workDir = inv.Cwd
 	}
 
 	resolved, ok, err := resolveCommand(ctx, inv, searchEnv, workDir, opts.Argv[0])

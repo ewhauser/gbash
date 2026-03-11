@@ -4,8 +4,12 @@ MODEL ?= gemini-2.5-flash
 SQLITE_FS_DB ?= /tmp/jbgo-sandbox.db
 SQLITE_FS_SCRIPT ?= pwd
 
-.PHONY: run run-sqlite-backed-fs run-sqlite-backed-fs-repl run-vertex-bash-chat
+<<<<<<< HEAD
+.PHONY: run run-custom-zstd run-sqlite-backed-fs run-sqlite-backed-fs-repl run-vertex-bash-chat
 run: run-vertex-bash-chat
+
+run-custom-zstd:
+	go run ./custom-zstd < ./custom-zstd/demo.sh
 
 run-vertex-bash-chat:
 	@if ! command -v gcloud >/dev/null 2>&1; then \

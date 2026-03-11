@@ -37,9 +37,6 @@ func copyFileContents(ctx context.Context, inv *Invocation, srcAbs, dstAbs strin
 	if err := ensureParentDirExists(ctx, inv, dstAbs); err != nil {
 		return err
 	}
-	if _, err := allowPath(ctx, inv, policy.FileActionWrite, dstAbs); err != nil {
-		return err
-	}
 
 	srcFile, err := inv.FS.Open(ctx, srcAbs)
 	if err != nil {
@@ -56,7 +53,7 @@ func copyFileContents(ctx context.Context, inv *Invocation, srcAbs, dstAbs strin
 	if _, err := io.Copy(dstFile, srcFile); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	recordFileMutation(inv.Trace, "copy", dstAbs, srcAbs, dstAbs)
+	recordFileMutation(inv.trace, "copy", dstAbs, srcAbs, dstAbs)
 	return nil
 }
 
@@ -72,13 +69,9 @@ func copyTree(ctx context.Context, inv *Invocation, srcAbs, dstAbs string) error
 	if err := ensureParentDirExists(ctx, inv, dstAbs); err != nil {
 		return err
 	}
-	if _, err := allowPath(ctx, inv, policy.FileActionMkdir, dstAbs); err != nil {
-		return err
-	}
 	if err := inv.FS.MkdirAll(ctx, dstAbs, srcInfo.Mode().Perm()); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	recordFileMutation(inv.Trace, "mkdir", dstAbs, "", "")
 
 	entries, _, err := readDir(ctx, inv, srcAbs)
 	if err != nil {
@@ -108,9 +101,6 @@ func writeFileContents(ctx context.Context, inv *Invocation, targetAbs string, d
 	if err := ensureParentDirExists(ctx, inv, targetAbs); err != nil {
 		return err
 	}
-	if _, err := allowPath(ctx, inv, policy.FileActionWrite, targetAbs); err != nil {
-		return err
-	}
 
 	file, err := inv.FS.OpenFile(ctx, targetAbs, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
@@ -121,7 +111,7 @@ func writeFileContents(ctx context.Context, inv *Invocation, targetAbs string, d
 	if _, err := file.Write(data); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	recordFileMutation(inv.Trace, "write", targetAbs, targetAbs, targetAbs)
+	recordFileMutation(inv.trace, "write", targetAbs, targetAbs, targetAbs)
 	return nil
 }
 

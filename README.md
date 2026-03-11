@@ -31,6 +31,7 @@ Install the module with `go get github.com/ewhauser/jbgo` and import packages fr
 - [Configuration](#configuration)
   - [Filesystem Backends](#filesystem-backends)
   - [Network Access](#network-access)
+  - [Custom Commands](#custom-commands)
   - [Registry and Policy](#registry-and-policy)
 - [Security Model](#security-model)
 - [Supported Commands](#supported-commands)
@@ -409,6 +410,29 @@ curl -X POST -H 'content-type: application/json' -d '{"name":"demo"}' \
 ```
 
 If you want full control over the transport in tests or embedding code, inject your own `Config.NetworkClient` instead of using `Config.Network`.
+
+### Custom Commands
+
+Use `commands.DefineCommand` with a custom `Config.Registry` when you want to add a command or override one of the defaults.
+
+```go
+registry := commands.DefaultRegistry()
+registry.Register(commands.DefineCommand("zstd", func(ctx context.Context, inv *commands.Invocation) error {
+    // ... Implementation here ...
+	return nil
+}))
+
+registry.RegisterLazy("echo", func() (commands.Command, error) {
+	return commands.DefineCommand("echo", func(ctx context.Context, inv *commands.Invocation) error {
+		_, err := fmt.Fprintf(inv.Stdout, "custom:%s\n", strings.Join(inv.Args, ","))
+		return err
+	}), nil
+})
+
+rt, err := runtime.New(&runtime.Config{Registry: registry})
+```
+
+See [`examples/custom-zstd/main.go`](./examples/custom-zstd/main.go) for a runnable example that adds a `zstd` command. Run it with `cd examples && make run-custom-zstd`.
 
 ### Registry and Policy
 

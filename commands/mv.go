@@ -56,13 +56,6 @@ func (c *MV) Run(ctx context.Context, inv *Invocation) error {
 		if err := ensureParentDirExists(ctx, inv, destAbs); err != nil {
 			return err
 		}
-		if _, err := allowPath(ctx, inv, policy.FileActionRename, srcAbs); err != nil {
-			return err
-		}
-		if _, err := allowPath(ctx, inv, policy.FileActionRename, destAbs); err != nil {
-			return err
-		}
-
 		if destExists {
 			if err := inv.FS.Remove(ctx, destAbs, destInfo != nil && destInfo.IsDir()); err != nil && !isNotExist(err) {
 				return &ExitError{Code: 1, Err: err}
@@ -77,12 +70,10 @@ func (c *MV) Run(ctx context.Context, inv *Invocation) error {
 				if err := inv.FS.Rename(ctx, srcAbs, destAbs); err != nil {
 					return &ExitError{Code: 1, Err: err}
 				}
-				recordFileMutation(inv.Trace, "rename", destAbs, srcAbs, destAbs)
 				continue
 			}
 			return &ExitError{Code: 1, Err: err}
 		}
-		recordFileMutation(inv.Trace, "rename", destAbs, srcAbs, destAbs)
 		if opts.verbose {
 			if _, err := fmt.Fprintf(inv.Stdout, "renamed '%s' -> '%s'\n", source, destAbs); err != nil {
 				return &ExitError{Code: 1, Err: err}

@@ -49,7 +49,6 @@ func (c *Mkdir) Run(ctx context.Context, inv *Invocation) error {
 		if err := inv.FS.MkdirAll(ctx, abs, fs.FileMode(0o755)); err != nil {
 			return &ExitError{Code: 1, Err: err}
 		}
-		recordFileMutation(inv.Trace, "mkdir", abs, "", "")
 	}
 
 	return nil
