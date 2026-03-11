@@ -199,8 +199,8 @@ Commands that exist in both repos but have flags in upstream not yet ported.
 
 #### `cat`
 
-- [ ] `--number`
-- [ ] `-n`
+- [x] `--number`
+- [x] `-n`
 
 #### `comm`
 
