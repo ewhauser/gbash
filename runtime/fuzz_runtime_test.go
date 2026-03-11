@@ -21,6 +21,7 @@ func FuzzRuntimeScript(f *testing.F) {
 		[]byte("printf 'x y\\n' | xargs -n 1 echo\n"),
 		[]byte("bash -c 'echo child'\n"),
 		[]byte("jq -n --arg value demo '{value:$value}'\n"),
+		[]byte(">&0\n"),
 		[]byte(">&000000000000000000\n"),
 	}
 	for _, seed := range seeds {

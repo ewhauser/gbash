@@ -7,7 +7,7 @@ import (
 	stdfs "io/fs"
 	"strings"
 
-	"github.com/cadencerpm/just-bash-go/policy"
+	"github.com/ewhauser/jbgo/policy"
 )
 
 type LN struct{}

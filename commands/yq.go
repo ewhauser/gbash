@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	jbfs "github.com/cadencerpm/just-bash-go/fs"
+	jbfs "github.com/ewhauser/jbgo/fs"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	logging "gopkg.in/op/go-logging.v1"
 )

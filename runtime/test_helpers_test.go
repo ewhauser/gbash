@@ -7,8 +7,8 @@ import (
 	"path"
 	"testing"
 
-	"github.com/cadencerpm/just-bash-go/commands"
-	"github.com/cadencerpm/just-bash-go/policy"
+	"github.com/ewhauser/jbgo/commands"
+	"github.com/ewhauser/jbgo/policy"
 )
 
 func newRuntime(t *testing.T, cfg *Config) *Runtime {

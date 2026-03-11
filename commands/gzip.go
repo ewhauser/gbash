@@ -10,7 +10,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/cadencerpm/just-bash-go/policy"
+	"github.com/ewhauser/jbgo/policy"
 )
 
 type Gzip struct {

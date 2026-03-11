@@ -6,11 +6,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cadencerpm/just-bash-go/commands"
-	jbfs "github.com/cadencerpm/just-bash-go/fs"
-	"github.com/cadencerpm/just-bash-go/network"
-	"github.com/cadencerpm/just-bash-go/policy"
-	"github.com/cadencerpm/just-bash-go/shell"
+	"github.com/ewhauser/jbgo/commands"
+	jbfs "github.com/ewhauser/jbgo/fs"
+	"github.com/ewhauser/jbgo/network"
+	"github.com/ewhauser/jbgo/policy"
+	"github.com/ewhauser/jbgo/shell"
 )
 
 type Config struct {

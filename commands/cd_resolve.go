@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	jbfs "github.com/cadencerpm/just-bash-go/fs"
+	jbfs "github.com/ewhauser/jbgo/fs"
 )
 
 const cdResolveCommandName = "__jb_cd_resolve"

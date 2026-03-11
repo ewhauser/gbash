@@ -14,11 +14,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cadencerpm/just-bash-go/commands"
-	jbfs "github.com/cadencerpm/just-bash-go/fs"
-	"github.com/cadencerpm/just-bash-go/network"
-	"github.com/cadencerpm/just-bash-go/policy"
-	"github.com/cadencerpm/just-bash-go/trace"
+	"github.com/ewhauser/jbgo/commands"
+	jbfs "github.com/ewhauser/jbgo/fs"
+	"github.com/ewhauser/jbgo/network"
+	"github.com/ewhauser/jbgo/policy"
+	"github.com/ewhauser/jbgo/trace"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
@@ -105,6 +105,12 @@ func (m *MVdan) Run(ctx context.Context, exec *Execution) (result *RunResult, ru
 			_, _ = fmt.Fprintln(exec.Stderr, violation.Error())
 		}
 		return &RunResult{FinalEnv: envMapFromVars(nil)}, interp.ExitStatus(126)
+	}
+	if invalid := validateSupportedRedirections(validationProgram); invalid != nil {
+		if exec.Stderr != nil {
+			_, _ = fmt.Fprintln(exec.Stderr, invalid.Error())
+		}
+		return &RunResult{FinalEnv: envMapFromVars(nil)}, interp.ExitStatus(2)
 	}
 
 	preludeLines := uint(0)

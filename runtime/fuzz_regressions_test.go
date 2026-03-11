@@ -9,20 +9,30 @@ import (
 func TestMalformedRedirectionDoesNotPanic(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: ">&000000000000000000\n",
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
+	cases := []string{
+		">&000000000000000000\n",
+		">&0\n",
+		">&0&0000000000000000\n",
 	}
-	if result.ExitCode == 0 {
-		t.Fatalf("ExitCode = %d, want non-zero", result.ExitCode)
-	}
-	if !strings.Contains(result.Stderr, "invalid redirection") {
-		t.Fatalf("Stderr = %q, want invalid-redirection message", result.Stderr)
-	}
-	if strings.Contains(result.Stderr, "unhandled >& arg") {
-		t.Fatalf("Stderr = %q, want sanitized panic output", result.Stderr)
+	for _, script := range cases {
+		script := script
+		t.Run(strings.TrimSpace(script), func(t *testing.T) {
+			result, err := rt.Run(context.Background(), &ExecutionRequest{
+				Script: script,
+			})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result.ExitCode == 0 {
+				t.Fatalf("ExitCode = %d, want non-zero", result.ExitCode)
+			}
+			if !strings.Contains(result.Stderr, "invalid redirection") {
+				t.Fatalf("Stderr = %q, want invalid-redirection message", result.Stderr)
+			}
+			if strings.Contains(result.Stderr, "unhandled >& arg") {
+				t.Fatalf("Stderr = %q, want sanitized panic output", result.Stderr)
+			}
+		})
 	}
 }
 

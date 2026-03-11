@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	jbfs "github.com/cadencerpm/just-bash-go/fs"
-	"github.com/cadencerpm/just-bash-go/policy"
+	jbfs "github.com/ewhauser/jbgo/fs"
+	"github.com/ewhauser/jbgo/policy"
 )
 
 type commandResolution struct {

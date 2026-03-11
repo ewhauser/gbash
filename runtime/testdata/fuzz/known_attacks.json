@@ -15,6 +15,11 @@
     "script": ">&000000000000000000\n"
   },
   {
+    "name": "unsupported-dup-redirection",
+    "kind": "stability",
+    "script": ">&0\n"
+  },
+  {
     "name": "loop-bomb",
     "kind": "dos",
     "script": "while true; do echo x; done\n"

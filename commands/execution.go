@@ -4,7 +4,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/cadencerpm/just-bash-go/trace"
+	"github.com/ewhauser/jbgo/trace"
 )
 
 type ExecutionRequest struct {

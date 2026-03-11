@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	jbfs "github.com/cadencerpm/just-bash-go/fs"
-	"github.com/cadencerpm/just-bash-go/policy"
+	jbfs "github.com/ewhauser/jbgo/fs"
+	"github.com/ewhauser/jbgo/policy"
 )
 
 type symlinkFSFactory struct {

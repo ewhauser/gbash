@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/cadencerpm/just-bash-go/policy"
+	"github.com/ewhauser/jbgo/policy"
 	"mvdan.cc/sh/v3/syntax"
 )
 

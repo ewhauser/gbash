@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	jbruntime "github.com/cadencerpm/just-bash-go/runtime"
+	jbruntime "github.com/ewhauser/jbgo/runtime"
 	"mvdan.cc/sh/v3/syntax"
 )
 

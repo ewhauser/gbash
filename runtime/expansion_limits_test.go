@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cadencerpm/just-bash-go/policy"
+	"github.com/ewhauser/jbgo/policy"
 )
 
 func TestMaxSubstitutionDepthEnforced(t *testing.T) {

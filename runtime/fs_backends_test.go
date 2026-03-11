@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	jbfs "github.com/cadencerpm/just-bash-go/fs"
+	jbfs "github.com/ewhauser/jbgo/fs"
 )
 
 type seededFSFactory struct {

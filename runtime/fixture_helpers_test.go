@@ -9,7 +9,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/cadencerpm/just-bash-go/trace"
+	"github.com/ewhauser/jbgo/trace"
 )
 
 type executionFixture struct {

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cadencerpm/just-bash-go/commands"
-	"github.com/cadencerpm/just-bash-go/policy"
+	"github.com/ewhauser/jbgo/commands"
+	"github.com/ewhauser/jbgo/policy"
 )
 
 type timeoutProbe struct{}

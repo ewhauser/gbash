@@ -7,10 +7,10 @@ import (
 	"io"
 	stdfs "io/fs"
 
-	jbfs "github.com/cadencerpm/just-bash-go/fs"
-	"github.com/cadencerpm/just-bash-go/network"
-	"github.com/cadencerpm/just-bash-go/policy"
-	"github.com/cadencerpm/just-bash-go/trace"
+	jbfs "github.com/ewhauser/jbgo/fs"
+	"github.com/ewhauser/jbgo/network"
+	"github.com/ewhauser/jbgo/policy"
+	"github.com/ewhauser/jbgo/trace"
 )
 
 type Command interface {

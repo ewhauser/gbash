@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cadencerpm/just-bash-go/policy"
+	"github.com/ewhauser/jbgo/policy"
 )
 
 type Touch struct{}

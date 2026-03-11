@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cadencerpm/just-bash-go/policy"
-	"github.com/cadencerpm/just-bash-go/trace"
+	"github.com/ewhauser/jbgo/policy"
+	"github.com/ewhauser/jbgo/trace"
 )
 
 func TestTraceEventsIncludeSchemaSessionAndExecutionIDs(t *testing.T) {

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/cadencerpm/just-bash-go/policy"
-	"github.com/cadencerpm/just-bash-go/trace"
+	"github.com/ewhauser/jbgo/policy"
+	"github.com/ewhauser/jbgo/trace"
 )
 
 func recordPolicyDenied(rec trace.Recorder, err error, action policy.FileAction, path, command string, exitCode int) {

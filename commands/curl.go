@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	jbfs "github.com/cadencerpm/just-bash-go/fs"
-	"github.com/cadencerpm/just-bash-go/network"
+	jbfs "github.com/ewhauser/jbgo/fs"
+	"github.com/ewhauser/jbgo/network"
 )
 
 type Curl struct{}

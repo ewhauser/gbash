@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cadencerpm/just-bash-go/network"
+	"github.com/ewhauser/jbgo/network"
 )
 
 func TestCurlIsUnavailableByDefault(t *testing.T) {

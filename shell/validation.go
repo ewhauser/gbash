@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cadencerpm/just-bash-go/policy"
+	"github.com/ewhauser/jbgo/policy"
 	"mvdan.cc/sh/v3/pattern"
 	"mvdan.cc/sh/v3/syntax"
 )
@@ -14,6 +14,14 @@ type budgetViolation struct {
 }
 
 func (e *budgetViolation) Error() string {
+	return e.message
+}
+
+type shellValidationError struct {
+	message string
+}
+
+func (e *shellValidationError) Error() string {
 	return e.message
 }
 
@@ -68,6 +76,52 @@ func validateExecutionBudgets(program *syntax.File, pol policy.Policy) error {
 		}
 	}
 	return nil
+}
+
+func validateSupportedRedirections(program *syntax.File) error {
+	if program == nil {
+		return nil
+	}
+
+	var walkErr error
+	syntax.Walk(program, func(node syntax.Node) bool {
+		if walkErr != nil || node == nil {
+			return walkErr == nil
+		}
+
+		redir, ok := node.(*syntax.Redirect)
+		if !ok {
+			return true
+		}
+
+		switch redir.Op {
+		case syntax.DplOut:
+			if !isSupportedDupOutTarget(wordLiteral(redir.Word)) {
+				walkErr = &shellValidationError{message: "invalid redirection"}
+				return false
+			}
+		case syntax.DplIn:
+			if !isSupportedDupInTarget(wordLiteral(redir.Word)) {
+				walkErr = &shellValidationError{message: "invalid redirection"}
+				return false
+			}
+		}
+		return true
+	})
+	return walkErr
+}
+
+func isSupportedDupOutTarget(target string) bool {
+	switch target {
+	case "1", "2", "-":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSupportedDupInTarget(target string) bool {
+	return target == "-"
 }
 
 func estimateWordGlobOps(word *syntax.Word) int64 {

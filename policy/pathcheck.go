@@ -6,7 +6,7 @@ import (
 	stdfs "io/fs"
 	"path"
 
-	jbfs "github.com/cadencerpm/just-bash-go/fs"
+	jbfs "github.com/ewhauser/jbgo/fs"
 )
 
 func CheckPath(ctx context.Context, pol Policy, fsys jbfs.FileSystem, action FileAction, target string) error {

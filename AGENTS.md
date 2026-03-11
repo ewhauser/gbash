@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`just-bash-go` is a small Go module centered on a deterministic shell runtime. Use [`cmd/just-bash-go/`](/Users/ewhauser/working/cadencerpm/just-bash-go/cmd/just-bash-go) for the CLI entrypoint, [`runtime/`](/Users/ewhauser/working/cadencerpm/just-bash-go/runtime) for orchestration and execution results, [`shell/`](/Users/ewhauser/working/cadencerpm/just-bash-go/shell) for `mvdan/sh` integration, [`commands/`](/Users/ewhauser/working/cadencerpm/just-bash-go/commands) for built-in command implementations, and [`fs/`](/Users/ewhauser/working/cadencerpm/just-bash-go/fs) for the virtual filesystem. Policy and tracing live in [`policy/`](/Users/ewhauser/working/cadencerpm/just-bash-go/policy) and [`trace/`](/Users/ewhauser/working/cadencerpm/just-bash-go/trace). Read [`SPEC.md`](/Users/ewhauser/working/cadencerpm/just-bash-go/SPEC.md) before changing runtime boundaries or sandbox behavior.
+`just-bash-go` is a small Go module centered on a deterministic shell runtime. Use [`cmd/jbgo/`](/Users/ewhauser/working/cadencerpm/just-bash-go/cmd/jbgo) for the CLI entrypoint, [`runtime/`](/Users/ewhauser/working/cadencerpm/just-bash-go/runtime) for orchestration and execution results, [`shell/`](/Users/ewhauser/working/cadencerpm/just-bash-go/shell) for `mvdan/sh` integration, [`commands/`](/Users/ewhauser/working/cadencerpm/just-bash-go/commands) for built-in command implementations, and [`fs/`](/Users/ewhauser/working/cadencerpm/just-bash-go/fs) for the virtual filesystem. Policy and tracing live in [`policy/`](/Users/ewhauser/working/cadencerpm/just-bash-go/policy) and [`trace/`](/Users/ewhauser/working/cadencerpm/just-bash-go/trace). Read [`SPEC.md`](/Users/ewhauser/working/cadencerpm/just-bash-go/SPEC.md) before changing runtime boundaries or sandbox behavior.
 
 ## Build, Test, and Development Commands
 Use Go 1.25+.
@@ -9,7 +9,7 @@ Use Go 1.25+.
 - `go build ./...` builds all packages and catches compile-time regressions.
 - `go test ./...` runs the full test suite; this currently exercises the runtime end to end.
 - `go test ./runtime -run TestRunSimpleScript` runs a focused sanity check while iterating.
-- `go run ./cmd/just-bash-go < script.sh` executes a shell snippet through the local CLI.
+- `go run ./cmd/jbgo < script.sh` executes a shell snippet through the local CLI.
 - `gofmt -w .` formats the repository with standard Go tooling before review.
 
 ## Coding Style & Naming Conventions

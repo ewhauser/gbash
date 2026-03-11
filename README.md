@@ -18,6 +18,8 @@ Key properties:
 
 Requires Go 1.25+.
 
+Install the module with `go get github.com/ewhauser/jbgo` and import packages from `github.com/ewhauser/jbgo/...`.
+
 ## Table of Contents
 
 - [Usage](#usage)
@@ -49,7 +51,7 @@ import (
 	"context"
 	"fmt"
 
-	jbruntime "github.com/cadencerpm/just-bash-go/runtime"
+	jbruntime "github.com/ewhauser/jbgo/runtime"
 )
 
 func main() {
@@ -93,8 +95,8 @@ import (
 	"context"
 	"fmt"
 
-	jbnetwork "github.com/cadencerpm/just-bash-go/network"
-	jbruntime "github.com/cadencerpm/just-bash-go/runtime"
+	jbnetwork "github.com/ewhauser/jbgo/network"
+	jbruntime "github.com/ewhauser/jbgo/runtime"
 )
 
 func main() {
@@ -134,7 +136,7 @@ import (
 	"context"
 	"fmt"
 
-	jbruntime "github.com/cadencerpm/just-bash-go/runtime"
+	jbruntime "github.com/ewhauser/jbgo/runtime"
 )
 
 func main() {
@@ -187,7 +189,13 @@ That differs from the interactive CLI, which carries shell-visible env and cwd f
 The CLI reads a script from stdin and executes it inside the sandbox runtime.
 
 ```bash
-printf 'echo hi\npwd\n' | go run ./cmd/just-bash-go
+go install github.com/ewhauser/jbgo/cmd/jbgo@latest
+```
+
+After installation, run the binary directly. From a local checkout, replace `jbgo` with `go run ./cmd/jbgo`.
+
+```bash
+printf 'echo hi\npwd\n' | jbgo
 ```
 
 Example:
@@ -200,19 +208,19 @@ hi
 Redirects and file reads also stay inside the virtual filesystem:
 
 ```bash
-printf 'echo hi > /tmp.txt\ncat /tmp.txt\n' | go run ./cmd/just-bash-go
+printf 'echo hi > /tmp.txt\ncat /tmp.txt\n' | jbgo
 ```
 
 When stdin is a terminal, the CLI starts an interactive shell automatically:
 
 ```bash
-go run ./cmd/just-bash-go
+jbgo
 ```
 
 You can also force interactive mode explicitly:
 
 ```bash
-printf 'pwd\ncd /tmp\npwd\nexit\n' | go run ./cmd/just-bash-go -i
+printf 'pwd\ncd /tmp\npwd\nexit\n' | jbgo -i
 ```
 
 The interactive shell is intentionally minimal:
@@ -271,8 +279,8 @@ Network access is disabled by default. When you set `Config.Network` or provide 
 
 ```go
 import (
-	jbnetwork "github.com/cadencerpm/just-bash-go/network"
-	jbruntime "github.com/cadencerpm/just-bash-go/runtime"
+	jbnetwork "github.com/ewhauser/jbgo/network"
+	jbruntime "github.com/ewhauser/jbgo/runtime"
 )
 
 rt, err := jbruntime.New(&jbruntime.Config{
@@ -389,7 +397,7 @@ Common commands:
 ```bash
 go build ./...
 go test ./...
-go run ./cmd/just-bash-go < script.sh
+go run ./cmd/jbgo < script.sh
 gofmt -w .
 ```
 

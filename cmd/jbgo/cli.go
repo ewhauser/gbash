@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	jbruntime "github.com/cadencerpm/just-bash-go/runtime"
+	jbruntime "github.com/ewhauser/jbgo/runtime"
 	"golang.org/x/term"
 )
 
@@ -33,7 +33,7 @@ func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 }
 
 func parseCLIOptions(args []string, stderr io.Writer) (cliOptions, error) {
-	fs := flag.NewFlagSet("just-bash-go", flag.ContinueOnError)
+	fs := flag.NewFlagSet("jbgo", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
 	var opts cliOptions

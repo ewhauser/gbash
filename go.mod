@@ -1,4 +1,4 @@
-module github.com/cadencerpm/just-bash-go
+module github.com/ewhauser/jbgo
 
 go 1.25.0
 

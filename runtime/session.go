@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cadencerpm/just-bash-go/commands"
-	jbfs "github.com/cadencerpm/just-bash-go/fs"
-	"github.com/cadencerpm/just-bash-go/shell"
-	"github.com/cadencerpm/just-bash-go/trace"
+	"github.com/ewhauser/jbgo/commands"
+	jbfs "github.com/ewhauser/jbgo/fs"
+	"github.com/ewhauser/jbgo/shell"
+	"github.com/ewhauser/jbgo/trace"
 )
 
 func (s *Session) Exec(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {

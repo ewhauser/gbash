@@ -30,12 +30,15 @@ func FuzzFilePathCommands(f *testing.F) {
 		copyPath := fuzzPath(rawName) + ".copy"
 		movedPath := fuzzPath(rawName) + ".moved"
 		linkPath := fuzzPath(rawName) + ".ln"
+		treeDir := path.Join("/tmp", "fuzz-tree")
+		treeFile := path.Join(treeDir, "sub", "item.txt")
+		treeLink := path.Join(treeDir, "item.ln")
 		data := clampFuzzData(rawData)
 
 		writeSessionFile(t, session, inputPath, data)
 
 		script := []byte(fmt.Sprintf(
-			"touch %s\ncp %s %s\nmv %s %s\nln -s -f %s %s\nreadlink %s >/tmp/readlink.out\nstat %s >/tmp/stat.out\nbasename %s >/tmp/base.out\ndirname %s >/tmp/dir.out\nchmod 600 %s\nmkdir -p /tmp/fuzz-empty/sub\nrmdir /tmp/fuzz-empty/sub\nfile -b %s >/tmp/file.out\ndu -a /tmp >/tmp/du.out\ntree -a -L 2 /tmp >/tmp/tree.out\nrm %s %s %s\n",
+			"touch %s\ncp %s %s\nmv %s %s\nln -s -f %s %s\nreadlink %s >/tmp/readlink.out\nstat %s >/tmp/stat.out\nbasename %s >/tmp/base.out\ndirname %s >/tmp/dir.out\nchmod 600 %s\nmkdir -p /tmp/fuzz-empty/sub\nrmdir /tmp/fuzz-empty/sub\nfile -b %s >/tmp/file.out\nmkdir -p %s\ncp %s %s\nln -s -f %s %s\ndu -a %s >/tmp/du.out\ntree -a -L 2 %s >/tmp/tree.out\nrm -r -f %s\nrm %s %s %s\n",
 			shellQuote(inputPath),
 			shellQuote(inputPath),
 			shellQuote(copyPath),
@@ -49,6 +52,14 @@ func FuzzFilePathCommands(f *testing.F) {
 			shellQuote(movedPath),
 			shellQuote(movedPath),
 			shellQuote(movedPath),
+			shellQuote(path.Dir(treeFile)),
+			shellQuote(movedPath),
+			shellQuote(treeFile),
+			shellQuote(treeFile),
+			shellQuote(treeLink),
+			shellQuote(treeDir),
+			shellQuote(treeDir),
+			shellQuote(treeDir),
 			shellQuote(linkPath),
 			shellQuote(movedPath),
 			shellQuote(inputPath),
@@ -140,9 +151,41 @@ func FuzzShellProcessCommands(f *testing.F) {
 		writeSessionFile(t, session, inputPath, text)
 
 		script := []byte(fmt.Sprintf(
-			"cat %s | tee /tmp/tee.txt >/tmp/tee.out\nenv -i ONLY=%s printenv ONLY >/tmp/env.txt\nprintenv HOME >/tmp/printenv.txt\nwhich echo >/tmp/which.txt\nhelp -s pwd >/tmp/help.txt\ndate -u -d 2024-01-02T03:04:05 +%%F >/tmp/date.txt\nsleep 0.001\ntimeout 0.01 sleep 1 || true\nprintf 'echo from-stdin\\n' | sh >/tmp/sh.txt\nbash -c 'echo \"$1\"' ignored %s >/tmp/bash.txt\ncat %s | xargs -n 1 echo >/tmp/xargs.txt || true\ntrue\n/bin/false || true\n",
+			"cat %s | tee /tmp/tee.txt >/tmp/tee.out\nenv -i ONLY=%s printenv ONLY >/tmp/env.txt\nprintenv HOME >/tmp/printenv.txt\nwhich echo >/tmp/which.txt\nhelp -s pwd >/tmp/help.txt\ndate -u -d 2024-01-02T03:04:05 +%%F >/tmp/date.txt\nsleep 0.001\ntrue\n/bin/false || true\n",
 			shellQuote(inputPath),
 			shellQuote(value),
+		))
+
+		result, err := runFuzzSessionScript(t, session, script)
+		assertSuccessfulFuzzExecution(t, script, result, err)
+	})
+}
+
+func FuzzNestedShellCommands(f *testing.F) {
+	rt := newFuzzRuntime(f)
+
+	seeds := []struct {
+		data  []byte
+		value string
+	}{
+		{[]byte("alpha beta\n"), "VALUE"},
+		{[]byte("one\ntwo\nthree\n"), "nested-value"},
+		{[]byte("x y z\n"), "with spaces"},
+	}
+	for _, seed := range seeds {
+		f.Add(seed.data, seed.value)
+	}
+
+	f.Fuzz(func(t *testing.T, rawData []byte, rawValue string) {
+		session := newFuzzSession(t, rt)
+		text := normalizeFuzzText(rawData)
+		value := sanitizeFuzzToken(rawValue)
+		inputPath := "/tmp/stdin.txt"
+
+		writeSessionFile(t, session, inputPath, text)
+
+		script := []byte(fmt.Sprintf(
+			"timeout 0.01 sleep 1 || true\nprintf 'echo from-stdin\\n' | sh >/tmp/sh.txt\nbash -c 'echo \"$1\"' ignored %s >/tmp/bash.txt\ncat %s | xargs -n 1 echo >/tmp/xargs.txt || true\n",
 			shellQuote(value),
 			shellQuote(inputPath),
 		))
@@ -154,39 +197,51 @@ func FuzzShellProcessCommands(f *testing.F) {
 
 func FuzzDataCommands(f *testing.F) {
 	rt := newFuzzRuntime(f)
-
-	seeds := []struct {
-		value string
-		raw   []byte
-	}{
-		{"alpha", []byte(`{"value":"alpha","items":[1,2,3]}`)},
-		{"beta", []byte(`{"value":"beta","items":["x","y"]}`)},
-		{"gamma", []byte(`not-json`)},
-	}
-	for _, seed := range seeds {
-		f.Add(seed.value, seed.raw)
-	}
+	addStructuredDataSeeds(f)
 
 	f.Fuzz(func(t *testing.T, rawValue string, rawJSON []byte) {
 		session := newFuzzSession(t, rt)
-		value := sanitizeFuzzToken(rawValue)
-
-		validDoc := map[string]any{
-			"value": value,
-			"items": []string{value, strings.ToUpper(value)},
-		}
-		validBytes, err := json.Marshal(validDoc)
-		if err != nil {
-			t.Fatalf("Marshal() error = %v", err)
-		}
-
-		writeSessionFile(t, session, "/tmp/input.json", validBytes)
-		writeSessionFile(t, session, "/tmp/input.yaml", []byte(fmt.Sprintf("value: %s\nitems:\n  - %s\n  - %s\n", value, value, strings.ToUpper(value))))
-		writeSessionFile(t, session, "/tmp/raw.json", clampFuzzData(rawJSON))
+		value := prepareStructuredDataFixtures(t, session, rawValue, rawJSON)
 
 		script := []byte(fmt.Sprintf(
-			"jq -r '.value' /tmp/input.json >/tmp/jq-value.txt\njq -c '.items' /tmp/input.json >/tmp/jq-items.txt\njq -n --arg value %s '{value:$value}' >/tmp/jq-build.txt\njq '.value' /tmp/raw.json >/tmp/jq-raw.txt || true\nyq '.value' /tmp/input.yaml >/tmp/yq-value.txt\nyq -p json -o json '.items' /tmp/input.json >/tmp/yq-items.txt\nyq -n '.value = \"built\"' >/tmp/yq-build.txt\nsqlite3 :memory: \"create table t(value text); insert into t values ('%s'); select value from t;\" >/tmp/sqlite-value.txt\nsqlite3 -json /tmp/data.db \"create table if not exists items(value text); insert into items values ('%s'); select value from items order by value;\" >/tmp/sqlite-json.txt\nbase64 /tmp/input.json | base64 -d >/tmp/base64-json.txt || true\ngzip -c /tmp/input.json >/tmp/input.json.gz\ngunzip -c /tmp/input.json.gz >/tmp/input.json.out\nzcat /tmp/input.json.gz >/tmp/input.json.zcat\ntar -cf /tmp/data.tar /tmp/input.json /tmp/input.yaml\nmkdir -p /tmp/extracted\ntar -tf /tmp/data.tar >/tmp/tar-list.txt\ntar -xf /tmp/data.tar -C /tmp/extracted\n",
+			"jq -r '.value' /tmp/input.json >/tmp/jq-value.txt\njq -c '.items' /tmp/input.json >/tmp/jq-items.txt\njq -n --arg value %s '{value:$value}' >/tmp/jq-build.txt\njq '.value' /tmp/raw.json >/tmp/jq-raw.txt || true\nbase64 /tmp/input.json | base64 -d >/tmp/base64-json.txt || true\n",
 			shellQuote(value),
+		))
+
+		result, err := runFuzzSessionScript(t, session, script)
+		assertSuccessfulFuzzExecution(t, script, result, err)
+	})
+}
+
+func FuzzYQCommands(f *testing.F) {
+	rt := newFuzzRuntime(f)
+	addStructuredDataSeeds(f)
+
+	f.Fuzz(func(t *testing.T, rawValue string, rawJSON []byte) {
+		session := newFuzzSession(t, rt)
+		_ = prepareStructuredDataFixtures(t, session, rawValue, rawJSON)
+
+		script := []byte(
+			"yq -p yaml -o yaml '.value' /tmp/input.yaml >/tmp/yq-value.txt\n" +
+				"yq -p json -o json '.items' /tmp/input.json >/tmp/yq-items.txt\n" +
+				"yq -n '.value = \"built\"' >/tmp/yq-build.txt\n",
+		)
+
+		result, err := runFuzzSessionScript(t, session, script)
+		assertSuccessfulFuzzExecution(t, script, result, err)
+	})
+}
+
+func FuzzSQLiteCommands(f *testing.F) {
+	rt := newFuzzRuntime(f)
+	addStructuredDataSeeds(f)
+
+	f.Fuzz(func(t *testing.T, rawValue string, rawJSON []byte) {
+		session := newFuzzSession(t, rt)
+		value := prepareStructuredDataFixtures(t, session, rawValue, rawJSON)
+
+		script := []byte(fmt.Sprintf(
+			"sqlite3 :memory: \"create table t(value text); insert into t values ('%s'); select value from t;\" >/tmp/sqlite-value.txt\nsqlite3 -json /tmp/data.db \"create table if not exists items(value text); insert into items values ('%s'); select value from items order by value;\" >/tmp/sqlite-json.txt\n",
 			sqliteStringLiteral(value),
 			sqliteStringLiteral(value),
 		))
@@ -270,4 +325,39 @@ func writeJoinFixtures(t *testing.T, session *Session, text []byte) (leftPath, r
 	writeSessionFile(t, session, leftPath, []byte(left.String()))
 	writeSessionFile(t, session, rightPath, []byte(right.String()))
 	return leftPath, rightPath
+}
+
+func addStructuredDataSeeds(f *testing.F) {
+	f.Helper()
+
+	seeds := []struct {
+		value string
+		raw   []byte
+	}{
+		{"alpha", []byte(`{"value":"alpha","items":[1,2,3]}`)},
+		{"beta", []byte(`{"value":"beta","items":["x","y"]}`)},
+		{"gamma", []byte(`not-json`)},
+	}
+	for _, seed := range seeds {
+		f.Add(seed.value, seed.raw)
+	}
+}
+
+func prepareStructuredDataFixtures(t *testing.T, session *Session, rawValue string, rawJSON []byte) string {
+	t.Helper()
+
+	value := sanitizeFuzzToken(rawValue)
+	validDoc := map[string]any{
+		"value": value,
+		"items": []string{value, strings.ToUpper(value)},
+	}
+	validBytes, err := json.Marshal(validDoc)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	writeSessionFile(t, session, "/tmp/input.json", validBytes)
+	writeSessionFile(t, session, "/tmp/input.yaml", []byte(fmt.Sprintf("value: %s\nitems:\n  - %s\n  - %s\n", value, value, strings.ToUpper(value))))
+	writeSessionFile(t, session, "/tmp/raw.json", clampFuzzData(rawJSON))
+	return value
 }

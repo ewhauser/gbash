@@ -154,7 +154,7 @@ Because `mvdan/sh` currently validates `interp.Dir(...)` against the host filesy
 ## 7. Proposed Package Layout
 
 ```text
-cmd/just-bash-go/     CLI entrypoint for local execution and demos
+cmd/jbgo/             CLI entrypoint for local execution and demos
 runtime/              top-level runtime API and execution orchestration
 shell/                mvdan/sh integration and handler wiring
 fs/                   project-owned filesystem interfaces and virtual backends
