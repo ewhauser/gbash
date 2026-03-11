@@ -1,0 +1,10 @@
+{"timestamp":"2026-03-06T10:16:40Z","service":"checkout","job":"cart-sync","status":"failed","duration_ms":14820,"error":"database timeout","deploy_id":"dep-1005","host":"wk-1","trace_id":"tr-001"}
+{"timestamp":"2026-03-06T10:17:04Z","service":"checkout","job":"payment-reconcile","status":"failed","duration_ms":19210,"error":"database timeout","deploy_id":"dep-1005","host":"wk-2","trace_id":"tr-002"}
+{"timestamp":"2026-03-06T10:17:22Z","service":"checkout","job":"cart-sync","status":"failed","duration_ms":16705,"error":"database timeout","deploy_id":"dep-1005","host":"wk-3","trace_id":"tr-003"}
+{"timestamp":"2026-03-06T10:18:09Z","service":"billing","job":"invoice-batch","status":"slow","duration_ms":9050,"error":"upstream retry budget nearly exhausted","deploy_id":"dep-1002","host":"bill-1","trace_id":"tr-004"}
+{"timestamp":"2026-03-06T10:18:14Z","service":"search","job":"index-refresh","status":"ok","duration_ms":1210,"error":"","deploy_id":"dep-1004","host":"srch-1","trace_id":"tr-005"}
+{"timestamp":"2026-03-06T10:18:47Z","service":"checkout","job":"refund-sync","status":"failed","duration_ms":21142,"error":"database timeout","deploy_id":"dep-1005","host":"wk-4","trace_id":"tr-006"}
+{"timestamp":"2026-03-06T10:19:03Z","service":"worker","job":"queue-drain","status":"slow","duration_ms":8440,"error":"downstream queue lag","deploy_id":"dep-1003","host":"wrk-1","trace_id":"tr-007"}
+{"timestamp":"2026-03-06T10:19:39Z","service":"checkout","job":"cart-sync","status":"failed","duration_ms":17664,"error":"database timeout","deploy_id":"dep-1005","host":"wk-1","trace_id":"tr-008"}
+{"timestamp":"2026-03-06T10:20:11Z","service":"billing","job":"refund-export","status":"ok","duration_ms":2330,"error":"","deploy_id":"dep-1002","host":"bill-1","trace_id":"tr-009"}
+{"timestamp":"2026-03-06T10:20:54Z","service":"checkout","job":"payment-reconcile","status":"failed","duration_ms":18772,"error":"database timeout","deploy_id":"dep-1005","host":"wk-2","trace_id":"tr-010"}

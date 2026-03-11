@@ -251,7 +251,7 @@ That path is intentionally separate from the default sandbox script and REPL mod
 
 The repository includes an `examples/` Go module so integration demos can carry their own dependencies without adding them to the root library module.
 
-The first example uses the OpenAI Go SDK Responses API with a function tool named `bash`. The tool implementation calls `runtime.Run`, so the model sees a normal `bash` tool while execution still happens inside the `just-bash-go` sandbox.
+`openai-tool-call` uses the OpenAI Go SDK Responses API with a function tool named `bash`. The tool implementation calls `runtime.Run`, so the model sees a normal `bash` tool while execution still happens inside the `just-bash-go` sandbox.
 
 ```bash
 export OPENAI_API_KEY=your-api-key
@@ -259,6 +259,26 @@ go run ./examples/openai-tool-call
 ```
 
 The example hardcodes `gpt-4.1-mini` and asks the model to run a simple `printf` command through the `bash` tool, then print only the tool's stdout.
+
+`adk-bash-chat` uses [`adk-go`](https://github.com/google/adk-go) to build a local CLI chatbot around a persistent `jbgo` bash tool session. It seeds an ops analytics lab under `/home/agent/lab`, prints each bash tool call and result inline, and carries forward filesystem changes, `PWD`, and exported environment variables across turns.
+
+Gemini API:
+
+```bash
+export GOOGLE_API_KEY=your-api-key
+go run ./examples/adk-bash-chat
+```
+
+Vertex AI:
+
+```bash
+export GOOGLE_CLOUD_PROJECT=your-project
+export GOOGLE_CLOUD_LOCATION=us-central1
+go run ./examples/adk-bash-chat --backend=vertex
+```
+
+Use `/reset` inside the chat to recreate the ADK conversation and reseed the sandboxed lab.
+
 ## Configuration
 
 The main configuration surface is `runtime.Config`.
@@ -432,6 +452,7 @@ Common commands from the repo root:
 - `go build ./... ./examples/...`
 - `go test ./... ./examples/...`
 - `go run ./examples/openai-tool-call`
+- `go run ./examples/adk-bash-chat`
 
 For architecture and product-boundary work, read [`SPEC.md`](./SPEC.md) before making changes.
 
