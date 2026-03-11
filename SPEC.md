@@ -551,12 +551,15 @@ Initial MVP command set:
 - `diff`
 - `base64`
 - `jq`
+- `yq`
 - `curl` when network access is configured
 - `mkdir`
 - `rm`
 - `pwd`
 
 For `jq`, the runtime should support a practical CLI-compatible subset for agent workflows, including raw-input mode, file-backed filters, variable injection flags, positional argument injection, and basic output-formatting flags. Module loading and stream-mode parity can follow later.
+
+For `yq`, the runtime should wrap `mikefarah/yq`'s `yqlib` evaluator rather than embedding the upstream Cobra CLI. The supported subset should cover agent-oriented `eval` / `eval-all` flows, input and output format selection, null-input document creation, pretty-print rewriting, exit-status handling, scalar-unwrapping controls, NUL-separated output, expression files, and in-place file updates. All input and output must continue to route through the sandbox filesystem, and `yqlib` file/env operators such as `load()` and `env()` must stay disabled so expressions cannot bypass policy.
 
 For file/path commands, the runtime now supports a practical agent-oriented subset rather than full GNU parity:
 

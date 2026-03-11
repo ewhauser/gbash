@@ -81,6 +81,7 @@ The repository currently contains:
   - `diff`
   - `base64`
   - `jq`
+  - `yq`
   - `mkdir`
   - `rm`
   - `curl` when network access is explicitly configured
@@ -88,6 +89,8 @@ The repository currently contains:
 The implementation is early-stage but coherent and runnable.
 
 The `jq` command is backed by `gojq` and now supports a broader CLI-compatible subset, including `-R`, `-f`, `--arg`, `--argjson`, `--slurpfile`, `--rawfile`, `--args`, `--jsonargs`, `--raw-output0`, `--indent`, and `--tab`.
+
+The `yq` command is backed by `mikefarah/yq`'s `yqlib` layer and currently supports the high-value sandboxed subset for agent workflows: `eval` / `eval-all`, `-p/--input-format`, `-o/--output-format`, `-j`, `-P`, `-n`, `-e`, `-I`, `-i`, `-N`, `-0`, `-r` / `--unwrapScalar`, and `--from-file`. Input and output stay inside the virtual filesystem, and `yqlib`'s own env/file operators such as `env()` and `load()` are disabled so expressions cannot bypass sandbox policy.
 
 The text-tool expansion is also in place. `sort` supports lexical and numeric ordering, reverse, unique, case-folded comparison, keyed sorts via `-k`, and custom field separators via `-t`. `uniq` supports adjacent-run deduping with `-c`, `-d`, and `-u`. `cut` supports `-f`, `-c`, `-d`, and `-s`. `sed` is intentionally a subset: it currently supports `-n`, `-e`, `-i`, numeric and regex addresses, `$`, simple ranges, and the `s`, `d`, `p`, and `q` commands with `g`/`i` substitution flags and alternate delimiters. The newer text/search commands are also implemented as practical subsets: `printf` covers the core shell format verbs plus `%b` escape handling; `rg` supports recursive regex search with `-n`, `-i`, `-l`, `-c`, `-g`, `--hidden`, and `--files`; `awk` is backed by `goawk` with `-F`, `-v`, and `-f` while keeping `system()`, file I/O, and shell pipes disabled; `comm`, `paste`, `tr`, `rev`, `nl`, `join`, `split`, `tac`, `diff`, and `base64` all exist with strong agent-oriented subsets rather than full GNU parity.
 

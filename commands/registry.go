@@ -115,6 +115,7 @@ func DefaultRegistry() *Registry {
 		NewBase64(),
 		NewChmod(),
 		NewJQ(),
+		NewYQ(),
 		NewMkdir(),
 		NewRM(),
 	)
