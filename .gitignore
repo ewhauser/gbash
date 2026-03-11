@@ -17,6 +17,7 @@ coverage.html
 # Common local build directories
 bin/
 dist/
+.gocache
 
 # Editor and OS files
 .DS_Store
