@@ -243,6 +243,7 @@ func mustFuzzCommandMetadata(tb testing.TB) []fuzzCommandMetadata {
 		),
 		fuzzSpec("comm", "text",
 			fuzzVariant("", "paths", "-12", "{path.sorted}", "{path.sorted2}"),
+			fuzzVariant("", "flag:1", "-1", "{path.sorted}", "{path.sorted2}"),
 		),
 		fuzzSpec("paste", "text",
 			fuzzVariant("", "paths", "{path.text}", "{path.alttext}"),
