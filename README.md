@@ -1,6 +1,6 @@
-# just-bash-go
+# jbgo
 
-`just-bash-go` is a deterministic, sandbox-only, bash-like runtime for AI agents, implemented in Go.
+`jbgo` (`just-bash-go`) is a deterministic, sandbox-only, bash-like runtime for AI agents, implemented in Go.
 
 It ports the core product idea behind [Vercel's `just-bash`](https://github.com/vercel-labs/just-bash) to a Go-native runtime built on [`mvdan/sh/v3`](https://pkg.go.dev/mvdan.cc/sh/v3).
 
@@ -435,7 +435,9 @@ Common commands from the repo root:
 
 For architecture and product-boundary work, read [`SPEC.md`](./SPEC.md) before making changes.
 
-The GNU coreutils compatibility harness is intentionally optional and not part of `make test` or `go test ./...`.
+### coreutils compatibility
+
+You can evaluate the skew between our implemented commands and [coreutils](https://www.gnu.org/software/coreutils/).
 
 Prepare the pinned GNU source tree:
 
