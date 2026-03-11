@@ -1,0 +1,5 @@
+service,team,tier,slo_target
+checkout,commerce,1,99.95
+billing,commerce,1,99.90
+search,discoverability,2,99.50
+worker,platform,2,99.00
