@@ -366,6 +366,7 @@ func seedBytes() [][]byte {
 func FuzzGeneratedPrograms(f *testing.F) {
 	rt := newFuzzRuntime(f)
 	specs := mustFuzzCommandMetadata(f)
+	warmFuzzSQLite(f, rt)
 	for _, seed := range seedBytes() {
 		f.Add(seed)
 	}

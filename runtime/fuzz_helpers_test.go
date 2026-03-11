@@ -17,8 +17,9 @@ import (
 
 const (
 	fuzzMaxScriptBytes = 4 << 10
-	fuzzTimeout        = 200 * time.Millisecond
+	fuzzTimeout        = 1 * time.Second
 	fuzzMaxDataBytes   = 2 << 10
+	fuzzWarmupTimeout  = 5 * time.Second
 )
 
 func newFuzzRuntime(tb testing.TB) *Runtime {
@@ -81,6 +82,27 @@ func newFuzzSession(tb testing.TB, rt *Runtime) *Session {
 		tb.Fatalf("NewSession() error = %v", err)
 	}
 	return session
+}
+
+func warmFuzzSQLite(tb testing.TB, rt *Runtime) {
+	tb.Helper()
+
+	session := newFuzzSession(tb, rt)
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		Name:    "sqlite-warmup.sh",
+		Script:  "sqlite3 :memory: \"select 1;\"\n",
+		Timeout: fuzzWarmupTimeout,
+	})
+	if err != nil {
+		tb.Fatalf("sqlite fuzz warmup error = %v", err)
+	}
+	if result == nil {
+		tb.Fatalf("sqlite fuzz warmup returned nil result")
+		return
+	}
+	if result.ExitCode != 0 {
+		tb.Fatalf("sqlite fuzz warmup ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
 }
 
 func assertSuccessfulFuzzExecution(t *testing.T, script []byte, result *ExecutionResult, err error) {
