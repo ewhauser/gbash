@@ -39,5 +39,10 @@ When doing feature work, keep the spec in sync by:
 
 If a request is intentionally small and does not change the documented contract, architecture, or scope, `SPEC.md` does not need churn. When in doubt, prefer a small SPEC update over silent drift.
 
+## Skills
+
+- **release** — Manages the tag-driven GitHub release workflow: validates release readiness, runs GoReleaser checks/snapshots, cuts SemVer tags, and troubleshoots failures. Located at `.agents/skills/release/`.
+- **upstream-diff** — Diffs this repo against the upstream [vercel-labs/just-bash](https://github.com/vercel-labs/just-bash) TypeScript repo to find missing commands and flags. Run it to refresh the `## Command Parity` section in `TODO.md`. Located at `.claude/skills/upstream-diff/`.
+
 ## Commit & Pull Request Guidelines
 This checkout does not include `.git` history, so no local commit convention can be derived. Use short, imperative commit subjects such as `runtime: normalize command-not-found errors`. Keep commits scoped to one change. PRs should explain user-visible behavior, list commands run (`go test ./...`), and note any SPEC updates. Include trace or CLI output when changing execution behavior.
