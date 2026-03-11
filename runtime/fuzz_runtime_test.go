@@ -11,12 +11,16 @@ func FuzzRuntimeScript(f *testing.F) {
 	seeds := [][]byte{
 		[]byte("echo hi\n"),
 		[]byte("printf 'alpha\\n' > /tmp/a\ncat /tmp/a\n"),
+		[]byte("touch /tmp/note\ncp /tmp/note /tmp/note.copy\nmv /tmp/note.copy /tmp/note.done\n"),
 		[]byte("for i in 1 2 3; do echo $i; done\n"),
 		[]byte("if true; then echo ok; fi\n"),
 		[]byte("echo $(echo nested)\n"),
 		[]byte("printf 'a\\nb\\n' | head -n 1\n"),
+		[]byte("printf 'alpha\\nbeta\\n' | sort | uniq\n"),
 		[]byte("env -i ONLY=value printenv ONLY\n"),
+		[]byte("printf 'x y\\n' | xargs -n 1 echo\n"),
 		[]byte("bash -c 'echo child'\n"),
+		[]byte("jq -n --arg value demo '{value:$value}'\n"),
 		[]byte(">&000000000000000000\n"),
 	}
 	for _, seed := range seeds {
@@ -25,7 +29,7 @@ func FuzzRuntimeScript(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, script []byte) {
 		result, err := runFuzzScript(t, rt, script)
-		assertExpectedFuzzOutcome(t, script, result, err)
+		assertSecureFuzzOutcome(t, script, result, err)
 	})
 }
 
@@ -46,7 +50,7 @@ func FuzzMalformedScript(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, script []byte) {
 		result, err := runFuzzScript(t, rt, script)
-		assertExpectedFuzzOutcome(t, script, result, err)
+		assertSecureFuzzOutcome(t, script, result, err)
 	})
 }
 
@@ -62,6 +66,8 @@ func FuzzSessionSequence(f *testing.F) {
 		{[]byte("echo first > /tmp/a\n"), []byte("echo second >> /tmp/a\ncat /tmp/a\n")},
 		{[]byte("cd /tmp\n"), []byte("pwd\n")},
 		{[]byte("bash -c 'echo child > /tmp/c'\n"), []byte("cat /tmp/c\n")},
+		{[]byte("printf 'alpha\\nbeta\\n' > /tmp/in.txt\nsort /tmp/in.txt > /tmp/out.txt\n"), []byte("cat /tmp/out.txt\n")},
+		{[]byte("jq -n --arg value seed '{value:$value}' > /tmp/data.json\n"), []byte("jq -r '.value' /tmp/data.json\n")},
 	}
 	for _, seed := range seeds {
 		f.Add(seed.first, seed.second)
@@ -78,9 +84,9 @@ func FuzzSessionSequence(f *testing.F) {
 		}
 
 		firstResult, firstErr := runFuzzSessionScript(t, session, first)
-		assertExpectedFuzzOutcome(t, first, firstResult, firstErr)
+		assertSecureFuzzOutcome(t, first, firstResult, firstErr)
 
 		secondResult, secondErr := runFuzzSessionScript(t, session, second)
-		assertExpectedFuzzOutcome(t, second, secondResult, secondErr)
+		assertSecureFuzzOutcome(t, second, secondResult, secondErr)
 	})
 }

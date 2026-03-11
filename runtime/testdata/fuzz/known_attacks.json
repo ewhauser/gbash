@@ -1,0 +1,52 @@
+[
+  {
+    "name": "host-file-read",
+    "kind": "disclosure",
+    "script": "cat /etc/passwd\n"
+  },
+  {
+    "name": "symlink-host-read",
+    "kind": "disclosure",
+    "script": "ln -s -f /etc/passwd /tmp/host-passwd\ncat /tmp/host-passwd\n"
+  },
+  {
+    "name": "malformed-redirection",
+    "kind": "stability",
+    "script": ">&000000000000000000\n"
+  },
+  {
+    "name": "loop-bomb",
+    "kind": "dos",
+    "script": "while true; do echo x; done\n"
+  },
+  {
+    "name": "command-count-bomb",
+    "kind": "dos",
+    "script": "echo x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\necho x\n"
+  },
+  {
+    "name": "command-substitution-nesting",
+    "kind": "dos",
+    "script": "echo $(echo $(echo $(echo $(echo x))))\n"
+  },
+  {
+    "name": "execution-timeout",
+    "kind": "dos",
+    "script": "sleep 1\n"
+  },
+  {
+    "name": "host-home-echo",
+    "kind": "disclosure",
+    "script": "echo $HOME\n"
+  },
+  {
+    "name": "host-pwd-echo",
+    "kind": "disclosure",
+    "script": "pwd\nbash -c 'pwd'\n"
+  },
+  {
+    "name": "nested-shell-host-read",
+    "kind": "disclosure",
+    "script": "bash -c 'cat /etc/passwd'\n"
+  }
+]

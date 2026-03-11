@@ -231,6 +231,19 @@ Current fuzz targets:
 - `FuzzRuntimeScript` for general sandboxed script execution
 - `FuzzMalformedScript` for broken syntax, truncated input, and byte-injected scripts
 - `FuzzSessionSequence` for multi-step session execution against one persistent sandbox
+- `FuzzFilePathCommands` for file/path command batches against fuzzed virtual files
+- `FuzzTextSearchCommands` for line-oriented text/search commands with fuzzed text corpora
+- `FuzzShellProcessCommands` for shell/process helpers like `env`, `tee`, `bash`, `sh`, `timeout`, and `xargs`
+- `FuzzDataCommands` for `jq` and related structured-data command flows
+- `FuzzGeneratedPrograms` for metadata-driven command, flag, pipeline, and shell-syntax generation
+- `FuzzAttackMutations` for known sandbox/disclosure/DoS attacks with controlled shell-shape mutations
+
+The fuzz harness also includes:
+
+- per-command fuzz metadata for the current registered command set
+- lightweight command/flag coverage accounting driven by that metadata
+- security-oriented fuzz oracles for host-path leaks, sensitive-output leaks, and internal panic/runtime leakage
+- a committed known-attack corpus in `runtime/testdata/fuzz/known_attacks.json`
 
 ## Network Access
 

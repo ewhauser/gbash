@@ -138,8 +138,13 @@ This file is the implementation queue derived from [`SPEC.md`](./SPEC.md), espec
 ### 15. Hardening and maturity
 
 - [x] Add Go built-in fuzz targets for runtime scripts, malformed inputs, and multi-exec session sequences
-- [ ] Expand fuzz seeds and command-specific fuzz targets alongside new command batches
-- [ ] Expand threat-model-driven security regressions around error sanitization and information disclosure
+- [x] Expand fuzz seeds and command-specific fuzz targets alongside new command batches
+- [x] Add generator-driven fuzz inputs for shell syntax, command pipelines, and command-flag combinations instead of relying only on curated script seeds
+- [x] Add security-specific fuzz oracles for sandbox escape, information disclosure, and denial-of-service outcomes
+- [x] Add a known-attack fuzz corpus and promote interesting fuzz findings into permanent regression tests
+- [x] Add lightweight feature and command-flag coverage accounting for fuzz runs
+- [x] Add per-command fuzz metadata so flags and supported modes can be exercised systematically as command surface grows
+- [x] Expand threat-model-driven security regressions around error sanitization and information disclosure
 - [ ] Add more compatibility corpus cases for the larger command surface as commands land
 - [ ] Audit command metadata/help/version behavior for consistency across the registry
 - [ ] Revisit deterministic virtual identity commands such as `hostname`, `whoami`, and `uname`

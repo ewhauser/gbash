@@ -869,6 +869,9 @@ The initial target set should live in `runtime/` and cover:
 - single-script execution against a runtime with tight policy and timeout limits
 - malformed and byte-injected inputs that should fail gracefully without internal panics or host-path leaks
 - multi-exec session sequences to exercise persistent filesystem state under fuzzed scripts
+- command-specific targets for the current file/path, text/search, shell/process-helper, and structured-data command batches
+- metadata-driven generated programs that compose command/flag variants into pipelines and broader shell-shape coverage
+- committed known-attack corpora whose seeds are also mutated under the fuzz harness
 
 The fuzz harness should:
 
@@ -876,6 +879,11 @@ The fuzz harness should:
 - keep request-level timeouts and policy limits intentionally tight
 - treat parser errors as acceptable outcomes
 - fail on unexpected internal errors, host-path leakage in error paths, or unbounded execution
+- use generator-driven inputs for shell syntax, pipelines, and command-flag combinations as command surface expands
+- add security-focused fuzz oracles for sandbox escape, information disclosure, and denial-of-service outcomes
+- keep a known-attack fuzz corpus and promote interesting discoveries into permanent regression tests
+- record lightweight feature and command-flag coverage so fuzzing can show which surfaces are actually exercised
+- keep project-owned per-command fuzz metadata so registered commands and supported flag variants stay exercised as the command set grows
 
 As command surface grows, add command-specific fuzz targets and richer seed corpora without replacing the focused regression suite.
 - canonicalize trace event ordering for concurrent pipeline stages before comparison, while still keeping exact event-order goldens for simple serial scripts
@@ -893,7 +901,7 @@ The gap analysis against `just-bash` yields two categories: gaps we should close
 - host-backed overlay filesystem support so real directories can be mounted read-only underneath an in-memory writable layer
 - fuller `jq` and `curl` compatibility for structured data flows and safe networked workflows
 - richer tracing and compatibility corpus
-- broader fuzzing coverage with command-specific targets and deeper security-oriented oracles
+- continued fuzzing depth as new commands land, including additional attack-corpus entries, richer metadata variants, and longer-running schedules outside the default CI path
 - more polished interactive-shell ergonomics, such as optional line editing and history that do not weaken sandbox determinism
 
 ### 18.2 Intentional Divergences
