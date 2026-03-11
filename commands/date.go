@@ -25,7 +25,7 @@ func (c *Date) Run(_ context.Context, inv *Invocation) error {
 	var output string
 	switch formatKind {
 	case "help":
-		_, _ = fmt.Fprintln(inv.Stdout, "usage: date [-u] [-d STRING] [+FORMAT] [-I|-R]")
+		_, _ = fmt.Fprintln(inv.Stdout, "usage: date [-u|--utc] [-d STRING|--date STRING] [+FORMAT] [-I|--iso-8601|-R|--rfc-email]")
 		return nil
 	case "iso":
 		output = current.Format("2006-01-02T15:04:05-0700")
@@ -54,15 +54,15 @@ func parseDateArgs(inv *Invocation) (current time.Time, formatKind, formatText s
 		switch {
 		case arg == "--help":
 			return current, "help", "", nil
-		case arg == "-u":
+		case arg == "-u" || arg == "--utc":
 			args = args[1:]
-		case arg == "-I":
+		case arg == "-I" || arg == "--iso-8601":
 			formatKind = "iso"
 			args = args[1:]
-		case arg == "-R":
+		case arg == "-R" || arg == "--rfc-email":
 			formatKind = "rfc"
 			args = args[1:]
-		case arg == "-d":
+		case arg == "-d" || arg == "--date":
 			if len(args) < 2 {
 				return time.Time{}, "", "", exitf(inv, 1, "date: option requires an argument -- 'd'")
 			}

@@ -1,7 +1,7 @@
 # just-bash-go
 
 Status: Draft v0.1
-Last updated: 2026-03-10
+Last updated: 2026-03-11
 
 ## 1. Purpose
 
@@ -616,7 +616,7 @@ For the shell/process helper batch, the runtime should expose practical, sandbox
 - `true` and `false` exist as explicit virtual commands, while bare shell builtins remain interpreter-owned unless intentionally shadowed
 - `which` supports `-a` and `-s` over the virtual `PATH`
 - `help` exposes runtime-owned help topics for the supported shell builtin surface
-- `date` is intentionally UTC-only and supports `-u`, `-d/--date`, `-I`, `-R`, and `+FORMAT`
+- `date` is intentionally UTC-only and supports `-u/--utc`, `-d/--date`, `-I/--iso-8601`, `-R/--rfc-email`, and `+FORMAT`
 - `sleep` supports decimal durations and `s`, `m`, `h`, and `d` suffixes with a bounded maximum delay
 - `timeout` supports duration-bounded nested command execution and accepts `--foreground`, `-k`, and `-s` as compatibility flags without host signal semantics
 - `xargs` supports the default `echo` behavior plus `-n`, `-I`, `-0`, `-d`, `-t`, and `-r`

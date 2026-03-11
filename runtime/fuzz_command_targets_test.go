@@ -182,7 +182,7 @@ func FuzzShellProcessCommands(f *testing.F) {
 		writeSessionFile(t, session, inputPath, text)
 
 		script := []byte(fmt.Sprintf(
-			"cat %s | tee /tmp/tee.txt >/tmp/tee.out\nenv -i ONLY=%s printenv ONLY >/tmp/env.txt\nprintenv HOME >/tmp/printenv.txt\nwhich echo >/tmp/which.txt\nhelp -s pwd >/tmp/help.txt\ndate -u -d 2024-01-02T03:04:05 +%%F >/tmp/date.txt\nsleep 0.001\ntrue\n/bin/false || true\n",
+			"cat %s | tee /tmp/tee.txt >/tmp/tee.out\nenv -i ONLY=%s printenv ONLY >/tmp/env.txt\nprintenv HOME >/tmp/printenv.txt\nwhich echo >/tmp/which.txt\nhelp -s pwd >/tmp/help.txt\ndate -u -d 2024-01-02T03:04:05 +%%F >/tmp/date.txt\ndate --utc --date 2024-01-02T03:04:05 +%%Z >/tmp/date-utc.txt\ndate --date 2024-01-02T03:04:05 --iso-8601 >/tmp/date-iso.txt\ndate --date 2024-01-02T03:04:05 --rfc-email >/tmp/date-rfc.txt\nsleep 0.001\ntrue\n/bin/false || true\n",
 			shellQuote(inputPath),
 			shellQuote(value),
 		))

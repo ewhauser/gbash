@@ -248,10 +248,10 @@ Commands that exist in both repos but have flags in upstream not yet ported.
 
 #### `date`
 
-- [ ] `--date`
-- [ ] `--iso-8601`
-- [ ] `--rfc-email`
-- [ ] `--utc`
+- [x] `--date`
+- [x] `--iso-8601`
+- [x] `--rfc-email`
+- [x] `--utc`
 
 #### `diff`
 

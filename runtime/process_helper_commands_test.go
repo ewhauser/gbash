@@ -109,6 +109,54 @@ func TestDateFormatsFixedUTCInstant(t *testing.T) {
 	}
 }
 
+func TestDateSupportsLongFlagAliases(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	tests := []struct {
+		name   string
+		script string
+		want   string
+	}{
+		{
+			name:   "utc",
+			script: "date --utc --date 2024-05-06T07:08:09 +%Z\n",
+			want:   "UTC\n",
+		},
+		{
+			name:   "date",
+			script: "date --date 2024-05-06T07:08:09 +%F\n",
+			want:   "2024-05-06\n",
+		},
+		{
+			name:   "iso-8601",
+			script: "date --date 2024-05-06T07:08:09 --iso-8601\n",
+			want:   "2024-05-06T07:08:09+0000\n",
+		},
+		{
+			name:   "rfc-email",
+			script: "date --date 2024-05-06T07:08:09 --rfc-email\n",
+			want:   "Mon, 06 May 2024 07:08:09 +0000\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := rt.Run(context.Background(), &ExecutionRequest{
+				Script: tc.script,
+			})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result.ExitCode != 0 {
+				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+			}
+			if got := result.Stdout; got != tc.want {
+				t.Fatalf("Stdout = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSleepHonorsShortDuration(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 

@@ -221,6 +221,7 @@ func mustFuzzCommandMetadata(tb testing.TB) []fuzzCommandMetadata {
 		fuzzSpec("date", "shell",
 			fuzzVariant("", "format"),
 			fuzzVariant("", "flag:ud", "-u", "-d", "{date.fixed}", "{date.format}"),
+			fuzzVariant("", "flag:long", "--utc", "--date", "{date.fixed}", "--iso-8601"),
 		),
 		fuzzSpec("sleep", "shell",
 			fuzzVariant("", "duration", "{duration.short}"),
