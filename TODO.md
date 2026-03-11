@@ -204,9 +204,9 @@ Commands that exist in both repos but have flags in upstream not yet ported.
 
 #### `comm`
 
-- [ ] `-1`
-- [ ] `-2`
-- [ ] `-3`
+- [x] `-1`
+- [x] `-2`
+- [x] `-3`
 
 #### `cp`
 

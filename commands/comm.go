@@ -79,6 +79,20 @@ func parseCommArgs(inv *Invocation) (opts commOptions, leftName, rightName strin
 		if !strings.HasPrefix(arg, "-") || arg == "-" {
 			break
 		}
+		switch arg {
+		case "-1":
+			opts.suppress[1] = true
+			args = args[1:]
+			continue
+		case "-2":
+			opts.suppress[2] = true
+			args = args[1:]
+			continue
+		case "-3":
+			opts.suppress[3] = true
+			args = args[1:]
+			continue
+		}
 		for _, flag := range arg[1:] {
 			switch flag {
 			case '1', '2', '3':
