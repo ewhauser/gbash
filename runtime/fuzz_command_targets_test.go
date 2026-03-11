@@ -34,7 +34,7 @@ func FuzzFilePathCommands(f *testing.F) {
 
 		writeSessionFile(t, session, inputPath, data)
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"touch %s\ncp -pv %s %s\nmv -v %s %s\nln -s -f %s %s\nreadlink %s >/tmp/readlink.out\nstat %s >/tmp/stat.out\nbasename --suffix=.moved %s >/tmp/base.out\ndirname %s >/tmp/dir.out\nchmod 600 %s\nmkdir -p /tmp/fuzz-empty/sub\nrmdir /tmp/fuzz-empty/sub\nfile --brief %s >/tmp/file.out\nrm %s %s %s\n",
 			shellQuote(inputPath),
 			shellQuote(inputPath),
@@ -52,7 +52,7 @@ func FuzzFilePathCommands(f *testing.F) {
 			shellQuote(linkPath),
 			shellQuote(movedPath),
 			shellQuote(inputPath),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)
@@ -84,7 +84,7 @@ func FuzzDirectoryTraversalCommands(f *testing.F) {
 
 		writeSessionFile(t, session, inputPath, data)
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"mkdir -p %s\ncp %s %s\nln -s -f %s %s\ndu -a %s >/tmp/du.out\ntree -a -L 2 %s >/tmp/tree.out\nrm -r -f %s\n",
 			shellQuote(path.Dir(treeFile)),
 			shellQuote(inputPath),
@@ -94,7 +94,7 @@ func FuzzDirectoryTraversalCommands(f *testing.F) {
 			shellQuote(treeDir),
 			shellQuote(treeDir),
 			shellQuote(treeDir),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)
@@ -127,7 +127,7 @@ func FuzzTextSearchCommands(f *testing.F) {
 		writeSessionFile(t, session, inputPath, text)
 		writeSessionFile(t, session, otherPath, []byte(strings.ToUpper(string(text))))
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"printf '1,3p\\n' >/tmp/sed.fuzz\nsort %s >/tmp/sort.txt || true\nuniq --ignore-case /tmp/sort.txt >/tmp/uniq.txt || true\ncut --only-delimited -c 1-8 %s >/tmp/cut.txt || true\nsed -f /tmp/sed.fuzz %s >/tmp/sed.txt || true\ngrep -n %s %s >/tmp/grep.txt || true\nrg -n %s /tmp >/tmp/rg.txt || true\nawk '{print NF}' %s >/tmp/awk.txt || true\nhead --bytes=3 %s >/tmp/head.txt || true\ntail --bytes=3 %s >/tmp/tail.txt || true\nwc %s >/tmp/wc.txt\ntr --delete '[:digit:]' < %s >/tmp/tr.txt || true\nrev %s >/tmp/rev.txt || true\nnl -ba -n rz %s >/tmp/nl.txt || true\ntac %s >/tmp/tac.txt || true\nsplit -n 3 --additional-suffix=.part %s /tmp/split- || true\ncat /tmp/split-aa.part >/tmp/split.txt || true\npaste --serial --delimiters=, %s >/tmp/paste.txt || true\ncomm -1 /tmp/sort.txt /tmp/sort.txt >/tmp/comm.txt || true\njoin %s %s >/tmp/join.txt || true\ndiff -u %s %s >/tmp/diff.txt || true\nbase64 --wrap=0 %s | base64 -d >/tmp/base64.txt || true\ncat --number %s >/tmp/cat.txt || true\n",
 			shellQuote(inputPath),
 			shellQuote(inputPath),
@@ -151,7 +151,7 @@ func FuzzTextSearchCommands(f *testing.F) {
 			shellQuote(otherPath),
 			shellQuote(inputPath),
 			shellQuote(inputPath),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)
@@ -181,11 +181,11 @@ func FuzzShellProcessCommands(f *testing.F) {
 
 		writeSessionFile(t, session, inputPath, text)
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"cat %s | tee /tmp/tee.txt >/tmp/tee.out\nenv --ignore-environment ONLY=%s printenv ONLY >/tmp/env.txt\nprintenv HOME >/tmp/printenv.txt\nwhich echo >/tmp/which.txt\nhelp -s pwd >/tmp/help.txt\ndate -u -d 2024-01-02T03:04:05 +%%F >/tmp/date.txt\ndate --utc --date 2024-01-02T03:04:05 +%%Z >/tmp/date-utc.txt\ndate --date 2024-01-02T03:04:05 --iso-8601 >/tmp/date-iso.txt\ndate --date 2024-01-02T03:04:05 --rfc-email >/tmp/date-rfc.txt\nsleep 0.001\ntrue\n/bin/false || true\n",
 			shellQuote(inputPath),
 			shellQuote(value),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)
@@ -215,11 +215,11 @@ func FuzzNestedShellCommands(f *testing.F) {
 
 		writeSessionFile(t, session, inputPath, text)
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"timeout --signal TERM --kill-after 0.01 0.01 sleep 1 || true\nprintf 'echo from-stdin\\n' | sh >/tmp/sh.txt\nbash -c 'echo \"$1\"' ignored %s >/tmp/bash.txt\ncat %s | xargs --verbose --max-args 1 echo >/tmp/xargs.txt || true\n",
 			shellQuote(value),
 			shellQuote(inputPath),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)
@@ -234,10 +234,10 @@ func FuzzDataCommands(f *testing.F) {
 		session := newFuzzSession(t, rt)
 		value := prepareStructuredDataFixtures(t, session, rawValue, rawJSON)
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"jq -r '.value' /tmp/input.json >/tmp/jq-value.txt\njq -c '.items' /tmp/input.json >/tmp/jq-items.txt\njq -n --arg value %s '{value:$value}' >/tmp/jq-build.txt\njq '.value' /tmp/raw.json >/tmp/jq-raw.txt || true\nbase64 /tmp/input.json | base64 -d >/tmp/base64-json.txt || true\n",
 			shellQuote(value),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)
@@ -276,10 +276,10 @@ func FuzzSQLiteCommands(f *testing.F) {
 			sqliteStringLiteral(value),
 		)
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"sqlite3 :memory: %s >/tmp/sqlite-value.txt\n",
 			shellQuote(sql),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)
@@ -299,10 +299,10 @@ func FuzzSQLiteFileCommands(f *testing.F) {
 			sqliteStringLiteral(value),
 		)
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"sqlite3 -json /tmp/data.db %s >/tmp/sqlite-json.txt\n",
 			shellQuote(sql),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)
@@ -332,7 +332,7 @@ func FuzzArchiveCommands(f *testing.F) {
 		writeSessionFile(t, session, "/tmp/archive-src/"+name+".txt", payload)
 		writeSessionFile(t, session, "/tmp/archive-src/nested/"+name+".bin", append([]byte(nil), payload...))
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"tar -cf /tmp/archive.tar /tmp/archive-src\n"+
 				"tar -tf /tmp/archive.tar >/tmp/archive.list\n"+
 				"mkdir -p /tmp/archive-out\n"+
@@ -344,7 +344,7 @@ func FuzzArchiveCommands(f *testing.F) {
 				"gunzip -c /tmp/file.txt.gz >/tmp/file.txt.out\n"+
 				"zcat /tmp/file.txt.gz >/tmp/file.txt.zcat\n",
 			shellQuote("/tmp/archive-src/"+name+".txt"),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)
@@ -415,7 +415,7 @@ func prepareStructuredDataFixtures(t *testing.T, session *Session, rawValue stri
 	}
 
 	writeSessionFile(t, session, "/tmp/input.json", validBytes)
-	writeSessionFile(t, session, "/tmp/input.yaml", []byte(fmt.Sprintf("value: %s\nitems:\n  - %s\n  - %s\n", value, value, strings.ToUpper(value))))
+	writeSessionFile(t, session, "/tmp/input.yaml", fmt.Appendf(nil, "value: %s\nitems:\n  - %s\n  - %s\n", value, value, strings.ToUpper(value)))
 	writeSessionFile(t, session, "/tmp/raw.json", clampFuzzData(rawJSON))
 	return value
 }

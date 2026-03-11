@@ -275,7 +275,7 @@ func (o *OverlayFS) MkdirAll(ctx context.Context, name string, perm stdfs.FileMo
 		return nil
 	}
 	current := "/"
-	for _, part := range strings.Split(strings.TrimPrefix(abs, "/"), "/") {
+	for part := range strings.SplitSeq(strings.TrimPrefix(abs, "/"), "/") {
 		current = Resolve(current, part)
 		info, _, err := o.visibleInfo(ctx, current)
 		if err == nil {

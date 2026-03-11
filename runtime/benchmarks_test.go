@@ -157,7 +157,7 @@ func BenchmarkCommandTarGzipRoundTrip(b *testing.B) {
 
 func codebaseExplorationBenchmarkFiles() (files map[string]string, totalBytes int64) {
 	files = make(map[string]string, 300)
-	for i := 0; i < 300; i++ {
+	for i := range 300 {
 		todo := ""
 		if i < 30 {
 			todo = fmt.Sprintf("// TODO: review benchmark file %03d\n", i)
@@ -178,13 +178,13 @@ func codebaseExplorationBenchmarkFiles() (files map[string]string, totalBytes in
 
 func refactorPreparationBenchmarkFiles() (files map[string]string, totalBytes int64) {
 	files = make(map[string]string, 440)
-	for i := 0; i < 400; i++ {
+	for i := range 400 {
 		content := fmt.Sprintf("module-%03d\npayload-%03d\n", i, i)
 		name := fmt.Sprintf("/home/agent/project/src/module%02d/file%03d.txt", i%20, i)
 		files[name] = content
 		totalBytes += int64(len(content))
 	}
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		content := fmt.Sprintf("# Note %02d\nTODO: follow up on item %02d\n", i, i)
 		name := fmt.Sprintf("/home/agent/project/docs/note%02d.md", i)
 		files[name] = content
@@ -195,7 +195,7 @@ func refactorPreparationBenchmarkFiles() (files map[string]string, totalBytes in
 
 func findBenchmarkFiles() (files map[string]string, totalBytes int64) {
 	files = make(map[string]string, 1000)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		content := fmt.Sprintf("find-target-%04d\n", i)
 		name := fmt.Sprintf("/bench/tree/dir%02d/sub%02d/file%04d.txt", i%25, i%10, i)
 		files[name] = content
@@ -206,9 +206,9 @@ func findBenchmarkFiles() (files map[string]string, totalBytes int64) {
 
 func rgBenchmarkFiles() (files map[string]string, totalBytes int64) {
 	files = make(map[string]string, 200)
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		var body strings.Builder
-		for line := 0; line < 250; line++ {
+		for line := range 250 {
 			if line == 125 && i < 40 {
 				body.WriteString("needle benchmark target\n")
 				continue
@@ -241,7 +241,7 @@ func sortBenchmarkFiles() (files map[string]string, totalBytes int64) {
 func jqBenchmarkFiles() (files map[string]string, totalBytes int64) {
 	var body strings.Builder
 	body.WriteString("{\"items\":[")
-	for i := 0; i < 2000; i++ {
+	for i := range 2000 {
 		if i > 0 {
 			body.WriteByte(',')
 		}
@@ -261,7 +261,7 @@ func jqBenchmarkFiles() (files map[string]string, totalBytes int64) {
 
 func archiveBenchmarkFiles() (files map[string]string, totalBytes int64) {
 	files = make(map[string]string, 200)
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		pattern := fmt.Sprintf("archive-file-%03d-", i)
 		repeats := 20480/len(pattern) + 1
 		content := strings.Repeat(pattern, repeats)

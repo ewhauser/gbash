@@ -180,7 +180,7 @@ func appendSedScriptFile(ctx context.Context, inv *Invocation, scripts *[]string
 }
 
 func appendSedScriptSource(scripts *[]string, source string) {
-	for _, line := range strings.Split(source, "\n") {
+	for line := range strings.SplitSeq(source, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

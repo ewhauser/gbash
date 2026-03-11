@@ -327,8 +327,8 @@ func (opts *jqOptions) normalize() {
 
 func splitJQLongFlag(arg string) (name, value string, hasValue bool) {
 	name = strings.TrimPrefix(arg, "--")
-	if idx := strings.IndexByte(name, '='); idx >= 0 {
-		return name[:idx], name[idx+1:], true
+	if before, after, ok := strings.Cut(name, "="); ok {
+		return before, after, true
 	}
 	return name, "", false
 }

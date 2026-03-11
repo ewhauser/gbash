@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"slices"
 	"testing"
 
 	"github.com/ewhauser/jbgo/commands"
@@ -56,12 +57,7 @@ func registryWithCommands(t testing.TB, extras ...commands.Command) *commands.Re
 }
 
 func containsLine(lines []string, want string) bool {
-	for _, line := range lines {
-		if line == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(lines, want)
 }
 
 func mustExecSession(t testing.TB, session *Session, script string) *ExecutionResult {

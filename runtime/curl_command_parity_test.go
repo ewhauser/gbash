@@ -3,6 +3,7 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"maps"
 	"strings"
 	"sync"
 	"testing"
@@ -65,9 +66,7 @@ func cloneStringMap(src map[string]string) map[string]string {
 		return nil
 	}
 	dst := make(map[string]string, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
+	maps.Copy(dst, src)
 	return dst
 }
 

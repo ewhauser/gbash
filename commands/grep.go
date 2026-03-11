@@ -403,10 +403,7 @@ func grepSearchContent(re *regexp.Regexp, data []byte, name string, showName boo
 	lastPrintedLine := -1
 
 	for _, lineNumber := range matchingLines {
-		contextStart := lineNumber - opts.beforeContext
-		if contextStart < 0 {
-			contextStart = 0
-		}
+		contextStart := max(lineNumber-opts.beforeContext, 0)
 
 		if lastPrintedLine >= 0 && contextStart > lastPrintedLine+1 {
 			outputLines = append(outputLines, "--")

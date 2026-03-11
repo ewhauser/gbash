@@ -20,7 +20,7 @@ func FuzzCommCommand(f *testing.F) {
 		writeSessionFile(t, session, leftPath, normalizeFuzzText(rawLeft))
 		writeSessionFile(t, session, rightPath, normalizeFuzzText(rawRight))
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"comm -1 %s %s >/tmp/comm-1.txt || true\ncomm -2 %s %s >/tmp/comm-2.txt || true\ncomm -3 %s %s >/tmp/comm-3.txt || true\n",
 			shellQuote(leftPath),
 			shellQuote(rightPath),
@@ -28,7 +28,7 @@ func FuzzCommCommand(f *testing.F) {
 			shellQuote(rightPath),
 			shellQuote(leftPath),
 			shellQuote(rightPath),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)

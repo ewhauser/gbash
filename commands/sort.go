@@ -640,10 +640,7 @@ var versionChunkRe = regexp.MustCompile(`\d+|\D+`)
 func compareVersions(a, b string) int {
 	partsA := versionChunkRe.FindAllString(a, -1)
 	partsB := versionChunkRe.FindAllString(b, -1)
-	maxLen := len(partsA)
-	if len(partsB) > maxLen {
-		maxLen = len(partsB)
-	}
+	maxLen := max(len(partsB), len(partsA))
 
 	for i := 0; i < maxLen; i++ {
 		partA := ""

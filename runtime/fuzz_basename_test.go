@@ -21,11 +21,11 @@ func FuzzBasenameCommand(f *testing.F) {
 		session := newFuzzSession(t, rt)
 		target := fuzzPath(rawPath) + ".txt"
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"basename --suffix .txt %s >/tmp/basename.txt\nbasename -z --suffix .txt %s >/tmp/basename-zero.txt\n",
 			shellQuote(target),
 			shellQuote(target),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)

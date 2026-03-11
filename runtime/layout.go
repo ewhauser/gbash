@@ -64,7 +64,7 @@ func commandDirectories(env map[string]string) []string {
 	}
 
 	dirs := make([]string, 0, strings.Count(pathValue, ":")+1)
-	for _, dir := range strings.Split(pathValue, ":") {
+	for dir := range strings.SplitSeq(pathValue, ":") {
 		dir = strings.TrimSpace(dir)
 		if dir == "" {
 			continue

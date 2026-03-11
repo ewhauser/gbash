@@ -222,10 +222,7 @@ func splitData(data []byte, opts splitOptions) [][]byte {
 		var chunks [][]byte
 		chunkSize := (len(data) + opts.chunks - 1) / opts.chunks
 		for start := 0; start < len(data); start += chunkSize {
-			end := start + chunkSize
-			if end > len(data) {
-				end = len(data)
-			}
+			end := min(start+chunkSize, len(data))
 			chunk := append([]byte(nil), data[start:end]...)
 			chunks = append(chunks, chunk)
 		}
@@ -234,10 +231,7 @@ func splitData(data []byte, opts splitOptions) [][]byte {
 	if opts.bytes > 0 {
 		var chunks [][]byte
 		for start := 0; start < len(data); start += opts.bytes {
-			end := start + opts.bytes
-			if end > len(data) {
-				end = len(data)
-			}
+			end := min(start+opts.bytes, len(data))
 			chunk := append([]byte(nil), data[start:end]...)
 			chunks = append(chunks, chunk)
 		}
@@ -247,10 +241,7 @@ func splitData(data []byte, opts splitOptions) [][]byte {
 	lines := splitLines(data)
 	var chunks [][]byte
 	for start := 0; start < len(lines); start += opts.lines {
-		end := start + opts.lines
-		if end > len(lines) {
-			end = len(lines)
-		}
+		end := min(start+opts.lines, len(lines))
 		chunks = append(chunks, append([]byte(nil), bytesJoin(lines[start:end])...))
 	}
 	return chunks

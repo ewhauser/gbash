@@ -70,10 +70,7 @@ func (c *XArgs) Run(ctx context.Context, inv *Invocation) error {
 		batchSize = opts.maxArgs
 	}
 	for start := 0; start < len(items); start += batchSize {
-		end := start + batchSize
-		if end > len(items) {
-			end = len(items)
-		}
+		end := min(start+batchSize, len(items))
 		argv := append(append([]string(nil), cmdArgs...), items[start:end]...)
 		if err := runXArgsCommand(ctx, inv, argv, opts.verbose); err != nil {
 			return err

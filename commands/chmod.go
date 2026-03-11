@@ -86,7 +86,7 @@ func computeChmodMode(current stdfs.FileMode, spec string) (stdfs.FileMode, erro
 	}
 
 	mode := current
-	for _, clause := range strings.Split(spec, ",") {
+	for clause := range strings.SplitSeq(spec, ",") {
 		if clause == "" {
 			return 0, fmt.Errorf("empty clause")
 		}

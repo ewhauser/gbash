@@ -38,7 +38,6 @@ func TestKnownAttackCorpus(t *testing.T) {
 	attacks := loadKnownAttacks(t)
 
 	for _, attack := range attacks {
-		attack := attack
 		t.Run(attack.Name, func(t *testing.T) {
 			result, err := runFuzzScript(t, rt, []byte(attack.Script))
 			assertSecureFuzzOutcome(t, []byte(attack.Script), result, err)

@@ -14,7 +14,7 @@ const (
 	findCompareLess  findCompare = "less"
 )
 
-type findExpr interface{}
+type findExpr any
 
 type findNameExpr struct {
 	pattern    string
@@ -85,7 +85,7 @@ type findOrExpr struct {
 	right findExpr
 }
 
-type findAction interface{}
+type findAction any
 
 type findExecAction struct {
 	command   []string

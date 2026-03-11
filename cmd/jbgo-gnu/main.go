@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -692,7 +693,7 @@ func parseReportedTestResults(logData []byte, selectedTests []string) (selectedR
 	selectedResults := make(map[string]*testResult, len(selectedTests))
 	extraResults := make(map[string]*testResult)
 
-	for _, rawLine := range strings.Split(string(logData), "\n") {
+	for rawLine := range strings.SplitSeq(string(logData), "\n") {
 		status, reportedName, ok := parseReportedTestStatusLine(rawLine)
 		if !ok {
 			continue
@@ -910,12 +911,7 @@ func percentage(numerator, denominator int) float64 {
 }
 
 func containsString(items []string, needle string) bool {
-	for _, item := range items {
-		if item == needle {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(items, needle)
 }
 
 func prepareResultsDir(cacheDir, explicitDir string) (string, error) {

@@ -23,10 +23,10 @@ func FuzzBase32Command(f *testing.F) {
 
 		writeSessionFile(t, session, inputPath, clampFuzzData(rawData))
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"base32 --wrap 0 %s | base32 -d -i >/tmp/base32.out || true\n",
 			shellQuote(inputPath),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)

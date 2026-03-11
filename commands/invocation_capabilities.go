@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	stdfs "io/fs"
+	"maps"
 	"os"
 	"time"
 
@@ -332,8 +333,6 @@ func cloneEnv(src map[string]string) map[string]string {
 		return nil
 	}
 	dst := make(map[string]string, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
+	maps.Copy(dst, src)
 	return dst
 }

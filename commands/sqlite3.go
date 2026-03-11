@@ -493,7 +493,7 @@ func executeSQLiteStatement(inv *Invocation, stmt *gosqlite.Stmt) (*sqliteStatem
 			continue
 		}
 		row := make([]any, columns)
-		for i := 0; i < columns; i++ {
+		for i := range columns {
 			row[i] = sqliteColumnValue(stmt, i)
 		}
 		result.Rows = append(result.Rows, row)

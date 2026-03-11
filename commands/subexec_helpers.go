@@ -135,7 +135,7 @@ func commandSearchDirs(env map[string]string, dir string) []string {
 	}
 	dirs := make([]string, 0, strings.Count(pathValue, ":")+1)
 	seen := make(map[string]struct{})
-	for _, entry := range strings.Split(pathValue, ":") {
+	for entry := range strings.SplitSeq(pathValue, ":") {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
 			continue

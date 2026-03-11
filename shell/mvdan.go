@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	stdfs "io/fs"
+	"maps"
 	"os"
 	"path"
 	"sort"
@@ -458,12 +459,8 @@ func normalizeSubexecRequest(req *commands.ExecutionRequest, currentEnv map[stri
 
 func mergeEnv(base, override map[string]string) map[string]string {
 	out := make(map[string]string, len(base)+len(override))
-	for key, value := range base {
-		out[key] = value
-	}
-	for key, value := range override {
-		out[key] = value
-	}
+	maps.Copy(out, base)
+	maps.Copy(out, override)
 	return out
 }
 
@@ -600,7 +597,7 @@ func pathDirs(env expand.Environ, dir string) []string {
 	}
 
 	dirs := make([]string, 0, strings.Count(pathValue, ":")+1)
-	for _, entry := range strings.Split(pathValue, ":") {
+	for entry := range strings.SplitSeq(pathValue, ":") {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
 			continue

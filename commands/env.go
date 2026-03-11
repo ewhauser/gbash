@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -139,17 +140,13 @@ func buildEnv(base map[string]string, replaceEnv bool, unset []string, pairs map
 	for _, name := range unset {
 		delete(env, name)
 	}
-	for name, value := range pairs {
-		env[name] = value
-	}
+	maps.Copy(env, pairs)
 	return env
 }
 
 func mergeStringMap(src map[string]string) map[string]string {
 	out := make(map[string]string, len(src))
-	for key, value := range src {
-		out[key] = value
-	}
+	maps.Copy(out, src)
 	return out
 }
 

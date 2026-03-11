@@ -23,11 +23,11 @@ func FuzzFileCommandFlags(f *testing.F) {
 
 		writeSessionFile(t, session, inputPath, clampFuzzData(rawData))
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"file --brief %s >/tmp/file-brief.txt\nfile --mime %s >/tmp/file-mime.txt\n",
 			shellQuote(inputPath),
 			shellQuote(inputPath),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)

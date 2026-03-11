@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	stdfs "io/fs"
+	"maps"
 	"net/http"
 	"net/url"
 	"path"
@@ -416,14 +417,14 @@ func parseCurlHeader(headers map[string]string, header string) {
 }
 
 func parseCurlFormField(spec string) (curlFormField, bool) {
-	eqIndex := strings.IndexByte(spec, '=')
-	if eqIndex < 0 {
+	before, after, ok := strings.Cut(spec, "=")
+	if !ok {
 		return curlFormField{}, false
 	}
 
 	field := curlFormField{
-		name:  spec[:eqIndex],
-		value: spec[eqIndex+1:],
+		name:  before,
+		value: after,
 	}
 
 	if idx := strings.LastIndex(field.value, ";type="); idx >= 0 && !strings.Contains(field.value[idx+len(";type="):], ";") {
@@ -447,10 +448,10 @@ func parseCurlFormField(spec string) (curlFormField, bool) {
 }
 
 func encodeCurlFormData(input string) string {
-	eqIndex := strings.IndexByte(input, '=')
-	if eqIndex >= 0 {
-		name := input[:eqIndex]
-		value := input[eqIndex+1:]
+	before, after, ok := strings.Cut(input, "=")
+	if ok {
+		name := before
+		value := after
 		if name != "" {
 			return curlURIComponent(name) + "=" + curlURIComponent(value)
 		}
@@ -528,9 +529,7 @@ func generateCurlMultipartBody(fields []curlFormField, fileContents map[string][
 
 func prepareCurlHeaders(opts *curlOptions, contentType string) map[string]string {
 	headers := make(map[string]string, len(opts.headers)+2)
-	for name, value := range opts.headers {
-		headers[name] = value
-	}
+	maps.Copy(headers, opts.headers)
 	if opts.user != "" {
 		headers["Authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(opts.user))
 	}
@@ -612,8 +611,8 @@ func curlStatusText(resp *network.Response) string {
 	if status == "" {
 		return http.StatusText(resp.StatusCode)
 	}
-	if strings.HasPrefix(status, strconv.Itoa(resp.StatusCode)) {
-		return strings.TrimSpace(strings.TrimPrefix(status, strconv.Itoa(resp.StatusCode)))
+	if after, ok := strings.CutPrefix(status, strconv.Itoa(resp.StatusCode)); ok {
+		return strings.TrimSpace(after)
 	}
 	return status
 }

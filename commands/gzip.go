@@ -252,8 +252,8 @@ func resolveGzipOutputPath(inv *Invocation, opts *gzipOptions, sourceAbs string)
 	if !opts.decompress {
 		return sourceAbs + opts.suffix, nil
 	}
-	if strings.HasSuffix(sourceAbs, opts.suffix) {
-		return strings.TrimSuffix(sourceAbs, opts.suffix), nil
+	if before, ok := strings.CutSuffix(sourceAbs, opts.suffix); ok {
+		return before, nil
 	}
 	return "", exitf(inv, 1, "gzip: %s: unknown suffix -- ignored", path.Base(sourceAbs))
 }

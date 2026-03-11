@@ -15,7 +15,6 @@ func TestMalformedRedirectionDoesNotPanic(t *testing.T) {
 		">&0&0000000000000000\n",
 	}
 	for _, script := range cases {
-		script := script
 		t.Run(strings.TrimSpace(script), func(t *testing.T) {
 			result, err := rt.Run(context.Background(), &ExecutionRequest{
 				Script: script,

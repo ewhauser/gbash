@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"io"
+	"maps"
 	"strings"
 	"sync"
 
@@ -120,12 +121,8 @@ func defaultName(name string) string {
 
 func mergeEnv(base, override map[string]string) map[string]string {
 	out := make(map[string]string, len(base)+len(override))
-	for key, value := range base {
-		out[key] = value
-	}
-	for key, value := range override {
-		out[key] = value
-	}
+	maps.Copy(out, base)
+	maps.Copy(out, override)
 	return out
 }
 

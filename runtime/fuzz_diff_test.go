@@ -33,7 +33,7 @@ func FuzzDiffCommand(f *testing.F) {
 		writeSessionFile(t, session, rightPath, right)
 		writeSessionFile(t, session, upperPath, []byte(strings.ToUpper(string(left))))
 
-		script := []byte(fmt.Sprintf(
+		script := fmt.Appendf(nil,
 			"diff --unified %s %s >/tmp/diff-unified.txt || true\n"+
 				"diff --brief %s %s >/tmp/diff-brief.txt || true\n"+
 				"diff --ignore-case %s %s >/tmp/diff-ignore.txt || true\n"+
@@ -46,7 +46,7 @@ func FuzzDiffCommand(f *testing.F) {
 			shellQuote(upperPath),
 			shellQuote(leftPath),
 			shellQuote(leftPath),
-		))
+		)
 
 		result, err := runFuzzSessionScript(t, session, script)
 		assertSuccessfulFuzzExecution(t, script, result, err)

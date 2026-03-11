@@ -131,7 +131,7 @@ func estimateWordGlobOps(word *syntax.Word) int64 {
 	}
 
 	ops := int64(1)
-	for _, part := range strings.Split(lit, "/") {
+	for part := range strings.SplitSeq(lit, "/") {
 		if part == "" {
 			continue
 		}
