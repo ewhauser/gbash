@@ -40,6 +40,7 @@ fuzz:
 	go test ./runtime -run=^$$ -fuzz=FuzzShellProcessCommands -fuzztime=$(FUZZTIME)
 	go test ./runtime -run=^$$ -fuzz=FuzzNestedShellCommands -fuzztime=$(FUZZTIME)
 	go test ./runtime -run=^$$ -fuzz=FuzzDataCommands -fuzztime=$(FUZZTIME)
+	go test ./runtime -run=^$$ -fuzz=FuzzJQCompatibilityFlags -fuzztime=$(FUZZTIME)
 	go test ./runtime -run=^$$ -fuzz=FuzzYQCommands -fuzztime=$(FUZZTIME)
 	go test ./runtime -run=^$$ -fuzz=FuzzSQLiteCommands -fuzztime=$(FUZZTIME)
 	go test ./runtime -run=^$$ -fuzz=FuzzSQLiteFileCommands -fuzztime=$(FUZZTIME)

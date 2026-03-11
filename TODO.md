@@ -370,13 +370,13 @@ Commands that exist in both repos but have flags in upstream not yet ported.
 
 #### `jq`
 
-- [ ] `--ascii`
-- [ ] `--color`
-- [ ] `--compact`
-- [ ] `--monochrome`
-- [ ] `-C`
-- [ ] `-M`
-- [ ] `-a`
+- [x] `--ascii`
+- [x] `--color`
+- [x] `--compact`
+- [x] `--monochrome`
+- [x] `-C`
+- [x] `-M`
+- [x] `-a`
 
 #### `ls`
 

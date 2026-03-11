@@ -174,6 +174,12 @@ func parseJQLongFlag(inv *Invocation, opts *jqOptions, args []string) ([]string,
 	name, value, hasValue := splitJQLongFlag(arg)
 
 	switch name {
+	case "ascii":
+		// Accepted for compatibility with upstream; output remains UTF-8.
+	case "color":
+		// Accepted for compatibility with upstream; color output is ignored.
+	case "compact":
+		opts.compact = true
 	case "compact-output":
 		opts.compact = true
 	case "exit-status":
@@ -184,6 +190,8 @@ func parseJQLongFlag(inv *Invocation, opts *jqOptions, args []string) ([]string,
 		opts.help = true
 	case "join-output":
 		opts.join = true
+	case "monochrome":
+		// Accepted for compatibility with upstream; output is already monochrome.
 	case "null-input":
 		opts.nullInput = true
 	case "raw-input":
@@ -267,6 +275,12 @@ func parseJQShortFlags(inv *Invocation, opts *jqOptions, args []string) ([]strin
 		flag := shorts[0]
 		shorts = shorts[1:]
 		switch flag {
+		case 'C':
+			// Accepted for compatibility with upstream; color output is ignored.
+		case 'M':
+			// Accepted for compatibility with upstream; output is already monochrome.
+		case 'a':
+			// Accepted for compatibility with upstream; output remains UTF-8.
 		case 'c':
 			opts.compact = true
 		case 'e':
@@ -706,11 +720,15 @@ Usage:
   jq [options] <filter> [file ...]
 
 Supported options:
-  -c, --compact-output   produce compact JSON output
+  -a, --ascii            accept upstream ASCII mode flag (output remains UTF-8)
+  -c, --compact, --compact-output
+                         produce compact JSON output
+  -C, --color            accept upstream color mode flag (ignored)
   -e, --exit-status      set exit status based on the last output value
   -f, --from-file        read the jq filter from a file
   -h, --help             show this help text
   -j, --join-output      do not print a trailing newline after each result
+  -M, --monochrome       accept upstream monochrome mode flag (ignored)
   -n, --null-input       run the filter once with null as input
   -r, --raw-output       print string results without JSON quotes
   -R, --raw-input        read input as raw strings

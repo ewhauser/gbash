@@ -314,6 +314,8 @@ func mustFuzzCommandMetadata(tb testing.TB) []fuzzCommandMetadata {
 		fuzzSpec("jq", "data",
 			fuzzVariant("", "filter", "-r", "{jq.filter}", "{path.json}"),
 			fuzzVariant("", "flag:n", "-n", "--arg", "value", "{token.value}", "{jq.build}"),
+			fuzzVariant("", "flag:long", "--compact", "--ascii", "--color", "--monochrome", "{jq.filter}", "{path.json}"),
+			fuzzVariant("", "flag:short", "-a", "-C", "-M", "-c", "{jq.filter}", "{path.json}"),
 		),
 		fuzzSpec("yq", "data",
 			fuzzVariant("", "filter", "{yq.filter}", "{path.yaml}"),
