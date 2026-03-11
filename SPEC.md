@@ -937,6 +937,7 @@ The compatibility harness should stay curated. It is not a Bash conformance suit
 - write a machine-readable `summary.json` with overall rollups, per-utility rollups, and per-test status data so external dashboards can build command-by-test views
 - support an explicit results directory so CI and local tooling can publish a stable `summary.json`, with a separate report-rendering script generating `index.html` and `badge.svg` from that summary
 - when the scheduled/manual reporting workflow does not produce a complete report bundle, skip deployment and leave the previously published Pages report in place
+- allow branch and pull-request-adjacent manual runs to generate raw artifacts without attempting a Pages deployment; only the default branch publishes the latest report
 
 ## 18. Future Roadmap
 
