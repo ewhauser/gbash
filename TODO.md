@@ -380,24 +380,24 @@ Commands that exist in both repos but have flags in upstream not yet ported.
 
 #### `ls`
 
-- [ ] `--all`
-- [ ] `--almost-all`
-- [ ] `--classify`
-- [ ] `--directory`
-- [ ] `--human-readable`
-- [ ] `--recursive`
-- [ ] `--reverse`
-- [ ] `-1`
-- [ ] `-A`
-- [ ] `-F`
-- [ ] `-R`
-- [ ] `-S`
-- [ ] `-a`
-- [ ] `-d`
-- [ ] `-h`
-- [ ] `-l`
-- [ ] `-r`
-- [ ] `-t`
+- [x] `--all`
+- [x] `--almost-all`
+- [x] `--classify`
+- [x] `--directory`
+- [x] `--human-readable`
+- [x] `--recursive`
+- [x] `--reverse`
+- [x] `-1`
+- [x] `-A`
+- [x] `-F`
+- [x] `-R`
+- [x] `-S`
+- [x] `-a`
+- [x] `-d`
+- [x] `-h`
+- [x] `-l`
+- [x] `-r`
+- [x] `-t`
 
 #### `mv`
 
