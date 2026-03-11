@@ -97,6 +97,7 @@ func mustFuzzCommandMetadata(tb testing.TB) []fuzzCommandMetadata {
 		fuzzSpec("cat", "file",
 			fuzzVariant("", "path.read", "{path.text}"),
 			fuzzVariant("text", "stdin", "-"),
+			fuzzVariant("", "flag:long", "--number", "{path.text}"),
 		),
 		fuzzSpec("cp", "file",
 			fuzzVariant("", "path.copy", "{path.text}", "{path.copy}"),

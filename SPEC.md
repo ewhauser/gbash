@@ -575,6 +575,7 @@ For archive and compression helpers, the runtime should expose explicit subsets 
 For file/path commands, the runtime now supports a practical agent-oriented subset rather than full GNU parity:
 
 - `touch` supports creation, `-c`, and `-d/--date`
+- `cat` supports stdin or file concatenation plus `-n/--number` line numbering
 - `ln` supports hard links plus `-s` and `-f`
 - `chmod` supports octal and symbolic modes plus recursive `-R`
 - `readlink` supports raw link-target output and `-f` canonicalization
