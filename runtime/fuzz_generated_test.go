@@ -80,6 +80,11 @@ func prepareFuzzFixtures(t *testing.T, session *Session, raw []byte) fuzzFixture
 	writeSessionFile(t, session, "/tmp/data.yaml", []byte(yamlText))
 	writeSessionFile(t, session, "/tmp/raw.json", clampFuzzData(raw))
 	writeSessionFile(t, session, "/tmp/base64.txt", []byte(base64Text))
+	writeSessionFile(t, session, "/tmp/text.txt.gz", buildGzipFixture(t, textBytes))
+	writeSessionFile(t, session, "/tmp/archive-fixture.tar", buildTarFixture(t,
+		tarFixtureEntry{Name: "tmp/dir/a.txt", Body: []byte("alpha\nbeta\n")},
+		tarFixtureEntry{Name: "tmp/dir/nested/b.txt", Body: []byte("beta\ngamma\n")},
+	))
 	writeSessionFile(t, session, "/tmp/copy.txt", []byte("copy-source\n"))
 	writeSessionFile(t, session, "/tmp/remove.txt", []byte("remove-me\n"))
 	writeSessionFile(t, session, "/tmp/script.sh", []byte("echo generated-script\n"))
@@ -126,8 +131,11 @@ func prepareFuzzFixtures(t *testing.T, session *Session, raw []byte) fuzzFixture
 		"{path.sqlite}":      "/tmp/fuzz.db",
 		"{path.rawjson}":     "/tmp/raw.json",
 		"{path.base64}":      "/tmp/base64.txt",
+		"{path.gzip}":        "/tmp/text.txt.gz",
 		"{path.dir}":         "/tmp/dir",
 		"{path.emptydir}":    "/tmp/empty",
+		"{path.archive}":     "/tmp/archive.tar",
+		"{path.tarfixture}":  "/tmp/archive-fixture.tar",
 		"{path.out}":         "/tmp/out.txt",
 		"{path.copy}":        "/tmp/copy.txt",
 		"{path.moved}":       "/tmp/moved.txt",

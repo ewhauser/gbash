@@ -108,7 +108,7 @@ This file is the implementation queue derived from [`SPEC.md`](./SPEC.md), espec
 - [x] Add file/path commands: `touch`, `rmdir`, `ln`, `chmod`, `readlink`, `stat`, `basename`, `dirname`, `tree`, `du`, `file`
 - [x] Add text/search commands: `printf`, `rg`, `awk`, `comm`, `paste`, `tr`, `rev`, `nl`, `join`, `split`, `tac`, `diff`, `base64`
 - [x] Add shell/process helpers: `tee`, `env`, `printenv`, `true`, `false`, `which`, `help`, `date`, `sleep`, `timeout`, `xargs`, `bash`, `sh`
-- [ ] Add archive/data commands: `tar`, `gzip`, `gunzip`, `zcat`
+- [x] Add archive/data commands: `tar`, `gzip`, `gunzip`, `zcat`
 
 ### 12. Agent-oriented data tools
 
@@ -165,8 +165,7 @@ Do not add these while working through the backlog:
 ## Suggested Order
 
 1. Finish `jq` and `curl` compatibility work for agent data flows.
-2. Add the next missing command families in batches, starting with file/path and shell/helper commands.
-3. Add a host-backed lower filesystem for `OverlayFS` so sessions can read from real trees and keep writes in memory.
-4. Add richer CPU and memory accounting to the policy layer.
-5. Expand the compatibility corpus and hardening suite alongside each new command batch.
-6. Polish the interactive shell only after the runtime and command surface are stable.
+2. Add a host-backed lower filesystem for `OverlayFS` so sessions can read from real trees and keep writes in memory.
+3. Add richer CPU and memory accounting to the policy layer.
+4. Expand the compatibility corpus and hardening suite alongside each new command/parity batch.
+5. Polish the interactive shell only after the runtime and command surface are stable.

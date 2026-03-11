@@ -185,10 +185,52 @@ func FuzzDataCommands(f *testing.F) {
 		writeSessionFile(t, session, "/tmp/raw.json", clampFuzzData(rawJSON))
 
 		script := []byte(fmt.Sprintf(
-			"jq -r '.value' /tmp/input.json >/tmp/jq-value.txt\njq -c '.items' /tmp/input.json >/tmp/jq-items.txt\njq -n --arg value %s '{value:$value}' >/tmp/jq-build.txt\njq '.value' /tmp/raw.json >/tmp/jq-raw.txt || true\nyq '.value' /tmp/input.yaml >/tmp/yq-value.txt\nyq -p json -o json '.items' /tmp/input.json >/tmp/yq-items.txt\nyq -n '.value = \"built\"' >/tmp/yq-build.txt\nsqlite3 :memory: \"create table t(value text); insert into t values ('%s'); select value from t;\" >/tmp/sqlite-value.txt\nsqlite3 -json /tmp/data.db \"create table if not exists items(value text); insert into items values ('%s'); select value from items order by value;\" >/tmp/sqlite-json.txt\nbase64 /tmp/input.json | base64 -d >/tmp/base64-json.txt || true\n",
+			"jq -r '.value' /tmp/input.json >/tmp/jq-value.txt\njq -c '.items' /tmp/input.json >/tmp/jq-items.txt\njq -n --arg value %s '{value:$value}' >/tmp/jq-build.txt\njq '.value' /tmp/raw.json >/tmp/jq-raw.txt || true\nyq '.value' /tmp/input.yaml >/tmp/yq-value.txt\nyq -p json -o json '.items' /tmp/input.json >/tmp/yq-items.txt\nyq -n '.value = \"built\"' >/tmp/yq-build.txt\nsqlite3 :memory: \"create table t(value text); insert into t values ('%s'); select value from t;\" >/tmp/sqlite-value.txt\nsqlite3 -json /tmp/data.db \"create table if not exists items(value text); insert into items values ('%s'); select value from items order by value;\" >/tmp/sqlite-json.txt\nbase64 /tmp/input.json | base64 -d >/tmp/base64-json.txt || true\ngzip -c /tmp/input.json >/tmp/input.json.gz\ngunzip -c /tmp/input.json.gz >/tmp/input.json.out\nzcat /tmp/input.json.gz >/tmp/input.json.zcat\ntar -cf /tmp/data.tar /tmp/input.json /tmp/input.yaml\nmkdir -p /tmp/extracted\ntar -tf /tmp/data.tar >/tmp/tar-list.txt\ntar -xf /tmp/data.tar -C /tmp/extracted\n",
 			shellQuote(value),
 			sqliteStringLiteral(value),
 			sqliteStringLiteral(value),
+		))
+
+		result, err := runFuzzSessionScript(t, session, script)
+		assertSuccessfulFuzzExecution(t, script, result, err)
+	})
+}
+
+func FuzzArchiveCommands(f *testing.F) {
+	rt := newFuzzRuntime(f)
+
+	seeds := []struct {
+		name string
+		data []byte
+	}{
+		{"alpha", []byte("alpha\nbeta\n")},
+		{"json", []byte("{\"value\":1}\n")},
+		{"binary", []byte{0x00, 0x01, 0x02, 0xff, '\n'}},
+	}
+	for _, seed := range seeds {
+		f.Add(seed.name, seed.data)
+	}
+
+	f.Fuzz(func(t *testing.T, rawName string, rawData []byte) {
+		session := newFuzzSession(t, rt)
+		name := fuzzPath(rawName)
+		payload := clampFuzzData(rawData)
+
+		writeSessionFile(t, session, "/tmp/archive-src/"+name+".txt", payload)
+		writeSessionFile(t, session, "/tmp/archive-src/nested/"+name+".bin", append([]byte(nil), payload...))
+
+		script := []byte(fmt.Sprintf(
+			"tar -cf /tmp/archive.tar /tmp/archive-src\n"+
+				"tar -tf /tmp/archive.tar >/tmp/archive.list\n"+
+				"mkdir -p /tmp/archive-out\n"+
+				"tar -xf /tmp/archive.tar -C /tmp/archive-out\n"+
+				"tar -czf /tmp/archive.tar.gz /tmp/archive-src\n"+
+				"mkdir -p /tmp/archive-out-gz\n"+
+				"tar -xzf /tmp/archive.tar.gz -C /tmp/archive-out-gz\n"+
+				"gzip -c %s >/tmp/file.txt.gz\n"+
+				"gunzip -c /tmp/file.txt.gz >/tmp/file.txt.out\n"+
+				"zcat /tmp/file.txt.gz >/tmp/file.txt.zcat\n",
+			shellQuote("/tmp/archive-src/"+name+".txt"),
 		))
 
 		result, err := runFuzzSessionScript(t, session, script)

@@ -249,8 +249,8 @@ The default registry currently includes the commands listed in [`commands/regist
 
 - File and path: `cat`, `cp`, `mv`, `ln`, `ls`, `mkdir`, `rm`, `rmdir`, `touch`, `chmod`, `readlink`, `stat`, `basename`, `dirname`, `tree`, `du`, `file`, `find`
 - Search and text: `grep`, `rg`, `awk`, `sed`, `cut`, `sort`, `uniq`, `head`, `tail`, `wc`, `printf`, `tee`, `comm`, `paste`, `tr`, `rev`, `nl`, `join`, `split`, `tac`, `diff`, `base64`
-- Data: `jq`, `yq`, `sqlite3`
-- Environment and execution: `echo`, `pwd`, `env`, `printenv`, `which`, `help`, `true`, `false`, `date`, `sleep`, `timeout`, `bash`, `sh`
+- Archive and data: `tar`, `gzip`, `gunzip`, `zcat`, `jq`, `yq`, `sqlite3`
+- Environment and execution: `echo`, `pwd`, `env`, `printenv`, `which`, `help`, `true`, `false`, `date`, `sleep`, `timeout`, `xargs`, `bash`, `sh`
 - Network when configured: `curl`
 
 The project targets high-value agent workflows, not full GNU flag parity for every command. Unsupported commands or flags fail normally.
@@ -299,3 +299,5 @@ For architecture and product-boundary work, read [`SPEC.md`](./SPEC.md) before m
 ## License
 
 This project is licensed under the [Apache License 2.0](./LICENSE).
+`tar`, `gzip`, `gunzip`, and `zcat` are intentionally focused subsets. The current surface covers create/list/extract, gzip-wrapped archives, `-C`, `-k`, `-O`, stdin/stdout flows, and extraction hardening around parent traversal and unsafe symlink targets. Append/update modes and non-gzip codecs are still out of scope.
+

@@ -550,6 +550,10 @@ Initial MVP command set:
 - `tac`
 - `diff`
 - `base64`
+- `tar`
+- `gzip`
+- `gunzip`
+- `zcat`
 - `jq`
 - `yq`
 - `sqlite3`
@@ -563,6 +567,8 @@ For `jq`, the runtime should support a practical CLI-compatible subset for agent
 For `yq`, the runtime should wrap `mikefarah/yq`'s `yqlib` evaluator rather than embedding the upstream Cobra CLI. The supported subset should cover agent-oriented `eval` / `eval-all` flows, input and output format selection, null-input document creation, pretty-print rewriting, exit-status handling, scalar-unwrapping controls, NUL-separated output, expression files, and in-place file updates. All input and output must continue to route through the sandbox filesystem, and `yqlib` file/env operators such as `load()` and `env()` must stay disabled so expressions cannot bypass policy.
 
 For `sqlite3`, the runtime should wrap `ncruces/go-sqlite3` directly rather than embedding the upstream CLI. The initial implementation should open an in-memory SQLite connection, deserialize database bytes from the sandbox filesystem when a file path is requested, execute SQL inside that in-memory connection, and serialize the database back to the sandbox filesystem only after successful writes. The supported subset should cover `:memory:` and file-backed databases, list / CSV / JSON / line / column / table output, `-header`, `-readonly`, `-bail`, `-cmd`, `-echo`, help, and version output. `ATTACH`, `DETACH`, `VACUUM`, virtual-table creation, and `load_extension()` must stay disabled so SQL cannot escape the sandbox filesystem or reach host file APIs.
+
+For archive and compression helpers, the runtime should expose explicit subsets rather than imply GNU `tar` or `gzip` parity. `gzip`, `gunzip`, and `zcat` should support file and stdin/stdout flows, `-c`, `-d`, `-f`, `-k`, `-S`, `-t`, and `-v`, with binary-safe streaming and no host-tempfile fallback. `tar` should support create, list, and extract flows with `-c`, `-x`, `-t`, `-f`, `-C`, `-z`, `-v`, `-O`, and `-k`, while rejecting unsupported codecs and append/update modes. Extraction must strip leading slashes, reject parent-traversal entries, and reject symlink targets that escape the extraction root.
 
 For file/path commands, the runtime now supports a practical agent-oriented subset rather than full GNU parity:
 
@@ -875,7 +881,7 @@ The initial target set should live in `runtime/` and cover:
 - single-script execution against a runtime with tight policy and timeout limits
 - malformed and byte-injected inputs that should fail gracefully without internal panics or host-path leaks
 - multi-exec session sequences to exercise persistent filesystem state under fuzzed scripts
-- command-specific targets for the current file/path, text/search, shell/process-helper, and structured-data command batches
+- command-specific targets for the current file/path, text/search, shell/process-helper, structured-data, and archive/compression command batches
 - metadata-driven generated programs that compose command/flag variants into pipelines and broader shell-shape coverage
 - committed known-attack corpora whose seeds are also mutated under the fuzz harness
 
@@ -902,7 +908,7 @@ The gap analysis against `just-bash` yields two categories: gaps we should close
 
 ### 18.1 Gaps To Close
 
-- broader command coverage for agent workflows, especially the remaining archive/data command families plus deeper parity for the newer helper and text/search tools
+- broader command coverage for agent workflows, especially deeper parity for the newer archive/compression, helper, and text/search tools
 - stronger execution budgets and policy enforcement, including richer CPU and memory accounting
 - host-backed overlay filesystem support so real directories can be mounted read-only underneath an in-memory writable layer
 - fuller `jq` and `curl` compatibility for structured data flows and safe networked workflows
