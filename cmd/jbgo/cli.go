@@ -13,12 +13,17 @@ import (
 
 type cliOptions struct {
 	interactive bool
+	showVersion bool
 }
 
 func runCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, stdinTTY bool) (int, error) {
 	opts, err := parseCLIOptions(args, stderr)
 	if err != nil {
 		return 2, err
+	}
+	if opts.showVersion {
+		_, _ = io.WriteString(stdout, versionText())
+		return 0, nil
 	}
 
 	rt, err := jbruntime.New(&jbruntime.Config{})
@@ -39,6 +44,7 @@ func parseCLIOptions(args []string, stderr io.Writer) (cliOptions, error) {
 	var opts cliOptions
 	fs.BoolVar(&opts.interactive, "i", false, "run an interactive shell session")
 	fs.BoolVar(&opts.interactive, "interactive", false, "run an interactive shell session")
+	fs.BoolVar(&opts.showVersion, "version", false, "print version information")
 
 	if err := fs.Parse(args); err != nil {
 		return cliOptions{}, err

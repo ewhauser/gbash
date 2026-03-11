@@ -1,6 +1,7 @@
-.PHONY: lint test build fuzz
+.PHONY: lint test build fuzz release-check release-snapshot
 
 FUZZTIME ?= 10s
+GORELEASER_VERSION ?= v2.14.3
 
 lint:
 	@which golangci-lint > /dev/null || go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
@@ -28,3 +29,9 @@ fuzz:
 	go test ./runtime -run=^$$ -fuzz=FuzzArchiveCommands -fuzztime=$(FUZZTIME)
 	go test ./runtime -run=^$$ -fuzz=FuzzGeneratedPrograms -fuzztime=$(FUZZTIME)
 	go test ./runtime -run=^$$ -fuzz=FuzzAttackMutations -fuzztime=$(FUZZTIME)
+
+release-check:
+	go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) check
+
+release-snapshot:
+	go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) release --snapshot --clean

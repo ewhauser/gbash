@@ -35,6 +35,7 @@ Install the module with `go get github.com/ewhauser/jbgo` and import packages fr
 - [Supported Commands](#supported-commands)
 - [Shell Features](#shell-features)
 - [Default Sandbox Layout](#default-sandbox-layout)
+- [Releases](#releases)
 - [Development](#development)
 - [License](#license)
 
@@ -192,6 +193,8 @@ The CLI reads a script from stdin and executes it inside the sandbox runtime.
 go install github.com/ewhauser/jbgo/cmd/jbgo@latest
 ```
 
+Tagged builds are also published as prebuilt archives on the [GitHub Releases page](https://github.com/ewhauser/jbgo/releases).
+
 After installation, run the binary directly. From a local checkout, replace `jbgo` with `go run ./cmd/jbgo`.
 
 ```bash
@@ -229,6 +232,12 @@ The interactive shell is intentionally minimal:
 - it carries forward working directory and shell-visible environment state between entries
 - it supports multiline input through `mvdan/sh/v3`'s interactive parser
 - it does not provide history, line editing, job control, or host TTY emulation
+
+The CLI can also report embedded release metadata:
+
+```bash
+jbgo --version
+```
 
 ## Configuration
 
@@ -390,6 +399,10 @@ Each fresh session starts with a Unix-like virtual layout:
 
 Those command paths are virtual stubs used for shell resolution. Command implementations still come from the Go registry, not the host filesystem.
 
+## Releases
+
+Push a SemVer tag such as `v0.1.0` to publish a GitHub Release with cross-platform `jbgo` archives and `checksums.txt`. The release contract lives in [`.github/workflows/release.yml`](./.github/workflows/release.yml), [`.github/workflows/release-check.yml`](./.github/workflows/release-check.yml), and [`.goreleaser.yaml`](./.goreleaser.yaml).
+
 ## Development
 
 Common commands:
@@ -398,6 +411,7 @@ Common commands:
 go build ./...
 go test ./...
 go run ./cmd/jbgo < script.sh
+go run github.com/goreleaser/goreleaser/v2@v2.14.3 release --snapshot --clean
 gofmt -w .
 ```
 

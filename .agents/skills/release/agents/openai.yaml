@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release"
+  short_description: "Tag-driven GitHub release workflow for this repo"
+  default_prompt: "Use $release to validate this repo's release readiness and prepare or publish the next tagged release."
