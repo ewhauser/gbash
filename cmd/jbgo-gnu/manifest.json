@@ -1,7 +1,7 @@
 {
   "gnu_version": "9.10",
   "tarball_url": "https://ftp.gnu.org/gnu/coreutils/coreutils-9.10.tar.gz",
-  "tarball_sha256": "",
+  "tarball_sha256": "e0bde1fb68509447fc723cf2517e8a8c7fa46769919bb7490ed350a2e9238562",
   "utilities": [
     { "name": "base64", "patterns": ["tests/basenc/base64.pl"] },
     { "name": "basename", "patterns": ["tests/misc/basename*"] },
