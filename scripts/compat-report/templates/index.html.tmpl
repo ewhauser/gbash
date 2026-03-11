@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>jbgo GNU Compatibility</title>
+  <style>
+:root {
+  color-scheme: light;
+  --bg: #f6f4ef;
+  --panel: #fffdf8;
+  --ink: #1d1a16;
+  --muted: #6e665d;
+  --line: #d8d2c7;
+  --good: #2d7d46;
+  --warn: #9a6b00;
+  --bad: #b83232;
+  --na: #6f6f6f;
+  --accent: #165ba8;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background: radial-gradient(circle at top, #fff8ea 0%, var(--bg) 42%, #ede8de 100%);
+  color: var(--ink);
+}
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 40px 20px 64px;
+}
+h1, h2 { margin: 0 0 12px; }
+p { margin: 0; line-height: 1.5; }
+a { color: var(--accent); }
+.lede {
+  margin-top: 10px;
+  color: var(--muted);
+  max-width: 720px;
+}
+.meta {
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.cards {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 28px;
+}
+.card {
+  background: rgba(255,255,255,0.78);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 18px 18px 16px;
+  box-shadow: 0 10px 30px rgba(29,26,22,0.06);
+}
+.card-label {
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.card-value {
+  margin-top: 6px;
+  font-size: 2rem;
+  font-weight: 700;
+}
+.card-detail {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.table-wrap {
+  margin-top: 28px;
+  background: rgba(255,255,255,0.82);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: auto;
+  box-shadow: 0 14px 34px rgba(29,26,22,0.07);
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 900px;
+}
+th, td {
+  text-align: left;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+th {
+  font-size: 0.82rem;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(246,244,239,0.85);
+}
+tbody tr:last-child td { border-bottom: 0; }
+.pill {
+  display: inline-block;
+  min-width: 64px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+.good { color: var(--good); background: rgba(45,125,70,0.12); }
+.warn { color: var(--warn); background: rgba(154,107,0,0.12); }
+.bad { color: var(--bad); background: rgba(184,50,50,0.12); }
+.na { color: var(--na); background: rgba(111,111,111,0.12); }
+.notes {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>GNU Coreutils Compatibility</h1>
+    <p class="lede">Latest published compatibility run for <code>jbgo</code>, generated from the optional GNU coreutils harness. The JSON summary is the machine-readable source of truth for deeper dashboards and command-by-test grids.</p>
+    <p class="meta">Generated <strong>{{ .Summary.GeneratedAt }}</strong> against GNU coreutils <strong>{{ .Summary.GNUVersion }}</strong>. Raw data: <a href="summary.json">summary.json</a>.</p>
+
+    <section class="cards">
+      <article class="card">
+        <div class="card-label">Overall Test Pass</div>
+        <div class="card-value">{{ formatPercent .Summary.Overall.PassPctSelected }}</div>
+        <div class="card-detail">{{ .OverallDetail }}</div>
+      </article>
+      <article class="card">
+        <div class="card-label">Runnable Test Pass</div>
+        <div class="card-value">{{ formatPercent .Summary.Overall.PassPctRunnable }}</div>
+        <div class="card-detail">{{ .RunnableDetail }}</div>
+      </article>
+      <article class="card">
+        <div class="card-label">Command Pass</div>
+        <div class="card-value">{{ formatPercent .Summary.UtilitySummary.PassPctRunnable }}</div>
+        <div class="card-detail">{{ .CommandDetail }}</div>
+      </article>
+      <article class="card">
+        <div class="card-label">Filtered Skips</div>
+        <div class="card-value">{{ .Summary.Overall.FilteredSkipTotal }}</div>
+        <div class="card-detail">{{ .FilteredDetail }}</div>
+      </article>
+    </section>
+
+    <section class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Utility</th>
+            <th>Pass %</th>
+            <th>Selected</th>
+            <th>Pass</th>
+            <th>Fail</th>
+            <th>Skip</th>
+            <th>XFail</th>
+            <th>XPass</th>
+            <th>Error</th>
+            <th>Unreported</th>
+            <th>Log</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{- range .Summary.Utilities }}
+          <tr>
+            <td><strong>{{ .Name }}</strong></td>
+            <td><span class="pill {{ percentageClass .Summary.SelectedTotal .Summary.PassPctSelected }}">{{ formatPercent .Summary.PassPctSelected }}</span></td>
+            <td>{{ .Summary.SelectedTotal }}</td>
+            <td>{{ .Summary.Pass }}</td>
+            <td>{{ .Summary.Fail }}</td>
+            <td>{{ .Summary.Skip }}</td>
+            <td>{{ .Summary.XFail }}</td>
+            <td>{{ .Summary.XPass }}</td>
+            <td>{{ .Summary.Error }}</td>
+            <td>{{ .Summary.Unreported }}</td>
+            <td>{{ if .LogFile }}<a href="{{ .LogFile }}">{{ .LogFile }}</a>{{ else }}<span class="notes">n/a</span>{{ end }}</td>
+            <td class="notes">{{ utilityNote .Reason .Skipped }}</td>
+          </tr>
+          {{- end }}
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

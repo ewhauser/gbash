@@ -1,0 +1,226 @@
+name: Compat
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: compat-pages
+  cancel-in-progress: true
+
+jobs:
+  compat:
+    runs-on: ubuntu-24.04
+    outputs:
+      exit_code: ${{ steps.run-compat.outputs.exit_code }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/configure-pages@v5
+
+      - name: Run GNU compatibility harness
+        id: run-compat
+        env:
+          PAGES_ROOT: ${{ runner.temp }}/compat-pages
+          GNU_RESULTS_DIR: ${{ runner.temp }}/compat-pages/compat/latest
+        run: |
+          set +e
+          mkdir -p "$GNU_RESULTS_DIR"
+          GNU_RESULTS_DIR="$GNU_RESULTS_DIR" make gnu-test
+          status=$?
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Render compat report assets
+        if: always()
+        env:
+          GNU_RESULTS_DIR: ${{ runner.temp }}/compat-pages/compat/latest
+        run: |
+          set +e
+          if [ -f "$GNU_RESULTS_DIR/summary.json" ]; then
+            go run ./scripts/compat-report --summary "$GNU_RESULTS_DIR/summary.json" --output "$GNU_RESULTS_DIR"
+          fi
+          exit 0
+
+      - name: Ensure publishable compat bundle
+        if: always()
+        env:
+          PAGES_ROOT: ${{ runner.temp }}/compat-pages
+          GNU_RESULTS_DIR: ${{ runner.temp }}/compat-pages/compat/latest
+          COMPAT_EXIT_CODE: ${{ steps.run-compat.outputs.exit_code }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$GNU_RESULTS_DIR"
+
+          if [ -f "$GNU_RESULTS_DIR/summary.json" ] && { [ ! -f "$GNU_RESULTS_DIR/index.html" ] || [ ! -f "$GNU_RESULTS_DIR/badge.svg" ]; }; then
+            set +e
+            go run ./scripts/compat-report --summary "$GNU_RESULTS_DIR/summary.json" --output "$GNU_RESULTS_DIR"
+            set -e
+          fi
+
+          if [ ! -f "$GNU_RESULTS_DIR/summary.json" ]; then
+            generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            cat > "$GNU_RESULTS_DIR/summary.json" <<EOF
+          {
+            "gnu_version": "",
+            "generated_at": "$generated_at",
+            "work_dir": "",
+            "results_dir": "$GNU_RESULTS_DIR",
+            "overall": {
+              "selected_total": 0,
+              "pass": 0,
+              "fail": 0,
+              "skip": 0,
+              "xfail": 0,
+              "xpass": 0,
+              "error": 0,
+              "unreported": 0,
+              "runnable_total": 0,
+              "pass_pct_selected": 0,
+              "pass_pct_runnable": 0
+            },
+            "utility_summary": {
+              "total": 0,
+              "passed": 0,
+              "failed": 0,
+              "no_runnable_tests": 0,
+              "pass_pct_total": 0,
+              "pass_pct_runnable": 0
+            },
+            "utilities": []
+          }
+          EOF
+
+            cat > "$GNU_RESULTS_DIR/index.html" <<EOF
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>jbgo GNU Compatibility</title>
+            <style>
+              body { font-family: sans-serif; margin: 40px; background: #f6f4ef; color: #1d1a16; }
+              a { color: #165ba8; }
+            </style>
+          </head>
+          <body>
+            <h1>GNU Coreutils Compatibility</h1>
+            <p>The compatibility harness did not produce a normal summary for this run.</p>
+            <p>Harness exit code: <strong>$COMPAT_EXIT_CODE</strong>.</p>
+            <p>Raw data: <a href="summary.json">summary.json</a>.</p>
+          </body>
+          </html>
+          EOF
+
+            cat > "$GNU_RESULTS_DIR/badge.svg" <<'EOF'
+          <svg xmlns="http://www.w3.org/2000/svg" width="94" height="20" role="img" aria-label="compat: error">
+          <rect width="49" height="20" fill="#555"/>
+          <rect x="49" width="45" height="20" fill="#e05d44"/>
+          <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
+            <text x="24.5" y="14">compat</text>
+            <text x="71.5" y="14">error</text>
+          </g>
+          </svg>
+          EOF
+          fi
+
+          if [ ! -f "$GNU_RESULTS_DIR/index.html" ]; then
+            cat > "$GNU_RESULTS_DIR/index.html" <<EOF
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>jbgo GNU Compatibility</title>
+            <style>
+              body { font-family: sans-serif; margin: 40px; background: #f6f4ef; color: #1d1a16; }
+              a { color: #165ba8; }
+            </style>
+          </head>
+          <body>
+            <h1>GNU Coreutils Compatibility</h1>
+            <p>The compatibility summary exists, but the HTML report could not be rendered for this run.</p>
+            <p>Harness exit code: <strong>$COMPAT_EXIT_CODE</strong>.</p>
+            <p>Raw data: <a href="summary.json">summary.json</a>.</p>
+          </body>
+          </html>
+          EOF
+          fi
+
+          if [ ! -f "$GNU_RESULTS_DIR/badge.svg" ]; then
+            cat > "$GNU_RESULTS_DIR/badge.svg" <<'EOF'
+          <svg xmlns="http://www.w3.org/2000/svg" width="94" height="20" role="img" aria-label="compat: error">
+          <rect width="49" height="20" fill="#555"/>
+          <rect x="49" width="45" height="20" fill="#e05d44"/>
+          <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
+            <text x="24.5" y="14">compat</text>
+            <text x="71.5" y="14">error</text>
+          </g>
+          </svg>
+          EOF
+          fi
+
+          cat > "$PAGES_ROOT/index.html" <<'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta http-equiv="refresh" content="0; url=./compat/latest/">
+            <title>jbgo compatibility</title>
+          </head>
+          <body>
+            <p>Redirecting to <a href="./compat/latest/">the latest compatibility report</a>.</p>
+          </body>
+          </html>
+          EOF
+
+      - name: Summarize compat run
+        if: always()
+        env:
+          PAGE_URL: https://ewhauser.github.io/jbgo/compat/latest/
+          COMPAT_EXIT_CODE: ${{ steps.run-compat.outputs.exit_code }}
+        run: |
+          {
+            echo "## Compatibility"
+            echo
+            echo "Harness exit code: \`$COMPAT_EXIT_CODE\`"
+            echo
+            echo "Latest report: $PAGE_URL"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload raw compat artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compat-results-${{ github.run_id }}
+          path: ${{ runner.temp }}/compat-pages/compat/latest
+          retention-days: 30
+
+      - name: Upload Pages artifact
+        if: always()
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/compat-pages
+
+  publish:
+    if: always()
+    needs: compat
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

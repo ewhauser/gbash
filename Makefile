@@ -11,6 +11,7 @@ BENCH_FULL_TIME ?= 200ms
 BENCH_SMOKE_REGEX ?= Benchmark(NewSession|RuntimeRunSimpleScript|SessionExecWarmSimpleScript|WorkflowCodebaseExploration|CommandRGRecursive|CommandJQTransform)$$
 GNU_CACHE_DIR ?= .cache/gnu
 GNU_JBGO_BIN ?= $(GNU_CACHE_DIR)/bin/jbgo
+GNU_RESULTS_DIR ?=
 
 lint:
 	@which golangci-lint > /dev/null || go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
@@ -75,7 +76,7 @@ gnu-test-setup:
 gnu-test:
 	mkdir -p $(GNU_CACHE_DIR)/bin
 	go build -o $(GNU_JBGO_BIN) ./cmd/jbgo
-	GNU_UTILS='$(GNU_UTILS)' GNU_TESTS='$(GNU_TESTS)' GNU_KEEP_WORKDIR='$(GNU_KEEP_WORKDIR)' go run ./cmd/jbgo-gnu --cache-dir $(GNU_CACHE_DIR) --jbgo-bin $(GNU_JBGO_BIN)
+	GNU_UTILS='$(GNU_UTILS)' GNU_TESTS='$(GNU_TESTS)' GNU_KEEP_WORKDIR='$(GNU_KEEP_WORKDIR)' GNU_RESULTS_DIR='$(GNU_RESULTS_DIR)' go run ./cmd/jbgo-gnu --cache-dir $(GNU_CACHE_DIR) --jbgo-bin $(GNU_JBGO_BIN) $(if $(GNU_RESULTS_DIR),--results-dir $(GNU_RESULTS_DIR),)
 
 release-check:
 	go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) check

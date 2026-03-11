@@ -929,10 +929,13 @@ The compatibility harness should stay curated. It is not a Bash conformance suit
 
 - provide an optional developer command that runs selected GNU coreutils tests against the current `jbgo` binary
 - keep it outside `go test ./...`, `make test`, and the default CI path
+- allow a dedicated scheduled/manual reporting workflow for the harness, separate from the default push and pull-request CI jobs
 - pin one GNU coreutils release in a committed manifest and fetch that release into a local cache on demand
 - run GNU tests utility-by-utility against symlinked `jbgo` utility names, with unsupported GNU utility names replaced by explicit `127` stubs instead of host fallback
 - keep the harness strict about GNU utility names while still allowing the non-coreutils host tooling that the GNU test framework itself needs
 - skip root-only, controlling-TTY, SELinux, and help/version-only cases in the first cut rather than patching expected utility output
+- write a machine-readable `summary.json` with overall rollups, per-utility rollups, and per-test status data so external dashboards can build command-by-test views
+- support an explicit results directory so CI and local tooling can publish a stable `summary.json`, with a separate report-rendering script generating `index.html` and `badge.svg` from that summary
 
 ## 18. Future Roadmap
 

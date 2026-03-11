@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ewhauser/jbgo/internal/compatshims"
 )
@@ -50,26 +52,72 @@ type options struct {
 	jbgoBin     string
 	utils       string
 	tests       string
+	resultsDir  string
 	setupOnly   bool
 	keepWorkdir bool
 }
 
+type testResult struct {
+	Name       string   `json:"name"`
+	Status     string   `json:"status"`
+	ReportedAs []string `json:"reported_as,omitempty"`
+}
+
+type testSummary struct {
+	SelectedTotal      int     `json:"selected_total"`
+	FilteredSkipTotal  int     `json:"filtered_skip_total,omitempty"`
+	ReportedExtraTotal int     `json:"reported_extra_total,omitempty"`
+	Pass               int     `json:"pass"`
+	Fail               int     `json:"fail"`
+	Skip               int     `json:"skip"`
+	XFail              int     `json:"xfail"`
+	XPass              int     `json:"xpass"`
+	Error              int     `json:"error"`
+	Unreported         int     `json:"unreported"`
+	RunnableTotal      int     `json:"runnable_total"`
+	PassPctSelected    float64 `json:"pass_pct_selected"`
+	PassPctRunnable    float64 `json:"pass_pct_runnable"`
+}
+
 type utilityResult struct {
-	Name     string   `json:"name"`
-	Tests    []string `json:"tests"`
-	Skipped  []string `json:"skipped,omitempty"`
-	ExitCode int      `json:"exit_code"`
-	Passed   bool     `json:"passed"`
-	LogPath  string   `json:"log_path,omitempty"`
-	Reason   string   `json:"reason,omitempty"`
+	Name         string       `json:"name"`
+	Tests        []string     `json:"tests"`
+	Skipped      []string     `json:"skipped,omitempty"`
+	TestResults  []testResult `json:"test_results,omitempty"`
+	ExtraResults []testResult `json:"extra_results,omitempty"`
+	Summary      testSummary  `json:"summary"`
+	ExitCode     int          `json:"exit_code"`
+	Passed       bool         `json:"passed"`
+	LogFile      string       `json:"log_file,omitempty"`
+	LogPath      string       `json:"log_path,omitempty"`
+	Reason       string       `json:"reason,omitempty"`
+}
+
+type utilityTotals struct {
+	Total           int     `json:"total"`
+	Passed          int     `json:"passed"`
+	Failed          int     `json:"failed"`
+	NoRunnableTests int     `json:"no_runnable_tests"`
+	PassPctTotal    float64 `json:"pass_pct_total"`
+	PassPctRunnable float64 `json:"pass_pct_runnable"`
 }
 
 type runSummary struct {
-	GNUVersion string          `json:"gnu_version"`
-	WorkDir    string          `json:"work_dir"`
-	ResultsDir string          `json:"results_dir"`
-	Utilities  []utilityResult `json:"utilities"`
+	GNUVersion     string          `json:"gnu_version"`
+	GeneratedAt    string          `json:"generated_at"`
+	WorkDir        string          `json:"work_dir"`
+	ResultsDir     string          `json:"results_dir"`
+	Overall        testSummary     `json:"overall"`
+	UtilitySummary utilityTotals   `json:"utility_summary"`
+	Utilities      []utilityResult `json:"utilities"`
 }
+
+type makeCheckResult struct {
+	ExitCode int
+	Output   []byte
+}
+
+const sourceCacheVersion = "2"
 
 func main() {
 	ctx := context.Background()
@@ -81,7 +129,7 @@ func main() {
 	if err != nil {
 		fatalf("load manifest: %v", err)
 	}
-	if err := run(ctx, manifest, opts); err != nil {
+	if err := run(ctx, manifest, &opts); err != nil {
 		fatalf("%v", err)
 	}
 }
@@ -93,6 +141,7 @@ func parseOptions() (options, error) {
 	fs.StringVar(&opts.jbgoBin, "jbgo-bin", "", "path to the jbgo binary under test")
 	fs.StringVar(&opts.utils, "utils", strings.TrimSpace(os.Getenv("GNU_UTILS")), "comma or space separated utility list")
 	fs.StringVar(&opts.tests, "tests", strings.TrimSpace(os.Getenv("GNU_TESTS")), "comma or newline separated explicit GNU test files")
+	fs.StringVar(&opts.resultsDir, "results-dir", strings.TrimSpace(os.Getenv("GNU_RESULTS_DIR")), "directory to write summary.json, logs, and published report assets")
 	fs.BoolVar(&opts.setupOnly, "setup", false, "download and extract the pinned GNU source tree, then exit")
 	fs.BoolVar(&opts.keepWorkdir, "keep-workdir", os.Getenv("GNU_KEEP_WORKDIR") == "1", "preserve the per-run workdir")
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -119,7 +168,7 @@ func loadManifest() (*manifest, error) {
 	return &out, nil
 }
 
-func run(ctx context.Context, mf *manifest, opts options) error {
+func run(ctx context.Context, mf *manifest, opts *options) error {
 	makeBin, err := findMake()
 	if err != nil {
 		return err
@@ -160,7 +209,7 @@ func run(ctx context.Context, mf *manifest, opts options) error {
 		defer func() { _ = os.RemoveAll(workDir) }()
 	}
 
-	resultsDir, err := prepareResultsDir(cacheDir)
+	resultsDir, err := prepareResultsDir(cacheDir, opts.resultsDir)
 	if err != nil {
 		return fmt.Errorf("create results dir: %w", err)
 	}
@@ -208,26 +257,36 @@ func run(ctx context.Context, mf *manifest, opts options) error {
 			Name:    utility.Name,
 			Tests:   tests,
 			Skipped: skipped,
+			Summary: summarizeTestResults(nil, len(skipped), 0),
 		}
 		if len(tests) == 0 {
 			result.Reason = "no runnable GNU tests matched after applying skip filters"
 			summary.Utilities = append(summary.Utilities, result)
 			continue
 		}
-		logPath := filepath.Join(resultsDir, utility.Name+".log")
-		exitCode, err := runMakeCheck(ctx, makeBin, workDir, tests, logPath)
+
+		logFile := utility.Name + ".log"
+		logPath := filepath.Join(resultsDir, logFile)
+		makeCheckResult, err := runMakeCheck(ctx, makeBin, workDir, tests, logPath)
 		if err != nil {
 			return err
 		}
+		result.TestResults, result.ExtraResults = parseReportedTestResults(makeCheckResult.Output, tests)
+		result.Summary = summarizeTestResults(result.TestResults, len(skipped), len(result.ExtraResults))
+		result.LogFile = logFile
 		result.LogPath = logPath
-		result.ExitCode = exitCode
-		result.Passed = exitCode == 0
-		if exitCode != 0 {
+		result.ExitCode = makeCheckResult.ExitCode
+		result.Passed = makeCheckResult.ExitCode == 0
+		if makeCheckResult.ExitCode != 0 {
 			hadFailure = true
 		}
 		summary.Utilities = append(summary.Utilities, result)
-		fmt.Printf("%s: %d tests, exit=%d\n", utility.Name, len(tests), exitCode)
+		fmt.Printf("%s: %d tests, exit=%d, pass=%s\n", utility.Name, len(tests), makeCheckResult.ExitCode, formatPercent(result.Summary.PassPctSelected))
 	}
+
+	summary.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+	summary.Overall = summarizeOverall(summary.Utilities)
+	summary.UtilitySummary = summarizeUtilityTotals(summary.Utilities)
 
 	summaryPath := filepath.Join(resultsDir, "summary.json")
 	if err := writeJSON(summaryPath, summary); err != nil {
@@ -293,9 +352,21 @@ func ensureSourceCache(ctx context.Context, mf *manifest, cacheDir string) (stri
 
 	sourceDir := filepath.Join(sourceRoot, "coreutils-"+mf.GNUVersion)
 	if _, err := os.Stat(sourceDir); err == nil {
-		return sourceDir, nil
+		cacheCurrent, err := sourceCacheCurrent(sourceDir)
+		if err != nil {
+			return "", err
+		}
+		if cacheCurrent {
+			return sourceDir, nil
+		}
+		if err := os.RemoveAll(sourceDir); err != nil {
+			return "", err
+		}
 	}
 	if err := extractTarGz(tarballPath, sourceRoot); err != nil {
+		return "", err
+	}
+	if err := writeSourceCacheVersion(sourceDir); err != nil {
 		return "", err
 	}
 	return sourceDir, nil
@@ -584,7 +655,7 @@ func shouldSkipTest(rel, path string, globalSkips []skipPattern, utilitySkips []
 	}
 }
 
-func runMakeCheck(ctx context.Context, makeBin, workDir string, tests []string, logPath string) (int, error) {
+func runMakeCheck(ctx context.Context, makeBin, workDir string, tests []string, logPath string) (makeCheckResult, error) {
 	args := []string{
 		"check",
 		"SUBDIRS=.",
@@ -598,16 +669,211 @@ func runMakeCheck(ctx context.Context, makeBin, workDir string, tests []string, 
 	cmd.Dir = workDir
 	output, err := cmd.CombinedOutput()
 	if writeErr := os.WriteFile(logPath, output, 0o644); writeErr != nil {
-		return 0, writeErr
+		return makeCheckResult{}, writeErr
 	}
 	if err == nil {
-		return 0, nil
+		return makeCheckResult{Output: output}, nil
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode(), nil
+		return makeCheckResult{ExitCode: exitErr.ExitCode(), Output: output}, nil
 	}
-	return 0, err
+	return makeCheckResult{}, err
+}
+
+func parseReportedTestResults(logData []byte, selectedTests []string) (selectedResultsOut, extraResultsOut []testResult) {
+	aliases := buildTestAliases(selectedTests)
+	selectedResults := make(map[string]*testResult, len(selectedTests))
+	extraResults := make(map[string]*testResult)
+
+	for _, rawLine := range strings.Split(string(logData), "\n") {
+		status, reportedName, ok := parseReportedTestStatusLine(rawLine)
+		if !ok {
+			continue
+		}
+		reportedName = filepath.ToSlash(reportedName)
+		canonicalName := reportedName
+		target := extraResults
+		if mappedName, ok := aliases[reportedName]; ok {
+			canonicalName = mappedName
+			target = selectedResults
+		}
+		recordReportedTestStatus(target, canonicalName, reportedName, status)
+	}
+
+	results := make([]testResult, 0, len(selectedTests))
+	for _, selectedTest := range selectedTests {
+		canonicalName := filepath.ToSlash(selectedTest)
+		if result, ok := selectedResults[canonicalName]; ok {
+			results = append(results, *result)
+			continue
+		}
+		results = append(results, testResult{
+			Name:   canonicalName,
+			Status: "unreported",
+		})
+	}
+
+	extraKeys := make([]string, 0, len(extraResults))
+	for name := range extraResults {
+		extraKeys = append(extraKeys, name)
+	}
+	sort.Strings(extraKeys)
+
+	extras := make([]testResult, 0, len(extraKeys))
+	for _, name := range extraKeys {
+		extras = append(extras, *extraResults[name])
+	}
+	return results, extras
+}
+
+func buildTestAliases(selectedTests []string) map[string]string {
+	candidates := make(map[string][]string, len(selectedTests)*2)
+	for _, selectedTest := range selectedTests {
+		canonicalName := filepath.ToSlash(selectedTest)
+		candidates[canonicalName] = append(candidates[canonicalName], canonicalName)
+		switch ext := filepath.Ext(canonicalName); ext {
+		case ".pl", ".sh", ".xpl":
+			alias := strings.TrimSuffix(canonicalName, ext)
+			candidates[alias] = append(candidates[alias], canonicalName)
+		}
+	}
+
+	aliases := make(map[string]string, len(candidates))
+	for alias, names := range candidates {
+		if len(names) == 1 {
+			aliases[alias] = names[0]
+		}
+	}
+	return aliases
+}
+
+func parseReportedTestStatusLine(line string) (status, name string, ok bool) {
+	line = strings.TrimSpace(line)
+	for prefix, statusName := range map[string]string{
+		"PASS:":  "pass",
+		"FAIL:":  "fail",
+		"SKIP:":  "skip",
+		"XFAIL:": "xfail",
+		"XPASS:": "xpass",
+		"ERROR:": "error",
+	} {
+		if strings.HasPrefix(line, prefix) {
+			testName := strings.TrimSpace(line[len(prefix):])
+			if testName == "" {
+				return "", "", false
+			}
+			return statusName, testName, true
+		}
+	}
+	return "", "", false
+}
+
+func recordReportedTestStatus(results map[string]*testResult, canonicalName, reportedName, status string) {
+	existing := results[canonicalName]
+	if existing == nil {
+		results[canonicalName] = &testResult{
+			Name:       canonicalName,
+			Status:     status,
+			ReportedAs: []string{reportedName},
+		}
+		return
+	}
+	if testStatusPrecedence(status) > testStatusPrecedence(existing.Status) {
+		existing.Status = status
+	}
+	if !containsString(existing.ReportedAs, reportedName) {
+		existing.ReportedAs = append(existing.ReportedAs, reportedName)
+	}
+}
+
+func testStatusPrecedence(status string) int {
+	switch status {
+	case "error":
+		return 6
+	case "xpass":
+		return 5
+	case "fail":
+		return 4
+	case "xfail":
+		return 3
+	case "skip":
+		return 2
+	case "pass":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func summarizeTestResults(results []testResult, filteredSkipTotal, reportedExtraTotal int) testSummary {
+	summary := testSummary{
+		SelectedTotal:      len(results),
+		FilteredSkipTotal:  filteredSkipTotal,
+		ReportedExtraTotal: reportedExtraTotal,
+	}
+	for _, result := range results {
+		switch result.Status {
+		case "pass":
+			summary.Pass++
+		case "fail":
+			summary.Fail++
+		case "skip":
+			summary.Skip++
+		case "xfail":
+			summary.XFail++
+		case "xpass":
+			summary.XPass++
+		case "error":
+			summary.Error++
+		default:
+			summary.Unreported++
+		}
+	}
+	summary.RunnableTotal = summary.Pass + summary.Fail + summary.XFail + summary.XPass + summary.Error
+	summary.PassPctSelected = percentage(summary.Pass, summary.SelectedTotal)
+	summary.PassPctRunnable = percentage(summary.Pass, summary.RunnableTotal)
+	return summary
+}
+
+func summarizeOverall(results []utilityResult) testSummary {
+	overall := testSummary{}
+	for i := range results {
+		utility := &results[i]
+		overall.SelectedTotal += utility.Summary.SelectedTotal
+		overall.FilteredSkipTotal += utility.Summary.FilteredSkipTotal
+		overall.ReportedExtraTotal += utility.Summary.ReportedExtraTotal
+		overall.Pass += utility.Summary.Pass
+		overall.Fail += utility.Summary.Fail
+		overall.Skip += utility.Summary.Skip
+		overall.XFail += utility.Summary.XFail
+		overall.XPass += utility.Summary.XPass
+		overall.Error += utility.Summary.Error
+		overall.Unreported += utility.Summary.Unreported
+		overall.RunnableTotal += utility.Summary.RunnableTotal
+	}
+	overall.PassPctSelected = percentage(overall.Pass, overall.SelectedTotal)
+	overall.PassPctRunnable = percentage(overall.Pass, overall.RunnableTotal)
+	return overall
+}
+
+func summarizeUtilityTotals(results []utilityResult) utilityTotals {
+	totals := utilityTotals{Total: len(results)}
+	for i := range results {
+		result := &results[i]
+		if result.Summary.SelectedTotal == 0 {
+			totals.NoRunnableTests++
+			continue
+		}
+		if result.Passed {
+			totals.Passed++
+			continue
+		}
+		totals.Failed++
+	}
+	totals.PassPctTotal = percentage(totals.Passed, totals.Total)
+	totals.PassPctRunnable = percentage(totals.Passed, totals.Passed+totals.Failed)
+	return totals
 }
 
 func writeJSON(path string, value any) error {
@@ -618,12 +884,72 @@ func writeJSON(path string, value any) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-func prepareResultsDir(cacheDir string) (string, error) {
-	root := filepath.Join(cacheDir, "results")
-	if err := os.MkdirAll(root, 0o755); err != nil {
+func formatPercent(value float64) string {
+	if value == 0 {
+		return "0%"
+	}
+	if value == math.Trunc(value) {
+		return fmt.Sprintf("%.0f%%", value)
+	}
+	formatted := fmt.Sprintf("%.2f", value)
+	formatted = strings.TrimRight(strings.TrimRight(formatted, "0"), ".")
+	return formatted + "%"
+}
+
+func percentage(numerator, denominator int) float64 {
+	if denominator == 0 {
+		return 0
+	}
+	return math.Round((float64(numerator)/float64(denominator))*10000) / 100
+}
+
+func containsString(items []string, needle string) bool {
+	for _, item := range items {
+		if item == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func prepareResultsDir(cacheDir, explicitDir string) (string, error) {
+	if strings.TrimSpace(explicitDir) == "" {
+		root := filepath.Join(cacheDir, "results")
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			return "", err
+		}
+		return os.MkdirTemp(root, "run-")
+	}
+
+	resultsDir, err := filepath.Abs(explicitDir)
+	if err != nil {
 		return "", err
 	}
-	return os.MkdirTemp(root, "run-")
+	if filepath.Clean(resultsDir) == string(os.PathSeparator) {
+		return "", fmt.Errorf("refusing to use filesystem root as results dir")
+	}
+	info, err := os.Stat(resultsDir)
+	switch {
+	case err == nil && !info.IsDir():
+		return "", fmt.Errorf("results dir %s exists and is not a directory", resultsDir)
+	case err == nil:
+		entries, err := os.ReadDir(resultsDir)
+		if err != nil {
+			return "", err
+		}
+		for _, entry := range entries {
+			if err := os.RemoveAll(filepath.Join(resultsDir, entry.Name())); err != nil {
+				return "", err
+			}
+		}
+	case errorsIsNotExist(err):
+		if err := os.MkdirAll(resultsDir, 0o755); err != nil {
+			return "", err
+		}
+	default:
+		return "", err
+	}
+	return resultsDir, nil
 }
 
 func downloadFile(ctx context.Context, url, destination string) error {
@@ -683,20 +1009,35 @@ func extractTarGz(archivePath, destination string) error {
 	}
 	defer func() { _ = gzr.Close() }()
 	tr := tar.NewReader(gzr)
+	type dirModTime struct {
+		path    string
+		modTime time.Time
+	}
+	var dirs []dirModTime
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
+			for i := len(dirs) - 1; i >= 0; i-- {
+				if err := os.Chtimes(dirs[i].path, dirs[i].modTime, dirs[i].modTime); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 		if err != nil {
 			return err
 		}
 		target := filepath.Join(destination, header.Name)
+		modTime := header.ModTime
+		if modTime.IsZero() {
+			modTime = time.Unix(0, 0)
+		}
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, header.FileInfo().Mode()); err != nil {
 				return err
 			}
+			dirs = append(dirs, dirModTime{path: target, modTime: modTime})
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
@@ -712,6 +1053,9 @@ func extractTarGz(archivePath, destination string) error {
 			if err := file.Close(); err != nil {
 				return err
 			}
+			if err := os.Chtimes(target, modTime, modTime); err != nil {
+				return err
+			}
 		case tar.TypeSymlink:
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
@@ -721,6 +1065,21 @@ func extractTarGz(archivePath, destination string) error {
 			}
 		}
 	}
+}
+
+func sourceCacheCurrent(sourceDir string) (bool, error) {
+	data, err := os.ReadFile(filepath.Join(sourceDir, ".jbgo-cache-version"))
+	if errorsIsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(data)) == sourceCacheVersion, nil
+}
+
+func writeSourceCacheVersion(sourceDir string) error {
+	return os.WriteFile(filepath.Join(sourceDir, ".jbgo-cache-version"), []byte(sourceCacheVersion+"\n"), 0o644)
 }
 
 func ensureExecutable(path string) error {
