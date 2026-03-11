@@ -58,7 +58,7 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("execute bash tool: %w", err)
 	}
 
-	second, err := client.Responses.New(ctx, followupResponseParams(first.ID, toolCall.CallID, toolOutput))
+	second, err := client.Responses.New(ctx, followupResponseParams(first, toolCall, toolOutput))
 	if err != nil {
 		return fmt.Errorf("create follow-up response: %w", err)
 	}
@@ -106,15 +106,12 @@ func initialResponseParams() responses.ResponseNewParams {
 	}
 }
 
-func followupResponseParams(previousResponseID, callID, output string) responses.ResponseNewParams {
+func followupResponseParams(first *responses.Response, toolCall responses.ResponseFunctionToolCall, output string) responses.ResponseNewParams {
 	return responses.ResponseNewParams{
 		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: responses.ResponseInputParam{
-				responses.ResponseInputItemParamOfFunctionCallOutput(callID, output),
-			},
+			OfInputItemList: buildFollowupInput(first, toolCall, output),
 		},
-		Model:              openai.ResponsesModel(exampleModel),
-		PreviousResponseID: openai.String(previousResponseID),
+		Model: openai.ResponsesModel(exampleModel),
 	}
 }
 
@@ -129,6 +126,31 @@ func firstFunctionCall(response *responses.Response) (responses.ResponseFunction
 		return item.AsFunctionCall(), nil
 	}
 	return responses.ResponseFunctionToolCall{}, fmt.Errorf("response did not contain a %q tool call", bashToolName)
+}
+
+func buildFollowupInput(first *responses.Response, toolCall responses.ResponseFunctionToolCall, output string) responses.ResponseInputParam {
+	input := responses.ResponseInputParam{
+		responses.ResponseInputItemParamOfMessage(examplePrompt, responses.EasyInputMessageRoleUser),
+	}
+
+	if first != nil {
+		for _, item := range first.Output {
+			switch item.Type {
+			case "reasoning":
+				reasoning := item.AsReasoning()
+				reasoningParam := reasoning.ToParam()
+				input = append(input, responses.ResponseInputItemUnionParam{
+					OfReasoning: &reasoningParam,
+				})
+			case "function_call":
+				call := item.AsFunctionCall()
+				input = append(input, responses.ResponseInputItemParamOfFunctionCall(call.Arguments, call.CallID, call.Name))
+			}
+		}
+	}
+
+	input = append(input, responses.ResponseInputItemParamOfFunctionCallOutput(toolCall.CallID, output))
+	return input
 }
 
 func executeBashTool(ctx context.Context, arguments string) (string, error) {
