@@ -266,8 +266,8 @@ Commands that exist in both repos but have flags in upstream not yet ported.
 
 #### `file`
 
-- [ ] `--brief`
-- [ ] `--mime`
+- [x] `--brief`
+- [x] `--mime`
 
 #### `find`
 

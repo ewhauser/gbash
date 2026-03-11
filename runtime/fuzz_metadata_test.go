@@ -143,6 +143,7 @@ func mustFuzzCommandMetadata(tb testing.TB) []fuzzCommandMetadata {
 		fuzzSpec("file", "file",
 			fuzzVariant("", "path.read", "{path.text}"),
 			fuzzVariant("", "flag:b", "-b", "{path.text}"),
+			fuzzVariant("", "flag:long", "--brief", "{path.text}"),
 		),
 		fuzzSpec("find", "file",
 			fuzzVariant("", "path.dir", "{path.dir}"),

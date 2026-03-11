@@ -583,7 +583,7 @@ For file/path commands, the runtime now supports a practical agent-oriented subs
 - `basename` and `dirname` support multi-operand path trimming, trailing-suffix removal, and Unix-style slash normalization
 - `tree` supports `-a`, `-d`, `-L`, and `-f`
 - `du` supports `-a`, `-s`, `-h`, `-c`, and `--max-depth`
-- `file` supports `-b`, `-i`, basic magic-byte detection, shebang detection, and extension-based text detection
+- `file` supports `-b/--brief`, `-i/--mime`, basic magic-byte detection, shebang detection, and extension-based text detection
 
 For `sed`, the runtime should continue to expose an explicitly documented subset rather than imply GNU `sed` parity. The supported subset is:
 

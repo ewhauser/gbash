@@ -28,9 +28,9 @@ func (c *FileCmd) Run(ctx context.Context, inv *Invocation) error {
 
 	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
 		switch args[0] {
-		case "-b":
+		case "-b", "--brief":
 			brief = true
-		case "-i":
+		case "-i", "--mime":
 			mimeOnly = true
 		case "-bi", "-ib":
 			brief = true
