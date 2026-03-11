@@ -23,3 +23,6 @@ dist/
 .idea/
 .vscode/
 .claude
+
+# Go fuzz generated artifacts
+runtime/testdata/fuzz/Fuzz*/

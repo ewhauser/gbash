@@ -181,10 +181,11 @@ func FuzzDataCommands(f *testing.F) {
 		}
 
 		writeSessionFile(t, session, "/tmp/input.json", validBytes)
+		writeSessionFile(t, session, "/tmp/input.yaml", []byte(fmt.Sprintf("value: %s\nitems:\n  - %s\n  - %s\n", value, value, strings.ToUpper(value))))
 		writeSessionFile(t, session, "/tmp/raw.json", clampFuzzData(rawJSON))
 
 		script := []byte(fmt.Sprintf(
-			"jq -r '.value' /tmp/input.json >/tmp/jq-value.txt\njq -c '.items' /tmp/input.json >/tmp/jq-items.txt\njq -n --arg value %s '{value:$value}' >/tmp/jq-build.txt\njq '.value' /tmp/raw.json >/tmp/jq-raw.txt || true\nbase64 /tmp/input.json | base64 -d >/tmp/base64-json.txt || true\n",
+			"jq -r '.value' /tmp/input.json >/tmp/jq-value.txt\njq -c '.items' /tmp/input.json >/tmp/jq-items.txt\njq -n --arg value %s '{value:$value}' >/tmp/jq-build.txt\njq '.value' /tmp/raw.json >/tmp/jq-raw.txt || true\nyq '.value' /tmp/input.yaml >/tmp/yq-value.txt\nyq -p json -o json '.items' /tmp/input.json >/tmp/yq-items.txt\nyq -n '.value = \"built\"' >/tmp/yq-build.txt\nbase64 /tmp/input.json | base64 -d >/tmp/base64-json.txt || true\n",
 			shellQuote(value),
 		))
 
