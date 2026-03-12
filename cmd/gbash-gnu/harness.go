@@ -159,7 +159,7 @@ func writeLines(path string, lines []string) error {
 }
 
 func patchTestsEnvironment(makefilePath string) error {
-	return applyFilePatch(filePatch{
+	return applyFilePatch(&filePatch{
 		path:                makefilePath,
 		needle:              "TESTS_ENVIRONMENT = \\\n",
 		replacement:         testsEnvironmentPatch,
@@ -170,7 +170,7 @@ func patchTestsEnvironment(makefilePath string) error {
 }
 
 func patchTestInitSetupPath(initPath string) error {
-	return applyFilePatch(filePatch{
+	return applyFilePatch(&filePatch{
 		path:               initPath,
 		needle:             "setup_ \"$@\"\n# This trap is here, rather than in the setup_ function, because some\n# shells run the exit trap at shell function exit, rather than script exit.\ntrap remove_tmp_ EXIT\n",
 		replacement:        testsInitSetupPatch,
@@ -188,7 +188,7 @@ type filePatch struct {
 	missingMarkerError  string
 }
 
-func applyFilePatch(patch filePatch) error {
+func applyFilePatch(patch *filePatch) error {
 	data, err := os.ReadFile(patch.path)
 	if err != nil {
 		return err
