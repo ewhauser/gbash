@@ -408,7 +408,7 @@ Implementation detail for MVP:
 
 - `interp.Dir(...)` is set to a host-safe existing directory such as `/`, not the virtual sandbox cwd
 - the runtime prepends a shell shim that initializes `PWD` and `OLDPWD`
-- the shim shadows `cd` and `pwd` so shell-visible cwd behavior stays virtual
+- the shim owns virtual `cd` and wraps shell-visible `pwd` to the Go `pwd` command so `-L` / `-P` still honor virtual `PWD`
 - all project path handlers resolve relative paths from virtual `PWD`, not from `HandlerContext.Dir`
 
 ### 9.3 Stdio
@@ -542,7 +542,7 @@ Rules:
 - command resolution should work by bare name and by virtual path such as `/bin/ls`
 - command implementations may compose other shell commands only through the session's own execution callback
 
-For MVP, `cd` and `pwd` are provided via a runtime-owned shell shim so they operate on the virtual cwd instead of `mvdan/sh`'s host-backed directory state.
+For MVP, `cd` is provided via a runtime-owned shell shim and shell-visible `pwd` is wrapped to the registry-owned Go command so cwd behavior stays virtual instead of using `mvdan/sh`'s host-backed directory state.
 
 Initial MVP command set:
 
@@ -668,7 +668,7 @@ For the text/search batch, the runtime should expose useful, explicitly document
 - `diff` supports unified output plus `-q/--brief`, `-s/--report-identical-files`, and `-i/--ignore-case`, and accepts `-u/--unified` as an explicit alias for the default unified format
 - `expr` supports the arithmetic, comparison, logical, and regex-match forms needed by shell-oriented helper scripts, including `:`, `|`, `&`, parentheses, and integer math
 - `seq` supports one-, two-, and three-argument numeric ranges plus `-s/--separator`, `-t/--terminator`, `-w/--equal-width`, and `-f/--format`, including decimal, hexadecimal-float, and infinite bounds within the sandbox runtime
-- `od` supports byte-dump and word-dump inspection for sandbox files and stdin, including `-A/--address-radix`, `-j/--skip-bytes`, `-N/--read-bytes`, `-t/--format` for common character and integer types, `-v/--output-duplicates`, `-w/--width`, and `--endian` for multi-byte integer output
+- `od` follows the uutils/GNU-compatible option surface used by the focused compatibility tests: address radix selection via `-A/--address-radix`, skip/read limits via `-j/--skip-bytes` and `-N/--read-bytes`, strings mode via `-S/--strings`, traditional format shorthands plus `-t/--format`, duplicate suppression via `-v/--output-duplicates`, width control via `-w/--width`, inferred long options such as `--end=big`, and traditional offset operands for sandbox files and stdin
 - `base32` supports encode/decode, `-d/--decode`, `-i/--ignore-garbage`, and `-w/--wrap` for GNU-style helper flows and basenc-adjacent compatibility tests
 - `base64` supports encode/decode, `-w/--wrap` line wrapping control, and whitespace-tolerant decoding
 
@@ -823,7 +823,7 @@ MVP includes:
 - persistent sessions with per-session filesystem state
 - in-memory sandbox filesystem
 - Unix-like default layout (`/home/agent`, `/tmp`, `/bin`, `/usr/bin`, `PATH`)
-- virtual `PWD` with runtime-provided `cd` and `pwd` shims
+- virtual `PWD` with a runtime-provided `cd` shim and a shell-visible `pwd` wrapper
 - explicit Go command registry
 - at least six core commands
 - command resolution by name and virtual path

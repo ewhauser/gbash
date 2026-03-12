@@ -126,6 +126,7 @@ func (r *Runner) exec(ctx context.Context, req *commands.ExecutionRequest, liveS
 
 	workDir := resolveWorkDir(r.cfg.DefaultDir, req.WorkDir)
 	execEnv := executionEnv(r.cfg.BaseEnv, req)
+	visiblePWD, hasVisiblePWD := execEnv["PWD"]
 	execEnv["PWD"] = workDir
 
 	if err := r.cfg.FS.Chdir(workDir); err != nil {
@@ -151,6 +152,8 @@ func (r *Runner) exec(ctx context.Context, req *commands.ExecutionRequest, liveS
 		Args:              req.Args,
 		Env:               execEnv,
 		Dir:               workDir,
+		VisiblePWD:        visiblePWD,
+		HasVisiblePWD:     hasVisiblePWD,
 		BuiltinCommandDir: r.cfg.BuiltinCommandDir,
 		Stdin:             stdinOrEmpty(req.Stdin),
 		Stdout:            stdoutWriter,

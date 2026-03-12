@@ -93,6 +93,8 @@ func parseCPArgs(inv *Invocation) (cpOptions, []string, error) {
 			return opts, args[1:], nil
 		}
 		switch arg {
+		case "-f", "--force":
+			// Overwrite is already the default sandbox behavior; accept force for GNU compatibility.
 		case "-r", "-R", "--recursive":
 			opts.recursive = true
 		case "-n", "--no-clobber":
@@ -105,6 +107,8 @@ func parseCPArgs(inv *Invocation) (cpOptions, []string, error) {
 			if len(arg) > 2 && arg[0] == '-' && arg[1] != '-' {
 				for _, flag := range arg[1:] {
 					switch flag {
+					case 'f':
+						// Overwrite is already the default sandbox behavior; accept force for GNU compatibility.
 					case 'r', 'R':
 						opts.recursive = true
 					case 'n':

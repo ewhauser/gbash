@@ -28,6 +28,7 @@
     { "name": "mkdir", "patterns": ["tests/mkdir/*"] },
     { "name": "mv", "patterns": ["tests/mv/*"] },
     { "name": "nl", "patterns": ["tests/nl/*", "tests/misc/nl*"] },
+    { "name": "od", "patterns": ["tests/od/*"] },
     { "name": "paste", "patterns": ["tests/paste/*", "tests/misc/paste*"] },
     { "name": "printenv", "patterns": ["tests/printenv/*"] },
     { "name": "printf", "patterns": ["tests/printf/*", "tests/misc/printf*"] },

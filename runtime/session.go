@@ -33,6 +33,7 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 
 	workDir := resolveWorkDir(s.cfg.FileSystem.WorkingDir, req.WorkDir)
 	execEnv := executionEnv(s.cfg.BaseEnv, req)
+	visiblePWD, hasVisiblePWD := execEnv["PWD"]
 	execEnv["PWD"] = workDir
 	if !s.bootAt.IsZero() {
 		execEnv["GBASH_SESSION_BOOT_AT"] = s.bootAt.Format(time.RFC3339)
@@ -64,20 +65,22 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 
 	started := time.Now().UTC()
 	runResult, runErr := s.cfg.Engine.Run(ctx, &shell.Execution{
-		Name:     defaultName(req.Name),
-		Script:   req.Script,
-		Args:     req.Args,
-		Env:      execEnv,
-		Dir:      workDir,
-		Stdin:    stdinOrEmpty(req.Stdin),
-		Stdout:   stdoutWriter,
-		Stderr:   stderrWriter,
-		FS:       s.fs,
-		Network:  s.cfg.NetworkClient,
-		Registry: s.cfg.Registry,
-		Policy:   s.cfg.Policy,
-		Trace:    recorder,
-		Exec:     s.subexecCallback,
+		Name:          defaultName(req.Name),
+		Script:        req.Script,
+		Args:          req.Args,
+		Env:           execEnv,
+		Dir:           workDir,
+		VisiblePWD:    visiblePWD,
+		HasVisiblePWD: hasVisiblePWD,
+		Stdin:         stdinOrEmpty(req.Stdin),
+		Stdout:        stdoutWriter,
+		Stderr:        stderrWriter,
+		FS:            s.fs,
+		Network:       s.cfg.NetworkClient,
+		Registry:      s.cfg.Registry,
+		Policy:        s.cfg.Policy,
+		Trace:         recorder,
+		Exec:          s.subexecCallback,
 	})
 	finished := time.Now().UTC()
 

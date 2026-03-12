@@ -37,6 +37,8 @@ type Execution struct {
 	Args              []string
 	Env               map[string]string
 	Dir               string
+	VisiblePWD        string
+	HasVisiblePWD     bool
 	BuiltinCommandDir string
 	Stdin             io.Reader
 	Stdout            io.Writer
@@ -118,7 +120,7 @@ func (m *MVdan) Run(ctx context.Context, exec *Execution) (result *RunResult, ru
 	preludeLines := uint(0)
 	program := exec.Program
 	if program == nil {
-		parsed, err := m.Parse(exec.Name, withRuntimePrelude(exec.Dir, exec.Script))
+		parsed, err := m.Parse(exec.Name, withRuntimePrelude(exec.Dir, exec.VisiblePWD, exec.HasVisiblePWD, exec.Script))
 		if err != nil {
 			return nil, err
 		}
@@ -624,6 +626,9 @@ func shellFailureToWriter(_ context.Context, stderr io.Writer, code int, format 
 }
 
 func virtualDir(env expand.Environ, dir string) string {
+	if internalPWD := strings.TrimSpace(env.Get("__JB_PWD").String()); strings.HasPrefix(internalPWD, "/") {
+		return gbfs.Clean(internalPWD)
+	}
 	if pwd := strings.TrimSpace(env.Get("PWD").String()); strings.HasPrefix(pwd, "/") {
 		return gbfs.Clean(pwd)
 	}
@@ -660,37 +665,19 @@ func optionalHandlerCtx(ctx context.Context) (_ interp.HandlerContext, ok bool) 
 	return interp.HandlerCtx(ctx), true
 }
 
-func withRuntimePrelude(dir, script string) string {
+func withRuntimePrelude(dir, visiblePWD string, hasVisiblePWD bool, script string) string {
 	const preludeTemplate = `
-PWD='%s'
-OLDPWD=$PWD
+__JB_PWD='%s'
+OLDPWD=$__JB_PWD
+%s
 export PWD OLDPWD
 
 pwd() {
-	case "$#" in
-		0)
-			printf '%%s\n' "$PWD"
-			;;
-		1)
-			case "$1" in
-				-L|-P)
-					printf '%%s\n' "$PWD"
-					;;
-				*)
-					printf 'pwd: invalid option: %%s\n' "$1" >&2
-					return 2
-					;;
-			esac
-			;;
-		*)
-			printf 'pwd: too many arguments\n' >&2
-			return 1
-			;;
-	esac
+	command /bin/pwd "$@"
 }
 
 cd() {
-	old=$PWD
+	old=$__JB_PWD
 	show=
 	case "$#" in
 		0)
@@ -708,17 +695,22 @@ cd() {
 		target=$OLDPWD
 		show=1
 	fi
-	next="$(__jb_cd_resolve "$PWD" "$target")" || return $?
+	next="$(__jb_cd_resolve "$__JB_PWD" "$target")" || return $?
 	OLDPWD=$old
+	__JB_PWD=$next
 	PWD=$next
 	export PWD OLDPWD
 	if [ -n "$show" ]; then
 		printf '%%s\n' "$PWD"
 	fi
-}
+	}
 `
 
-	return fmt.Sprintf(preludeTemplate, shellSingleQuote(dir)) + "\n" + script
+	pwdAssignment := "PWD=$__JB_PWD"
+	if hasVisiblePWD {
+		pwdAssignment = "PWD=" + shellSingleQuote(visiblePWD)
+	}
+	return fmt.Sprintf(preludeTemplate, shellSingleQuote(dir), pwdAssignment) + "\n" + script
 }
 
 type commandTraceResolution struct {
@@ -895,7 +887,7 @@ func (b *executionBudget) beforeLoopIteration(ctx context.Context, args []string
 }
 
 func runtimePreludeLineCount() uint {
-	return uint(strings.Count(withRuntimePrelude("/", ""), "\n"))
+	return uint(strings.Count(withRuntimePrelude("/", "", false, ""), "\n"))
 }
 
 func isInternalHelperCommand(name string) bool {

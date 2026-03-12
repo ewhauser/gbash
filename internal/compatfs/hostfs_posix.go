@@ -4,10 +4,12 @@ package compatfs
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	gbfs "github.com/ewhauser/gbash/fs"
@@ -63,11 +65,20 @@ func (h *HostFS) Readlink(_ context.Context, name string) (string, error) {
 }
 
 func (h *HostFS) Realpath(_ context.Context, name string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(h.resolve(name))
+	resolved := h.resolve(name)
+	canonical, err := filepath.EvalSymlinks(resolved)
 	if err != nil {
+		h.mu.RLock()
+		current := filepath.Clean(h.cwd)
+		h.mu.RUnlock()
+		if errors.Is(err, syscall.ENAMETOOLONG) && filepath.Clean(resolved) == current {
+			// The process is already in this directory, so keep the recorded cwd
+			// instead of rechecking the full long path.
+			return filepath.ToSlash(current), nil
+		}
 		return "", err
 	}
-	return filepath.ToSlash(resolved), nil
+	return filepath.ToSlash(canonical), nil
 }
 
 func (h *HostFS) Symlink(_ context.Context, target, linkName string) error {
@@ -117,6 +128,12 @@ func (h *HostFS) Getwd() string {
 
 func (h *HostFS) Chdir(name string) error {
 	resolved := h.resolve(name)
+	h.mu.RLock()
+	current := filepath.Clean(h.cwd)
+	h.mu.RUnlock()
+	if current != "" && filepath.Clean(resolved) == current {
+		return nil
+	}
 	info, err := os.Stat(resolved)
 	if err != nil {
 		return err

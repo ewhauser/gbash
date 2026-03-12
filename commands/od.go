@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
+	stdfs "io/fs"
 	"math"
 	"math/big"
 	"strconv"
@@ -37,7 +39,7 @@ func (c *OD) Run(ctx context.Context, inv *Invocation) error {
 		return nil
 	}
 
-	data, err := readODInputs(ctx, inv, opts.inputNames)
+	data, err := readODInputs(ctx, inv, &opts)
 	if err != nil {
 		return err
 	}
@@ -116,7 +118,7 @@ func parseODOptions(inv *Invocation) (odOptions, error) {
 	operands := make([]string, 0, len(args))
 
 	for len(args) > 0 {
-		arg := args[0]
+		arg := odNormalizeLongArg(args[0])
 		if arg == "--" {
 			operands = append(operands, args[1:]...)
 			break
@@ -420,10 +422,10 @@ func applyODWidth(opts *odOptions, value string, inv *Invocation) error {
 	opts.widthSpecified = true
 	n, err := parseODByteCount(value)
 	if err != nil || n == 0 {
-		return exitf(inv, 1, "od: invalid -w argument %q", value)
+		return exitf(inv, 1, "od: invalid -w argument '%s'", value)
 	}
 	if n > uint64(^uint(0)>>1) {
-		return exitf(inv, 1, "od: invalid -w argument %q", value)
+		return exitf(inv, 1, "od: invalid -w argument '%s'", value)
 	}
 	opts.lineBytes = int(n)
 	return nil
@@ -455,7 +457,8 @@ func parseODInputs(operands []string, traditional, offsetParsingOff bool) (input
 		return parseODTraditionalInputs(operands)
 	}
 	if !offsetParsingOff && (len(operands) == 1 || len(operands) == 2) {
-		offset, err := parseODOffsetOperand(operands[len(operands)-1])
+		candidate := operands[len(operands)-1]
+		offset, err := parseODOffsetOperand(candidate)
 		if err == nil {
 			if len(operands) == 1 && strings.HasPrefix(operands[0], "+") {
 				return []string{"-"}, &offset, nil, nil
@@ -463,6 +466,8 @@ func parseODInputs(operands []string, traditional, offsetParsingOff bool) (input
 			if len(operands) == 2 {
 				return []string{operands[0]}, &offset, nil, nil
 			}
+		} else if errors.Is(err, errODOffsetRange) {
+			return nil, nil, nil, fmt.Errorf("%s: %s", candidate, odOffsetErrorText(err))
 		}
 	}
 	if len(operands) == 0 {
@@ -488,17 +493,17 @@ func parseODTraditionalInputs(operands []string) (inputs []string, offset, label
 		}
 		offset1, err := parseODOffsetOperand(operands[1])
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("%s: %v", operands[1], err)
+			return nil, nil, nil, fmt.Errorf("%s: %s", operands[1], odOffsetErrorText(err))
 		}
 		return []string{operands[0]}, &offset1, nil, nil
 	case 3:
 		offset, err := parseODOffsetOperand(operands[1])
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("%s: %v", operands[1], err)
+			return nil, nil, nil, fmt.Errorf("%s: %s", operands[1], odOffsetErrorText(err))
 		}
 		label, err := parseODOffsetOperand(operands[2])
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("%s: %v", operands[2], err)
+			return nil, nil, nil, fmt.Errorf("%s: %s", operands[2], odOffsetErrorText(err))
 		}
 		return []string{operands[0]}, &offset, &label, nil
 	default:
@@ -506,9 +511,14 @@ func parseODTraditionalInputs(operands []string) (inputs []string, offset, label
 	}
 }
 
+var (
+	errODOffsetParse = errors.New("parse failed")
+	errODOffsetRange = errors.New("result too large")
+)
+
 func parseODOffsetOperand(value string) (uint64, error) {
 	if value == "" || strings.Contains(value, " ") || strings.HasPrefix(value, "-") || strings.HasPrefix(value, "++") || strings.HasPrefix(value, "+-") {
-		return 0, fmt.Errorf("invalid suffix in offset")
+		return 0, errODOffsetParse
 	}
 	start := 0
 	end := len(value)
@@ -531,15 +541,19 @@ func parseODOffsetOperand(value string) (uint64, error) {
 		}
 	}
 	if start >= end {
-		return 0, fmt.Errorf("invalid suffix in offset")
+		return 0, errODOffsetParse
 	}
 	n, err := strconv.ParseUint(value[start:end], base, 64)
 	if err != nil {
-		return 0, fmt.Errorf("invalid suffix in offset")
+		var numErr *strconv.NumError
+		if errors.As(err, &numErr) && numErr.Err == strconv.ErrRange {
+			return 0, errODOffsetRange
+		}
+		return 0, errODOffsetParse
 	}
 	if multiplier != 1 {
 		if n > math.MaxUint64/multiplier {
-			return 0, fmt.Errorf("value too large")
+			return 0, errODOffsetRange
 		}
 		n *= multiplier
 	}
@@ -606,14 +620,53 @@ func parseODByteCount(value string) (uint64, error) {
 	return n * multiplier, nil
 }
 
-func readODInputs(ctx context.Context, inv *Invocation, names []string) ([]byte, error) {
-	inputs, err := readNamedInputs(ctx, inv, names, true)
-	if err != nil {
-		return nil, err
+func readODInputs(ctx context.Context, inv *Invocation, opts *odOptions) ([]byte, error) {
+	names := opts.inputNames
+	if len(names) == 0 {
+		names = []string{"-"}
 	}
+
+	limitBytes := uint64(0)
+	limited := false
+	if opts.readBytes != nil {
+		limited = true
+		limitBytes = opts.skipBytes
+		if math.MaxUint64-limitBytes < *opts.readBytes {
+			limitBytes = math.MaxUint64
+		} else {
+			limitBytes += *opts.readBytes
+		}
+	}
+
 	var data []byte
-	for _, input := range inputs {
-		data = append(data, input.Data...)
+	for _, name := range names {
+		if limited && uint64(len(data)) >= limitBytes {
+			break
+		}
+
+		var (
+			reader io.Reader
+			closer io.Closer
+		)
+		if name == "-" {
+			reader = inv.Stdin
+		} else {
+			file, _, err := openRead(ctx, inv, name)
+			if err != nil {
+				return nil, odInputError(inv, name, err)
+			}
+			reader = file
+			closer = file
+		}
+
+		chunk, err := odReadAll(reader, limited, limitBytes-uint64(len(data)))
+		if closer != nil {
+			_ = closer.Close()
+		}
+		if err != nil {
+			return nil, &ExitError{Code: 1, Err: err}
+		}
+		data = append(data, chunk...)
 	}
 	return data, nil
 }
@@ -1183,6 +1236,7 @@ func odSignedFormat(size int) odFormat {
 
 func parseODTypeString(spec string) ([]odFormat, error) {
 	var formats []odFormat
+	original := spec
 	for spec != "" {
 		ch := spec[0]
 		spec = spec[1:]
@@ -1199,6 +1253,9 @@ func parseODTypeString(spec string) ([]odFormat, error) {
 			size, spec, err = parseODTypeSize(spec, false, size)
 			if err != nil {
 				return nil, err
+			}
+			if size != 1 && size != 2 && size != 4 && size != 8 {
+				return nil, fmt.Errorf("invalid type size %d in %q", size, original)
 			}
 			switch ch {
 			case 'd':
@@ -1241,13 +1298,13 @@ func parseODTypeString(spec string) ([]odFormat, error) {
 					case 16:
 						floatKind = odFloat128
 					default:
-						return nil, fmt.Errorf("invalid type size %d in %q", size, spec)
+						return nil, fmt.Errorf("invalid type size %d in %q", size, original)
 					}
 				}
 			}
 			format = odFormat{kind: odFormatFloat, floatKind: floatKind, byteSize: size, printWidth: odFloatWidth(floatKind)}
 		default:
-			return nil, fmt.Errorf("invalid character %q in format %q", string(ch), spec)
+			return nil, fmt.Errorf("invalid character %q in format %q", string(ch), original)
 		}
 		if spec != "" && spec[0] == 'z' {
 			format.addASCIIDump = true
@@ -1299,6 +1356,91 @@ func parseODTypeSize(spec string, allowFloat bool, defaultSize int) (size int, r
 
 func odKeywordPrefix(value, keyword string) bool {
 	return value != "" && strings.HasPrefix(keyword, value)
+}
+
+func odNormalizeLongArg(arg string) string {
+	if !strings.HasPrefix(arg, "--") || arg == "--" {
+		return arg
+	}
+	name := strings.TrimPrefix(arg, "--")
+	value := ""
+	hasValue := false
+	if before, after, ok := strings.Cut(name, "="); ok {
+		name, value, hasValue = before, after, true
+	}
+	match := odMatchLongOption(name)
+	if match == "" {
+		return arg
+	}
+	if hasValue {
+		return "--" + match + "=" + value
+	}
+	return "--" + match
+}
+
+func odMatchLongOption(prefix string) string {
+	options := []string{
+		"help",
+		"version",
+		"address-radix",
+		"skip-bytes",
+		"read-bytes",
+		"endian",
+		"strings",
+		"format",
+		"output-duplicates",
+		"width",
+		"traditional",
+	}
+	match := ""
+	for _, option := range options {
+		if option == prefix {
+			return option
+		}
+		if strings.HasPrefix(option, prefix) {
+			if match != "" {
+				return ""
+			}
+			match = option
+		}
+	}
+	return match
+}
+
+func odReadAll(r io.Reader, limited bool, remaining uint64) ([]byte, error) {
+	if !limited {
+		return io.ReadAll(r)
+	}
+	return io.ReadAll(io.LimitReader(r, int64(remaining)))
+}
+
+func odInputError(inv *Invocation, name string, err error) error {
+	if errors.Is(err, stdfs.ErrNotExist) {
+		return exitf(inv, 1, "od: %s: No such file or directory", odDisplayName(name))
+	}
+	return exitf(inv, 1, "od: %s: %v", odDisplayName(name), err)
+}
+
+func odDisplayName(name string) string {
+	if strings.ContainsAny(name, " \t\r\n") {
+		return "'" + strings.ReplaceAll(name, "'", "'\\''") + "'"
+	}
+	return name
+}
+
+func odOffsetErrorText(err error) string {
+	if errors.Is(err, errODOffsetRange) {
+		return odRangeMessage()
+	}
+	return "parse failed"
+}
+
+func odRangeMessage() string {
+	text := errODOffsetRange.Error()
+	if text == "" {
+		return text
+	}
+	return strings.ToUpper(text[:1]) + text[1:]
 }
 
 func odFloatWidth(kind odFloatKind) int {

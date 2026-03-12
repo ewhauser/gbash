@@ -53,3 +53,53 @@ func TestODSupportsEndianWordFormatting(t *testing.T) {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
+
+func TestODRespectsReadLimitOnSharedStdin(t *testing.T) {
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/tmp/in.txt", []byte("abcdefg\n"))
+
+	result := mustExecSession(t, session, "(od -An -N3 -c; od -An -N3 -c) < /tmp/in.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "   a   b   c\n   d   e   f\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestODAcceptsInferredEndianLongOption(t *testing.T) {
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/tmp/in.bin", []byte{0x01, 0x02, 0x03, 0x04})
+
+	result := mustExecSession(t, session, "od -An -tx2 --end=big /tmp/in.bin\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, " 0102 0304\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestODRejectsUnsupportedIntegerTypeSizes(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "printf '' | od -An -tx16\n")
+	if result.ExitCode == 0 {
+		t.Fatalf("ExitCode = %d, want non-zero", result.ExitCode)
+	}
+	if got, want := result.Stderr, "od: invalid type size 16 in \"x16\"\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
+func TestODReportsMissingOffsetLikeFilename(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "od ++0\n")
+	if result.ExitCode == 0 {
+		t.Fatalf("ExitCode = %d, want non-zero", result.ExitCode)
+	}
+	if got, want := result.Stderr, "od: ++0: No such file or directory\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}

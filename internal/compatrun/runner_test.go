@@ -46,7 +46,11 @@ func TestRunnerExecSupportsNestedSubexecAndHostWorkdir(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	wantStdout := "hello\n" + filepath.ToSlash(tmp) + "\n"
+	physicalTmp, err := filepath.EvalSymlinks(tmp)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q) error = %v", tmp, err)
+	}
+	wantStdout := "hello\n" + filepath.ToSlash(physicalTmp) + "\n"
 	if result.Stdout != wantStdout {
 		t.Fatalf("Stdout = %q, want %q", result.Stdout, wantStdout)
 	}

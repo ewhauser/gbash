@@ -26,3 +26,23 @@ func TestCPSupportsParityFlagsIsolated(t *testing.T) {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
+
+func TestCPAcceptsForceFlagForOverwrite(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "echo new > /tmp/src.txt\n" +
+			"echo old > /tmp/dst.txt\n" +
+			"cp -f /tmp/src.txt /tmp/dst.txt\n" +
+			"cat /tmp/dst.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "new\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
