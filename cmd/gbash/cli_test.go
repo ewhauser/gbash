@@ -332,6 +332,61 @@ func TestRunCLICompatExecTailFollowByNameHandlesRenameAndReplacement(t *testing.
 	}
 }
 
+func TestRunCLICompatExecTailGroupedQuietFollowFlags(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	for _, name := range []string{"1", "2"} {
+		if err := os.WriteFile(filepath.Join(tmp, name), nil, 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", name, err)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	defer cancel()
+
+	stdout := newStreamingWriter()
+	stderr := newStreamingWriter()
+	done := make(chan struct {
+		exitCode int
+		err      error
+	}, 1)
+
+	go func() {
+		exitCode, err := runCLI(ctx, "gbash", []string{
+			"compat", "exec", "tail", "-qF", "-s0.05", "--max-unchanged-stats=1", "1", "2",
+		}, strings.NewReader(""), stdout, stderr, false)
+		done <- struct {
+			exitCode int
+			err      error
+		}{exitCode: exitCode, err: err}
+	}()
+
+	if err := os.WriteFile(filepath.Join(tmp, "2"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(2) error = %v", err)
+	}
+	if !stdout.WaitForSubstring("x\n", 500*time.Millisecond) {
+		t.Fatalf("stdout did not emit followed content; got %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "==>") {
+		t.Fatalf("stdout = %q, did not expect headers with -qF", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "unsupported flag -qF") {
+		t.Fatalf("stderr = %q, grouped short flags were not parsed", stderr.String())
+	}
+
+	result := <-done
+	if result.err != nil {
+		t.Fatalf("runCLI() error = %v", result.err)
+	}
+	if result.exitCode != 124 {
+		t.Fatalf("exitCode = %d, want 124; stderr=%q", result.exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "execution timed out") {
+		t.Fatalf("stderr = %q, want timeout marker", stderr.String())
+	}
+}
+
 func TestRunCLIMulticallUsesArgv0CommandAndBypassesTTYRepl(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)

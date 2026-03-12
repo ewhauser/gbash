@@ -477,6 +477,12 @@ func parseTailArgs(inv *Invocation) (tailOptions, error) {
 			}
 			opts.lines = count
 			args = args[1:]
+		case strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--"):
+			expanded, ok := expandTailGroupedShortFlags(arg)
+			if !ok {
+				return tailOptions{}, exitf(inv, 1, "tail: unsupported flag %s", arg)
+			}
+			args = append(expanded, args[1:]...)
 		case strings.HasPrefix(arg, "-"):
 			return tailOptions{}, exitf(inv, 1, "tail: unsupported flag %s", arg)
 		default:
@@ -486,6 +492,23 @@ func parseTailArgs(inv *Invocation) (tailOptions, error) {
 	}
 
 	return opts, nil
+}
+
+func expandTailGroupedShortFlags(arg string) ([]string, bool) {
+	if len(arg) < 3 || strings.HasPrefix(arg, "--") {
+		return nil, false
+	}
+
+	expanded := make([]string, 0, len(arg)-1)
+	for _, ch := range arg[1:] {
+		switch ch {
+		case 'q', 'v', 'f', 'F':
+			expanded = append(expanded, "-"+string(ch))
+		default:
+			return nil, false
+		}
+	}
+	return expanded, true
 }
 
 func parseTailSleepInterval(raw string) (time.Duration, error) {
