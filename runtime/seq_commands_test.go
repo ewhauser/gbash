@@ -35,7 +35,7 @@ func TestSeqSupportsSeparatorsFormatsAndHexInput(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "2,3,4,5,6!0.00\n1.00\n2.00\n3.00\n0.5\n1.5\n"; got != want {
+	if got, want := result.Stdout, "2,3,4,5,6!0.00\n0.10\n0.20\n0.30\n0.5\n1.5\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
@@ -53,6 +53,23 @@ func TestSeqPreservesPrecisionAndNegativeZero(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
 	if got, want := result.Stdout, "-0.0\n01.0\n1.00\n2.20\n1\n2.2\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestSeqParsesFractionalValuesWithLeadingZeroes(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "seq 0.8 0.1 0.9\nseq 0.000000 0.000001 0.000003\nseq 0.1 -0.1 -0.2\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "0.8\n0.9\n0.000000\n0.000001\n0.000002\n0.000003\n0.1\n0.0\n-0.1\n-0.2\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }

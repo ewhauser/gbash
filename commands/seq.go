@@ -365,9 +365,7 @@ func parseSeqDecimal(input string, sign int) (seqValue, error) {
 		num.Neg(num)
 	}
 
-	leadingTrimmed := strings.TrimLeft(intPart+fracPart, "0")
-	missingLeadingZeros := len(intPart+fracPart) - len(leadingTrimmed)
-	scale := len(fracPart) - exp - missingLeadingZeros
+	scale := len(fracPart) - exp
 	if scale < 0 {
 		scale = -scale
 		num.Mul(num, seqPow10(scale))
