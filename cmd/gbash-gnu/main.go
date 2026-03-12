@@ -760,6 +760,7 @@ func disableCheckRebuild(workDir string) error {
 
 func installTestRelinkHook(workDir, gbashBin string, supportedNames, unsupportedNames []string) error {
 	hookDir := filepath.Join(workDir, "build-aux", "gbash-harness")
+	_ = os.RemoveAll(filepath.Join(workDir, "build-aux", "jbgo-harness"))
 	if err := os.MkdirAll(hookDir, 0o755); err != nil {
 		return err
 	}
@@ -823,13 +824,19 @@ func patchTestsEnvironment(makefilePath string) error {
 	}
 	const needle = "TESTS_ENVIRONMENT = \\\n"
 	const injection = "TESTS_ENVIRONMENT = \\\n  $(SHELL) '$(abs_top_builddir)/build-aux/gbash-harness/relink.sh' '$(abs_top_builddir)/src' || exit $$?; \\\n"
+	const legacyInjection = "  $(SHELL) '$(abs_top_builddir)/build-aux/jbgo-harness/relink.sh' '$(abs_top_builddir)/src' || exit $$?; \\\n"
+
 	contents := string(data)
-	if strings.Contains(contents, "build-aux/gbash-harness/relink.sh") {
-		return nil
+	updated := strings.ReplaceAll(contents, legacyInjection, "")
+	if !strings.Contains(updated, "build-aux/gbash-harness/relink.sh") {
+		next := strings.Replace(updated, needle, injection, 1)
+		if next == updated {
+			return fmt.Errorf("patch TESTS_ENVIRONMENT: marker not found")
+		}
+		updated = next
 	}
-	updated := strings.Replace(contents, needle, injection, 1)
 	if updated == contents {
-		return fmt.Errorf("patch TESTS_ENVIRONMENT: marker not found")
+		return nil
 	}
 	return os.WriteFile(makefilePath, []byte(updated), 0o644)
 }

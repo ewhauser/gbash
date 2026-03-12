@@ -338,6 +338,33 @@ func TestPrepareProgramDirAddsCompatShellHelpers(t *testing.T) {
 	}
 }
 
+func TestPatchTestsEnvironmentRemovesLegacyJbgoRelinkHook(t *testing.T) {
+	makefilePath := filepath.Join(t.TempDir(), "Makefile")
+	contents := "TESTS_ENVIRONMENT = \\\n" +
+		"  $(SHELL) '$(abs_top_builddir)/build-aux/gbash-harness/relink.sh' '$(abs_top_builddir)/src' || exit $$?; \\\n" +
+		"  $(SHELL) '$(abs_top_builddir)/build-aux/jbgo-harness/relink.sh' '$(abs_top_builddir)/src' || exit $$?; \\\n" +
+		"  env PATH=\"$(abs_top_builddir)/src:$$PATH\" \\\n"
+	if err := os.WriteFile(makefilePath, []byte(contents), 0o644); err != nil {
+		t.Fatalf("WriteFile(Makefile) error = %v", err)
+	}
+
+	if err := patchTestsEnvironment(makefilePath); err != nil {
+		t.Fatalf("patchTestsEnvironment() error = %v", err)
+	}
+
+	data, err := os.ReadFile(makefilePath)
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	got := string(data)
+	if strings.Contains(got, "build-aux/jbgo-harness/relink.sh") {
+		t.Fatalf("Makefile still references jbgo relink hook: %q", got)
+	}
+	if count := strings.Count(got, "build-aux/gbash-harness/relink.sh"); count != 1 {
+		t.Fatalf("gbash relink hook count = %d, want 1; contents=%q", count, got)
+	}
+}
+
 func TestPatchTestInitSetupPathIsIdempotent(t *testing.T) {
 	initPath := filepath.Join(t.TempDir(), "init.sh")
 	original := "setup_ \"$@\"\n# This trap is here, rather than in the setup_ function, because some\n# shells run the exit trap at shell function exit, rather than script exit.\ntrap remove_tmp_ EXIT\n"
