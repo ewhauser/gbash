@@ -87,6 +87,12 @@ func mustFuzzCommandMetadata(tb testing.TB) []fuzzCommandMetadata {
 	specs := []fuzzCommandMetadata{
 		fuzzSpec("echo", "shell",
 			fuzzVariant("", "text", "{token.value}"),
+			fuzzVariant("", "flag:n", "-n", "{token.value}"),
+			fuzzVariant("", "flag:e", "-e", "{token.value}"),
+			fuzzVariant("", "flag:E", "-E", "{token.value}"),
+			fuzzVariant("", "flag:literal-dash", "--", "{token.value}"),
+			fuzzVariant("", "flag:version", "--version"),
+			fuzzVariant("", "flag:help", "--help"),
 		),
 		fuzzSpec("pwd", "shell",
 			fuzzVariant("", "cwd"),
