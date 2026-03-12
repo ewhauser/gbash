@@ -673,7 +673,7 @@ For the text/search batch, the runtime should expose useful, explicitly document
 
 For the shell/process helper batch, the runtime should expose practical, sandbox-owned subsets:
 
-- `tee` supports stdout passthrough, writing one or more files, and `-a` append mode
+- `tee` streams stdin to stdout and one or more files with unbuffered chunked writes, supports `-a/--append`, `-i/--ignore-interrupts`, `-p`, `--output-error[=MODE]`, and treats `-` as a literal filename while keeping error handling sandbox-owned
 - `env` supports `-i`, `-u NAME`, inline `NAME=value` assignments, and nested command execution with scoped environment replacement
 - `id` reports a deterministic virtual sandbox identity instead of consulting the host passwd/group database, supports the GNU/BSD-compatible option surface used by uutils (`-a`, `-A`, `-u`, `-g`, `-G`, `-n`, `-r`, `-z`, `-Z`, `-p`, `-P`), and treats audit or security-context output as sandbox-owned compatibility behavior rather than host state
 - `whoami` reports the deterministic virtual effective username derived from the sandbox identity environment, matching `id -un` instead of consulting host account databases

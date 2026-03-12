@@ -60,6 +60,111 @@ func TestTeeAppendsAndWritesMultipleFiles(t *testing.T) {
 	}
 }
 
+func TestTeeSupportsGNUFlagsAndLiteralDashFiles(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	tests := []struct {
+		name       string
+		script     string
+		wantCode   int
+		wantOut    string
+		wantStderr string
+	}{
+		{
+			name:     "ignore interrupts and pipe mode",
+			script:   "printf 'one\\n' | tee -ip /tmp/a >/tmp/out\ncat /tmp/a\n",
+			wantCode: 0,
+			wantOut:  "one\n",
+		},
+		{
+			name:     "bare output-error defaults to warn-nopipe",
+			script:   "printf 'two\\n' | tee --output-error /tmp/a >/tmp/out\ncat /tmp/a\n",
+			wantCode: 0,
+			wantOut:  "two\n",
+		},
+		{
+			name:     "literal dash is a file name",
+			script:   "cd /tmp\nprintf 'dash\\n' | tee - >/tmp/out\ncat /tmp/-\ncat /tmp/out\n",
+			wantCode: 0,
+			wantOut:  "dash\ndash\n",
+		},
+		{
+			name:     "help",
+			script:   "tee --help\n",
+			wantCode: 0,
+			wantOut:  "Usage: tee [OPTION]... [FILE]...\nCopy standard input to each FILE, and also to standard output.\n\n  -a, --append              append to the given FILEs, do not overwrite\n  -i, --ignore-interrupts   ignore interrupt signals\n  -p                        diagnose errors writing to non pipes\n      --output-error[=MODE] set behavior on write error; see MODE below\n  -h, --help                display this help and exit\n      --version             output version information and exit\n\nMODE determines behavior with write errors on outputs:\n  warn         diagnose errors writing to any output\n  warn-nopipe  diagnose errors writing to any output not a pipe\n  exit         exit on error writing to any output\n  exit-nopipe  exit on error writing to any output not a pipe\n",
+		},
+		{
+			name:     "version",
+			script:   "tee --version\n",
+			wantCode: 0,
+			wantOut:  "tee (gbash)\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result.ExitCode != tc.wantCode {
+				t.Fatalf("ExitCode = %d, want %d; stderr=%q", result.ExitCode, tc.wantCode, result.Stderr)
+			}
+			if got := result.Stdout; got != tc.wantOut {
+				t.Fatalf("Stdout = %q, want %q", got, tc.wantOut)
+			}
+			if tc.wantStderr != "" && result.Stderr != tc.wantStderr {
+				t.Fatalf("Stderr = %q, want %q", result.Stderr, tc.wantStderr)
+			}
+		})
+	}
+}
+
+func TestTeeOutputErrorModes(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	tests := []struct {
+		name      string
+		script    string
+		wantOut   string
+		stderrSub string
+	}{
+		{
+			name: "default continues after open error",
+			script: "mkdir /tmp/blocked\nprintf 'hello\\n' | tee /tmp/blocked /tmp/out >/tmp/stdout; echo $?\n" +
+				"cat /tmp/out\n",
+			wantOut:   "1\nhello\n",
+			stderrSub: "tee: /tmp/blocked: open /tmp/blocked:",
+		},
+		{
+			name: "exit mode aborts after open error",
+			script: "mkdir /tmp/blocked\nprintf 'hello\\n' | tee --output-error=exit /tmp/blocked /tmp/out >/tmp/stdout; echo $?\n" +
+				"test ! -e /tmp/out && echo missing\n",
+			wantOut:   "1\nmissing\n",
+			stderrSub: "tee: /tmp/blocked: open /tmp/blocked:",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result.ExitCode != 0 {
+				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+			}
+			if got := result.Stdout; got != tc.wantOut {
+				t.Fatalf("Stdout = %q, want %q", got, tc.wantOut)
+			}
+			if got := result.Stderr; !strings.Contains(got, tc.stderrSub) {
+				t.Fatalf("Stderr = %q, want substring %q", got, tc.stderrSub)
+			}
+		})
+	}
+}
+
 func TestTrueAndFalseCommandsByPath(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 
