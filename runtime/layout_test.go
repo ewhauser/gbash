@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/ewhauser/gbash/policy"
 )
 
 func TestDefaultSandboxLayout(t *testing.T) {
@@ -93,6 +95,50 @@ func TestVirtualCDUpdatesPWD(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want 0", result.ExitCode)
 	}
 	if got, want := result.Stdout, "/home/agent\n/tmp\n/home/agent\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestPwdHonorsLogicalAndPhysicalModes(t *testing.T) {
+	rt := newRuntime(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "" +
+			"mkdir -p a/b\n" +
+			"ln -s a/b c\n" +
+			"cd c\n" +
+			"pwd -L\n" +
+			"pwd -P\n" +
+			"pwd\n" +
+			"POSIXLY_CORRECT=1 pwd\n" +
+			"PWD=\"$PWD/.\" pwd -L\n" +
+			"PWD=bogus pwd -L\n" +
+			"PWD=\"/home/agent\" pwd -L\n" +
+			"PWD=\"/home/agent/a/../c\" pwd -L\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	want := "" +
+		"/home/agent/c\n" +
+		"/home/agent/a/b\n" +
+		"/home/agent/a/b\n" +
+		"/home/agent/c\n" +
+		"/home/agent/a/b\n" +
+		"/home/agent/a/b\n" +
+		"/home/agent/a/b\n" +
+		"/home/agent/a/b\n"
+	if got := result.Stdout; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }

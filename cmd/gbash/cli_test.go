@@ -116,6 +116,77 @@ func TestRunCLICompatExecUnknownCommandReturns127(t *testing.T) {
 	}
 }
 
+func TestRunCLICompatExecEnvSupportsDoubleDashCommandSeparator(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), "gbash", []string{"compat", "exec", "env", "--", "pwd", "-P"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
+	}
+	physicalTmp, err := filepath.EvalSymlinks(tmp)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q) error = %v", tmp, err)
+	}
+	if got, want := stdout.String(), filepath.ToSlash(physicalTmp)+"\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRunCLIMulticallEnvSupportsAssignmentsAfterDoubleDash(t *testing.T) {
+	tmp := t.TempDir()
+
+	commandDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(commandDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	envPath := filepath.Join(commandDir, "env")
+	if err := os.WriteFile(envPath, []byte("# compat shim\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", envPath, err)
+	}
+	pwdPath := filepath.Join(commandDir, "pwd")
+	if err := os.WriteFile(pwdPath, []byte("# compat shim\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", pwdPath, err)
+	}
+
+	physicalDir := filepath.Join(tmp, "a", "b")
+	if err := os.MkdirAll(physicalDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", physicalDir, err)
+	}
+	logicalDir := filepath.Join(tmp, "c")
+	if err := os.Symlink(physicalDir, logicalDir); err != nil {
+		t.Skipf("Symlink() error = %v", err)
+	}
+
+	t.Chdir(logicalDir)
+	t.Setenv("PWD", filepath.ToSlash(logicalDir))
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	exitCode, err := runCLI(context.Background(), envPath, []string{"--", "POSIXLY_CORRECT=1", "pwd"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
+	}
+	if got, want := stdout.String(), filepath.ToSlash(logicalDir)+"\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
 func TestRunCLICompatExecStreamsOutputBeforeExit(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
@@ -1050,7 +1121,11 @@ func TestRunCLIMulticallUsesArgv0CommandAndBypassesTTYRepl(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
 	}
-	want := filepath.ToSlash(tmp) + "\n"
+	physicalTmp, err := filepath.EvalSymlinks(tmp)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q) error = %v", tmp, err)
+	}
+	want := filepath.ToSlash(physicalTmp) + "\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -1059,6 +1134,86 @@ func TestRunCLIMulticallUsesArgv0CommandAndBypassesTTYRepl(t *testing.T) {
 	}
 	if got := stderr.String(); got != "" {
 		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRunCLIMulticallPwdHonorsLogicalAndPhysicalModes(t *testing.T) {
+	tmp := t.TempDir()
+
+	commandDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(commandDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	commandPath := filepath.Join(commandDir, "pwd")
+	if err := os.WriteFile(commandPath, []byte("# compat shim\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", commandPath, err)
+	}
+
+	physicalDir := filepath.Join(tmp, "a", "b")
+	if err := os.MkdirAll(physicalDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", physicalDir, err)
+	}
+	logicalDir := filepath.Join(tmp, "c")
+	if err := os.Symlink(physicalDir, logicalDir); err != nil {
+		t.Skipf("Symlink() error = %v", err)
+	}
+
+	t.Chdir(logicalDir)
+	t.Setenv("PWD", filepath.ToSlash(logicalDir))
+	physicalLogicalDir, err := filepath.EvalSymlinks(logicalDir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q) error = %v", logicalDir, err)
+	}
+	physicalLogicalDir = filepath.ToSlash(physicalLogicalDir)
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), commandPath, []string{"-L"}, strings.NewReader("ignored"), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI(-L) error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
+	}
+	if got, want := stdout.String(), filepath.ToSlash(logicalDir)+"\n"; got != want {
+		t.Fatalf("stdout(-L) = %q, want %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr(-L) = %q, want empty", got)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode, err = runCLI(context.Background(), commandPath, []string{"--physical"}, strings.NewReader("ignored"), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI(--physical) error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
+	}
+	if got, want := stdout.String(), physicalLogicalDir+"\n"; got != want {
+		t.Fatalf("stdout(--physical) = %q, want %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr(--physical) = %q, want empty", got)
+	}
+
+	t.Setenv("POSIXLY_CORRECT", "1")
+	stdout.Reset()
+	stderr.Reset()
+	exitCode, err = runCLI(context.Background(), commandPath, nil, strings.NewReader("ignored"), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI(POSIXLY_CORRECT) error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
+	}
+	if got, want := stdout.String(), filepath.ToSlash(logicalDir)+"\n"; got != want {
+		t.Fatalf("stdout(POSIXLY_CORRECT) = %q, want %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr(POSIXLY_CORRECT) = %q, want empty", got)
 	}
 }
 

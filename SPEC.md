@@ -408,7 +408,7 @@ Implementation detail for MVP:
 
 - `interp.Dir(...)` is set to a host-safe existing directory such as `/`, not the virtual sandbox cwd
 - the runtime prepends a shell shim that initializes `PWD` and `OLDPWD`
-- the shim shadows `cd` and `pwd` so shell-visible cwd behavior stays virtual
+- the shim owns virtual `cd` and wraps shell-visible `pwd` to the Go `pwd` command so `-L` / `-P` still honor virtual `PWD`
 - all project path handlers resolve relative paths from virtual `PWD`, not from `HandlerContext.Dir`
 
 ### 9.3 Stdio
@@ -542,7 +542,7 @@ Rules:
 - command resolution should work by bare name and by virtual path such as `/bin/ls`
 - command implementations may compose other shell commands only through the session's own execution callback
 
-For MVP, `cd` and `pwd` are provided via a runtime-owned shell shim so they operate on the virtual cwd instead of `mvdan/sh`'s host-backed directory state.
+For MVP, `cd` is provided via a runtime-owned shell shim and shell-visible `pwd` is wrapped to the registry-owned Go command so cwd behavior stays virtual instead of using `mvdan/sh`'s host-backed directory state.
 
 Initial MVP command set:
 
@@ -823,7 +823,7 @@ MVP includes:
 - persistent sessions with per-session filesystem state
 - in-memory sandbox filesystem
 - Unix-like default layout (`/home/agent`, `/tmp`, `/bin`, `/usr/bin`, `PATH`)
-- virtual `PWD` with runtime-provided `cd` and `pwd` shims
+- virtual `PWD` with a runtime-provided `cd` shim and a shell-visible `pwd` wrapper
 - explicit Go command registry
 - at least six core commands
 - command resolution by name and virtual path

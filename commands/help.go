@@ -31,8 +31,8 @@ var builtinHelp = map[string]helpTopic{
 		Body:     "Display shell builtin help.",
 	},
 	"pwd": {
-		Synopsis: "pwd",
-		Body:     "Print the virtual current directory.",
+		Synopsis: "pwd [-L|-P]",
+		Body:     "Print the current working directory, honoring logical and physical modes.",
 	},
 }
 

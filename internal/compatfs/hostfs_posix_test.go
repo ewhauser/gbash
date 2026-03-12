@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -102,6 +103,51 @@ func TestHostFSStatPreservesRawSysStat(t *testing.T) {
 	}
 	if _, ok := info.Sys().(*syscall.Stat_t); !ok {
 		t.Fatalf("Stat().Sys() = %T, want *syscall.Stat_t", info.Sys())
+	}
+}
+
+func TestHostFSChdirAllowsCurrentLongPath(t *testing.T) {
+	root := t.TempDir()
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(previous)
+	})
+
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("Chdir(root) error = %v", err)
+	}
+
+	segment := strings.Repeat("z", 31)
+	for depth := range 256 {
+		if err := os.Mkdir(segment, 0o755); err != nil {
+			t.Fatalf("Mkdir(depth=%d) error = %v", depth, err)
+		}
+		if err := os.Chdir(segment); err != nil {
+			t.Fatalf("Chdir(depth=%d) error = %v", depth, err)
+		}
+	}
+
+	fsys, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	current := fsys.Getwd()
+	if len(filepath.FromSlash(current)) <= 1024 {
+		t.Fatalf("Getwd() = %q, want path longer than PATH_MAX-ish threshold", current)
+	}
+
+	if err := fsys.Chdir(current); err != nil {
+		t.Fatalf("Chdir(current long path) error = %v", err)
+	}
+	realpath, err := fsys.Realpath(context.Background(), ".")
+	if err != nil {
+		t.Fatalf("Realpath(.) error = %v", err)
+	}
+	if got, want := realpath, current; got != want {
+		t.Fatalf("Realpath(.) = %q, want %q", got, want)
 	}
 }
 

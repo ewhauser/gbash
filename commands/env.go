@@ -45,12 +45,20 @@ func (c *Env) Run(ctx context.Context, inv *Invocation) error {
 		return nil
 	}
 
+	searchEnv := env
+	if _, ok := searchEnv["PATH"]; !ok {
+		searchEnv = mergeStringMap(env)
+		if pathValue, ok := inv.Env["PATH"]; ok {
+			searchEnv["PATH"] = pathValue
+		}
+	}
+
 	result, err := executeCommand(ctx, inv, &executeCommandOptions{
 		Argv:       argv,
 		Env:        env,
-		SearchEnv:  inv.Env,
+		SearchEnv:  searchEnv,
 		WorkDir:    inv.Cwd,
-		ReplaceEnv: replaceEnv,
+		ReplaceEnv: true,
 		Stdin:      inv.Stdin,
 	})
 	if err != nil {
@@ -95,28 +103,32 @@ func (c *PrintEnv) Run(_ context.Context, inv *Invocation) error {
 func parseEnvArgs(inv *Invocation) (replaceEnv bool, unset []string, setPairs map[string]string, argv []string, err error) {
 	args := inv.Args
 	setPairs = make(map[string]string)
+	optionsDone := false
 	for len(args) > 0 {
 		arg := args[0]
 		switch {
-		case arg == "-i" || arg == "--ignore-environment":
+		case !optionsDone && arg == "--":
+			optionsDone = true
+			args = args[1:]
+		case !optionsDone && (arg == "-i" || arg == "--ignore-environment"):
 			replaceEnv = true
 			args = args[1:]
-		case arg == "-u":
+		case !optionsDone && arg == "-u":
 			if len(args) < 2 {
 				return false, nil, nil, nil, exitf(inv, 1, "env: option requires an argument -- 'u'")
 			}
 			unset = append(unset, args[1])
 			args = args[2:]
-		case arg == "--unset":
+		case !optionsDone && arg == "--unset":
 			if len(args) < 2 {
 				return false, nil, nil, nil, exitf(inv, 1, "env: option requires an argument -- unset")
 			}
 			unset = append(unset, args[1])
 			args = args[2:]
-		case strings.HasPrefix(arg, "-u") && len(arg) > 2:
+		case !optionsDone && strings.HasPrefix(arg, "-u") && len(arg) > 2:
 			unset = append(unset, arg[2:])
 			args = args[1:]
-		case strings.HasPrefix(arg, "--unset="):
+		case !optionsDone && strings.HasPrefix(arg, "--unset="):
 			unset = append(unset, strings.TrimPrefix(arg, "--unset="))
 			args = args[1:]
 		case strings.Contains(arg, "=") && !strings.HasPrefix(arg, "="):
