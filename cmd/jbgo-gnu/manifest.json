@@ -3,6 +3,7 @@
   "tarball_url": "https://ftp.gnu.org/gnu/coreutils/coreutils-9.10.tar.gz",
   "tarball_sha256": "e0bde1fb68509447fc723cf2517e8a8c7fa46769919bb7490ed350a2e9238562",
   "utilities": [
+    { "name": "base32", "patterns": ["tests/basenc/base32.pl"] },
     { "name": "base64", "patterns": ["tests/basenc/base64.pl"] },
     { "name": "basename", "patterns": ["tests/misc/basename*"] },
     { "name": "cat", "patterns": ["tests/cat/*"] },
@@ -15,8 +16,10 @@
     { "name": "du", "patterns": ["tests/du/*"] },
     { "name": "echo", "patterns": ["tests/echo/*", "tests/misc/echo*"] },
     { "name": "env", "patterns": ["tests/env/*"] },
+    { "name": "expr", "patterns": ["tests/expr/*"] },
     { "name": "false", "patterns": ["tests/misc/false*"] },
     { "name": "head", "patterns": ["tests/head/*"] },
+    { "name": "id", "patterns": ["tests/id/*"] },
     { "name": "join", "patterns": ["tests/join/*"] },
     { "name": "ln", "patterns": ["tests/ln/*"] },
     { "name": "ls", "patterns": ["tests/ls/*"] },
@@ -30,6 +33,8 @@
     { "name": "readlink", "patterns": ["tests/readlink/*"] },
     { "name": "rm", "patterns": ["tests/rm/*"] },
     { "name": "rmdir", "patterns": ["tests/rmdir/*"] },
+    { "name": "seq", "patterns": ["tests/seq/*"] },
+    { "name": "sha256sum", "patterns": ["tests/sum/*", "tests/cksum/*"] },
     { "name": "sleep", "patterns": ["tests/sleep/*", "tests/misc/sleep*"] },
     { "name": "sort", "patterns": ["tests/sort/*"] },
     { "name": "split", "patterns": ["tests/split/*"] },
@@ -42,7 +47,8 @@
     { "name": "tr", "patterns": ["tests/tr/*"] },
     { "name": "true", "patterns": ["tests/misc/true*"] },
     { "name": "uniq", "patterns": ["tests/uniq/*"] },
-    { "name": "wc", "patterns": ["tests/wc/*"] }
+    { "name": "wc", "patterns": ["tests/wc/*"] },
+    { "name": "yes", "patterns": ["tests/yes/*", "tests/misc/yes*"] }
   ],
   "skip_patterns": [
     { "pattern": "tests/help/*", "reason": "help/version tests are skipped in v1" },
