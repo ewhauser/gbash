@@ -39,3 +39,42 @@ func TestCutSupportsByteSelectionOnBinaryInput(t *testing.T) {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
+
+func TestCutSupportsOutputDelimiterAndComplement(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'abcdefg\\n' > /tmp/in.txt\n" +
+			"cut -c4-,2-3 --output-d=: /tmp/in.txt\n" +
+			"cut --complement -b2-4 /tmp/in.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "bc:defg\naefg\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestCutSupportsNewlineDelimiterAndZeroTerminatedRecords(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'a\\nb\\n' > /tmp/text.txt\n" +
+			"cut -d'\n' -f1- --output-d=: /tmp/text.txt\n" +
+			"printf 'a:1\\0b:2' > /tmp/zero.bin\n" +
+			"cut -z -d: -f1 /tmp/zero.bin\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "a:b\na\x00b\x00"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}

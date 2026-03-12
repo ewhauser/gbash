@@ -21,7 +21,9 @@ func FuzzCutFlagsCommand(f *testing.F) {
 
 		script := []byte(
 			"cut --only-delimited -d: -f2 " + shellQuote(inputPath) + " >/tmp/cut-long.txt || true\n" +
-				"cut -b1 " + shellQuote(inputPath) + " >/tmp/cut-bytes.txt || true\n",
+				"cut -b1 " + shellQuote(inputPath) + " >/tmp/cut-bytes.txt || true\n" +
+				"cut --complement -c2-4 " + shellQuote(inputPath) + " >/tmp/cut-complement.txt || true\n" +
+				"cut -z -d: -f1 " + shellQuote(inputPath) + " >/tmp/cut-zero.txt || true\n",
 		)
 
 		result, err := runFuzzSessionScript(t, session, script)
