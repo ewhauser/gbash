@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	gbfs "github.com/ewhauser/gbash/fs"
@@ -663,10 +662,7 @@ func tailPathIsUntailable(ctx context.Context, inv *Invocation, name string) boo
 	return info.IsDir()
 }
 
-func tailPIDIsAlive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
-}
+// tailPIDIsAlive is defined in tail_unix.go and tail_windows.go.
 
 func writeTailWarnings(inv *Invocation, opts *tailOptions) error {
 	switch {
