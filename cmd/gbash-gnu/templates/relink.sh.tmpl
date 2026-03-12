@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+src_dir=$1
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+gbash_bin={{.GBashBinQuoted}}
+
+while IFS= read -r name || [ -n "$name" ]; do
+  [ -n "$name" ] || continue
+  rm -rf "$src_dir/$name"
+  ln -sf "$gbash_bin" "$src_dir/$name"
+done < "$script_dir/supported-programs.txt"
+
+while IFS= read -r name || [ -n "$name" ]; do
+  [ -n "$name" ] || continue
+  rm -rf "$src_dir/$name"
+  cat > "$src_dir/$name" <<'EOF'
+#!/bin/sh
+printf '%s: unsupported by gbash GNU harness\n' "$(basename "$0")" >&2
+exit 127
+EOF
+  chmod 755 "$src_dir/$name"
+done < "$script_dir/unsupported-programs.txt"
