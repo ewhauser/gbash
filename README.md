@@ -553,6 +553,10 @@ Maintainers can refresh the published prepared build archive set with:
 make gnu-build-cache-publish
 ```
 
+## AI Disclosure
+
+All of the code in this repository was written by AI - the vast majority of it by Codex (Claude Code worked on a couple CI jobs).
+
 ## License
 
 This project is licensed under the [Apache License 2.0](./LICENSE).
