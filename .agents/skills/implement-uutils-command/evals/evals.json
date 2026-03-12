@@ -1,9 +1,9 @@
 {
-  "skill_name": "implement-coreutils-command",
+  "skill_name": "implement-uutils-command",
   "evals": [
     {
       "id": 0,
-      "prompt": "Implement the `seq` command from coreutils",
+      "prompt": "Implement the `seq` command from uutils",
       "expected_output": "A complete seq command implementation in commands/seq.go with all flags (-w, -s, -f), registration in registry.go, integration tests, and fuzz tests. Should handle seq LAST, seq FIRST LAST, and seq FIRST INCREMENT LAST forms.",
       "files": [],
       "expectations": [
@@ -21,7 +21,7 @@
     },
     {
       "id": 1,
-      "prompt": "Port `fold` from uutils/coreutils",
+      "prompt": "Port `fold` from uutils",
       "expected_output": "A complete fold command implementation in commands/fold.go with all flags (-w, -s, -b), registration in registry.go, integration tests, and fuzz tests. Should wrap lines at specified width, with byte-counting and word-breaking options.",
       "files": [],
       "expectations": [
@@ -38,7 +38,7 @@
     },
     {
       "id": 2,
-      "prompt": "Add `strings` from coreutils — I need it for inspecting binary files",
+      "prompt": "Add `strings` from uutils — I need it for inspecting binary files",
       "expected_output": "A complete strings command implementation in commands/strings.go with all flags (-n, -t, -a, -e), registration in registry.go, integration tests, and fuzz tests. Should extract printable strings from binary data.",
       "files": [],
       "expectations": [
