@@ -1,0 +1,58 @@
+{
+  "skill_name": "implement-coreutils-command",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Implement the `seq` command from coreutils",
+      "expected_output": "A complete seq command implementation in commands/seq.go with all flags (-w, -s, -f), registration in registry.go, integration tests, and fuzz tests. Should handle seq LAST, seq FIRST LAST, and seq FIRST INCREMENT LAST forms.",
+      "files": [],
+      "expectations": [
+        "Creates a commands/seq.go file with a Seq struct implementing the Command interface",
+        "Includes var _ Command = (*Seq)(nil) interface compliance check",
+        "Registers NewSeq() in DefaultRegistry() in registry.go",
+        "Implements -w flag for equal-width zero-padded output",
+        "Implements -s flag for custom separator string",
+        "Implements -f flag for printf-style format string",
+        "Handles all three argument forms: seq LAST, seq FIRST LAST, seq FIRST INCR LAST",
+        "Handles floating-point increments correctly",
+        "Writes integration tests covering each flag",
+        "Writes fuzz tests using assertSecureFuzzOutcome"
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "Port `fold` from uutils/coreutils",
+      "expected_output": "A complete fold command implementation in commands/fold.go with all flags (-w, -s, -b), registration in registry.go, integration tests, and fuzz tests. Should wrap lines at specified width, with byte-counting and word-breaking options.",
+      "files": [],
+      "expectations": [
+        "Creates a commands/fold.go file with a Fold struct implementing the Command interface",
+        "Includes var _ Command = (*Fold)(nil) interface compliance check",
+        "Registers NewFold() in DefaultRegistry() in registry.go",
+        "Implements -w flag for custom line width (default 80)",
+        "Implements -s flag for breaking at word boundaries (spaces)",
+        "Implements -b flag for counting bytes instead of columns",
+        "Reads from stdin when no file arguments given",
+        "Writes integration tests covering each flag",
+        "Writes fuzz tests using assertSecureFuzzOutcome"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Add `strings` from coreutils — I need it for inspecting binary files",
+      "expected_output": "A complete strings command implementation in commands/strings.go with all flags (-n, -t, -a, -e), registration in registry.go, integration tests, and fuzz tests. Should extract printable strings from binary data.",
+      "files": [],
+      "expectations": [
+        "Creates a commands/strings.go file with a Strings struct implementing the Command interface",
+        "Includes var _ Command = (*Strings)(nil) interface compliance check",
+        "Registers NewStrings() in DefaultRegistry() in registry.go",
+        "Implements -n flag for minimum string length (default 4)",
+        "Implements -t flag for offset format (d/o/x)",
+        "Implements -a flag for scanning the whole file",
+        "Implements -e flag for character encoding selection",
+        "Reads from stdin when no file arguments given",
+        "Writes integration tests covering each flag",
+        "Writes fuzz tests using assertSecureFuzzOutcome"
+      ]
+    }
+  ]
+}
