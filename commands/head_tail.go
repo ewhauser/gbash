@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -36,27 +37,27 @@ func parseHeadTailArgs(inv *Invocation, cmdName string, allowFromLine bool) (hea
 			opts.fromLine = fromLine
 			args = args[2:]
 		case strings.HasPrefix(arg, "--lines="):
-			count, err := strconv.Atoi(strings.TrimPrefix(arg, "--lines="))
-			if err != nil || count < 0 {
+			count, fromLine, err := parseHeadTailCount(strings.TrimPrefix(arg, "--lines="), allowFromLine)
+			if err != nil {
 				return headTailOptions{}, exitf(inv, 1, "%s: invalid number of lines", cmdName)
 			}
 			opts.lines = count
-			opts.fromLine = false
+			opts.fromLine = fromLine
 			args = args[1:]
 		case arg == "-c" || arg == "--bytes":
 			if len(args) < 2 {
 				return headTailOptions{}, exitf(inv, 1, "%s: missing argument to -c", cmdName)
 			}
-			count, err := strconv.Atoi(args[1])
-			if err != nil || count < 0 {
+			count, err := parseHeadTailNumber(args[1])
+			if err != nil {
 				return headTailOptions{}, exitf(inv, 1, "%s: invalid number of bytes", cmdName)
 			}
 			opts.bytes = count
 			opts.hasBytes = true
 			args = args[2:]
 		case strings.HasPrefix(arg, "--bytes="):
-			count, err := strconv.Atoi(strings.TrimPrefix(arg, "--bytes="))
-			if err != nil || count < 0 {
+			count, err := parseHeadTailNumber(strings.TrimPrefix(arg, "--bytes="))
+			if err != nil {
 				return headTailOptions{}, exitf(inv, 1, "%s: invalid number of bytes", cmdName)
 			}
 			opts.bytes = count
@@ -71,8 +72,8 @@ func parseHeadTailArgs(inv *Invocation, cmdName string, allowFromLine bool) (hea
 			opts.fromLine = fromLine
 			args = args[1:]
 		case strings.HasPrefix(arg, "-c"):
-			count, err := strconv.Atoi(strings.TrimPrefix(arg, "-c"))
-			if err != nil || count < 0 {
+			count, err := parseHeadTailNumber(strings.TrimPrefix(arg, "-c"))
+			if err != nil {
 				return headTailOptions{}, exitf(inv, 1, "%s: invalid number of bytes", cmdName)
 			}
 			opts.bytes = count
@@ -108,11 +109,47 @@ func parseHeadTailCount(value string, allowFromLine bool) (count int, fromLine b
 		fromLine = true
 		value = strings.TrimPrefix(value, "+")
 	}
-	count, err = strconv.Atoi(value)
-	if err != nil || count < 0 {
-		return 0, false, fmt.Errorf("invalid count")
+	count, err = parseHeadTailNumber(value)
+	return count, fromLine, err
+}
+
+func parseHeadTailNumber(value string) (int, error) {
+	if value == "" {
+		return 0, fmt.Errorf("invalid count")
 	}
-	return count, fromLine, nil
+
+	multiplier := int64(1)
+	for _, suffix := range []struct {
+		token      string
+		multiplier int64
+	}{
+		{"E", 1 << 60},
+		{"P", 1 << 50},
+		{"T", 1 << 40},
+		{"G", 1 << 30},
+		{"M", 1 << 20},
+		{"K", 1 << 10},
+		{"b", 512},
+	} {
+		if before, ok := strings.CutSuffix(value, suffix.token); ok {
+			value = before
+			multiplier = suffix.multiplier
+			break
+		}
+	}
+
+	count, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || count < 0 {
+		return 0, fmt.Errorf("invalid count")
+	}
+	if count > math.MaxInt64/multiplier {
+		return 0, fmt.Errorf("invalid count")
+	}
+	total := count * multiplier
+	if total > int64(math.MaxInt) {
+		return 0, fmt.Errorf("invalid count")
+	}
+	return int(total), nil
 }
 
 func splitLines(data []byte) [][]byte {

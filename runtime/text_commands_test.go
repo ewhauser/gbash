@@ -130,6 +130,23 @@ func TestHeadShowsHeadersForMultipleFiles(t *testing.T) {
 	}
 }
 
+func TestHeadAcceptsSuffixedLineCounts(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "seq 1100 > /tmp/in.txt\nhead -n1K /tmp/in.txt | wc -l\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := strings.TrimSpace(result.Stdout), "1024"; got != want {
+		t.Fatalf("Stdout = %q, want %q", result.Stdout, want)
+	}
+}
+
 func TestTailSupportsFromLineSyntax(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 
