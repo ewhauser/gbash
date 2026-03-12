@@ -628,7 +628,7 @@ For checksum helpers, the runtime should expose shared uutils-style implementati
 For file/path commands, the runtime now supports a practical agent-oriented subset rather than full GNU parity:
 
 - `touch` supports creation, `-c`, and `-d/--date`
-- `cat` supports stdin or file concatenation plus `-n/--number` line numbering
+- `cat` supports stdin or file concatenation plus GNU-style `-A`, `-b`, `-e`, `-E`, `-n`, `-s`, `-t`, `-T`, `-u`, and `-v`, including visible end-of-line and nonprinting rendering and same-file overwrite protection for redirected stdin/stdout
 - `ln` supports hard links plus `-s` and `-f`
 - `link` exposes the strict two-operand hard-link form used by GNU/coreutils compatibility harnesses
 - `dir` reuses the supported `ls` option subset but defaults to non-long directory listings with `dir`-specific help/version text
