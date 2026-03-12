@@ -1,33 +1,34 @@
 ---
-name: implement-coreutils-command
+name: implement-uutils-command
 description: >
-  Implement a command by porting it from the uutils/coreutils Rust repo into this Go sandbox,
-  achieving full parity with the coreutils behavior. Use this skill whenever the user wants to
-  port a command from coreutils, implement a GNU coreutil, add POSIX command behavior, or
+  Implement a command by porting it from the uutils Rust repo into this Go sandbox,
+  achieving full parity with the uutils behavior. Use this skill whenever the user wants to
+  port a command from uutils, implement a standard Unix utility, add POSIX command behavior, or
   reference uutils as the source of truth for a command's behavior. Also trigger when the user
   says "coreutils", "uutils", "GNU compatible", or wants to match GNU/POSIX behavior for a
   command like seq, fold, expand, expr, column, od, strings, md5sum, sha1sum, sha256sum, or
   similar standard Unix utilities.
 ---
 
-# Implement Coreutils Command
+# Implement uutils Command
 
-Port a command from [uutils/coreutils](https://github.com/uutils/coreutils) (Rust implementation
-of GNU coreutils) into this Go codebase with full parity — every flag, every behavior, no shortcuts.
+Port a command from [uutils/coreutils](https://github.com/uutils/coreutils) — a Rust
+implementation of GNU coreutils — into this Go codebase with full parity: every flag, every
+behavior, no shortcuts.
 
 ## Workflow
 
 ### 1. Pick the command
 
 Read `TODO.md` and present the **Command Parity** section to the user. Many missing commands
-are standard Unix utilities that have canonical behavior defined by GNU coreutils. Ask the user
+are standard Unix utilities that have canonical behavior defined by uutils. Ask the user
 which command they want to implement. If they already told you, skip the asking and proceed.
 
-### 2. Clone uutils/coreutils and study the Rust source
+### 2. Clone uutils and study the Rust source
 
 ```bash
-COREUTILS=$(mktemp -d)/coreutils
-git clone --depth 1 https://github.com/uutils/coreutils.git "$COREUTILS"
+UUTILS=$(mktemp -d)/uutils
+git clone --depth 1 https://github.com/uutils/coreutils.git "$UUTILS"
 ```
 
 The uutils repo structure is:
@@ -40,7 +41,7 @@ Read the **entire** Rust source for the command. Do not skim. Pay special attent
   of supported flags, their short/long forms, aliases, default values, and descriptions.
 - `uumain()` — the entry point that parses args and dispatches to the core logic
 - How stdin is handled when no file arguments are given
-- Error messages and exit codes (coreutils uses specific exit codes for different failures)
+- Error messages and exit codes (uutils uses specific exit codes for different failures)
 - Edge cases in the Rust implementation — conditionals, special-cased inputs, platform checks
 
 Also check `tests/by-name/<command>/` for the test suite. These tests reveal expected behaviors
@@ -107,11 +108,11 @@ Key conventions:
 
 **Full parity means full parity.** Implement every flag from the `uu_app()` clap definition.
 Do not skip flags because they seem obscure or rarely used. Do not leave TODO comments for
-"later". If the coreutils version supports `--zero`, `--complement`, or `--output-delimiter`,
+"later". If the uutils version supports `--zero`, `--complement`, or `--output-delimiter`,
 your Go version supports them too. Compare your implementation against the Rust source
 function by function to make sure nothing was missed.
 
-**Sandbox considerations:** Some coreutils flags interact with real OS features that don't
+**Sandbox considerations:** Some uutils flags interact with real OS features that don't
 exist in the virtual filesystem (e.g., file ownership, ACLs, device files). For these:
 - Implement the flag parsing so the flag is accepted
 - Produce reasonable behavior in the sandbox context
