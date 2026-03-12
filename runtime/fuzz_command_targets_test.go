@@ -35,7 +35,7 @@ func FuzzFilePathCommands(f *testing.F) {
 		writeSessionFile(t, session, inputPath, data)
 
 		script := fmt.Appendf(nil,
-			"touch %s\ncp -pv %s %s\nmv -v %s %s\nln -s -f %s %s\nreadlink %s >/tmp/readlink.out\nstat %s >/tmp/stat.out\nbasename --suffix=.moved %s >/tmp/base.out\ndirname %s >/tmp/dir.out\nchmod 600 %s\nmkdir -p /tmp/fuzz-empty/sub\nrmdir /tmp/fuzz-empty/sub\nfile --brief %s >/tmp/file.out\nrm %s %s %s\n",
+			"touch %s\ncp -pv %s %s\nmv -v %s %s\nln -s -f %s %s\nreadlink %s >/tmp/readlink.out\nstat %s >/tmp/stat.out\nbasename --suffix=.moved %s >/tmp/base.out\ndirname %s >/tmp/dir.out\nchmod 600 %s\nchown 123:456 %s\nchown -h 321:654 %s || true\nmkdir -p /tmp/fuzz-empty/sub\nrmdir /tmp/fuzz-empty/sub\nfile --brief %s >/tmp/file.out\nrm %s %s %s\n",
 			shellQuote(inputPath),
 			shellQuote(inputPath),
 			shellQuote(copyPath),
@@ -49,6 +49,8 @@ func FuzzFilePathCommands(f *testing.F) {
 			shellQuote(movedPath),
 			shellQuote(movedPath),
 			shellQuote(movedPath),
+			shellQuote(movedPath),
+			shellQuote(linkPath),
 			shellQuote(linkPath),
 			shellQuote(movedPath),
 			shellQuote(inputPath),

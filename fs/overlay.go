@@ -252,6 +252,23 @@ func (o *OverlayFS) Chmod(ctx context.Context, name string, mode stdfs.FileMode)
 	return nil
 }
 
+func (o *OverlayFS) Chown(ctx context.Context, name string, uid, gid uint32, follow bool) error {
+	abs := o.resolve(name)
+	_, source, err := o.visibleInfo(ctx, abs)
+	if err != nil {
+		return &os.PathError{Op: "chown", Path: abs, Err: stdfs.ErrNotExist}
+	}
+	if source == overlaySourceLower {
+		if err := clonePath(ctx, o.lower, abs, o.upper, abs); err != nil {
+			return toPathError("chown", abs, err)
+		}
+	}
+	if err := o.upper.Chown(ctx, abs, uid, gid, follow); err != nil {
+		return toPathError("chown", abs, err)
+	}
+	return nil
+}
+
 func (o *OverlayFS) Chtimes(ctx context.Context, name string, atime, mtime time.Time) error {
 	abs := o.resolve(name)
 	_, source, err := o.visibleInfo(ctx, abs)

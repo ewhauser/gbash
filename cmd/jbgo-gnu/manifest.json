@@ -8,6 +8,7 @@
     { "name": "basename", "patterns": ["tests/misc/basename*"] },
     { "name": "cat", "patterns": ["tests/cat/*"] },
     { "name": "chmod", "patterns": ["tests/chmod/*"] },
+    { "name": "chown", "patterns": ["tests/chown/*"] },
     { "name": "comm", "patterns": ["tests/comm/*", "tests/misc/comm*"] },
     { "name": "cp", "patterns": ["tests/cp/*"] },
     { "name": "cut", "patterns": ["tests/cut/*"] },

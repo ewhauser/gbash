@@ -45,6 +45,10 @@ func (HostFS) Symlink(context.Context, string, string) error { return unsupporte
 
 func (HostFS) Link(context.Context, string, string) error { return unsupportedHostError() }
 
+func (HostFS) Chown(context.Context, string, uint32, uint32, bool) error {
+	return unsupportedHostError()
+}
+
 func (HostFS) Chmod(context.Context, string, stdfs.FileMode) error { return unsupportedHostError() }
 
 func (HostFS) Chtimes(context.Context, string, time.Time, time.Time) error {
