@@ -26,6 +26,8 @@ type memoryNode struct {
 	target   string
 	children map[string]struct{}
 	modTime  time.Time
+	uid      uint32
+	gid      uint32
 }
 
 const maxSymlinkDepth = 40
@@ -42,6 +44,8 @@ func NewMemory() *MemoryFS {
 				mode:     stdfs.ModeDir | 0o755,
 				children: make(map[string]struct{}),
 				modTime:  now,
+				uid:      DefaultOwnerUID,
+				gid:      DefaultOwnerGID,
 			},
 		},
 	}
@@ -62,6 +66,8 @@ func (m *MemoryFS) Symlink(_ context.Context, target, linkName string) error {
 		mode:    stdfs.ModeSymlink | 0o777,
 		target:  target,
 		modTime: time.Now().UTC(),
+		uid:     DefaultOwnerUID,
+		gid:     DefaultOwnerGID,
 	}
 	m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{}
 	return nil
@@ -133,6 +139,8 @@ func (m *MemoryFS) OpenFile(_ context.Context, name string, flag int, perm stdfs
 		node = &memoryNode{
 			mode:    perm,
 			modTime: time.Now().UTC(),
+			uid:     DefaultOwnerUID,
+			gid:     DefaultOwnerGID,
 		}
 		m.nodes[abs] = node
 		m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{}
@@ -247,6 +255,21 @@ func (m *MemoryFS) Chmod(_ context.Context, name string, mode stdfs.FileMode) er
 	}
 	typeBits := node.mode &^ stdfs.ModePerm
 	node.mode = typeBits | mode.Perm()
+	node.modTime = time.Now().UTC()
+	m.nodes[abs] = node
+	return nil
+}
+
+func (m *MemoryFS) Chown(_ context.Context, name string, uid, gid uint32, follow bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	abs, node, err := m.resolvePathLocked(name, follow, false)
+	if err != nil {
+		return &os.PathError{Op: "chown", Path: Resolve(m.cwd, name), Err: err}
+	}
+	node.uid = uid
+	node.gid = gid
 	node.modTime = time.Now().UTC()
 	m.nodes[abs] = node
 	return nil
@@ -400,6 +423,8 @@ func (m *MemoryFS) mkdirAllLocked(name string, perm stdfs.FileMode) error {
 			mode:     stdfs.ModeDir | perm,
 			children: make(map[string]struct{}),
 			modTime:  time.Now().UTC(),
+			uid:      DefaultOwnerUID,
+			gid:      DefaultOwnerGID,
 		}
 		m.nodes[current].children[part] = struct{}{}
 		current = next
@@ -620,6 +645,8 @@ type fileInfo struct {
 	size    int64
 	mode    stdfs.FileMode
 	modTime time.Time
+	uid     uint32
+	gid     uint32
 }
 
 func newFileInfo(name string, node *memoryNode) fileInfo {
@@ -634,6 +661,8 @@ func newFileInfo(name string, node *memoryNode) fileInfo {
 		size:    size,
 		mode:    node.mode,
 		modTime: node.modTime,
+		uid:     node.uid,
+		gid:     node.gid,
 	}
 }
 
@@ -642,7 +671,12 @@ func (fi fileInfo) Size() int64          { return fi.size }
 func (fi fileInfo) Mode() stdfs.FileMode { return fi.mode }
 func (fi fileInfo) ModTime() time.Time   { return fi.modTime }
 func (fi fileInfo) IsDir() bool          { return fi.mode.IsDir() }
-func (fi fileInfo) Sys() any             { return nil }
+func (fi fileInfo) Sys() any {
+	return FileMetadata{
+		UID: fi.uid,
+		GID: fi.gid,
+	}
+}
 
 var _ FileSystem = (*MemoryFS)(nil)
 var _ File = (*memoryFile)(nil)

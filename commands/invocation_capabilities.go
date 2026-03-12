@@ -207,6 +207,18 @@ func (fs *CommandFS) Link(ctx context.Context, oldName, newName string) error {
 	return nil
 }
 
+func (fs *CommandFS) Chown(ctx context.Context, name string, uid, gid uint32, follow bool) error {
+	abs, err := fs.prepare(ctx, policy.FileActionWrite, name)
+	if err != nil {
+		return err
+	}
+	if err := fs.raw().Chown(ctx, abs, uid, gid, follow); err != nil {
+		return wrapCommandError(err)
+	}
+	recordFileMutation(fs.trace, "chown", abs, abs, abs)
+	return nil
+}
+
 func (fs *CommandFS) Chmod(ctx context.Context, name string, mode stdfs.FileMode) error {
 	abs, err := fs.prepare(ctx, policy.FileActionWrite, name)
 	if err != nil {

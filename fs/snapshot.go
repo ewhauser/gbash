@@ -67,6 +67,10 @@ func (s *SnapshotFS) Chmod(_ context.Context, name string, _ stdfs.FileMode) err
 	return snapshotWriteError("chmod", Resolve(s.base.Getwd(), name))
 }
 
+func (s *SnapshotFS) Chown(_ context.Context, name string, _, _ uint32, _ bool) error {
+	return snapshotWriteError("chown", Resolve(s.base.Getwd(), name))
+}
+
 func (s *SnapshotFS) Chtimes(_ context.Context, name string, _, _ time.Time) error {
 	return snapshotWriteError("chtimes", Resolve(s.base.Getwd(), name))
 }

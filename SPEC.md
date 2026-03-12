@@ -1,7 +1,7 @@
 # just-bash-go
 
 Status: Draft v0.1
-Last updated: 2026-03-11
+Last updated: 2026-03-12
 
 ## 1. Purpose
 
@@ -153,6 +153,7 @@ The default in-memory sandbox should look Unix-like enough for agent scripts:
 
 - `/home/agent` as the default home and working directory
 - `/tmp` for scratch files
+- `/etc/passwd` and `/etc/group` with deterministic sandbox identity entries
 - `/bin` and `/usr/bin` as virtual command locations
 - `PATH=/usr/bin:/bin`
 - deterministic identity defaults via `USER=agent`, `LOGNAME=agent`, `GROUP=agent`, `GROUPS=1000`, `UID=1000`, `EUID=1000`, `GID=1000`, `EGID=1000`, and `SHELL=/bin/sh`
@@ -624,8 +625,9 @@ For file/path commands, the runtime now supports a practical agent-oriented subs
 - `link` exposes the strict two-operand hard-link form used by GNU/coreutils compatibility harnesses
 - `dir` reuses the supported `ls` option subset but defaults to non-long directory listings with `dir`-specific help/version text
 - `chmod` supports octal and symbolic modes plus recursive `-R`
+- `chown` supports owner/group changes from numeric IDs or sandbox identity names, `--reference`, `--from`, recursive `-R`, and GNU-style symlink traversal controls `-H/-L/-P` plus `--dereference` and `-h/--no-dereference`
 - `readlink` supports raw link-target output and `-f` canonicalization
-- `stat` supports default output and `-c` formatting for common fields such as name, size, type, and mode
+- `stat` supports default output and `-c` formatting for common fields such as name, size, type, mode, and ownership
 - `basename` and `dirname` support multi-operand path trimming, trailing-suffix removal, and Unix-style slash normalization
 - `tree` supports `-a`, `-d`, `-L`, and `-f`
 - `du` supports `-a`, `-s`, `-h`, `-c`, and `--max-depth`

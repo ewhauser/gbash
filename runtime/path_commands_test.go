@@ -176,6 +176,81 @@ func TestChmodSupportsRecursiveMode(t *testing.T) {
 	}
 }
 
+func TestChownSupportsNamedAndNumericOwners(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "echo hi > /home/agent/file.txt\nstat -c '%u:%g:%U:%G' /home/agent/file.txt\nchown 123:456 /home/agent/file.txt\nstat -c '%u:%g:%U:%G' /home/agent/file.txt\nchown agent:agent /home/agent/file.txt\nstat -c '%u:%g:%U:%G' /home/agent/file.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("Stdout lines = %v, want 3", lines)
+	}
+	if got, want := lines[0], "1000:1000:agent:agent"; got != want {
+		t.Fatalf("initial stat = %q, want %q", got, want)
+	}
+	if got, want := lines[1], "123:456:123:456"; got != want {
+		t.Fatalf("numeric chown stat = %q, want %q", got, want)
+	}
+	if got, want := lines[2], "1000:1000:agent:agent"; got != want {
+		t.Fatalf("named chown stat = %q, want %q", got, want)
+	}
+}
+
+func TestChownSupportsReferenceFromAndRecursiveFlags(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "mkdir -p /home/agent/tree/sub\necho ref > /home/agent/ref.txt\necho one > /home/agent/tree/file.txt\necho two > /home/agent/tree/sub/file.txt\nchown 41:42 /home/agent/ref.txt\nchown --from=1000:1000 --reference=/home/agent/ref.txt /home/agent/tree/file.txt\nchown --from=7:8 99:100 /home/agent/tree/file.txt\nchown -R 51:52 /home/agent/tree\nstat -c '%u:%g' /home/agent/tree/file.txt\nstat -c '%u:%g' /home/agent/tree/sub/file.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("Stdout lines = %v, want 2", lines)
+	}
+	for idx, line := range lines {
+		if got, want := line, "51:52"; got != want {
+			t.Fatalf("line %d = %q, want %q", idx, got, want)
+		}
+	}
+}
+
+func TestChownNoDereferenceTargetsTheSymlink(t *testing.T) {
+	rt := newRuntime(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "echo data > /home/agent/target.txt\nln -s target.txt /home/agent/link.txt\nchown 61:62 /home/agent/link.txt\nstat -c '%u:%g' /home/agent/target.txt\nstat -c '%u:%g %F' /home/agent/link.txt\nchown -h 71:72 /home/agent/link.txt\nstat -c '%u:%g' /home/agent/target.txt\nstat -c '%u:%g %F' /home/agent/link.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("Stdout lines = %v, want 4", lines)
+	}
+	if got, want := lines[0], "61:62"; got != want {
+		t.Fatalf("target after dereference = %q, want %q", got, want)
+	}
+	if got, want := lines[1], "1000:1000 symbolic link"; got != want {
+		t.Fatalf("link before -h = %q, want %q", got, want)
+	}
+	if got, want := lines[2], "61:62"; got != want {
+		t.Fatalf("target after -h = %q, want %q", got, want)
+	}
+	if got, want := lines[3], "71:72 symbolic link"; got != want {
+		t.Fatalf("link after -h = %q, want %q", got, want)
+	}
+}
+
 func TestStatFormatsMultipleFilesAndContinuesOnError(t *testing.T) {
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/home/agent/one.txt", []byte("hello"))

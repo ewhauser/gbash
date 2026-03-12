@@ -35,11 +35,19 @@ func (h *HostFS) OpenFile(_ context.Context, name string, flag int, perm fs.File
 }
 
 func (h *HostFS) Stat(_ context.Context, name string) (fs.FileInfo, error) {
-	return os.Stat(h.resolve(name))
+	info, err := os.Stat(h.resolve(name))
+	if err != nil {
+		return nil, err
+	}
+	return compatFileInfo{name: filepath.Base(h.resolve(name)), info: info}, nil
 }
 
 func (h *HostFS) Lstat(_ context.Context, name string) (fs.FileInfo, error) {
-	return os.Lstat(h.resolve(name))
+	info, err := os.Lstat(h.resolve(name))
+	if err != nil {
+		return nil, err
+	}
+	return compatFileInfo{name: filepath.Base(h.resolve(name)), info: info}, nil
 }
 
 func (h *HostFS) ReadDir(_ context.Context, name string) ([]fs.DirEntry, error) {
@@ -68,6 +76,13 @@ func (h *HostFS) Symlink(_ context.Context, target, linkName string) error {
 
 func (h *HostFS) Link(_ context.Context, oldName, newName string) error {
 	return os.Link(h.resolve(oldName), h.resolve(newName))
+}
+
+func (h *HostFS) Chown(_ context.Context, name string, uid, gid uint32, follow bool) error {
+	if follow {
+		return os.Chown(h.resolve(name), int(uid), int(gid))
+	}
+	return os.Lchown(h.resolve(name), int(uid), int(gid))
 }
 
 func (h *HostFS) Chmod(_ context.Context, name string, mode fs.FileMode) error {
@@ -129,3 +144,15 @@ func (h *HostFS) resolve(name string) string {
 	}
 	return filepath.Clean(filepath.Join(cwd, converted))
 }
+
+type compatFileInfo struct {
+	name string
+	info fs.FileInfo
+}
+
+func (i compatFileInfo) Name() string       { return i.name }
+func (i compatFileInfo) Size() int64        { return i.info.Size() }
+func (i compatFileInfo) Mode() fs.FileMode  { return i.info.Mode() }
+func (i compatFileInfo) ModTime() time.Time { return i.info.ModTime() }
+func (i compatFileInfo) IsDir() bool        { return i.info.IsDir() }
+func (i compatFileInfo) Sys() any           { return jbfs.MetadataFromSys(i.info.Sys()) }

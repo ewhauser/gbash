@@ -85,6 +85,8 @@ func defaultStatOutput(abs string, info stdfs.FileInfo) string {
 }
 
 func renderStatFormat(ctx context.Context, inv *Invocation, abs string, info stdfs.FileInfo, format string) (string, error) {
+	identities := loadPermissionIdentityDB(ctx, inv)
+	owner := permissionLookupOwnership(identities, info)
 	var b strings.Builder
 	for i := 0; i < len(format); i++ {
 		if format[i] != '%' || i == len(format)-1 {
@@ -115,10 +117,14 @@ func renderStatFormat(ctx context.Context, inv *Invocation, abs string, info std
 			b.WriteString(formatModeOctal(info.Mode()))
 		case 'A':
 			b.WriteString(formatModeLong(info.Mode()))
-		case 'u', 'g':
-			b.WriteString("0")
-		case 'U', 'G':
-			b.WriteString("root")
+		case 'u':
+			fmt.Fprintf(&b, "%d", owner.uid)
+		case 'g':
+			fmt.Fprintf(&b, "%d", owner.gid)
+		case 'U':
+			b.WriteString(permissionNameOrID(owner.user, owner.uid))
+		case 'G':
+			b.WriteString(permissionNameOrID(owner.group, owner.gid))
 		default:
 			return "", fmt.Errorf("unsupported format sequence %%%c", format[i])
 		}

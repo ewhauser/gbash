@@ -423,6 +423,10 @@ func (s *sqliteFS) Link(ctx context.Context, oldName, newName string) error {
 	})
 }
 
+func (s *sqliteFS) Chown(_ context.Context, name string, _, _ uint32, _ bool) error {
+	return &os.PathError{Op: "chown", Path: jbfs.Resolve(s.cwd, name), Err: stdfs.ErrPermission}
+}
+
 func (s *sqliteFS) Chmod(ctx context.Context, name string, mode stdfs.FileMode) error {
 	if err := ctx.Err(); err != nil {
 		return err

@@ -277,6 +277,10 @@ func (h *HostFS) Link(_ context.Context, _, newName string) error {
 	return h.readOnlyError("link", h.resolve(newName))
 }
 
+func (h *HostFS) Chown(_ context.Context, name string, _, _ uint32, _ bool) error {
+	return h.readOnlyError("chown", h.resolve(name))
+}
+
 func (h *HostFS) Chmod(_ context.Context, name string, _ stdfs.FileMode) error {
 	return h.readOnlyError("chmod", h.resolve(name))
 }
@@ -552,7 +556,7 @@ func (i namedFileInfo) Size() int64          { return i.info.Size() }
 func (i namedFileInfo) Mode() stdfs.FileMode { return i.info.Mode() }
 func (i namedFileInfo) ModTime() time.Time   { return i.info.ModTime() }
 func (i namedFileInfo) IsDir() bool          { return i.info.IsDir() }
-func (i namedFileInfo) Sys() any             { return i.info.Sys() }
+func (i namedFileInfo) Sys() any             { return MetadataFromSys(i.info.Sys()) }
 
 type staticFileInfo struct {
 	name    string
@@ -566,7 +570,12 @@ func (i staticFileInfo) Size() int64          { return i.size }
 func (i staticFileInfo) Mode() stdfs.FileMode { return i.mode }
 func (i staticFileInfo) ModTime() time.Time   { return i.modTime }
 func (i staticFileInfo) IsDir() bool          { return i.mode.IsDir() }
-func (i staticFileInfo) Sys() any             { return nil }
+func (i staticFileInfo) Sys() any {
+	return FileMetadata{
+		UID: DefaultOwnerUID,
+		GID: DefaultOwnerGID,
+	}
+}
 
 type fileTooLargeError struct {
 	size int64

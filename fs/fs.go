@@ -25,6 +25,7 @@ type FileSystem interface {
 	Realpath(ctx context.Context, name string) (string, error)
 	Symlink(ctx context.Context, target, linkName string) error
 	Link(ctx context.Context, oldName, newName string) error
+	Chown(ctx context.Context, name string, uid, gid uint32, follow bool) error
 	Chmod(ctx context.Context, name string, mode stdfs.FileMode) error
 	Chtimes(ctx context.Context, name string, atime, mtime time.Time) error
 	MkdirAll(ctx context.Context, name string, perm stdfs.FileMode) error
