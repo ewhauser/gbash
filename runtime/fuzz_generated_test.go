@@ -205,6 +205,9 @@ func renderCommand(spec fuzzCommandMetadata, variant fuzzCommandVariant, fixture
 		parts = append(parts, shellQuote(fixtures.render(token)))
 	}
 	command := strings.Join(parts, " ")
+	if spec.Name == "[" {
+		command += " ]"
+	}
 	if variant.StdinHint == "" {
 		return command
 	}

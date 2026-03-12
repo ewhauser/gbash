@@ -121,6 +121,30 @@ func TestLNHardLinkSharesContent(t *testing.T) {
 	}
 }
 
+func TestLinkHardLinkSharesContent(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "echo original > /home/agent/src.txt\nlink /home/agent/src.txt /home/agent/dst.txt\necho updated > /home/agent/dst.txt\ncat /home/agent/src.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "updated\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestLinkReportsMissingSource(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "link /home/agent/missing.txt /home/agent/dst.txt\n")
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "cannot create link") || !strings.Contains(result.Stderr, "No such file or directory") {
+		t.Fatalf("Stderr = %q, want missing-source error", result.Stderr)
+	}
+}
+
 func TestChmodSupportsOctalAndSymbolicModes(t *testing.T) {
 	session := newSession(t, &Config{})
 

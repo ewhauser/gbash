@@ -101,6 +101,51 @@ func FuzzDirectoryTraversalCommands(f *testing.F) {
 	})
 }
 
+func FuzzCompatPredicateCommands(f *testing.F) {
+	rt := newFuzzRuntime(f)
+
+	seeds := []struct {
+		name  string
+		data  []byte
+		token string
+	}{
+		{"alpha", []byte("hello\n"), "match"},
+		{"notes-1", []byte("# title\nbody\n"), "value"},
+		{"data.bin", []byte{0x00, 0x01, 0x02, 0x03, 0xff}, "binary"},
+	}
+	for _, seed := range seeds {
+		f.Add(seed.name, seed.data, seed.token)
+	}
+
+	f.Fuzz(func(t *testing.T, rawName string, rawData []byte, rawToken string) {
+		session := newFuzzSession(t, rt)
+		inputPath := fuzzPath(rawName) + ".txt"
+		linkPath := fuzzPath(rawName) + ".link"
+		dirPath := path.Dir(inputPath)
+		data := clampFuzzData(rawData)
+		token := sanitizeFuzzToken(rawToken)
+		if token == "" {
+			token = "value"
+		}
+
+		writeSessionFile(t, session, inputPath, data)
+
+		script := fmt.Appendf(nil,
+			"dir %s >/tmp/dir.out || true\nlink %s %s || true\ntest -e %s || true\ntest %s = %s || true\n[ -s %s ] || true\n",
+			shellQuote(dirPath),
+			shellQuote(inputPath),
+			shellQuote(linkPath),
+			shellQuote(inputPath),
+			shellQuote(token),
+			shellQuote(token),
+			shellQuote(inputPath),
+		)
+
+		result, err := runFuzzSessionScript(t, session, script)
+		assertSecureFuzzOutcome(t, script, result, err)
+	})
+}
+
 func FuzzTextSearchCommands(f *testing.F) {
 	rt := newFuzzRuntime(f)
 

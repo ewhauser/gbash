@@ -181,6 +181,54 @@ func TestLSReturnsMissingPathExitCode(t *testing.T) {
 	}
 }
 
+func TestDirUsesDirUsageAndNonLongDefaultOutput(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/tmp/dir-view/alpha.txt", []byte("alpha\n"))
+	writeSessionFile(t, session, "/tmp/dir-view/beta.txt", []byte("beta\n"))
+
+	result := mustExecSession(t, session, "dir --help\necho ---\ndir /tmp/dir-view\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	parts := strings.Split(result.Stdout, "---\n")
+	if len(parts) != 2 {
+		t.Fatalf("Stdout blocks = %q, want 2 blocks", result.Stdout)
+	}
+	helpBlock := parts[0]
+	if !strings.Contains(helpBlock, "Usage:\n  dir [OPTION]... [FILE]...") {
+		t.Fatalf("help block = %q, want dir usage", helpBlock)
+	}
+	if strings.Contains(helpBlock, "ls [OPTION]") {
+		t.Fatalf("help block = %q, want no ls usage", helpBlock)
+	}
+
+	listing := strings.TrimSpace(parts[1])
+	for _, want := range []string{"alpha.txt", "beta.txt"} {
+		if !strings.Contains(listing, want) {
+			t.Fatalf("dir output = %q, want %q", listing, want)
+		}
+	}
+	if strings.Contains(listing, "-rw") {
+		t.Fatalf("dir output = %q, want non-long default output", listing)
+	}
+}
+
+func TestDirSupportsLongFormatViaLSFlags(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/tmp/dir-long/item.txt", []byte("payload\n"))
+
+	result := mustExecSession(t, session, "dir -l /tmp/dir-long\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "item.txt") || !strings.Contains(result.Stdout, "-rw") {
+		t.Fatalf("Stdout = %q, want long-format output", result.Stdout)
+	}
+}
+
 func splitTrimmedLines(block string) []string {
 	trimmed := strings.TrimSpace(block)
 	if trimmed == "" {

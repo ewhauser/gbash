@@ -621,6 +621,8 @@ For file/path commands, the runtime now supports a practical agent-oriented subs
 - `touch` supports creation, `-c`, and `-d/--date`
 - `cat` supports stdin or file concatenation plus `-n/--number` line numbering
 - `ln` supports hard links plus `-s` and `-f`
+- `link` exposes the strict two-operand hard-link form used by GNU/coreutils compatibility harnesses
+- `dir` reuses the supported `ls` option subset but defaults to non-long directory listings with `dir`-specific help/version text
 - `chmod` supports octal and symbolic modes plus recursive `-R`
 - `readlink` supports raw link-target output and `-f` canonicalization
 - `stat` supports default output and `-c` formatting for common fields such as name, size, type, and mode
@@ -664,6 +666,7 @@ For the shell/process helper batch, the runtime should expose practical, sandbox
 - `env` supports `-i`, `-u NAME`, inline `NAME=value` assignments, and nested command execution with scoped environment replacement
 - `id` reports a deterministic virtual sandbox identity instead of consulting the host passwd/group database, supports the GNU/BSD-compatible option surface used by uutils (`-a`, `-A`, `-u`, `-g`, `-G`, `-n`, `-r`, `-z`, `-Z`, `-p`, `-P`), and treats audit or security-context output as sandbox-owned compatibility behavior rather than host state
 - `printenv` prints either the whole environment or named variables and exits non-zero when a requested variable is missing
+- `test` and `[` support argv-only GNU-style predicate evaluation over strings, integers, file metadata, `!`, `-a`, `-o`, and parenthesized expressions, while mapping ownership and special-file predicates onto deterministic sandbox behavior when host metadata is unavailable
 - `true` and `false` exist as explicit virtual commands, while bare shell builtins remain interpreter-owned unless intentionally shadowed
 - `which` supports `-a` and `-s` over the virtual `PATH`
 - `help` exposes runtime-owned help topics for the supported shell builtin surface
