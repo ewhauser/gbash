@@ -16,7 +16,7 @@ func TestParseCommandSpecGroupedShortAndAttachedValues(t *testing.T) {
 		},
 	}
 
-	matches, action, err := ParseCommandSpec(&Invocation{Args: []string{"-as,", "out.txt"}}, spec)
+	matches, action, err := ParseCommandSpec(&Invocation{Args: []string{"-as,", "out.txt"}}, &spec)
 	if err != nil {
 		t.Fatalf("ParseCommandSpec() error = %v", err)
 	}
@@ -46,10 +46,11 @@ func TestParseCommandSpecSupportsLongInferenceAndDoubleDash(t *testing.T) {
 		},
 	}
 
-	helpMatches, action, err := ParseCommandSpec(&Invocation{Args: []string{"--ver"}}, CommandSpec{
+	versionSpec := CommandSpec{
 		Name:  spec.Name,
 		Parse: ParseConfig{InferLongOptions: true, AutoVersion: true},
-	})
+	}
+	helpMatches, action, err := ParseCommandSpec(&Invocation{Args: []string{"--ver"}}, &versionSpec)
 	if err != nil {
 		t.Fatalf("ParseCommandSpec(--ver) error = %v", err)
 	}
@@ -60,7 +61,7 @@ func TestParseCommandSpecSupportsLongInferenceAndDoubleDash(t *testing.T) {
 		t.Fatalf("matches = nil, want non-nil")
 	}
 
-	matches, action, err := ParseCommandSpec(&Invocation{Args: []string{"--", "--version"}}, spec)
+	matches, action, err := ParseCommandSpec(&Invocation{Args: []string{"--", "--version"}}, &spec)
 	if err != nil {
 		t.Fatalf("ParseCommandSpec(--) error = %v", err)
 	}
@@ -84,7 +85,7 @@ func TestParseCommandSpecOptionalValueEqualsOnly(t *testing.T) {
 		},
 	}
 
-	matches, action, err := ParseCommandSpec(&Invocation{Args: []string{"--output-error", "out.txt"}}, spec)
+	matches, action, err := ParseCommandSpec(&Invocation{Args: []string{"--output-error", "out.txt"}}, &spec)
 	if err != nil {
 		t.Fatalf("ParseCommandSpec() error = %v", err)
 	}
@@ -111,7 +112,7 @@ func TestParseCommandSpecNegativeNumbersAsPositionals(t *testing.T) {
 		},
 	}
 
-	matches, action, err := ParseCommandSpec(&Invocation{Args: []string{"-0.0", "1"}}, spec)
+	matches, action, err := ParseCommandSpec(&Invocation{Args: []string{"-0.0", "1"}}, &spec)
 	if err != nil {
 		t.Fatalf("ParseCommandSpec() error = %v", err)
 	}

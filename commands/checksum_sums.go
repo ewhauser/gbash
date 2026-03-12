@@ -43,8 +43,6 @@ type checksumOptions struct {
 	ignoreMissing bool
 	strict        bool
 	verbosity     checksumVerbosity
-	help          bool
-	version       bool
 	textFlagSet   bool
 	binaryFlagSet bool
 	tagFlagSet    bool
@@ -188,20 +186,6 @@ func (c *checksumSum) RunParsed(ctx context.Context, inv *Invocation, matches *P
 		return c.runCheckMode(ctx, inv, opts)
 	}
 	return c.runDigestMode(ctx, inv, opts)
-}
-
-func (c *checksumSum) parseArgs(inv *Invocation) (checksumOptions, error) {
-	matches, action, err := ParseCommandSpec(inv, c.Spec())
-	if err != nil {
-		return checksumOptions{}, err
-	}
-	opts, err := c.optionsFromMatches(inv, matches)
-	if err != nil {
-		return checksumOptions{}, err
-	}
-	opts.help = action == "help"
-	opts.version = action == "version"
-	return opts, nil
 }
 
 func (c *checksumSum) optionsFromMatches(inv *Invocation, matches *ParsedCommand) (checksumOptions, error) {
@@ -707,16 +691,6 @@ func errorsIsDirectory(err error) bool {
 		return true
 	}
 	return strings.Contains(err.Error(), "is a directory")
-}
-
-func writeChecksumUnknownOption(inv *Invocation, name, option string) error {
-	_, _ = fmt.Fprintf(inv.Stderr, "%s: unrecognized option '%s'\n", name, option)
-	return &ExitError{Code: 1}
-}
-
-func writeChecksumUnknownShort(inv *Invocation, name, option string) error {
-	_, _ = fmt.Fprintf(inv.Stderr, "%s: invalid option -- '%s'\n", name, option)
-	return &ExitError{Code: 1}
 }
 
 var _ Command = (*checksumSum)(nil)

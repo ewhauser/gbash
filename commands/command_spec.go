@@ -144,13 +144,14 @@ func RunCommand(ctx context.Context, cmd Command, inv *Invocation) error {
 	specCmd, ok := cmd.(SpecProvider)
 	if ok {
 		if runner, ok := cmd.(ParsedRunner); ok {
-			return runCommandWithSpec(ctx, inv, specCmd.Spec(), runner.RunParsed)
+			spec := specCmd.Spec()
+			return runCommandWithSpec(ctx, inv, &spec, runner.RunParsed)
 		}
 	}
 	return cmd.Run(ctx, inv)
 }
 
-func runCommandWithSpec(ctx context.Context, inv *Invocation, spec CommandSpec, run func(context.Context, *Invocation, *ParsedCommand) error) error {
+func runCommandWithSpec(ctx context.Context, inv *Invocation, spec *CommandSpec, run func(context.Context, *Invocation, *ParsedCommand) error) error {
 	matches, action, err := ParseCommandSpec(inv, spec)
 	if err != nil {
 		return err
@@ -165,10 +166,10 @@ func runCommandWithSpec(ctx context.Context, inv *Invocation, spec CommandSpec, 
 	}
 }
 
-func ParseCommandSpec(inv *Invocation, spec CommandSpec) (*ParsedCommand, string, error) {
+func ParseCommandSpec(inv *Invocation, spec *CommandSpec) (*ParsedCommand, string, error) {
 	spec = normalizeCommandSpec(spec)
 	parsed := &ParsedCommand{
-		Spec:         spec,
+		Spec:         *spec,
 		optionValues: make(map[string][]string),
 		optionCount:  make(map[string]int),
 		optionOrder:  nil,
@@ -192,7 +193,7 @@ func ParseCommandSpec(inv *Invocation, spec CommandSpec) (*ParsedCommand, string
 			}
 			continue
 		}
-		if parsingOptions && arg != "-" && strings.HasPrefix(arg, "-") && !(spec.Parse.NegativeNumberPositional && looksNegativeNumeric(arg)) {
+		if parsingOptions && arg != "-" && strings.HasPrefix(arg, "-") && (!spec.Parse.NegativeNumberPositional || !looksNegativeNumeric(arg)) {
 			action, handled, err := parseShortOptions(inv, spec, parsed, arg, &args)
 			if err != nil || handled {
 				return parsed, action, err
@@ -214,26 +215,27 @@ func ParseCommandSpec(inv *Invocation, spec CommandSpec) (*ParsedCommand, string
 	return parsed, "", nil
 }
 
-func normalizeCommandSpec(spec CommandSpec) CommandSpec {
-	if spec.Parse.AutoHelp {
-		spec.Options = append(spec.Options, OptionSpec{
+func normalizeCommandSpec(spec *CommandSpec) *CommandSpec {
+	normalized := *spec
+	if normalized.Parse.AutoHelp {
+		normalized.Options = append(normalized.Options, OptionSpec{
 			Name:  "help",
 			Short: 'h',
 			Long:  "help",
 			Help:  "display this help and exit",
 		})
 	}
-	if spec.Parse.AutoVersion {
-		spec.Options = append(spec.Options, OptionSpec{
+	if normalized.Parse.AutoVersion {
+		normalized.Options = append(normalized.Options, OptionSpec{
 			Name: "version",
 			Long: "version",
 			Help: "output version information and exit",
 		})
 	}
-	return spec
+	return &normalized
 }
 
-func parseLongOption(inv *Invocation, spec CommandSpec, parsed *ParsedCommand, raw string, rest *[]string) (string, bool, error) {
+func parseLongOption(inv *Invocation, spec *CommandSpec, parsed *ParsedCommand, raw string, rest *[]string) (action string, handled bool, err error) {
 	name := strings.TrimPrefix(raw, "--")
 	value := ""
 	hasValue := false
@@ -263,7 +265,7 @@ func parseLongOption(inv *Invocation, spec CommandSpec, parsed *ParsedCommand, r
 	return "", false, nil
 }
 
-func parseShortOptions(inv *Invocation, spec CommandSpec, parsed *ParsedCommand, raw string, rest *[]string) (string, bool, error) {
+func parseShortOptions(inv *Invocation, spec *CommandSpec, parsed *ParsedCommand, raw string, rest *[]string) (action string, handled bool, err error) {
 	shorts := strings.TrimPrefix(raw, "-")
 	if !spec.Parse.GroupShortOptions && len(shorts) > 1 {
 		return "", false, commandUsageError(inv, spec.Name, "invalid option -- '%c'", rune(shorts[0]))
@@ -307,7 +309,7 @@ func parseShortOptions(inv *Invocation, spec CommandSpec, parsed *ParsedCommand,
 	return "", false, nil
 }
 
-func applyOptionValue(inv *Invocation, spec CommandSpec, parsed *ParsedCommand, opt OptionSpec, shownName, value string, hasValue bool, rest *[]string, long bool) error {
+func applyOptionValue(inv *Invocation, spec *CommandSpec, parsed *ParsedCommand, opt *OptionSpec, shownName, value string, hasValue bool, rest *[]string, long bool) error {
 	switch opt.Arity {
 	case OptionNoValue:
 		if hasValue {
@@ -332,7 +334,6 @@ func applyOptionValue(inv *Invocation, spec CommandSpec, parsed *ParsedCommand, 
 		if !hasValue && long && !opt.OptionalValueEqualsOnly && len(*rest) > 0 && !strings.HasPrefix((*rest)[0], "-") {
 			value = (*rest)[0]
 			*rest = (*rest)[1:]
-			hasValue = true
 		}
 		recordOption(parsed, opt.Name, value)
 		return nil
@@ -392,9 +393,10 @@ func assignArgSpecs(inv *Invocation, parsed *ParsedCommand) error {
 	return nil
 }
 
-func matchLongOption(spec CommandSpec, name string) (OptionSpec, error) {
-	candidates := make([]OptionSpec, 0, len(spec.Options))
-	for _, opt := range spec.Options {
+func matchLongOption(spec *CommandSpec, name string) (*OptionSpec, error) {
+	candidates := make([]*OptionSpec, 0, len(spec.Options))
+	for i := range spec.Options {
+		opt := &spec.Options[i]
 		names := append([]string{opt.Long}, opt.Aliases...)
 		for _, candidate := range names {
 			if candidate == "" {
@@ -412,22 +414,23 @@ func matchLongOption(spec CommandSpec, name string) (OptionSpec, error) {
 	if len(candidates) == 1 {
 		return candidates[0], nil
 	}
-	return OptionSpec{}, fmt.Errorf("no long option match")
+	return nil, fmt.Errorf("no long option match")
 }
 
-func matchShortOption(spec CommandSpec, short rune) (OptionSpec, bool) {
-	for _, opt := range spec.Options {
+func matchShortOption(spec *CommandSpec, short rune) (*OptionSpec, bool) {
+	for i := range spec.Options {
+		opt := &spec.Options[i]
 		if opt.Short == short {
 			return opt, true
 		}
 	}
-	return OptionSpec{}, false
+	return nil, false
 }
 
-func RenderCommandHelp(w io.Writer, spec CommandSpec) error {
+func RenderCommandHelp(w io.Writer, spec *CommandSpec) error {
 	spec = normalizeCommandSpec(spec)
 	if spec.HelpRenderer != nil {
-		return spec.HelpRenderer(w, spec)
+		return spec.HelpRenderer(w, *spec)
 	}
 
 	var b strings.Builder
@@ -471,16 +474,17 @@ func RenderCommandHelp(w io.Writer, spec CommandSpec) error {
 	return err
 }
 
-func RenderCommandVersion(w io.Writer, spec CommandSpec) error {
+func RenderCommandVersion(w io.Writer, spec *CommandSpec) error {
 	if spec.VersionRenderer != nil {
-		return spec.VersionRenderer(w, spec)
+		return spec.VersionRenderer(w, *spec)
 	}
 	return RenderSimpleVersion(w, spec.Name)
 }
 
 func renderArgHelp(args []ArgSpec) []string {
 	lines := make([]string, 0, len(args))
-	for _, arg := range args {
+	for i := range args {
+		arg := &args[i]
 		if arg.Help == "" {
 			continue
 		}
@@ -497,7 +501,8 @@ func renderArgHelp(args []ArgSpec) []string {
 func renderOptionHelp(opts []OptionSpec) []string {
 	lines := make([]string, 0, len(opts))
 	seen := map[string]bool{}
-	for _, opt := range opts {
+	for i := range opts {
+		opt := &opts[i]
 		if opt.Hidden || seen[opt.Name] {
 			continue
 		}
@@ -508,7 +513,7 @@ func renderOptionHelp(opts []OptionSpec) []string {
 	return lines
 }
 
-func optionLabel(opt OptionSpec) string {
+func optionLabel(opt *OptionSpec) string {
 	parts := make([]string, 0, 2)
 	if opt.Short != 0 {
 		short := "-" + string(opt.Short)
@@ -529,7 +534,7 @@ func optionLabel(opt OptionSpec) string {
 	return strings.Join(parts, ", ")
 }
 
-func argLabel(arg ArgSpec) string {
+func argLabel(arg *ArgSpec) string {
 	label := arg.ValueName
 	if label == "" {
 		label = strings.ToUpper(arg.Name)
@@ -543,13 +548,14 @@ func argLabel(arg ArgSpec) string {
 	return label
 }
 
-func defaultUsage(spec CommandSpec) string {
+func defaultUsage(spec *CommandSpec) string {
 	var parts []string
 	parts = append(parts, spec.Name)
 	if len(spec.Options) > 0 {
 		parts = append(parts, "[OPTION]...")
 	}
-	for _, arg := range spec.Args {
+	for i := range spec.Args {
+		arg := &spec.Args[i]
 		part := argLabel(arg)
 		part = strings.TrimPrefix(strings.TrimSuffix(part, "]"), "[")
 		if !arg.Required {

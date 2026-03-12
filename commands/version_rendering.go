@@ -19,7 +19,7 @@ func RenderSimpleVersion(w io.Writer, name string) error {
 	return err
 }
 
-func RenderDetailedVersion(w io.Writer, info VersionInfo) error {
+func RenderDetailedVersion(w io.Writer, info *VersionInfo) error {
 	version := strings.TrimSpace(info.Version)
 	if version == "" {
 		version = "dev"

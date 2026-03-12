@@ -24,7 +24,7 @@ type buildMetadata struct {
 func versionText() string {
 	meta := currentBuildMetadata()
 	var b strings.Builder
-	_ = commands.RenderDetailedVersion(&b, commands.VersionInfo{
+	_ = commands.RenderDetailedVersion(&b, &commands.VersionInfo{
 		Name:    "gbash",
 		Version: meta.Version,
 		Commit:  meta.Commit,

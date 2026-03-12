@@ -153,7 +153,8 @@ func teeCommandSpec() CommandSpec {
 }
 
 func parseTeeArgs(inv *Invocation) (teeOptions, error) {
-	matches, action, err := ParseCommandSpec(inv, teeCommandSpec())
+	spec := teeCommandSpec()
+	matches, action, err := ParseCommandSpec(inv, &spec)
 	if err != nil {
 		return teeOptions{}, err
 	}
@@ -164,27 +165,6 @@ func parseTeeArgs(inv *Invocation) (teeOptions, error) {
 	opts.showHelp = action == "help"
 	opts.showVersion = action == "version"
 	return opts, nil
-}
-
-func matchTeeLongOption(name string) (string, error) {
-	options := []string{"append", "help", "ignore-interrupts", "output-error", "version"}
-	exact := ""
-	matches := make([]string, 0, len(options))
-	for _, option := range options {
-		if option == name {
-			exact = option
-		}
-		if strings.HasPrefix(option, name) {
-			matches = append(matches, option)
-		}
-	}
-	if exact != "" {
-		return exact, nil
-	}
-	if len(matches) == 1 {
-		return matches[0], nil
-	}
-	return "", errors.New("no long option match")
 }
 
 func teeOptionsFromMatches(matches *ParsedCommand) (teeOptions, error) {
@@ -460,18 +440,6 @@ func teeWriteWriterError(stderr io.Writer, name string, err error) {
 	if stderr != nil {
 		_, _ = fmt.Fprintf(stderr, "tee: %s: %v\n", name, err)
 	}
-}
-
-func teeUnknownLongOption(inv *Invocation, arg string) error {
-	return exitf(inv, 1, "tee: unrecognized option '%s'\nTry 'tee --help' for more information.", arg)
-}
-
-func teeUnknownShortOption(inv *Invocation, flag rune) error {
-	return exitf(inv, 1, "tee: invalid option -- '%c'\nTry 'tee --help' for more information.", flag)
-}
-
-func teeLongOptionTakesNoValue(inv *Invocation, arg string) error {
-	return exitf(inv, 1, "tee: option '%s' doesn't allow an argument\nTry 'tee --help' for more information.", arg)
 }
 
 func teeInvalidOutputErrorValue(inv *Invocation, value string) error {
