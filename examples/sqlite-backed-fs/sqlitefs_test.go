@@ -479,12 +479,12 @@ func newTestSQLiteFSAt(t *testing.T, dbPath string) *sqliteFS {
 func newSQLiteRuntime(t *testing.T, dbPath string) *gbruntime.Runtime {
 	t.Helper()
 
-	rt, err := gbruntime.New(&gbruntime.Config{
-		FileSystem: gbruntime.CustomFileSystem(
+	rt, err := gbruntime.New(gbruntime.WithFileSystem(
+		gbruntime.CustomFileSystem(
 			sqliteFSFactory{dbPath: dbPath},
 			defaultWorkDir,
 		),
-	})
+	))
 	if err != nil {
 		t.Fatalf("runtime.New() error = %v", err)
 	}

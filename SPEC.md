@@ -184,7 +184,7 @@ Package responsibilities:
 - `fs/`: POSIX-like path normalization, memory filesystem, host-backed lower layers, overlay, and snapshot backends
 - `network/`: runtime-owned HTTP sandbox with URL-prefix allowlists, method controls, redirect revalidation, and response-size limits
 - `commands/`: registry and Go-native command implementations such as `echo`, `cat`, `ls`, and `pwd`
-- `contrib/`: opt-in command modules that stay outside the root module dependency graph so heavyweight helpers do not inflate the core runtime
+- `contrib/`: opt-in command modules that stay outside the root module dependency graph so heavyweight helpers do not inflate the core runtime. The repository may also expose umbrella contrib helpers such as `contrib/extras` to register the full official contrib command set without changing the default runtime surface.
 - `policy/`: allowlists, root restrictions, size limits, network stance, and decision helpers
 - `trace/`: event schema, recorder interfaces, and in-memory buffering
 - `examples/`: runnable demos that can depend on external SDKs without affecting the root module build list
@@ -203,6 +203,8 @@ type Runtime struct {
     cfg Config
 }
 
+type Option func(*Config) error
+
 type Config struct {
     FileSystem    FileSystemConfig
     Registry      commands.CommandRegistry
@@ -212,6 +214,8 @@ type Config struct {
     Network       *network.Config
     NetworkClient network.Client
 }
+
+func New(options ...Option) (*Runtime, error)
 
 type FileSystemConfig struct {
     Factory    fs.Factory
@@ -354,6 +358,7 @@ Registry semantics are override-friendly: later registrations replace earlier on
 Key design decisions:
 
 - `Runtime` is a concrete type. Callers should not need to mock it.
+- `New` should accept composable runtime options, with helpers such as `WithRegistry`, `WithFileSystem`, `WithNetworkConfig`, and `WithConfig` for callers that prefer either direct options or an existing `Config` value.
 - `Session` is the primary unit of agent interaction.
 - `FileSystem` is narrow and POSIX-shaped.
 - filesystem state persists at the session level; shell-local state does not persist across executions by default
@@ -608,7 +613,7 @@ Initial MVP command set:
 - `rm`
 - `pwd`
 
-Contrib commands are registry-backed like core commands, but they are not part of `commands.DefaultRegistry()` and should be imported and registered explicitly by embedders that want them.
+Contrib commands are registry-backed like core commands, but they are not part of `commands.DefaultRegistry()` and should be imported and registered explicitly by embedders that want them. The `github.com/ewhauser/gbash/contrib/extras` module should remain an opt-in convenience helper that exposes a `FullRegistry()` constructor and keeps all official command-bearing contrib modules out of the root module's default dependency graph and registry contents unless embedders choose that bundle.
 
 For contrib `jq`, the `github.com/ewhauser/gbash/contrib/jq` module should support a practical CLI-compatible subset for agent workflows, including raw-input mode, file-backed filters, variable injection flags, positional argument injection, and basic output-formatting flags. Module loading and stream-mode parity can follow later.
 

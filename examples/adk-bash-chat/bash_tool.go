@@ -73,7 +73,7 @@ func newPersistentBashTool(ctx context.Context) (*persistentBashTool, error) {
 		return nil, fmt.Errorf("register sqlite3 command: %w", err)
 	}
 
-	rt, err := gbruntime.New(&gbruntime.Config{Registry: registry})
+	rt, err := gbruntime.New(gbruntime.WithRegistry(registry))
 	if err != nil {
 		return nil, fmt.Errorf("create runtime: %w", err)
 	}

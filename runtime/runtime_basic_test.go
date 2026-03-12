@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/ewhauser/gbash/commands"
 )
 
 func TestRunSimpleScript(t *testing.T) {
@@ -54,5 +56,39 @@ func TestUnknownCommand(t *testing.T) {
 	}
 	if !strings.Contains(result.Stderr, "missing-command: command not found") {
 		t.Fatalf("Stderr = %q, want command-not-found message", result.Stderr)
+	}
+}
+
+func TestNewAcceptsOptions(t *testing.T) {
+	registry := commands.NewRegistry(commands.NewEcho())
+
+	rt, err := New(WithRegistry(registry))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{Script: "echo hi\n"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := result.Stdout, "hi\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestNewAcceptsLegacyConfig(t *testing.T) {
+	registry := commands.NewRegistry(commands.NewEcho())
+
+	rt, err := New(&Config{Registry: registry})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{Script: "echo hi\n"})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := result.Stdout, "hi\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }

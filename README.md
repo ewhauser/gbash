@@ -47,7 +47,7 @@ import (
 )
 
 func main() {
-	rt, err := gbruntime.New(&gbruntime.Config{})
+	rt, err := gbruntime.New()
 	if err != nil {
 		panic(err)
 	}
@@ -92,14 +92,14 @@ import (
 )
 
 func main() {
-	rt, err := gbruntime.New(&gbruntime.Config{
-		Network: &gbnetwork.Config{
+	rt, err := gbruntime.New(
+		gbruntime.WithNetworkConfig(&gbnetwork.Config{
 			AllowedURLPrefixes: []string{"https://api.example.com/v1/"},
 			AllowedMethods:     []gbnetwork.Method{gbnetwork.MethodGet, gbnetwork.MethodHead},
 			MaxResponseBytes:   10 << 20,
 			DenyPrivateRanges:  true,
-		},
-	})
+		}),
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -134,7 +134,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	rt, err := gbruntime.New(&gbruntime.Config{})
+	rt, err := gbruntime.New()
 	if err != nil {
 		panic(err)
 	}
@@ -305,11 +305,11 @@ The zero value of `runtime.Config` still gives you an in-memory sandbox rooted a
 For the closest parity with `just-bash`'s real-directory overlay:
 
 ```go
-rt, err := gbruntime.New(&gbruntime.Config{
-	FileSystem: gbruntime.HostProjectFileSystem("/path/to/project", gbruntime.HostProjectOptions{
+rt, err := gbruntime.New(
+	gbruntime.WithFileSystem(gbruntime.HostProjectFileSystem("/path/to/project", gbruntime.HostProjectOptions{
 		VirtualRoot: "/home/agent/project",
-	}),
-})
+	})),
+)
 ```
 
 That mounts the host directory read-only at `/home/agent/project`, starts the session there, and keeps all writes, deletes, and command stubs in the in-memory upper layer. `VirtualRoot` defaults to `gbfs.DefaultHostVirtualRoot`. `MaxFileReadBytes` defaults to `gbfs.DefaultHostMaxFileReadBytes`. If you want the host tree mounted at `/`, set `VirtualRoot: "/"`.
@@ -325,12 +325,12 @@ func (f myFactory) New(ctx context.Context) (gbfs.FileSystem, error) {
 	return newMyJBFSAdapter(f.base), nil
 }
 
-rt, err := gbruntime.New(&gbruntime.Config{
-	FileSystem: gbruntime.CustomFileSystem(
+rt, err := gbruntime.New(
+	gbruntime.WithFileSystem(gbruntime.CustomFileSystem(
 		myFactory{base: os.DirFS("/path/to/workspace")},
 		"/home/agent",
-	),
-})
+	)),
+)
 ```
 
 If you want copy-on-write behavior over another backend, wrap it with `gbfs.Overlay(...)` before passing it to `CustomFileSystem`.
@@ -355,14 +355,14 @@ import (
 	gbruntime "github.com/ewhauser/gbash/runtime"
 )
 
-rt, err := gbruntime.New(&gbruntime.Config{
-	Network: &gbnetwork.Config{
+rt, err := gbruntime.New(
+	gbruntime.WithNetworkConfig(&gbnetwork.Config{
 		AllowedURLPrefixes: []string{"https://api.example.com/v1/"},
 		AllowedMethods:     []gbnetwork.Method{gbnetwork.MethodGet, gbnetwork.MethodHead},
 		MaxResponseBytes:   10 << 20,
 		DenyPrivateRanges:  true,
-	},
-})
+	}),
+)
 ```
 
 At runtime, network access works like this:
@@ -419,12 +419,32 @@ registry.RegisterLazy("echo", func() (commands.Command, error) {
 	}), nil
 })
 
-rt, err := runtime.New(&runtime.Config{Registry: registry})
+rt, err := runtime.New(runtime.WithRegistry(registry))
 ```
 
 See [`examples/custom-zstd/main.go`](./examples/custom-zstd/main.go) for a runnable example that adds a `zstd` command. Run it with `cd examples && make run-custom-zstd`.
 
 To opt into contrib commands such as `sqlite3`, `jq`, and `yq`:
+
+```go
+package main
+
+import (
+	"github.com/ewhauser/gbash/contrib/extras"
+	gbruntime "github.com/ewhauser/gbash/runtime"
+)
+
+func main() {
+	rt, err := gbruntime.New(gbruntime.WithRegistry(extras.FullRegistry()))
+	if err != nil {
+		panic(err)
+	}
+
+	_ = rt
+}
+```
+
+If you only want a subset, register the contrib modules individually:
 
 ```go
 package main
@@ -451,7 +471,7 @@ func main() {
 		panic(err)
 	}
 
-	rt, err := gbruntime.New(&gbruntime.Config{Registry: registry})
+	rt, err := gbruntime.New(gbruntime.WithRegistry(registry))
 	if err != nil {
 		panic(err)
 	}
@@ -464,7 +484,7 @@ func main() {
 }
 ```
 
-The stock `gbash` CLI and zero-config `runtime.New(&runtime.Config{})` only include core commands. Contrib commands are opt-in by design.
+The stock `gbash` CLI and zero-config `runtime.New()` only include core commands. Contrib commands are opt-in by design.
 
 ### Registry and Policy
 
@@ -509,6 +529,8 @@ Optional commands live in [`contrib/`](./contrib/) as separate Go modules so the
 | [`jq`](./contrib/jq/) | `github.com/ewhauser/gbash/contrib/jq` | [`itchyny/gojq`](https://github.com/itchyny/gojq) |
 | [`sqlite3`](./contrib/sqlite3/) | `github.com/ewhauser/gbash/contrib/sqlite3` | [`ncruces/go-sqlite3`](https://github.com/ncruces/go-sqlite3) |
 | [`yq`](./contrib/yq/) | `github.com/ewhauser/gbash/contrib/yq` | [`mikefarah/yq`](https://github.com/mikefarah/yq) |
+
+Use `github.com/ewhauser/gbash/contrib/extras` when you want to build a full registry for the contrib command set in one call.
 
 See [Custom Commands](#custom-commands) for how to register them.
 ## Shell Features

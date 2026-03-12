@@ -40,11 +40,11 @@ type Session struct {
 type ExecutionRequest = commands.ExecutionRequest
 type ExecutionResult = commands.ExecutionResult
 
-func New(cfg *Config) (*Runtime, error) {
-	if cfg == nil {
-		cfg = &Config{}
+func New(args ...any) (*Runtime, error) {
+	resolved, err := resolveConfig(args)
+	if err != nil {
+		return nil, err
 	}
-	resolved := *cfg
 	resolved.FileSystem = resolved.FileSystem.resolved()
 	if resolved.Registry == nil {
 		resolved.Registry = commands.DefaultRegistry()

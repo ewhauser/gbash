@@ -31,12 +31,12 @@ func run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, args []
 		return 1, err
 	}
 
-	rt, err := gbruntime.New(&gbruntime.Config{
-		FileSystem: gbruntime.CustomFileSystem(
+	rt, err := gbruntime.New(gbruntime.WithFileSystem(
+		gbruntime.CustomFileSystem(
 			sqliteFSFactory{dbPath: opts.dbPath},
 			opts.workDir,
 		),
-	})
+	))
 	if err != nil {
 		return 1, fmt.Errorf("create runtime: %w", err)
 	}

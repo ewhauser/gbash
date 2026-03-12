@@ -163,7 +163,7 @@ func executeBashTool(ctx context.Context, arguments string) (string, error) {
 		return "", errors.New("bash tool call did not include a script")
 	}
 
-	rt, err := gbruntime.New(&gbruntime.Config{})
+	rt, err := gbruntime.New()
 	if err != nil {
 		return "", fmt.Errorf("create runtime: %w", err)
 	}

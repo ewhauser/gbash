@@ -32,7 +32,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	rt, err := gbruntime.New(&gbruntime.Config{Registry: registry})
+	rt, err := gbruntime.New(gbruntime.WithRegistry(registry))
 	if err != nil {
 		fail(fmt.Errorf("create runtime: %w", err))
 	}

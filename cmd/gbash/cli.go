@@ -42,7 +42,7 @@ func runCLI(ctx context.Context, argv0 string, args []string, stdin io.Reader, s
 		return 0, nil
 	}
 
-	rt, err := gbruntime.New(&gbruntime.Config{})
+	rt, err := gbruntime.New()
 	if err != nil {
 		return 1, fmt.Errorf("init runtime: %w", err)
 	}
