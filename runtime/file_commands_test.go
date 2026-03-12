@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 )
@@ -52,6 +53,21 @@ func TestCPRejectsDirectoryWithoutRecursiveFlag(t *testing.T) {
 	}
 	if !strings.Contains(result.Stderr, "omitting directory") {
 		t.Fatalf("Stderr = %q, want directory omission error", result.Stderr)
+	}
+}
+
+func TestRMSupportsGroupedForceDirFlags(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "mkdir -p /tmp/empty\necho x > /tmp/out\nrm -fd /tmp/empty /tmp/out\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	for _, name := range []string{"/tmp/empty", "/tmp/out"} {
+		if _, err := session.FileSystem().Lstat(context.Background(), name); !os.IsNotExist(err) {
+			t.Fatalf("Lstat(%q) error = %v, want not exist", name, err)
+		}
 	}
 }
 
