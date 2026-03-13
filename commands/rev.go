@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"strings"
 )
 
 type Rev struct{}
@@ -17,13 +16,25 @@ func (c *Rev) Name() string {
 }
 
 func (c *Rev) Run(ctx context.Context, inv *Invocation) error {
-	args := inv.Args
-	if len(args) > 0 && strings.HasPrefix(args[0], "-") && args[0] != "-" && args[0] != "--" {
-		return exitf(inv, 1, "rev: unsupported flag %s", args[0])
+	return RunCommand(ctx, c, inv)
+}
+
+func (c *Rev) Spec() CommandSpec {
+	return CommandSpec{
+		Name:  "rev",
+		About: "Reverse lines characterwise",
+		Usage: "rev [FILE]...",
+		Args: []ArgSpec{
+			{Name: "file", ValueName: "FILE", Repeatable: true},
+		},
+		Parse: ParseConfig{
+			StopAtFirstPositional: true,
+		},
 	}
-	if len(args) > 0 && args[0] == "--" {
-		args = args[1:]
-	}
+}
+
+func (c *Rev) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
+	args := matches.Args("file")
 	inputs, err := readNamedInputs(ctx, inv, args, true)
 	if err != nil {
 		return err
