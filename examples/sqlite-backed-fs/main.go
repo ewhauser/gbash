@@ -31,7 +31,7 @@ func run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, args []
 		return 1, err
 	}
 
-	rt, err := gbash.New(gbash.WithFileSystem(
+	gb, err := gbash.New(gbash.WithFileSystem(
 		gbash.CustomFileSystem(
 			sqliteFSFactory{dbPath: opts.dbPath},
 			opts.workDir,
@@ -42,7 +42,7 @@ func run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, args []
 	}
 
 	if opts.repl || (opts.script == "" && stdinIsTTY(stdin)) {
-		return runInteractiveShell(ctx, rt, stdin, stdout, stderr, opts.workDir)
+		return runInteractiveShell(ctx, gb, stdin, stdout, stderr, opts.workDir)
 	}
 
 	script := opts.script
@@ -54,7 +54,7 @@ func run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, args []
 		script = string(data)
 	}
 
-	result, err := rt.Run(ctx, &gbash.ExecutionRequest{
+	result, err := gb.Run(ctx, &gbash.ExecutionRequest{
 		Name:   "sqlite-backed-fs",
 		Script: script,
 	})

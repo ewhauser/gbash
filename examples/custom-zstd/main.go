@@ -32,12 +32,12 @@ func main() {
 		os.Exit(2)
 	}
 
-	rt, err := gbash.New(gbash.WithRegistry(registry))
+	gb, err := gbash.New(gbash.WithRegistry(registry))
 	if err != nil {
 		fail(fmt.Errorf("create runtime: %w", err))
 	}
 
-	result, err := rt.Run(ctx, &gbash.ExecutionRequest{
+	result, err := gb.Run(ctx, &gbash.ExecutionRequest{
 		Name:   "custom-zstd",
 		Script: string(script),
 	})

@@ -45,12 +45,12 @@ import (
 )
 
 func main() {
-	rt, err := gbash.New()
+	gb, err := gbash.New()
 	if err != nil {
 		panic(err)
 	}
 
-	result, err := rt.Run(context.Background(), &gbash.ExecutionRequest{
+	result, err := gb.Run(context.Background(), &gbash.ExecutionRequest{
 		Script: "echo hello\npwd\n",
 	})
 	if err != nil {
@@ -87,14 +87,14 @@ import (
 )
 
 func main() {
-	rt, err := gbash.New(
+	gb, err := gbash.New(
 		gbash.WithHTTPAccess("https://api.example.com/v1/"),
 	)
 	if err != nil {
 		panic(err)
 	}
 
-	result, err := rt.Run(context.Background(), &gbash.ExecutionRequest{
+	result, err := gb.Run(context.Background(), &gbash.ExecutionRequest{
 		Script: "curl -o /tmp/status.json https://api.example.com/v1/status\ncat /tmp/status.json\n",
 	})
 	if err != nil {
@@ -124,12 +124,12 @@ import (
 func main() {
 	ctx := context.Background()
 
-	rt, err := gbash.New()
+	gb, err := gbash.New()
 	if err != nil {
 		panic(err)
 	}
 
-	session, err := rt.NewSession(ctx)
+	session, err := gb.NewSession(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -239,7 +239,7 @@ The zero value of `gbash.Config` still gives you an in-memory sandbox rooted at 
 For the closest parity with `just-bash`'s real-directory overlay:
 
 ```go
-rt, err := gbash.New(
+gb, err := gbash.New(
 	gbash.WithWorkspace("/path/to/project"),
 )
 ```
@@ -249,7 +249,7 @@ That mounts the host directory read-only at `/home/agent/project`, starts the se
 If you need to change the mount point or host-file read cap, drop down to the explicit filesystem helper:
 
 ```go
-rt, err := gbash.New(
+gb, err := gbash.New(
 	gbash.WithFileSystem(gbash.HostDirectoryFileSystem("/path/to/project", gbash.HostDirectoryOptions{
 		MountPoint: "/home/agent/project",
 	})),
@@ -263,7 +263,7 @@ rt, err := gbash.New(
 Network access is disabled by default. When you set `Config.Network` or provide `Config.NetworkClient`, the runtime registers `curl` automatically. Otherwise `curl` is not present in the sandbox at all.
 
 ```go
-rt, err := gbash.New(
+gb, err := gbash.New(
 	gbash.WithNetwork(&gbash.NetworkConfig{
 		AllowedURLPrefixes: []string{"https://api.example.com/v1/"},
 		AllowedMethods:     []gbash.Method{gbash.MethodGet, gbash.MethodHead},

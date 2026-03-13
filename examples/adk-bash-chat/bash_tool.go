@@ -40,7 +40,7 @@ type bashToolResult struct {
 }
 
 type persistentBashTool struct {
-	rt         *gbash.Runtime
+	gb         *gbash.Runtime
 	fixtureDir string
 
 	mu      sync.Mutex
@@ -73,13 +73,13 @@ func newPersistentBashTool(ctx context.Context) (*persistentBashTool, error) {
 		return nil, fmt.Errorf("register sqlite3 command: %w", err)
 	}
 
-	rt, err := gbash.New(gbash.WithRegistry(registry))
+	gb, err := gbash.New(gbash.WithRegistry(registry))
 	if err != nil {
 		return nil, fmt.Errorf("create runtime: %w", err)
 	}
 
 	bt := &persistentBashTool{
-		rt:         rt,
+		gb:         gb,
 		fixtureDir: mustFixtureDir(),
 	}
 	if err := bt.resetLocked(ctx); err != nil {
@@ -130,7 +130,7 @@ func (t *persistentBashTool) Reset(ctx context.Context) error {
 }
 
 func (t *persistentBashTool) resetLocked(ctx context.Context) error {
-	session, err := t.rt.NewSession(ctx)
+	session, err := t.gb.NewSession(ctx)
 	if err != nil {
 		return fmt.Errorf("create sandbox session: %w", err)
 	}
