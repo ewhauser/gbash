@@ -714,6 +714,187 @@ func TestLinkReportsMissingSource(t *testing.T) {
 	}
 }
 
+func TestUnlinkRemovesFile(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/home/agent/file.txt", []byte("data\n"))
+
+	result := mustExecSession(t, session, "unlink /home/agent/file.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if result.Stdout != "" || result.Stderr != "" {
+		t.Fatalf("output = stdout %q stderr %q, want empty", result.Stdout, result.Stderr)
+	}
+	if _, err := session.FileSystem().Stat(context.Background(), "/home/agent/file.txt"); !os.IsNotExist(err) {
+		t.Fatalf("Stat(file.txt) error = %v, want not exist", err)
+	}
+}
+
+func TestUnlinkRemovesSymlinkOnly(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "echo target > /home/agent/target.txt\nln -s /home/agent/target.txt /home/agent/link.txt\nunlink /home/agent/link.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if _, err := session.FileSystem().Stat(context.Background(), "/home/agent/target.txt"); err != nil {
+		t.Fatalf("Stat(target.txt) error = %v, want present", err)
+	}
+	if _, err := session.FileSystem().Lstat(context.Background(), "/home/agent/link.txt"); !os.IsNotExist(err) {
+		t.Fatalf("Lstat(link.txt) error = %v, want not exist", err)
+	}
+}
+
+func TestUnlinkSupportsDashedPaths(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "echo data > /home/agent/--dash\nunlink -- --dash\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if _, err := session.FileSystem().Stat(context.Background(), "/home/agent/--dash"); !os.IsNotExist(err) {
+		t.Fatalf("Stat(--dash) error = %v, want not exist", err)
+	}
+}
+
+func TestUnlinkHelpAndVersion(t *testing.T) {
+	tests := []struct {
+		name       string
+		script     string
+		wantStdout string
+	}{
+		{
+			name:       "short help",
+			script:     "unlink -h\n",
+			wantStdout: "Unlink the file at FILE.\n\nUsage: unlink FILE\n       unlink OPTION\n\nOptions:\n  -h, --help     Print help\n  -V, --version  Print version\n",
+		},
+		{
+			name:       "inferred long help",
+			script:     "unlink --he\n",
+			wantStdout: "Unlink the file at FILE.\n\nUsage: unlink FILE\n       unlink OPTION\n\nOptions:\n  -h, --help     Print help\n  -V, --version  Print version\n",
+		},
+		{
+			name:       "short version",
+			script:     "unlink -V\n",
+			wantStdout: "unlink (gbash) dev\n",
+		},
+		{
+			name:       "inferred long version",
+			script:     "unlink --ver\n",
+			wantStdout: "unlink (gbash) dev\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := newSession(t, &Config{})
+
+			result := mustExecSession(t, session, tt.script)
+			if result.ExitCode != 0 {
+				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+			}
+			if got := result.Stdout; got != tt.wantStdout {
+				t.Fatalf("Stdout = %q, want %q", got, tt.wantStdout)
+			}
+			if result.Stderr != "" {
+				t.Fatalf("Stderr = %q, want empty", result.Stderr)
+			}
+		})
+	}
+}
+
+func TestUnlinkUsageErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		script     string
+		wantStderr string
+	}{
+		{
+			name:       "missing operand",
+			script:     "unlink\n",
+			wantStderr: "error: the following required arguments were not provided:\n  <FILE>\n\nUsage: unlink FILE\n       unlink OPTION\n\nFor more information, try '--help'.\n",
+		},
+		{
+			name:       "extra operand",
+			script:     "unlink first second\n",
+			wantStderr: "error: unexpected argument 'second' found\n\nUsage: unlink FILE\n       unlink OPTION\n\nFor more information, try '--help'.\n",
+		},
+		{
+			name:       "invalid option",
+			script:     "unlink --definitely-invalid\n",
+			wantStderr: "error: unexpected argument '--definitely-invalid' found\n\n  tip: to pass '--definitely-invalid' as a value, use '-- --definitely-invalid'\n\nUsage: unlink FILE\n       unlink OPTION\n\nFor more information, try '--help'.\n",
+		},
+		{
+			name:       "unexpected option value",
+			script:     "unlink --version=1\n",
+			wantStderr: "error: unexpected value '1' for '--version' found; no more were expected\n\nUsage: unlink FILE\n       unlink OPTION\n\nFor more information, try '--help'.\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := newSession(t, &Config{})
+
+			result := mustExecSession(t, session, tt.script)
+			if result.ExitCode != 1 {
+				t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+			}
+			if result.Stdout != "" {
+				t.Fatalf("Stdout = %q, want empty", result.Stdout)
+			}
+			if got := result.Stderr; got != tt.wantStderr {
+				t.Fatalf("Stderr = %q, want %q", got, tt.wantStderr)
+			}
+		})
+	}
+}
+
+func TestUnlinkReportsPathErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		setup      string
+		script     string
+		wantStderr string
+	}{
+		{
+			name:       "directory",
+			setup:      "mkdir /home/agent/dir\n",
+			script:     "unlink /home/agent/dir\n",
+			wantStderr: "unlink: cannot unlink '/home/agent/dir': Is a directory\n",
+		},
+		{
+			name:       "missing path",
+			script:     "unlink /home/agent/missing.txt\n",
+			wantStderr: "unlink: cannot unlink '/home/agent/missing.txt': No such file or directory\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := newSession(t, &Config{})
+
+			if tt.setup != "" {
+				setup := mustExecSession(t, session, tt.setup)
+				if setup.ExitCode != 0 {
+					t.Fatalf("setup ExitCode = %d, want 0; stderr=%q", setup.ExitCode, setup.Stderr)
+				}
+			}
+
+			result := mustExecSession(t, session, tt.script)
+			if result.ExitCode != 1 {
+				t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+			}
+			if result.Stdout != "" {
+				t.Fatalf("Stdout = %q, want empty", result.Stdout)
+			}
+			if got := result.Stderr; got != tt.wantStderr {
+				t.Fatalf("Stderr = %q, want %q", got, tt.wantStderr)
+			}
+		})
+	}
+}
+
 func TestChmodSupportsOctalAndSymbolicModes(t *testing.T) {
 	session := newSession(t, &Config{})
 
