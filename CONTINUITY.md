@@ -28,7 +28,7 @@ State:
 - Ledger initialized: yes
 - Active task: TODO migration pass
 - TODO scope at start: 59 command files / 63 command entrypoints
-- Current verification gate: `bash` / `sh` complete; preparing commit and moving to `env`
+- Current verification gate: `env` / `printenv` complete; preparing commit and moving to `gzip` / `gunzip` / `zcat`
 
 Done:
 - Confirmed `CONTINUITY.md` was missing at start of turn.
@@ -57,14 +57,25 @@ Done:
 - Verified `go test ./cmd/gbash -run 'TestRunCLIMulticallShRunsCommandStringWithArgs'` passed.
 - Verified `go test ./...` passed after the `bash` / `sh` migration.
 - Verified `make lint` passed after the `bash` / `sh` migration.
+- Rewrote `env` / `printenv` onto `CommandSpec` / `RunParsed(...)`.
+- Preserved `env` mixed option / assignment / command parsing, including bare `-` as `-i`, `-uNAME`, `--unset=NAME`, `--chdir`, `--argv0`, `--debug`, and assignment handling around bare `--`.
+- Added `env` / `printenv` runtime coverage for attached unset forms, `--chdir`, missing `-u` arguments, debug/argv0 output, and nested-shell execution of `c=d` through `PATH=$PATH:`.
+- Fixed nested shell command lookup to treat empty `PATH` entries as `.`, matching GNU `env.sh`.
+- Added shebang-based shell command resolution so scripts like `simple_echo`, `truetrue`, and `c=d` execute via their registered interpreter in both runtime and compat mode.
+- Updated compat-runner tests to reflect shebang script execution via registered interpreters while still rejecting plain non-shebang executables on `PATH`.
+- Verified `go test ./runtime -run 'TestEnv|TestPrintEnv'` passed.
+- Verified `go test ./cmd/gbash -run 'TestRunCLICompatExecEnvSupportsDoubleDashCommandSeparator|TestRunCLIMulticallEnvSupportsAssignmentsAfterDoubleDash'` passed.
+- Verified explicit GNU compatibility tests `tests/env/env.sh,tests/misc/printenv.sh` passed via `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/env/env.sh,tests/misc/printenv.sh'`.
+- Verified `go test ./...` passed after the `env` / `printenv` migration.
+- Verified `make lint` passed after the `env` / `printenv` migration.
 
 Now:
-- Commit the completed `bash` / `sh` migration.
-- Move to `env`, then `printenv`, using the already-collected exploration notes.
+- Commit the completed `env` / `printenv` migration.
+- Move to `gzip` / `gunzip` / `zcat`, then run their repo and GNU compatibility gates.
 
 Next:
-- Migrate `env` / `printenv` after that.
-- Migrate `gzip` / `gunzip` / `zcat` after `env` / `printenv`.
+- Migrate `gzip` / `gunzip` / `zcat`.
+- Keep committing each completed command item before moving to the next TODO entry.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: No dedicated GNU test file for `base32` alone was found; `tests/basenc/base64.pl` appears to be the shared GNU compatibility test covering both `base32` and `base64`.
@@ -80,9 +91,13 @@ Working set (files/ids/commands):
 - File: `commands/command_spec.go`
 - File: `commands/bash.go`
 - File: `commands/env.go`
+- File: `commands/gzip.go`
+- File: `shell/mvdan.go`
+- File: `internal/compatrun/runner_test.go`
 - File: `runtime/process_helper_commands_test.go`
 - File: `runtime/base32_commands_test.go`
 - File: `runtime/base64_commands_test.go`
+- File: `runtime/env_command_parity_test.go`
 - Command: `ls -la`
 - Command: `git status --short`
 - Command: `git branch --show-current`
@@ -94,14 +109,18 @@ Working set (files/ids/commands):
 - Command: `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --tests 'tests/basenc/base64.pl'`
 - Command: `go test ./runtime -run 'TestBash|TestSh'`
 - Command: `go test ./cmd/gbash -run 'TestRunCLIMulticallShRunsCommandStringWithArgs'`
+- Command: `go test ./runtime -run 'TestEnv|TestPrintEnv'`
+- Command: `go test ./cmd/gbash -run 'TestRunCLICompatExecEnvSupportsDoubleDashCommandSeparator|TestRunCLIMulticallEnvSupportsAssignmentsAfterDoubleDash'`
+- Command: `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/env/env.sh,tests/misc/printenv.sh'`
+- Command: `go build -o .cache/gnu/bin/gbash ./cmd/gbash`
 
 Migration checklist:
 - [x] `base32`
 - [x] `base64`
 - [x] `bash`
 - [x] `sh`
-- [ ] `env`
-- [ ] `printenv`
+- [x] `env`
+- [x] `printenv`
 - [ ] `gzip`
 - [ ] `gunzip`
 - [ ] `zcat`
