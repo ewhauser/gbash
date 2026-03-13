@@ -77,7 +77,6 @@ type xargsExecResult struct {
 	stdout   string
 	stderr   string
 	exitCode int
-	err      error
 }
 
 func NewXArgs() *XArgs {
@@ -171,7 +170,7 @@ func (c *XArgs) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedC
 		opts.exitIfTooLarge = true
 	}
 	if opts.showLimits {
-		if err := writeXArgsLimits(inv, opts, maxSupported); err != nil {
+		if err := writeXArgsLimits(inv, &opts, maxSupported); err != nil {
 			return err
 		}
 	}
@@ -179,18 +178,18 @@ func (c *XArgs) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedC
 		command = []string{"echo"}
 	}
 
-	inputData, err := readXArgsInput(ctx, inv, opts)
+	inputData, err := readXArgsInput(ctx, inv, &opts)
 	if err != nil {
 		return err
 	}
-	parsed := parseXArgsInput(inv, inputData, opts)
+	parsed := parseXArgsInput(inv, inputData, &opts)
 
-	tasks, err := buildXArgsTasks(inv, opts, command, parsed.items)
+	tasks, err := buildXArgsTasks(inv, &opts, command, parsed.items)
 	if err != nil {
 		return err
 	}
 
-	status, err := runXArgsTasks(ctx, inv, opts, tasks)
+	status, err := runXArgsTasks(ctx, inv, &opts, tasks)
 	if err != nil {
 		return err
 	}
@@ -561,23 +560,23 @@ func optionValueFromShort(inv *Invocation, name string, short byte, attached str
 	return value, nil
 }
 
-func parseXArgsNumber(inv *Invocation, raw string, option byte, min, max int, fatal bool) (int, error) {
+func parseXArgsNumber(inv *Invocation, raw string, option byte, minValue, maxValue int, fatal bool) (int, error) {
 	value64, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
 		return 0, exitf(inv, 1, "xargs: invalid number %q for -%c option\nTry 'xargs --help' for more information.", raw, option)
 	}
 
-	if value64 < int64(min) {
+	if value64 < int64(minValue) {
 		if !fatal {
-			return min, nil
+			return minValue, nil
 		}
-		return 0, exitf(inv, 1, "xargs: value %s for -%c option should be >= %d\nTry 'xargs --help' for more information.", raw, option, min)
+		return 0, exitf(inv, 1, "xargs: value %s for -%c option should be >= %d\nTry 'xargs --help' for more information.", raw, option, minValue)
 	}
-	if max >= 0 && value64 > int64(max) {
+	if maxValue >= 0 && value64 > int64(maxValue) {
 		if !fatal {
-			return max, nil
+			return maxValue, nil
 		}
-		return 0, exitf(inv, 1, "xargs: value %s for -%c option should be <= %d\nTry 'xargs --help' for more information.", raw, option, max)
+		return 0, exitf(inv, 1, "xargs: value %s for -%c option should be <= %d\nTry 'xargs --help' for more information.", raw, option, maxValue)
 	}
 	return int(value64), nil
 }
@@ -684,7 +683,7 @@ func xargsWarn(inv *Invocation, format string, args ...any) {
 	_, _ = fmt.Fprintf(inv.Stderr, "xargs: "+format+"\n", args...)
 }
 
-func readXArgsInput(ctx context.Context, inv *Invocation, opts xargsOptions) ([]byte, error) {
+func readXArgsInput(ctx context.Context, inv *Invocation, opts *xargsOptions) ([]byte, error) {
 	if opts.inputFile == "-" {
 		return readAllStdin(inv)
 	}
@@ -720,14 +719,11 @@ func xargsEnvironmentSize(env map[string]string) int {
 	return total
 }
 
-func writeXArgsLimits(inv *Invocation, opts xargsOptions, maxSupported int) error {
+func writeXArgsLimits(inv *Invocation, opts *xargsOptions, maxSupported int) error {
 	if inv == nil || inv.Stderr == nil {
 		return nil
 	}
-	usable := xargsSyntheticArgMax - xargsEnvironmentSize(inv.Env) - xargsArgHeadroom
-	if usable < 0 {
-		usable = 0
-	}
+	usable := max(xargsSyntheticArgMax-xargsEnvironmentSize(inv.Env)-xargsArgHeadroom, 0)
 	_, err := fmt.Fprintf(
 		inv.Stderr,
 		"Your environment variables take up %d bytes\nPOSIX upper limit on argument length (this system): %d\nPOSIX smallest allowable upper limit on argument length (all systems): %d\nMaximum length of command we could actually use: %d\nSize of command buffer we are actually using: %d\nMaximum parallelism (--max-procs must be no greater): %d\n",
@@ -741,7 +737,7 @@ func writeXArgsLimits(inv *Invocation, opts xargsOptions, maxSupported int) erro
 	return err
 }
 
-func parseXArgsInput(inv *Invocation, data []byte, opts xargsOptions) xargsInputParseResult {
+func parseXArgsInput(inv *Invocation, data []byte, opts *xargsOptions) xargsInputParseResult {
 	if opts.readMode == xargsReadDelimited {
 		return parseXArgsDelimitedInput(data, opts.delimiter)
 	}
@@ -769,7 +765,7 @@ func parseXArgsDelimitedInput(data []byte, delimiter byte) xargsInputParseResult
 	return xargsInputParseResult{items: items}
 }
 
-func parseXArgsShellInput(inv *Invocation, data []byte, opts xargsOptions) xargsInputParseResult {
+func parseXArgsShellInput(inv *Invocation, data []byte, opts *xargsOptions) xargsInputParseResult {
 	const (
 		xargsStateSpace = iota
 		xargsStateNorm
@@ -878,7 +874,8 @@ func parseXArgsShellInput(inv *Invocation, data []byte, opts xargsOptions) xargs
 		if atEOF || c == '\n' {
 			lineEnded := !atEOF && prevSet && !xargsIsBlank(prev)
 			if len(buf) == 0 {
-				if seenArg {
+				switch {
+				case seenArg:
 					if xargsMatchesEOF(opts.eofStr, "") {
 						if firstOnLine {
 							return xargsInputParseResult{items: items}
@@ -887,9 +884,9 @@ func parseXArgsShellInput(inv *Invocation, data []byte, opts xargsOptions) xargs
 						return xargsInputParseResult{items: items}
 					}
 					appendToken("")
-				} else if atEOF {
+				case atEOF:
 					return xargsInputParseResult{items: items}
-				} else {
+				default:
 					state = xargsStateSpace
 					firstOnLine = true
 					seenArg = false
@@ -989,7 +986,7 @@ func xargsMatchesEOF(eofStr *string, token string) bool {
 	return eofStr != nil && token == *eofStr
 }
 
-func buildXArgsTasks(inv *Invocation, opts xargsOptions, command []string, items []xargsInputItem) ([]xargsTask, error) {
+func buildXArgsTasks(inv *Invocation, opts *xargsOptions, command []string, items []xargsInputItem) ([]xargsTask, error) {
 	if opts.replacePat != nil {
 		tasks := make([]xargsTask, 0, len(items))
 		for _, item := range items {
@@ -1087,7 +1084,7 @@ func xargsArgvSize(argv []string) int {
 	return total
 }
 
-func runXArgsTasks(ctx context.Context, inv *Invocation, opts xargsOptions, tasks []xargsTask) (int, error) {
+func runXArgsTasks(ctx context.Context, inv *Invocation, opts *xargsOptions, tasks []xargsTask) (int, error) {
 	if len(tasks) == 0 {
 		return 0, nil
 	}
@@ -1097,7 +1094,7 @@ func runXArgsTasks(ctx context.Context, inv *Invocation, opts xargsOptions, task
 	return runXArgsTasksParallel(ctx, inv, opts, tasks)
 }
 
-func runXArgsTasksSequential(ctx context.Context, inv *Invocation, opts xargsOptions, tasks []xargsTask) (int, error) {
+func runXArgsTasksSequential(ctx context.Context, inv *Invocation, opts *xargsOptions, tasks []xargsTask) (int, error) {
 	status := 0
 	for _, task := range tasks {
 		if opts.interactive {
@@ -1113,7 +1110,7 @@ func runXArgsTasksSequential(ctx context.Context, inv *Invocation, opts xargsOpt
 		if err != nil {
 			return 0, err
 		}
-		status = max(status, xargsStatusForExecResult(result))
+		status = max(status, xargsStatusForExecResult(&result))
 		if err := writeXArgsExecOutputs(inv, opts, result); err != nil {
 			return 0, err
 		}
@@ -1124,7 +1121,7 @@ func runXArgsTasksSequential(ctx context.Context, inv *Invocation, opts xargsOpt
 	return status, nil
 }
 
-func runXArgsTasksParallel(ctx context.Context, inv *Invocation, opts xargsOptions, tasks []xargsTask) (int, error) {
+func runXArgsTasksParallel(ctx context.Context, inv *Invocation, opts *xargsOptions, tasks []xargsTask) (int, error) {
 	// The current runtime subexec path is not safe for concurrent inv.Exec calls,
 	// so in the sandbox we preserve -P parsing and batching behavior but execute
 	// the resulting commands serially.
@@ -1169,7 +1166,7 @@ func xargsPromptReader(ctx context.Context, inv *Invocation) (io.Reader, io.Clos
 	return nil, nil, exitf(inv, 1, "xargs: failed to open /dev/tty for reading")
 }
 
-func runXArgsTask(ctx context.Context, inv *Invocation, opts xargsOptions, task xargsTask, slot int) (xargsExecResult, error) {
+func runXArgsTask(ctx context.Context, inv *Invocation, opts *xargsOptions, task xargsTask, slot int) (xargsExecResult, error) {
 	result := xargsExecResult{
 		slot: slot,
 		argv: append([]string(nil), task.argv...),
@@ -1220,7 +1217,7 @@ func runXArgsTask(ctx context.Context, inv *Invocation, opts xargsOptions, task 
 	return result, nil
 }
 
-func xargsChildStdin(ctx context.Context, inv *Invocation, opts xargsOptions) (io.Reader, io.Closer, error) {
+func xargsChildStdin(ctx context.Context, inv *Invocation, opts *xargsOptions) (io.Reader, io.Closer, error) {
 	if opts.openTTY {
 		file, _, err := openRead(ctx, inv, "/dev/tty")
 		if err != nil {
@@ -1234,7 +1231,7 @@ func xargsChildStdin(ctx context.Context, inv *Invocation, opts xargsOptions) (i
 	return strings.NewReader(""), nil, nil
 }
 
-func xargsStatusForExecResult(result xargsExecResult) int {
+func xargsStatusForExecResult(result *xargsExecResult) int {
 	switch {
 	case result.exitCode == 0:
 		return 0
@@ -1249,7 +1246,7 @@ func xargsStatusForExecResult(result xargsExecResult) int {
 	}
 }
 
-func writeXArgsExecOutputs(inv *Invocation, opts xargsOptions, result xargsExecResult) error {
+func writeXArgsExecOutputs(inv *Invocation, opts *xargsOptions, result xargsExecResult) error {
 	if opts.verbose {
 		if _, err := fmt.Fprintln(inv.Stderr, shellJoinArgs(result.argv)); err != nil {
 			return &ExitError{Code: 1, Err: err}
