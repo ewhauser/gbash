@@ -231,7 +231,9 @@ func FuzzCompatPredicateCommands(f *testing.F) {
 		writeSessionFile(t, session, inputPath, data)
 
 		script := fmt.Appendf(nil,
-			"dir %s >/tmp/dir.out || true\nlink %s %s || true\ntest -e %s || true\ntest %s = %s || true\n[ -s %s ] || true\n",
+			"dir %s >/tmp/dir.out || true\nvdir %s >/tmp/vdir.out || true\nvdir -C %s >/tmp/vdir-columns.out || true\nlink %s %s || true\ntest -e %s || true\ntest %s = %s || true\n[ -s %s ] || true\n",
+			shellQuote(dirPath),
+			shellQuote(dirPath),
 			shellQuote(dirPath),
 			shellQuote(inputPath),
 			shellQuote(linkPath),

@@ -247,6 +247,70 @@ func TestDirSupportsLongFormatViaLSFlags(t *testing.T) {
 	}
 }
 
+func TestVdirUsesVdirUsageAndLongEscapedDefaultOutput(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/tmp/vdir-view/plain.txt", []byte("plain\n"))
+	writeSessionFile(t, session, "/tmp/vdir-view/tab\tname.txt", []byte("tabbed\n"))
+
+	result := mustExecSession(t, session, "vdir --help\necho ---\nvdir /tmp/vdir-view\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	parts := strings.Split(result.Stdout, "---\n")
+	if len(parts) != 2 {
+		t.Fatalf("Stdout blocks = %q, want 2 blocks", result.Stdout)
+	}
+
+	helpBlock := parts[0]
+	if !strings.Contains(helpBlock, "Usage:\n  vdir [OPTION]... [FILE]...") {
+		t.Fatalf("help block = %q, want vdir usage", helpBlock)
+	}
+	if strings.Contains(helpBlock, "ls [OPTION]") {
+		t.Fatalf("help block = %q, want no ls usage", helpBlock)
+	}
+
+	listing := parts[1]
+	if !strings.Contains(listing, "plain.txt") || !strings.Contains(listing, "-rw") {
+		t.Fatalf("listing = %q, want long-format output", listing)
+	}
+	if !strings.Contains(listing, "tab\\tname.txt") {
+		t.Fatalf("listing = %q, want C-style escaping", listing)
+	}
+}
+
+func TestVdirSupportsColumnOutputViaLSFlags(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/tmp/vdir-columns/alpha.txt", []byte("alpha\n"))
+	writeSessionFile(t, session, "/tmp/vdir-columns/beta.txt", []byte("beta\n"))
+
+	result := mustExecSession(t, session, "vdir -C /tmp/vdir-columns\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	if !strings.Contains(result.Stdout, "alpha.txt") || !strings.Contains(result.Stdout, "beta.txt") {
+		t.Fatalf("Stdout = %q, want both entries", result.Stdout)
+	}
+	if strings.Contains(result.Stdout, "-rw") {
+		t.Fatalf("Stdout = %q, want non-long output", result.Stdout)
+	}
+}
+
+func TestVdirInvalidOptionUsesVdirPrefixAndExitCode(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "vdir -/\n")
+	if result.ExitCode != 2 {
+		t.Fatalf("ExitCode = %d, want 2; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stderr, "vdir: invalid option -- '/'\nTry 'vdir --help' for more information.\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
 func TestLSColorFlagsAndLSColorsOverride(t *testing.T) {
 	session := newSession(t, &Config{})
 

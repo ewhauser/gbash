@@ -68,7 +68,7 @@ func (c *Dir) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCom
 			stdout.WriteByte('\n')
 		}
 
-		output, status, _, err := c.listPath(ctx, inv, target, &opts, len(targets) > 1, defaultColumns)
+		output, status, _, err := c.listPath(ctx, inv, c.Name(), target, &opts, len(targets) > 1, defaultColumns)
 		if err != nil {
 			return err
 		}
@@ -87,13 +87,13 @@ func (c *Dir) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCom
 	return nil
 }
 
-func (c *Dir) listPath(ctx context.Context, inv *Invocation, target string, opts *lsOptions, showHeader, defaultColumns bool) (output string, status int, rendered lsRenderResult, err error) {
+func (c *Dir) listPath(ctx context.Context, inv *Invocation, commandName, target string, opts *lsOptions, showHeader, defaultColumns bool) (output string, status int, rendered lsRenderResult, err error) {
 	info, abs, exists, err := statMaybe(ctx, inv, policy.FileActionStat, target)
 	if err != nil {
 		return "", 0, lsRenderResult{}, err
 	}
 	if !exists {
-		_, _ = fmt.Fprintf(inv.Stderr, "dir: %s: No such file or directory\n", target)
+		_, _ = fmt.Fprintf(inv.Stderr, "%s: %s: No such file or directory\n", commandName, target)
 		return "", 2, lsRenderResult{}, nil
 	}
 
@@ -160,7 +160,7 @@ func (c *Dir) listPath(ctx context.Context, inv *Invocation, target string, opts
 			default:
 				subTarget = path.Join(subTarget, dir.name)
 			}
-			subOutput, status, _, err := c.listPath(ctx, inv, subTarget, opts, false, defaultColumns)
+			subOutput, status, _, err := c.listPath(ctx, inv, commandName, subTarget, opts, false, defaultColumns)
 			if err != nil {
 				return "", 0, lsRenderResult{}, err
 			}
