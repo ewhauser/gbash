@@ -298,7 +298,7 @@ The default registry includes commands for file ops, text processing, archival, 
 | Environment and execution | `bash` `date` `echo` `env` `expr` `false` `help` `id` `md5sum` `printenv` `pwd` `sh` `sha1sum` `sha256sum` `sleep` `timeout` `true` `uptime` `which` `xargs` `yes` |
 | Network (when configured) | `curl` |
 
-The goal is high-value agent workflows, not full GNU flag parity. Unsupported commands or flags fail with a shell-style error.
+Many commands are ported from [uutils/coreutils](https://github.com/uutils/coreutils) so have full GNU flag parity. You can view the current compatibility matrix with `coreutils` test suite [here](https://ewhauser.github.io/gbash/compat/latest/)
 
 ### Contrib commands
 
