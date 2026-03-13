@@ -24,18 +24,50 @@ func (c *ID) Name() string {
 	return "id"
 }
 
-func (c *ID) Run(_ context.Context, inv *Invocation) error {
-	opts, err := parseIDArgs(inv)
+func (c *ID) Run(ctx context.Context, inv *Invocation) error {
+	return RunCommand(ctx, c, inv)
+}
+
+func (c *ID) Spec() CommandSpec {
+	return CommandSpec{
+		Name:  "id",
+		About: "Print user and group information for each specified USER,\n  or (when USER omitted) for the current user.",
+		Usage: "id [OPTION]... [USER]...",
+		AfterHelp: "The id utility displays the user and group names and numeric IDs, of the\n" +
+			"calling process, to the standard output. If the real and effective IDs are\n" +
+			"different, both are displayed, otherwise only the real ID is displayed.\n\n" +
+			"If a user (login name or user ID) is specified, the user and group IDs of\n" +
+			"that user are displayed. In this case, the real and effective IDs are\n" +
+			"assumed to be the same.",
+		Options: []OptionSpec{
+			{Name: "ignore", Short: 'a', Long: "ignore", Help: "ignore, for compatibility with other versions"},
+			{Name: "audit", Short: 'A', Help: "Display the process audit user ID and other process audit properties,\n  which requires privilege (not available on Linux)."},
+			{Name: "user", Short: 'u', Long: "user", Help: "Display only the effective user ID as a number."},
+			{Name: "group", Short: 'g', Long: "group", Help: "Display only the effective group ID as a number"},
+			{Name: "groups", Short: 'G', Long: "groups", Help: "Display only the different group IDs as white-space separated numbers,\n  in no particular order."},
+			{Name: "human-readable", Short: 'p', Long: "human-readable", Help: "Make the output human-readable. Each display is on a separate line."},
+			{Name: "name", Short: 'n', Long: "name", Help: "Display the name of the user or group ID for the -G, -g and -u options\n  instead of the number.\n  If any of the ID numbers cannot be mapped into\n  names, the number will be displayed as usual."},
+			{Name: "password", Short: 'P', Long: "password", Help: "Display the id as a password file entry."},
+			{Name: "real", Short: 'r', Long: "real", Help: "Display the real ID for the -G, -g and -u options instead of\n  the effective ID."},
+			{Name: "zero", Short: 'z', Long: "zero", Help: "delimit entries with NUL characters, not whitespace;\n  not permitted in default format"},
+			{Name: "context", Short: 'Z', Long: "context", Help: "print only the security context of the process (not enabled)"},
+		},
+		Args: []ArgSpec{
+			{Name: "user", ValueName: "USER", Repeatable: true},
+		},
+		Parse: ParseConfig{
+			InferLongOptions:  true,
+			GroupShortOptions: true,
+			AutoHelp:          true,
+			AutoVersion:       true,
+		},
+	}
+}
+
+func (c *ID) RunParsed(_ context.Context, inv *Invocation, matches *ParsedCommand) error {
+	opts, err := parseIDMatches(inv, matches)
 	if err != nil {
 		return err
-	}
-	switch opts.mode {
-	case "help":
-		_, _ = fmt.Fprintln(inv.Stdout, "usage: id [OPTION]... [USER]...")
-		return nil
-	case "version":
-		_, _ = fmt.Fprintln(inv.Stdout, "id (gbash)")
-		return nil
 	}
 
 	current := idCurrentIdentity(inv)
@@ -93,89 +125,20 @@ func (c *ID) Run(_ context.Context, inv *Invocation) error {
 	return nil
 }
 
-type idOptions struct {
-	mode          string
-	ignore        bool
-	audit         bool
-	context       bool
-	userOnly      bool
-	groupOnly     bool
-	groupsOnly    bool
-	humanReadable bool
-	nameOnly      bool
-	passwordStyle bool
-	realOnly      bool
-	zero          bool
-	users         []string
-}
-
-type idIdentity struct {
-	userName string
-	uid      uint32
-	euid     uint32
-	group    idGroup
-	egid     uint32
-	groups   []idGroup
-	homeDir  string
-	shell    string
-}
-
-type idGroup struct {
-	id   uint32
-	name string
-}
-
-func parseIDArgs(inv *Invocation) (idOptions, error) {
-	args := append([]string(nil), inv.Args...)
-	opts := idOptions{}
-	parsingOptions := true
-
-	for len(args) > 0 {
-		arg := args[0]
-		args = args[1:]
-
-		if parsingOptions && arg == "--" {
-			parsingOptions = false
-			continue
-		}
-		if !parsingOptions || !strings.HasPrefix(arg, "-") || arg == "-" {
-			opts.users = append(opts.users, arg)
-			parsingOptions = false
-			continue
-		}
-
-		switch {
-		case arg == "--help":
-			opts.mode = "help"
-			return opts, nil
-		case arg == "--version":
-			opts.mode = "version"
-			return opts, nil
-		case arg == "--ignore":
-			opts.ignore = true
-		case arg == "--audit":
-			opts.audit = true
-		case arg == "--context":
-			opts.context = true
-		case arg == "--user":
-			opts.userOnly = true
-		case arg == "--group":
-			opts.groupOnly = true
-		case arg == "--groups":
-			opts.groupsOnly = true
-		case arg == "--name":
-			opts.nameOnly = true
-		case arg == "--real":
-			opts.realOnly = true
-		case arg == "--zero":
-			opts.zero = true
-		case strings.HasPrefix(arg, "--"):
-			return idOptions{}, exitf(inv, 1, "id: unrecognized option '%s'", arg)
-		default:
-			if err := parseIDShortFlags(inv, arg, &opts); err != nil {
-				return idOptions{}, err
-			}
-		}
+func parseIDMatches(inv *Invocation, matches *ParsedCommand) (idOptions, error) {
+	opts := idOptions{
+		ignore:        matches.Has("ignore"),
+		audit:         matches.Has("audit"),
+		context:       matches.Has("context"),
+		userOnly:      matches.Has("user"),
+		groupOnly:     matches.Has("group"),
+		groupsOnly:    matches.Has("groups"),
+		humanReadable: matches.Has("human-readable"),
+		nameOnly:      matches.Has("name"),
+		passwordStyle: matches.Has("password"),
+		realOnly:      matches.Has("real"),
+		zero:          matches.Has("zero"),
+		users:         matches.Args("user"),
 	}
 
 	defaultFormat := !opts.userOnly && !opts.groupOnly && !opts.groupsOnly
@@ -206,36 +169,35 @@ func parseIDArgs(inv *Invocation) (idOptions, error) {
 	return opts, nil
 }
 
-func parseIDShortFlags(inv *Invocation, arg string, opts *idOptions) error {
-	for _, flag := range arg[1:] {
-		switch flag {
-		case 'a':
-			opts.ignore = true
-		case 'A':
-			opts.audit = true
-		case 'u':
-			opts.userOnly = true
-		case 'g':
-			opts.groupOnly = true
-		case 'G':
-			opts.groupsOnly = true
-		case 'p':
-			opts.humanReadable = true
-		case 'n':
-			opts.nameOnly = true
-		case 'P':
-			opts.passwordStyle = true
-		case 'r':
-			opts.realOnly = true
-		case 'z':
-			opts.zero = true
-		case 'Z':
-			opts.context = true
-		default:
-			return exitf(inv, 1, "id: invalid option -- '%c'", flag)
-		}
-	}
-	return nil
+type idOptions struct {
+	ignore        bool
+	audit         bool
+	context       bool
+	userOnly      bool
+	groupOnly     bool
+	groupsOnly    bool
+	humanReadable bool
+	nameOnly      bool
+	passwordStyle bool
+	realOnly      bool
+	zero          bool
+	users         []string
+}
+
+type idIdentity struct {
+	userName string
+	uid      uint32
+	euid     uint32
+	group    idGroup
+	egid     uint32
+	groups   []idGroup
+	homeDir  string
+	shell    string
+}
+
+type idGroup struct {
+	id   uint32
+	name string
 }
 
 func idCurrentIdentity(inv *Invocation) idIdentity {
@@ -446,3 +408,5 @@ func idPretty(identity *idIdentity) string {
 }
 
 var _ Command = (*ID)(nil)
+var _ SpecProvider = (*ID)(nil)
+var _ ParsedRunner = (*ID)(nil)
