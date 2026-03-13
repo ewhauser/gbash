@@ -19,10 +19,20 @@ From the repository root:
 go run ./examples/transactional-workspaces
 ```
 
+Interactive terminal runs pause between major beats and use ANSI colors automatically.
+
 For a shorter version of the output:
 
 ```bash
 go run ./examples/transactional-workspaces --quiet
+```
+
+Useful toggles:
+
+```bash
+go run ./examples/transactional-workspaces --no-pause
+go run ./examples/transactional-workspaces --no-color
+go run ./examples/transactional-workspaces --pause --color
 ```
 
 From the `examples/` module, you can also use:

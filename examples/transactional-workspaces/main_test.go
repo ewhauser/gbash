@@ -11,7 +11,7 @@ func TestRunQuietDemo(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	if err := run(context.Background(), &stdout, &stderr, []string{"--quiet"}); err != nil {
+	if err := run(context.Background(), strings.NewReader(""), &stdout, &stderr, []string{"--quiet"}); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
 	if stderr.Len() != 0 {

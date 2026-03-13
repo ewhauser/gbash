@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -62,48 +63,60 @@ for file in "$workspace"/raw/*.csv; do
   mv "$file" "$workspace/archive/"
 done
 
-rm -rf "$workspace/tmp"
+	rm -rf "$workspace/tmp"
 `
 
-func runDemo(ctx context.Context, stdout, _ io.Writer, opts cliOptions) error {
+func runDemo(ctx context.Context, stdin io.Reader, stdout, _ io.Writer, opts demoOptions) error {
 	manager := newWorkspaceManager(workspaceRoot)
 	if err := manager.seed(ctx); err != nil {
 		return err
 	}
 
 	demo := scriptedDemo{
-		out:     stdout,
-		quiet:   opts.quiet,
-		manager: manager,
+		out:        stdout,
+		quiet:      opts.quiet,
+		pause:      opts.pause,
+		pauseInput: bufio.NewReader(stdin),
+		styles:     newDemoStyles(opts.color),
+		manager:    manager,
 	}
 	return demo.run(ctx)
 }
 
 type scriptedDemo struct {
-	out     io.Writer
-	quiet   bool
-	manager *workspaceManager
+	out        io.Writer
+	quiet      bool
+	pause      bool
+	pauseInput *bufio.Reader
+	styles     demoStyles
+	manager    *workspaceManager
 }
 
 func (d scriptedDemo) run(ctx context.Context) error {
 	if err := d.showInitialState(ctx); err != nil {
 		return err
 	}
+	d.pauseForBeat("Next: checkpoint the workspace before the destructive script runs.")
 	if err := d.createSnapshot(ctx, "before-cleanup"); err != nil {
 		return err
 	}
+	d.pauseForBeat("Next: run the buggy cleanup and inspect exactly what it changed.")
 	if err := d.runBuggyCleanup(ctx); err != nil {
 		return err
 	}
+	d.pauseForBeat("Next: roll the workspace back to the saved snapshot.")
 	if err := d.restoreMain(ctx, "before-cleanup"); err != nil {
 		return err
 	}
+	d.pauseForBeat("Next: fork two independent workspaces from the same snapshot.")
 	if err := d.branchFixes(ctx, "before-cleanup"); err != nil {
 		return err
 	}
+	d.pauseForBeat("Next: run both repair strategies side by side and compare them.")
 	if err := d.compareBranches(ctx, "before-cleanup"); err != nil {
 		return err
 	}
+	d.pauseForBeat("Next: promote the winning branch back into main.")
 	return d.promoteBranch(ctx, "before-cleanup", "fix-filter")
 }
 
@@ -145,7 +158,7 @@ func (d scriptedDemo) runBuggyCleanup(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	d.line(fmt.Sprintf("cleanup exited with code %d", result.ExitCode))
+	d.success(fmt.Sprintf("cleanup exited with code %d", result.ExitCode))
 
 	d.command("tree /workspace")
 	tree, err := d.manager.renderWorkspaceTree(ctx, mainWorkspaceName)
@@ -170,7 +183,7 @@ func (d scriptedDemo) runBuggyCleanup(ctx context.Context) error {
 
 	d.command("workspace trace main")
 	d.block(renderMutationJournal(result.Events))
-	d.line(fmt.Sprintf("The seeded dataset has %d non-invalid rows, so the summary is obviously wrong.", expectedValidRows))
+	d.warning(fmt.Sprintf("The seeded dataset has %d non-invalid rows, so the summary is obviously wrong.", expectedValidRows))
 	return nil
 }
 
@@ -186,7 +199,7 @@ func (d scriptedDemo) restoreMain(ctx context.Context, snapshotName string) erro
 		return err
 	}
 	d.block(tree)
-	d.line("The workspace is back to the exact pre-run state without any cleanup script archaeology.")
+	d.success("The workspace is back to the exact pre-run state without any cleanup script archaeology.")
 	return nil
 }
 
@@ -283,7 +296,7 @@ func (d scriptedDemo) compareBranches(ctx context.Context, snapshotName string) 
 	d.block(keepDiff)
 
 	if d.quiet {
-		d.line("fix-filter is the winner: it keeps the expected rows while still removing invalid records.")
+		d.success("fix-filter is the winner: it keeps the expected rows while still removing invalid records.")
 		return nil
 	}
 
@@ -301,7 +314,7 @@ func (d scriptedDemo) compareBranches(ctx context.Context, snapshotName string) 
 	}
 	d.block(keepSummary)
 
-	d.line("fix-filter is the winner: it keeps the expected rows while still removing invalid records.")
+	d.success("fix-filter is the winner: it keeps the expected rows while still removing invalid records.")
 	return nil
 }
 
@@ -325,28 +338,123 @@ func (d scriptedDemo) promoteBranch(ctx context.Context, snapshotName, branch st
 		return err
 	}
 	d.block(diff)
-	d.line("main now points at the accepted branch state.")
+	d.success("main now points at the accepted branch state.")
 	return nil
 }
 
 func (d scriptedDemo) section(title string) {
-	_, _ = fmt.Fprintf(d.out, "\n== %s ==\n", title)
+	_, _ = fmt.Fprintf(d.out, "\n%s\n", d.styles.section("== "+title+" =="))
 }
 
 func (d scriptedDemo) line(text string) {
-	_, _ = fmt.Fprintln(d.out, text)
+	_, _ = fmt.Fprintln(d.out, d.styles.body(text))
+}
+
+func (d scriptedDemo) success(text string) {
+	_, _ = fmt.Fprintln(d.out, d.styles.success(text))
+}
+
+func (d scriptedDemo) warning(text string) {
+	_, _ = fmt.Fprintln(d.out, d.styles.warning(text))
 }
 
 func (d scriptedDemo) command(cmd string) {
-	_, _ = fmt.Fprintf(d.out, "$ %s\n", cmd)
+	_, _ = fmt.Fprintf(d.out, "%s\n", d.styles.command("$ "+cmd))
 }
 
 func (d scriptedDemo) block(text string) {
 	if strings.TrimSpace(text) == "" {
-		_, _ = fmt.Fprintln(d.out, "(empty)")
+		_, _ = fmt.Fprintln(d.out, d.styles.muted("(empty)"))
 		return
 	}
-	_, _ = fmt.Fprintln(d.out, text)
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = d.styles.blockLine(line)
+	}
+	_, _ = fmt.Fprintln(d.out, strings.Join(lines, "\n"))
+}
+
+func (d scriptedDemo) pauseForBeat(text string) {
+	if !d.pause {
+		return
+	}
+	_, _ = fmt.Fprintln(d.out, d.styles.pause(text))
+	_, err := d.pauseInput.ReadString('\n')
+	if err != nil && err != io.EOF {
+		_, _ = fmt.Fprintln(d.out, d.styles.warning("pause skipped: "+err.Error()))
+	}
+}
+
+type demoStyles struct {
+	enabled bool
+}
+
+func newDemoStyles(enabled bool) demoStyles {
+	return demoStyles{enabled: enabled}
+}
+
+func (s demoStyles) section(text string) string {
+	return s.wrap("1;36", text)
+}
+
+func (s demoStyles) body(text string) string {
+	return s.wrap("0;37", text)
+}
+
+func (s demoStyles) command(text string) string {
+	return s.wrap("1;33", text)
+}
+
+func (s demoStyles) success(text string) string {
+	return s.wrap("1;32", text)
+}
+
+func (s demoStyles) warning(text string) string {
+	return s.wrap("1;31", text)
+}
+
+func (s demoStyles) pause(text string) string {
+	return s.wrap("1;35", "[pause] "+text+" Press Enter to continue.")
+}
+
+func (s demoStyles) muted(text string) string {
+	return s.wrap("2", text)
+}
+
+func (s demoStyles) added(text string) string {
+	return s.wrap("32", text)
+}
+
+func (s demoStyles) removed(text string) string {
+	return s.wrap("31", text)
+}
+
+func (s demoStyles) changed(text string) string {
+	return s.wrap("33", text)
+}
+
+func (s demoStyles) blockLine(text string) string {
+	switch {
+	case strings.HasPrefix(text, "+ "):
+		return s.added(text)
+	case strings.HasPrefix(text, "- "):
+		return s.removed(text)
+	case strings.HasPrefix(text, "~ "):
+		return s.changed(text)
+	case strings.HasPrefix(text, "fix-filter:"):
+		return s.success(text)
+	case strings.HasPrefix(text, "keep-everything:"):
+		return s.warning(text)
+	default:
+		return text
+	}
+}
+
+func (s demoStyles) wrap(code, text string) string {
+	if !s.enabled || text == "" {
+		return text
+	}
+	return "\x1b[" + code + "m" + text + "\x1b[0m"
 }
 
 type workspaceManager struct {
