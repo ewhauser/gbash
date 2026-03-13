@@ -39,7 +39,7 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 		execEnv["GBASH_SESSION_BOOT_AT"] = s.bootAt.Format(time.RFC3339)
 	}
 
-	if err := initializeSandboxLayout(ctx, s.fs, execEnv, workDir, s.cfg.Registry.Names()); err != nil {
+	if err := s.layout.ensure(ctx, s.fs, execEnv, workDir, s.cfg.Registry.Names()); err != nil {
 		return nil, err
 	}
 	if err := s.fs.Chdir(workDir); err != nil {
@@ -84,6 +84,9 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 	})
 	finished := time.Now().UTC()
 
+	events := recorder.Snapshot()
+	s.layout.invalidateForEvents(events)
+
 	result := &ExecutionResult{
 		ExitCode:        shell.ExitCode(runErr),
 		Stdout:          stdout.String(),
@@ -91,7 +94,7 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 		StartedAt:       started,
 		FinishedAt:      finished,
 		Duration:        finished.Sub(started),
-		Events:          recorder.Snapshot(),
+		Events:          events,
 		StdoutTruncated: stdout.Truncated(),
 		StderrTruncated: stderr.Truncated(),
 	}

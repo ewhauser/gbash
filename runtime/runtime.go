@@ -35,6 +35,7 @@ type Session struct {
 	id     string
 	fs     gbfs.FileSystem
 	bootAt time.Time
+	layout *sandboxLayoutState
 	mu     sync.Mutex
 }
 
@@ -121,6 +122,7 @@ func (r *Runtime) NewSession(ctx context.Context) (*Session, error) {
 		id:     nextTraceID("sess"),
 		fs:     fsys,
 		bootAt: time.Now().UTC(),
+		layout: newSandboxLayoutState(r.cfg.BaseEnv, r.cfg.FileSystem.WorkingDir),
 	}, nil
 }
 

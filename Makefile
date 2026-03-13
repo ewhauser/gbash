@@ -1,7 +1,7 @@
 .PHONY: lint test build fuzz fuzz-run fuzz-shard fuzz-smoke fuzz-full bench-smoke bench-full gnu-test gnu-test-setup gnu-build-cache-fetch gnu-build-cache-publish compat-docker-build compat-docker-run release-check release-snapshot
 
 GO_PACKAGES := ./... ./contrib/extras/... ./contrib/sqlite3/... ./contrib/jq/... ./contrib/yq/... ./examples/...
-BENCH_PACKAGES := ./runtime ./contrib/jq
+BENCH_PACKAGES := ./runtime ./cmd/gbash ./contrib/jq
 
 FUZZTIME ?= 10s
 FUZZ_SMOKE_TIME ?= 3s
@@ -10,7 +10,7 @@ BENCH_SMOKE_COUNT ?= 8
 BENCH_SMOKE_TIME ?= 100ms
 BENCH_FULL_COUNT ?= 10
 BENCH_FULL_TIME ?= 200ms
-BENCH_SMOKE_REGEX ?= Benchmark(NewSession|RuntimeRunSimpleScript|SessionExecWarmSimpleScript|WorkflowCodebaseExploration|CommandRGRecursive|CommandJQTransform)$$
+BENCH_SMOKE_REGEX ?= Benchmark(NewSession|RuntimeRunSimpleScript|SessionExecWarmSimpleScript|WorkflowCodebaseExploration|CommandRGRecursive|CLIBinary|CommandJQTransform)$$
 GNU_CACHE_DIR ?= .cache/gnu
 GNU_GBASH_BIN ?= $(GNU_CACHE_DIR)/bin/gbash
 GNU_RESULTS_DIR ?=

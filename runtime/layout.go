@@ -58,21 +58,29 @@ func initializeSandboxLayout(ctx context.Context, fsys gbfs.FileSystem, env map[
 }
 
 func layoutDirectories(env map[string]string, workDir string) []string {
+	return layoutDirectoriesForValues(env["HOME"], env["PATH"], workDir)
+}
+
+func layoutDirectoriesForValues(home, pathValue, workDir string) []string {
 	dirs := []string{
 		defaultTempDir,
 		workDir,
 	}
 
-	if home := strings.TrimSpace(env["HOME"]); home != "" {
+	if home := strings.TrimSpace(home); home != "" {
 		dirs = append(dirs, gbfs.Clean(home))
 	}
 
-	dirs = append(dirs, commandDirectories(env)...)
+	dirs = append(dirs, commandDirectoriesForPath(pathValue)...)
 	return uniqueSortedPaths(dirs)
 }
 
 func commandDirectories(env map[string]string) []string {
-	pathValue := strings.TrimSpace(env["PATH"])
+	return commandDirectoriesForPath(env["PATH"])
+}
+
+func commandDirectoriesForPath(pathValue string) []string {
+	pathValue = strings.TrimSpace(pathValue)
 	if pathValue == "" {
 		return nil
 	}
