@@ -402,7 +402,9 @@ func runMakeCheck(ctx context.Context, makeBin, workDir, configShell string, tes
 	if err != nil {
 		return makeCheckResult{}, err
 	}
-	defer logFile.Close()
+	defer func() {
+		_ = logFile.Close()
+	}()
 
 	stream := &captureTeeWriter{dest: io.MultiWriter(os.Stdout, logFile)}
 	cmd.Stdout = stream
