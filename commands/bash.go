@@ -23,11 +23,27 @@ func (c *Bash) Name() string {
 }
 
 func (c *Bash) Run(ctx context.Context, inv *Invocation) error {
+	return RunCommand(ctx, c, inv)
+}
+
+func (c *Bash) Spec() CommandSpec {
+	spec := BashInvocationSpec(BashInvocationConfig{Name: c.name})
+	spec.HelpRenderer = func(w io.Writer, spec CommandSpec) error {
+		_, err := fmt.Fprintf(w, "usage: %s\n", spec.Usage)
+		return err
+	}
+	spec.VersionRenderer = func(w io.Writer, _ CommandSpec) error {
+		return RenderSimpleVersion(w, c.name)
+	}
+	return spec
+}
+
+func (c *Bash) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
 	if inv.Exec == nil {
 		return fmt.Errorf("%s: subexec callback missing", c.name)
 	}
 
-	parsed, err := ParseBashInvocation(inv.Args, BashInvocationConfig{Name: c.name})
+	parsed, err := bashInvocationFromParsed(BashInvocationConfig{Name: c.name}, matches, inv.Args)
 	if err != nil {
 		return exitf(inv, 2, "%v", err)
 	}
@@ -37,7 +53,6 @@ func (c *Bash) Run(ctx context.Context, inv *Invocation) error {
 	case "version":
 		return RenderSimpleVersion(inv.Stdout, c.name)
 	}
-
 	switch parsed.Source {
 	case BashSourceCommandString:
 		return c.executeInlineScript(ctx, inv, parsed, parsed.CommandString, inv.Stdin)
@@ -75,3 +90,5 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 }
 
 var _ Command = (*Bash)(nil)
+var _ SpecProvider = (*Bash)(nil)
+var _ ParsedRunner = (*Bash)(nil)

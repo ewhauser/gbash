@@ -123,3 +123,67 @@ func TestParseCommandSpecNegativeNumbersAsPositionals(t *testing.T) {
 		t.Fatalf("numbers = %v, want %v", got, want)
 	}
 }
+
+func TestParseCommandSpecContinueShortGroupValuesConsumesLaterArgs(t *testing.T) {
+	spec := CommandSpec{
+		Name: "probe",
+		Options: []OptionSpec{
+			{Name: "command", Short: 'c', Arity: OptionRequiredValue},
+			{Name: "errexit", Short: 'e'},
+			{Name: "nounset", Short: 'u'},
+		},
+		Parse: ParseConfig{
+			GroupShortOptions:        true,
+			ContinueShortGroupValues: true,
+		},
+	}
+
+	matches, action, err := ParseCommandSpec(&Invocation{Args: []string{"-ceu", "echo hi"}}, &spec)
+	if err != nil {
+		t.Fatalf("ParseCommandSpec() error = %v", err)
+	}
+	if action != "" {
+		t.Fatalf("action = %q, want empty", action)
+	}
+	if !matches.Has("errexit") {
+		t.Fatalf("errexit = false, want true")
+	}
+	if !matches.Has("nounset") {
+		t.Fatalf("nounset = false, want true")
+	}
+	if got, want := matches.Value("command"), "echo hi"; got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+}
+
+func TestParseCommandSpecContinueShortGroupValuesSupportsMultiplePendingOptions(t *testing.T) {
+	spec := CommandSpec{
+		Name: "probe",
+		Options: []OptionSpec{
+			{Name: "option", Short: 'o', Arity: OptionRequiredValue},
+			{Name: "command", Short: 'c', Arity: OptionRequiredValue},
+			{Name: "nounset", Short: 'u'},
+		},
+		Parse: ParseConfig{
+			GroupShortOptions:        true,
+			ContinueShortGroupValues: true,
+		},
+	}
+
+	matches, action, err := ParseCommandSpec(&Invocation{Args: []string{"-ocu", "pipefail", "echo hi"}}, &spec)
+	if err != nil {
+		t.Fatalf("ParseCommandSpec() error = %v", err)
+	}
+	if action != "" {
+		t.Fatalf("action = %q, want empty", action)
+	}
+	if !matches.Has("nounset") {
+		t.Fatalf("nounset = false, want true")
+	}
+	if got, want := matches.Value("option"), "pipefail"; got != want {
+		t.Fatalf("option = %q, want %q", got, want)
+	}
+	if got, want := matches.Value("command"), "echo hi"; got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+}

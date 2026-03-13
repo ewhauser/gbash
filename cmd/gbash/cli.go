@@ -39,11 +39,12 @@ func runCLI(ctx context.Context, argv0 string, args []string, stdin io.Reader, s
 	}
 	switch parsed.Action {
 	case "help":
-		if err := commands.RenderBashInvocationHelp(stdout, commands.BashInvocationConfig{
+		spec := commands.BashInvocationSpec(commands.BashInvocationConfig{
 			Name:             "gbash",
 			AllowInteractive: true,
 			LongInteractive:  true,
-		}); err != nil {
+		})
+		if err := commands.RenderCommandHelp(stdout, &spec); err != nil {
 			return 1, err
 		}
 		return 0, nil

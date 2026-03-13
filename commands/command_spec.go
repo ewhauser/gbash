@@ -44,6 +44,7 @@ type CommandSpec struct {
 type ParseConfig struct {
 	InferLongOptions         bool
 	GroupShortOptions        bool
+	ContinueShortGroupValues bool
 	ShortOptionValueAttached bool
 	LongOptionValueEquals    bool
 	StopAtFirstPositional    bool
@@ -307,6 +308,12 @@ func parseShortOptions(inv *Invocation, spec *CommandSpec, parsed *ParsedCommand
 		return "", false, commandUsageError(inv, spec.Name, "invalid option -- '%c'", rune(shorts[0]))
 	}
 
+	type pendingShortOption struct {
+		opt       *OptionSpec
+		shownName string
+	}
+
+	var pending []pendingShortOption
 	for i, ch := range shorts {
 		opt, ok := matchShortOption(spec, ch)
 		if !ok {
@@ -336,10 +343,27 @@ func parseShortOptions(inv *Invocation, spec *CommandSpec, parsed *ParsedCommand
 			value = remaining
 			hasValue = true
 		}
+		if opt.Arity == OptionRequiredValue && spec.Parse.ContinueShortGroupValues && !hasValue {
+			pending = append(pending, pendingShortOption{
+				opt:       opt,
+				shownName: "-" + string(ch),
+			})
+			continue
+		}
 		if err := applyOptionValue(inv, spec, parsed, opt, "-"+string(ch), value, hasValue, rest, false); err != nil {
 			return "", false, err
 		}
+		for _, item := range pending {
+			if err := applyOptionValue(inv, spec, parsed, item.opt, item.shownName, "", false, rest, false); err != nil {
+				return "", false, err
+			}
+		}
 		return "", false, nil
+	}
+	for _, item := range pending {
+		if err := applyOptionValue(inv, spec, parsed, item.opt, item.shownName, "", false, rest, false); err != nil {
+			return "", false, err
+		}
 	}
 
 	return "", false, nil
