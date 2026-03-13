@@ -2,8 +2,6 @@ package commands
 
 import (
 	"context"
-	"fmt"
-	"strings"
 )
 
 type Chown struct{}
@@ -17,28 +15,63 @@ func (c *Chown) Name() string {
 }
 
 func (c *Chown) Run(ctx context.Context, inv *Invocation) error {
-	opts, err := parseChownArgs(inv)
+	return RunCommand(ctx, c, inv)
+}
+
+func (c *Chown) Spec() CommandSpec {
+	return CommandSpec{
+		Name:  "chown",
+		About: "Change the owner and/or group of each FILE to OWNER and/or GROUP.",
+		Usage: "chown [OPTION]... [OWNER][:[GROUP]] FILE...\n  or:  chown [OPTION]... --reference=RFILE FILE...",
+		Options: []OptionSpec{
+			{Name: "help", Long: "help", Help: "display this help and exit"},
+			{Name: "changes", Short: 'c', Long: "changes", Help: "like verbose but report only when a change is made"},
+			{Name: "from", Long: "from", ValueName: "CURRENT_OWNER:CURRENT_GROUP", Arity: OptionRequiredValue, Help: "change the owner and/or group of each file only if its current owner and/or group match those specified here"},
+			{Name: "preserve-root", Long: "preserve-root", Help: "fail to operate recursively on '/'"},
+			{Name: "no-preserve-root", Long: "no-preserve-root", Help: "do not treat '/' specially"},
+			{Name: "quiet", Short: 'f', Long: "quiet", Aliases: []string{"silent"}, HelpAliases: []string{"silent"}, Help: "suppress most error messages"},
+			{Name: "recursive", Short: 'R', Long: "recursive", Help: "operate on files and directories recursively"},
+			{Name: "reference", Long: "reference", ValueName: "RFILE", Arity: OptionRequiredValue, Help: "use RFILE's owner and group rather than specifying OWNER:GROUP values"},
+			{Name: "verbose", Short: 'v', Long: "verbose", Help: "output a diagnostic for every file processed"},
+			{Name: "traverse-first", Short: 'H', Help: "if a command line argument is a symbolic link to a directory, traverse it"},
+			{Name: "traverse-all", Short: 'L', Help: "traverse every symbolic link to a directory encountered"},
+			{Name: "traverse-none", Short: 'P', Help: "do not traverse any symbolic links (default)"},
+			{Name: "dereference", Long: "dereference", Help: "affect the referent of each symbolic link rather than the symbolic link itself"},
+			{Name: "no-dereference", Short: 'h', Long: "no-dereference", Help: "affect symbolic links instead of any referenced file"},
+		},
+		Args: []ArgSpec{
+			{Name: "owner", ValueName: "OWNER", Help: "new owner name or numeric ID, optionally with :GROUP"},
+			{Name: "file", ValueName: "FILE", Repeatable: true, Help: "files to change"},
+		},
+		Parse: ParseConfig{
+			InferLongOptions:      true,
+			GroupShortOptions:     true,
+			LongOptionValueEquals: true,
+			AutoVersion:           true,
+		},
+	}
+}
+
+func (c *Chown) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
+	spec := c.Spec()
+	if matches.Has("help") {
+		return RenderCommandHelp(inv.Stdout, &spec)
+	}
+
+	opts, err := parseChownMatches(inv, matches)
 	if err != nil {
 		return err
 	}
-	switch opts.mode {
-	case "help":
-		_, _ = fmt.Fprintln(inv.Stdout, "usage: chown [OPTION]... [OWNER][:[GROUP]] FILE...")
-		return nil
-	case "version":
-		_, _ = fmt.Fprintln(inv.Stdout, "chown (gbash)")
-		return nil
-	}
 
 	db := loadPermissionIdentityDB(ctx, inv)
-	if opts.fromSpec != "" {
+	if opts.fromSet {
 		opts.filter, err = parsePermissionFilterSpec(inv, db, opts.fromSpec)
 		if err != nil {
 			return err
 		}
 	}
 
-	if opts.reference != "" {
+	if opts.referenceSet {
 		info, _, err := statPath(ctx, inv, opts.reference)
 		if err != nil {
 			return err
@@ -52,6 +85,7 @@ func (c *Chown) Run(ctx context.Context, inv *Invocation) error {
 			return err
 		}
 	}
+
 	return runPermissionApply(ctx, inv, db, &permissionApplyOptions{
 		commandName: c.Name(),
 		files:       opts.files,
@@ -64,92 +98,61 @@ func (c *Chown) Run(ctx context.Context, inv *Invocation) error {
 }
 
 type chownOptions struct {
-	mode      string
-	fromSpec  string
-	ownerSpec string
-	reference string
-	files     []string
-	uid       *uint32
-	gid       *uint32
-	filter    permissionIfFrom
-	verbosity permissionVerbosity
-	walk      permissionWalkOptions
+	fromSpec     string
+	fromSet      bool
+	ownerSpec    string
+	reference    string
+	referenceSet bool
+	files        []string
+	uid          *uint32
+	gid          *uint32
+	filter       permissionIfFrom
+	verbosity    permissionVerbosity
+	walk         permissionWalkOptions
 }
 
-func parseChownArgs(inv *Invocation) (chownOptions, error) {
-	args := append([]string(nil), inv.Args...)
+func parseChownMatches(inv *Invocation, matches *ParsedCommand) (chownOptions, error) {
 	opts := chownOptions{
-		verbosity: permissionVerbosity{level: permissionVerbosityNormal},
+		fromSpec:     matches.Value("from"),
+		fromSet:      matches.Has("from"),
+		reference:    matches.Value("reference"),
+		referenceSet: matches.Has("reference"),
+		verbosity: permissionVerbosity{
+			level: permissionVerbosityNormal,
+		},
 	}
+
 	recursive := false
 	preserveRoot := false
 	traverse := permissionTraverseNone
 	var dereference *bool
-	parsingOptions := true
-	operands := make([]string, 0, len(args))
 
-	for len(args) > 0 {
-		arg := args[0]
-		args = args[1:]
-
-		if parsingOptions && arg == "--" {
-			parsingOptions = false
-			continue
-		}
-		if !parsingOptions || !strings.HasPrefix(arg, "-") || arg == "-" {
-			operands = append(operands, arg)
-			parsingOptions = false
-			continue
-		}
-
-		switch {
-		case arg == "--help":
-			opts.mode = "help"
-			return opts, nil
-		case arg == "--version":
-			opts.mode = "version"
-			return opts, nil
-		case arg == "--changes":
+	for _, name := range matches.OptionOrder() {
+		switch name {
+		case "changes":
 			opts.verbosity.level = permissionVerbosityChanges
-		case arg == "--quiet" || arg == "--silent":
+		case "quiet":
 			opts.verbosity.level = permissionVerbositySilent
-		case arg == "--verbose":
+		case "verbose":
 			opts.verbosity.level = permissionVerbosityVerbose
-		case arg == "--recursive":
+		case "recursive":
 			recursive = true
-		case arg == "--preserve-root":
+		case "preserve-root":
 			preserveRoot = true
-		case arg == "--no-preserve-root":
+		case "no-preserve-root":
 			preserveRoot = false
-		case arg == "--dereference":
+		case "traverse-first":
+			traverse = permissionTraverseFirst
+		case "traverse-all":
+			traverse = permissionTraverseAll
+		case "traverse-none":
+			traverse = permissionTraverseNone
+		case "dereference":
 			value := true
 			dereference = &value
-		case arg == "--no-dereference":
+		case "no-dereference":
 			value := false
 			dereference = &value
-		case arg == "--from":
-			if len(args) == 0 {
-				return chownOptions{}, exitf(inv, 1, "chown: option requires an argument -- from")
-			}
-			opts.fromSpec = args[0]
-			args = args[1:]
-		case strings.HasPrefix(arg, "--from="):
-			opts.fromSpec = arg[len("--from="):]
-		case arg == "--reference":
-			if len(args) == 0 {
-				return chownOptions{}, exitf(inv, 1, "chown: option requires an argument -- reference")
-			}
-			opts.reference = args[0]
-			args = args[1:]
-		case strings.HasPrefix(arg, "--reference="):
-			opts.reference = arg[len("--reference="):]
-		default:
-			if strings.HasPrefix(arg, "--") {
-				return chownOptions{}, exitf(inv, 1, "chown: unrecognized option '%s'", arg)
-			}
-			if err := parseChownShortFlags(inv, arg, &opts, &recursive, &traverse, &dereference); err != nil {
-				return chownOptions{}, err
-			}
 		}
 	}
 
@@ -158,46 +161,24 @@ func parseChownArgs(inv *Invocation) (chownOptions, error) {
 		return chownOptions{}, err
 	}
 	opts.walk = walk
-	if opts.reference != "" {
-		if len(operands) == 0 {
+
+	positionals := matches.Positionals()
+	if opts.referenceSet {
+		if len(positionals) == 0 {
 			return chownOptions{}, exitf(inv, 1, "chown: missing operand after %s", opts.reference)
 		}
-		opts.files = operands
+		opts.files = positionals
 		return opts, nil
 	}
-	if len(operands) < 2 {
+
+	if len(positionals) < 2 {
 		return chownOptions{}, exitf(inv, 1, "chown: missing operand")
 	}
-	opts.ownerSpec = operands[0]
-	opts.files = operands[1:]
+	opts.ownerSpec = positionals[0]
+	opts.files = positionals[1:]
 	return opts, nil
 }
 
-func parseChownShortFlags(inv *Invocation, arg string, opts *chownOptions, recursive *bool, traverse *permissionTraverseSymlinks, dereference **bool) error {
-	for _, flag := range arg[1:] {
-		switch flag {
-		case 'c':
-			opts.verbosity.level = permissionVerbosityChanges
-		case 'f', 'q':
-			opts.verbosity.level = permissionVerbositySilent
-		case 'v':
-			opts.verbosity.level = permissionVerbosityVerbose
-		case 'R':
-			*recursive = true
-		case 'H':
-			*traverse = permissionTraverseFirst
-		case 'L':
-			*traverse = permissionTraverseAll
-		case 'P':
-			*traverse = permissionTraverseNone
-		case 'h':
-			value := false
-			*dereference = &value
-		default:
-			return exitf(inv, 1, "chown: invalid option -- %c", flag)
-		}
-	}
-	return nil
-}
-
 var _ Command = (*Chown)(nil)
+var _ SpecProvider = (*Chown)(nil)
+var _ ParsedRunner = (*Chown)(nil)
