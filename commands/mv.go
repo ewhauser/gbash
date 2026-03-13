@@ -20,7 +20,39 @@ func (c *MV) Name() string {
 }
 
 func (c *MV) Run(ctx context.Context, inv *Invocation) error {
-	opts, args, err := parseMVArgs(inv)
+	return RunCommand(ctx, c, inv)
+}
+
+func (c *MV) Spec() CommandSpec {
+	return CommandSpec{
+		Name:  "mv",
+		About: "Rename SOURCE to DEST, or move SOURCE(s) to DIRECTORY.",
+		Usage: "mv [OPTION]... SOURCE DEST\n" +
+			"       mv [OPTION]... SOURCE... DIRECTORY\n" +
+			"       mv [OPTION]... -t DIRECTORY SOURCE...",
+		Options: []OptionSpec{
+			{Name: "force", Short: 'f', Long: "force", Help: "do not prompt before overwriting"},
+			{Name: "no-clobber", Short: 'n', Long: "no-clobber", Help: "do not overwrite an existing file"},
+			{Name: "verbose", Short: 'v', Long: "verbose", Help: "explain what is being done"},
+			{Name: "target-directory", Short: 't', Long: "target-directory", Arity: OptionRequiredValue, ValueName: "DIRECTORY", Help: "move all SOURCE arguments into DIRECTORY"},
+			{Name: "no-target-directory", Short: 'T', Long: "no-target-directory", Help: "treat DEST as a normal file"},
+		},
+		Args: []ArgSpec{
+			{Name: "file", ValueName: "FILE", Repeatable: true},
+		},
+		Parse: ParseConfig{
+			InferLongOptions:         true,
+			GroupShortOptions:        true,
+			ShortOptionValueAttached: true,
+			LongOptionValueEquals:    true,
+			AutoHelp:                 true,
+			AutoVersion:              true,
+		},
+	}
+}
+
+func (c *MV) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
+	opts, args, err := parseMVMatches(inv, matches)
 	if err != nil {
 		return err
 	}
@@ -50,7 +82,7 @@ func (c *MV) Run(ctx context.Context, inv *Invocation) error {
 		if opts.noClobber && destExists {
 			continue
 		}
-		if srcInfo.IsDir() && (destAbs == srcAbs || strings.HasPrefix(destAbs, srcAbs+"/")) {
+		if srcInfo.IsDir() && isWithinMovedTree(srcAbs, destAbs) {
 			return exitf(inv, 1, "mv: cannot move %q into itself", source)
 		}
 		if err := ensureParentDirExists(ctx, inv, destAbs); err != nil {
@@ -88,45 +120,34 @@ type mvOptions struct {
 	force     bool
 	noClobber bool
 	verbose   bool
+	targetDir string
+	noTarget  bool
 }
 
-func parseMVArgs(inv *Invocation) (mvOptions, []string, error) {
-	args := inv.Args
-	var opts mvOptions
-	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
-		arg := args[0]
-		if arg == "--" {
-			return opts, args[1:], nil
-		}
-		switch arg {
-		case "-f", "--force":
+func parseMVMatches(inv *Invocation, matches *ParsedCommand) (mvOptions, []string, error) {
+	opts := mvOptions{}
+	for _, name := range matches.OptionOrder() {
+		switch name {
+		case "force":
 			opts.force = true
-		case "-n", "--no-clobber":
+			opts.noClobber = false
+		case "no-clobber":
 			opts.noClobber = true
 			opts.force = false
-		case "-v", "--verbose":
+		case "verbose":
 			opts.verbose = true
-		default:
-			if len(arg) > 2 && arg[0] == '-' && arg[1] != '-' {
-				for _, flag := range arg[1:] {
-					switch flag {
-					case 'f':
-						opts.force = true
-					case 'n':
-						opts.noClobber = true
-						opts.force = false
-					case 'v':
-						opts.verbose = true
-					default:
-						return mvOptions{}, nil, exitf(inv, 1, "mv: unsupported flag -%c", flag)
-					}
-				}
-				args = args[1:]
-				continue
-			}
-			return mvOptions{}, nil, exitf(inv, 1, "mv: unsupported flag %s", arg)
+		case "target-directory":
+			opts.targetDir = matches.Value("target-directory")
+		case "no-target-directory":
+			opts.noTarget = true
 		}
-		args = args[1:]
+	}
+	args := matches.Args("file")
+	if opts.targetDir != "" {
+		if opts.noTarget {
+			return mvOptions{}, nil, commandUsageError(inv, "mv", "cannot combine --target-directory and --no-target-directory")
+		}
+		args = append(append([]string(nil), args...), opts.targetDir)
 	}
 	return opts, args, nil
 }
@@ -143,4 +164,10 @@ func isDirInfo(info stdfs.FileInfo) bool {
 	return info != nil && info.IsDir()
 }
 
+func isWithinMovedTree(srcAbs, destAbs string) bool {
+	return destAbs == srcAbs || len(destAbs) > len(srcAbs) && destAbs[:len(srcAbs)] == srcAbs && destAbs[len(srcAbs)] == '/'
+}
+
 var _ Command = (*MV)(nil)
+var _ SpecProvider = (*MV)(nil)
+var _ ParsedRunner = (*MV)(nil)
