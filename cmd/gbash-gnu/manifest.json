@@ -66,7 +66,9 @@
     { "patterns": ["tests/misc/false-status.sh"], "commands": ["false"], "kind": "direct" }
   ],
   "skip_patterns": [
+    { "pattern": "tests/chcon/*", "reason": "SELinux command tests are out of scope in v1" },
     { "pattern": "tests/help/*", "reason": "help/version tests are skipped in v1" },
-    { "pattern": "tests/*/selinux*", "reason": "SELinux tests are skipped in v1" }
+    { "pattern": "tests/runcon/*", "reason": "SELinux command tests are out of scope in v1" },
+    { "pattern": "tests/*/selinux*", "reason": "SELinux tests are out of scope in v1" }
   ]
 }
