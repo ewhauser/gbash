@@ -220,24 +220,6 @@ func parseUniqCheckChars(inv *Invocation, raw string) (int, error) {
 	return count, nil
 }
 
-func uniqGroups(lines []string, opts uniqOptions) []uniqGroup {
-	if len(lines) == 0 {
-		return nil
-	}
-	groups := make([]uniqGroup, 0, len(lines))
-	current := uniqGroup{line: lines[0], count: 1}
-	for _, line := range lines[1:] {
-		if equalUniqLine(line, current.line, opts) {
-			current.count++
-			continue
-		}
-		groups = append(groups, current)
-		current = uniqGroup{line: line, count: 1}
-	}
-	groups = append(groups, current)
-	return groups
-}
-
 func equalUniqLine(left, right string, opts uniqOptions) bool {
 	if opts.checkCharsSet {
 		left = uniqPrefixChars(left, opts.checkChars)
