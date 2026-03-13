@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	stdfs "io/fs"
 	"os"
 	"strings"
@@ -15,17 +16,6 @@ import (
 type Readlink struct{}
 
 const readlinkMaxSymlinkDepth = 40
-
-var readlinkLongOptions = []string{
-	"canonicalize",
-	"canonicalize-existing",
-	"canonicalize-missing",
-	"no-newline",
-	"quiet",
-	"silent",
-	"verbose",
-	"zero",
-}
 
 type readlinkOptions struct {
 	canonicalize         bool
@@ -54,15 +44,52 @@ func (c *Readlink) Name() string {
 }
 
 func (c *Readlink) Run(ctx context.Context, inv *Invocation) error {
-	opts, args, err := parseReadlinkArgs(inv, inv.Args)
-	if err != nil {
-		return err
+	return RunCommand(ctx, c, inv)
+}
+
+func (c *Readlink) Spec() CommandSpec {
+	return CommandSpec{
+		Name:  "readlink",
+		About: "Print value of a symbolic link or canonical file name",
+		Usage: "readlink [OPTION]... FILE...",
+		Options: []OptionSpec{
+			{Name: "canonicalize", Short: 'f', Long: "canonicalize", Help: "canonicalize by following every symlink in every component of the given name recursively; all but the last component must exist"},
+			{Name: "canonicalize-existing", Short: 'e', Long: "canonicalize-existing", Help: "canonicalize by following every symlink in every component of the given name recursively, all components must exist"},
+			{Name: "canonicalize-missing", Short: 'm', Long: "canonicalize-missing", Help: "canonicalize by following every symlink in every component of the given name recursively, without requirements on components existence"},
+			{Name: "no-newline", Short: 'n', Long: "no-newline", Help: "do not output the trailing delimiter"},
+			{Name: "quiet", Short: 'q', Long: "quiet", Help: "suppress most error messages", Overrides: []string{"quiet", "silent", "verbose"}},
+			{Name: "silent", Short: 's', Long: "silent", Help: "suppress most error messages", Overrides: []string{"quiet", "silent", "verbose"}},
+			{Name: "verbose", Short: 'v', Long: "verbose", Help: "report error messages", Overrides: []string{"quiet", "silent", "verbose"}},
+			{Name: "zero", Short: 'z', Long: "zero", Help: "end each output line with NUL, not newline"},
+			{Name: "help", Long: "help", Help: "display this help and exit"},
+			{Name: "version", Long: "version", Help: "output version information and exit"},
+		},
+		Args: []ArgSpec{
+			{Name: "file", ValueName: "FILE", Repeatable: true, Required: true},
+		},
+		Parse: ParseConfig{
+			InferLongOptions:      true,
+			GroupShortOptions:     true,
+			StopAtFirstPositional: true,
+		},
+		VersionRenderer: func(w io.Writer, _ CommandSpec) error {
+			return RenderSimpleVersion(w, "readlink")
+		},
 	}
+}
+
+func (c *Readlink) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
+	if matches.Has("help") {
+		return RenderCommandHelp(inv.Stdout, &matches.Spec)
+	}
+	if matches.Has("version") {
+		return RenderCommandVersion(inv.Stdout, &matches.Spec)
+	}
+
+	opts := parseReadlinkMatches(matches)
+	args := matches.Args("file")
 	if _, ok := inv.Env["POSIXLY_CORRECT"]; ok {
 		opts.verbose = true
-	}
-	if len(args) == 0 {
-		return exitf(inv, 1, "readlink: missing operand")
 	}
 
 	lineEnding := "\n"
@@ -74,7 +101,10 @@ func (c *Readlink) Run(ctx context.Context, inv *Invocation) error {
 
 	mode := resolveReadlinkCanonicalMode(opts)
 	for _, name := range args {
-		var out string
+		var (
+			out string
+			err error
+		)
 		if mode == readlinkModeNone {
 			out, err = readlinkValue(ctx, inv, name)
 		} else {
@@ -95,94 +125,27 @@ func (c *Readlink) Run(ctx context.Context, inv *Invocation) error {
 	return nil
 }
 
-func parseReadlinkArgs(inv *Invocation, args []string) (readlinkOptions, []string, error) {
+func parseReadlinkMatches(matches *ParsedCommand) readlinkOptions {
 	opts := readlinkOptions{}
-	for len(args) > 0 {
-		arg := args[0]
-		if arg == "--" {
-			return opts, args[1:], nil
-		}
-		if arg == "-" || !strings.HasPrefix(arg, "-") {
-			return opts, args, nil
-		}
-		if strings.HasPrefix(arg, "--") {
-			name, ok := inferReadlinkLongOption(arg)
-			if !ok {
-				return readlinkOptions{}, nil, exitf(inv, 1, "readlink: unsupported flag %s", arg)
-			}
-			applyReadlinkLongOption(&opts, name)
-			args = args[1:]
-			continue
-		}
-		if !applyReadlinkShortFlags(&opts, arg) {
-			return readlinkOptions{}, nil, exitf(inv, 1, "readlink: unsupported flag %s", arg)
-		}
-		args = args[1:]
-	}
-	return opts, args, nil
-}
-
-func inferReadlinkLongOption(arg string) (string, bool) {
-	if strings.Contains(arg, "=") {
-		return "", false
-	}
-	name := strings.TrimPrefix(arg, "--")
-	match := ""
-	for _, option := range readlinkLongOptions {
-		if strings.HasPrefix(option, name) {
-			if match != "" {
-				return "", false
-			}
-			match = option
-		}
-	}
-	return match, match != ""
-}
-
-func applyReadlinkLongOption(opts *readlinkOptions, name string) {
-	switch name {
-	case "canonicalize":
-		opts.canonicalize = true
-	case "canonicalize-existing":
-		opts.canonicalizeExisting = true
-	case "canonicalize-missing":
-		opts.canonicalizeMissing = true
-	case "no-newline":
-		opts.noNewline = true
-	case "quiet", "silent":
-		opts.verbose = false
-	case "verbose":
-		opts.verbose = true
-	case "zero":
-		opts.zero = true
-	}
-}
-
-func applyReadlinkShortFlags(opts *readlinkOptions, arg string) bool {
-	if len(arg) < 2 || arg[0] != '-' || strings.HasPrefix(arg, "--") {
-		return false
-	}
-	for _, flag := range arg[1:] {
-		switch flag {
-		case 'f':
+	for _, name := range matches.OptionOrder() {
+		switch name {
+		case "canonicalize":
 			opts.canonicalize = true
-		case 'e':
+		case "canonicalize-existing":
 			opts.canonicalizeExisting = true
-		case 'm':
+		case "canonicalize-missing":
 			opts.canonicalizeMissing = true
-		case 'n':
+		case "no-newline":
 			opts.noNewline = true
-		case 'q', 's':
+		case "quiet", "silent":
 			opts.verbose = false
-		case 'v':
+		case "verbose":
 			opts.verbose = true
-		case 'z':
+		case "zero":
 			opts.zero = true
-		default:
-			return false
 		}
 	}
-	return true
+	return opts
 }
 
 func resolveReadlinkCanonicalMode(opts readlinkOptions) readlinkCanonicalMode {
