@@ -18,8 +18,10 @@ import (
 var templateFS embed.FS
 
 var indexTemplate = htmltemplate.Must(htmltemplate.New("index.html.tmpl").Funcs(htmltemplate.FuncMap{
-	"formatPercent":     formatPercent,
-	"formatPercentOrNA": formatPercentOrNA,
+	"formatPercent":   formatPercent,
+	"bucketCounts":    bucketCounts,
+	"bucketSegments":  bucketSegments,
+	"testStatusClass": testStatusClass,
 }).ParseFS(templateFS, "templates/index.html.tmpl"))
 
 var badgeTemplate = texttemplate.Must(texttemplate.New("badge.svg.tmpl").ParseFS(templateFS, "templates/badge.svg.tmpl"))
@@ -30,13 +32,18 @@ type options struct {
 }
 
 type runSummary struct {
-	GNUVersion     string          `json:"gnu_version"`
-	GeneratedAt    string          `json:"generated_at"`
-	WorkDir        string          `json:"work_dir,omitempty"`
-	ResultsDir     string          `json:"results_dir,omitempty"`
-	Overall        testSummary     `json:"overall"`
-	UtilitySummary utilityTotals   `json:"utility_summary"`
-	Utilities      []utilityResult `json:"utilities"`
+	GNUVersion     string              `json:"gnu_version"`
+	GeneratedAt    string              `json:"generated_at"`
+	WorkDir        string              `json:"work_dir,omitempty"`
+	ResultsDir     string              `json:"results_dir,omitempty"`
+	Overall        testSummary         `json:"overall"`
+	UtilitySummary utilityTotals       `json:"utility_summary"`
+	Utilities      []utilityResult     `json:"utilities"`
+	Suite          suiteSummary        `json:"suite"`
+	Categories     []categoryResult    `json:"categories"`
+	Commands       []commandCoverage   `json:"commands"`
+	Coverage       coverageDebtSummary `json:"coverage"`
+	ExtraResults   []testResult        `json:"extra_results,omitempty"`
 }
 
 type testSummary struct {
@@ -84,40 +91,96 @@ type testResult struct {
 	ReportedAs []string `json:"reported_as,omitempty"`
 }
 
+type suiteSummary struct {
+	SelectedTotal   int         `json:"selected_total"`
+	FilteredTotal   int         `json:"filtered_total"`
+	Pass            int         `json:"pass"`
+	Fail            int         `json:"fail"`
+	Skip            int         `json:"skip"`
+	XFail           int         `json:"xfail"`
+	XPass           int         `json:"xpass"`
+	Error           int         `json:"error"`
+	Unreported      int         `json:"unreported"`
+	RunnableTotal   int         `json:"runnable_total"`
+	PassPctSelected float64     `json:"pass_pct_selected"`
+	PassPctRunnable float64     `json:"pass_pct_runnable"`
+	Tests           []suiteTest `json:"tests"`
+}
+
+type suiteTest struct {
+	Path         string            `json:"path"`
+	Category     string            `json:"category"`
+	Status       string            `json:"status"`
+	Filtered     bool              `json:"filtered,omitempty"`
+	FilterReason string            `json:"filter_reason,omitempty"`
+	ReportedAs   []string          `json:"reported_as,omitempty"`
+	Attributions []testAttribution `json:"attributions,omitempty"`
+}
+
+type testAttribution struct {
+	Command string `json:"command"`
+	Kind    string `json:"kind"`
+}
+
+type coverageBucket struct {
+	SelectedTotal   int     `json:"selected_total"`
+	FilteredTotal   int     `json:"filtered_total"`
+	Pass            int     `json:"pass"`
+	Fail            int     `json:"fail"`
+	Skip            int     `json:"skip"`
+	XFail           int     `json:"xfail"`
+	XPass           int     `json:"xpass"`
+	Error           int     `json:"error"`
+	Unreported      int     `json:"unreported"`
+	RunnableTotal   int     `json:"runnable_total"`
+	PassPctSelected float64 `json:"pass_pct_selected"`
+	PassPctRunnable float64 `json:"pass_pct_runnable"`
+}
+
+type categoryResult struct {
+	Name    string         `json:"name"`
+	Summary coverageBucket `json:"summary"`
+	Tests   []suiteTest    `json:"tests,omitempty"`
+}
+
+type commandCoverage struct {
+	Name          string           `json:"name"`
+	CoverageState string           `json:"coverage_state"`
+	Primary       coverageBucket   `json:"primary"`
+	Shared        coverageBucket   `json:"shared"`
+	Tests         []commandTestRef `json:"tests,omitempty"`
+}
+
+type commandTestRef struct {
+	Path     string `json:"path"`
+	Status   string `json:"status"`
+	Kind     string `json:"kind"`
+	Filtered bool   `json:"filtered,omitempty"`
+}
+
+type coverageDebtSummary struct {
+	CommandTotal           int     `json:"command_total"`
+	PrimaryCoveredCommands int     `json:"primary_covered_commands"`
+	PrimaryPassingCommands int     `json:"primary_passing_commands"`
+	SharedOnlyCommands     int     `json:"shared_only_commands"`
+	FilteredOnlyCommands   int     `json:"filtered_only_commands"`
+	EmptyCommands          int     `json:"empty_commands"`
+	PrimaryPassPct         float64 `json:"primary_pass_pct"`
+	UnmappedSelectedTests  int     `json:"unmapped_selected_tests"`
+	UnmappedRunnableTests  int     `json:"unmapped_runnable_tests"`
+	MultiDirectTests       int     `json:"multi_direct_tests"`
+	ExtraReportedTotal     int     `json:"extra_reported_total"`
+}
+
 type indexView struct {
-	Summary              runSummary
-	Rows                 []indexUtilityRow
-	CommandSummary       renderedUtilityTotals
-	OverallDetail        string
-	RunnableDetail       string
-	CommandDetail        string
-	FilteredDetail       string
-	CommandPassPercent   float64
-	CommandPassPercentNA bool
+	Summary        runSummary
+	SelectedDetail string
+	RunnableDetail string
 }
 
-type renderedUtilityTotals struct {
-	RunnablePassed int
-	RunnableFailed int
-	SkipOnly       int
-	Empty          int
-	PassPct        float64
-}
-
-type indexUtilityRow struct {
-	Name         string
-	Percent      string
-	PercentClass string
-	Selected     string
-	Pass         string
-	Fail         string
-	Skip         string
-	XFail        string
-	XPass        string
-	Error        string
-	Unreported   string
-	LogFile      string
-	Notes        string
+type progressSegment struct {
+	Class string
+	Width string
 }
 
 type badgeView struct {
@@ -202,17 +265,10 @@ func writeReport(outputDir string, summary *runSummary) error {
 
 func renderIndex(summary *runSummary) ([]byte, error) {
 	var buf bytes.Buffer
-	commandSummary := summarizeRenderedUtilities(summary.Utilities)
 	view := indexView{
-		Summary:              *summary,
-		Rows:                 buildUtilityRows(summary.Utilities),
-		CommandSummary:       commandSummary,
-		OverallDetail:        fmt.Sprintf("%d selected, %d pass, %d fail, %d skip", summary.Overall.SelectedTotal, summary.Overall.Pass, summary.Overall.Fail, summary.Overall.Skip),
-		RunnableDetail:       fmt.Sprintf("%d runnable, %d pass, %d fail", summary.Overall.RunnableTotal, summary.Overall.Pass, summary.Overall.Fail),
-		CommandDetail:        fmt.Sprintf("%d passed, %d failed, %d skip-only, %d empty", commandSummary.RunnablePassed, commandSummary.RunnableFailed, commandSummary.SkipOnly, commandSummary.Empty),
-		FilteredDetail:       fmt.Sprintf("%d manifest-level skips, %d extra reported results", summary.Overall.FilteredSkipTotal, summary.Overall.ReportedExtraTotal),
-		CommandPassPercent:   commandSummary.PassPct,
-		CommandPassPercentNA: commandSummary.RunnablePassed+commandSummary.RunnableFailed == 0,
+		Summary:        *summary,
+		SelectedDetail: fmt.Sprintf("%d selected, %d filtered, %d passing", summary.Suite.SelectedTotal, summary.Suite.FilteredTotal, summary.Suite.Pass),
+		RunnableDetail: fmt.Sprintf("%d runnable, %d passing, %d skipped, %d failing", summary.Suite.RunnableTotal, summary.Suite.Pass, summary.Suite.Skip+summary.Suite.XFail, summary.Suite.Fail+summary.Suite.Error+summary.Suite.XPass+summary.Suite.Unreported),
 	}
 	if err := indexTemplate.ExecuteTemplate(&buf, "index.html.tmpl", view); err != nil {
 		return nil, err
@@ -231,8 +287,8 @@ func renderBadge(summary *runSummary) ([]byte, error) {
 
 func buildBadgeView(summary *runSummary) badgeView {
 	label := "compat"
-	message := formatPercent(summary.Overall.PassPctSelected)
-	if summary.Overall.SelectedTotal == 0 {
+	message := formatPercent(summary.Suite.PassPctSelected)
+	if summary.Suite.SelectedTotal == 0 {
 		message = "n/a"
 	}
 	labelWidth := badgeTextWidth(label)
@@ -249,99 +305,21 @@ func buildBadgeView(summary *runSummary) badgeView {
 	}
 }
 
-func summarizeRenderedUtilities(results []utilityResult) renderedUtilityTotals {
-	var totals renderedUtilityTotals
-	for i := range results {
-		summary := results[i].Summary
-		switch {
-		case summary.SelectedTotal == 0:
-			totals.Empty++
-		case summary.RunnableTotal == 0:
-			totals.SkipOnly++
-		case summary.Pass == summary.RunnableTotal && summary.Fail == 0 && summary.XPass == 0 && summary.Error == 0 && summary.Unreported == 0:
-			totals.RunnablePassed++
-		default:
-			totals.RunnableFailed++
-		}
-	}
-	totals.PassPct = percentage(float64(totals.RunnablePassed), float64(totals.RunnablePassed+totals.RunnableFailed))
-	return totals
-}
-
-func buildUtilityRows(results []utilityResult) []indexUtilityRow {
-	rows := make([]indexUtilityRow, 0, len(results))
-	for i := range results {
-		result := &results[i]
-		rows = append(rows, indexUtilityRow{
-			Name:         result.Name,
-			Percent:      utilityPercentText(result),
-			PercentClass: utilityPercentClass(result),
-			Selected:     fmt.Sprintf("%d", result.Summary.SelectedTotal),
-			Pass:         fmt.Sprintf("%d", result.Summary.Pass),
-			Fail:         fmt.Sprintf("%d", result.Summary.Fail),
-			Skip:         fmt.Sprintf("%d", result.Summary.Skip),
-			XFail:        fmt.Sprintf("%d", result.Summary.XFail),
-			XPass:        fmt.Sprintf("%d", result.Summary.XPass),
-			Error:        fmt.Sprintf("%d", result.Summary.Error),
-			Unreported:   fmt.Sprintf("%d", result.Summary.Unreported),
-			LogFile:      result.LogFile,
-			Notes:        utilityNoteText(result),
-		})
-	}
-	return rows
-}
-
-func utilityPercentText(result *utilityResult) string {
-	if result.Summary.RunnableTotal == 0 {
-		return "n/a"
-	}
-	return formatPercent(result.Summary.PassPctRunnable)
-}
-
-func utilityPercentClass(result *utilityResult) string {
-	return percentageClass(result.Summary.RunnableTotal, result.Summary.PassPctRunnable)
-}
-
-func utilityNoteText(result *utilityResult) string {
-	var notes []string
-	if result.Summary.SelectedTotal > 0 && result.Summary.RunnableTotal == 0 {
-		notes = append(notes, "all selected tests skipped")
-	}
-	if len(result.Skipped) > 0 {
-		notes = append(notes, fmt.Sprintf("%d filtered skips", len(result.Skipped)))
-	}
-	return strings.Join(notes, "; ")
-}
-
 func badgeTextWidth(text string) int {
 	return 10 + (len(text) * 7)
 }
 
 func badgeColor(summary *runSummary) string {
-	if summary.Overall.SelectedTotal == 0 {
+	if summary.Suite.SelectedTotal == 0 {
 		return "#9f9f9f"
 	}
 	switch {
-	case summary.Overall.PassPctSelected >= 90:
+	case summary.Suite.PassPctSelected >= 90:
 		return "#4c1"
-	case summary.Overall.PassPctSelected >= 70:
+	case summary.Suite.PassPctSelected >= 70:
 		return "#dfb317"
 	default:
 		return "#e05d44"
-	}
-}
-
-func percentageClass(selected int, percent float64) string {
-	if selected == 0 {
-		return "na"
-	}
-	switch {
-	case percent >= 90:
-		return "good"
-	case percent >= 70:
-		return "warn"
-	default:
-		return "bad"
 	}
 }
 
@@ -350,6 +328,114 @@ func formatPercentOrNA(value float64, na bool) string {
 		return "n/a"
 	}
 	return formatPercent(value)
+}
+
+func bucketCounts(bucket coverageBucket) string {
+	return fmt.Sprintf("%d / %d / %d", bucket.Pass, bucket.Skip+bucket.FilteredTotal+bucket.XFail, bucket.Fail+bucket.Error+bucket.XPass+bucket.Unreported)
+}
+
+func bucketSegments(bucket coverageBucket) []progressSegment {
+	total := bucket.SelectedTotal
+	if total == 0 {
+		return nil
+	}
+	segments := []struct {
+		class string
+		count int
+	}{
+		{class: "good", count: bucket.Pass},
+		{class: "warn", count: bucket.Skip + bucket.FilteredTotal + bucket.XFail},
+		{class: "bad", count: bucket.Fail + bucket.Error + bucket.XPass + bucket.Unreported},
+	}
+	out := make([]progressSegment, 0, len(segments))
+	for _, segment := range segments {
+		if segment.count == 0 {
+			continue
+		}
+		out = append(out, progressSegment{
+			Class: segment.class,
+			Width: fmt.Sprintf("%.4f%%", (float64(segment.count)/float64(total))*100),
+		})
+	}
+	return out
+}
+
+func bucketClass(bucket coverageBucket) string {
+	if bucket.SelectedTotal == 0 {
+		return "na"
+	}
+	if bucket.RunnableTotal == 0 {
+		return "warn"
+	}
+	switch {
+	case bucket.PassPctRunnable >= 90:
+		return "good"
+	case bucket.PassPctRunnable >= 70:
+		return "warn"
+	default:
+		return "bad"
+	}
+}
+
+func commandNotes(command commandCoverage) string {
+	var notes []string
+	switch command.CoverageState {
+	case "shared-only":
+		notes = append(notes, "shared coverage only")
+	case "filtered-only":
+		notes = append(notes, "all attributed tests filtered")
+	case "empty":
+		notes = append(notes, "no attributed coverage")
+	}
+	if command.Shared.SelectedTotal > 0 && command.CoverageState == "primary" {
+		notes = append(notes, fmt.Sprintf("%d shared tests", command.Shared.SelectedTotal))
+	}
+	if command.Primary.FilteredTotal > 0 && command.CoverageState == "primary" {
+		notes = append(notes, fmt.Sprintf("%d primary tests filtered", command.Primary.FilteredTotal))
+	}
+	return strings.Join(notes, "; ")
+}
+
+func stateClass(state string) string {
+	switch state {
+	case "primary":
+		return "good"
+	case "shared-only":
+		return "warn"
+	case "filtered-only":
+		return "warn"
+	default:
+		return "na"
+	}
+}
+
+func testStatusClass(status string, filtered bool) string {
+	if filtered {
+		return "warn"
+	}
+	switch status {
+	case "pass":
+		return "good"
+	case "skip", "xfail":
+		return "warn"
+	case "filtered":
+		return "warn"
+	case "fail", "error", "xpass", "unreported":
+		return "bad"
+	default:
+		return "na"
+	}
+}
+
+func attributionLabel(attributions []testAttribution) string {
+	if len(attributions) == 0 {
+		return "unmapped"
+	}
+	parts := make([]string, 0, len(attributions))
+	for _, attribution := range attributions {
+		parts = append(parts, attribution.Command+" ("+attribution.Kind+")")
+	}
+	return strings.Join(parts, ", ")
 }
 
 func formatPercent(value float64) string {

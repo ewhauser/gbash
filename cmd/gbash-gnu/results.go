@@ -274,3 +274,442 @@ func prepareResultsDir(cacheDir, explicitDir string) (string, error) {
 	}
 	return resultsDir, nil
 }
+
+func buildCoverageArtifacts(selectedTests []string, filteredByPath map[string]string, selectedResults, extraResults []testResult, runs []utilityRun, mf *manifest) (suiteSummary, []categoryResult, []commandCoverage, coverageDebtSummary, []testResult) {
+	resultByPath := make(map[string]testResult, len(selectedResults))
+	for _, result := range selectedResults {
+		resultByPath[result.Name] = cloneTestResult(result)
+	}
+	commandNames := coverageCommandNames(runs, mf)
+	commandSet := make(map[string]struct{}, len(commandNames))
+	for _, name := range commandNames {
+		commandSet[name] = struct{}{}
+	}
+
+	suitePaths := make([]string, 0, len(selectedTests)+len(filteredByPath))
+	suitePaths = append(suitePaths, selectedTests...)
+	for path := range filteredByPath {
+		if containsString(suitePaths, path) {
+			continue
+		}
+		suitePaths = append(suitePaths, path)
+	}
+	suitePaths = uniqueSortedStrings(suitePaths)
+
+	tests := make([]suiteTest, 0, len(suitePaths))
+	for _, path := range suitePaths {
+		test := suiteTest{
+			Path:         path,
+			Category:     testCategory(path),
+			Status:       "unreported",
+			Attributions: attributeTestPath(path, commandSet, mf),
+		}
+		if reason, ok := filteredByPath[path]; ok {
+			test.Status = "filtered"
+			test.Filtered = true
+			test.FilterReason = reason
+		} else if result, ok := resultByPath[path]; ok {
+			test.Status = result.Status
+			test.ReportedAs = append([]string(nil), result.ReportedAs...)
+		}
+		tests = append(tests, test)
+	}
+
+	suite := summarizeSuiteTests(tests)
+	categories := buildCategoryResults(tests)
+	commands := buildCommandCoverage(commandNames, tests)
+	coverage := summarizeCoverageDebt(commands, tests, extraResults)
+	return suite, categories, commands, coverage, extraResults
+}
+
+func combinedSkippedEntriesForRuns(runs []utilityRun) map[string]string {
+	out := make(map[string]string)
+	for _, run := range runs {
+		for _, skipped := range run.Skipped {
+			name, reason := splitSkippedEntry(skipped)
+			if name == "" {
+				continue
+			}
+			if _, exists := out[name]; exists {
+				continue
+			}
+			out[name] = reason
+		}
+	}
+	return out
+}
+
+func parseSkippedEntries(entries []string) map[string]string {
+	out := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		name, reason := splitSkippedEntry(entry)
+		if name == "" {
+			continue
+		}
+		out[name] = reason
+	}
+	return out
+}
+
+func splitSkippedEntry(entry string) (name, reason string) {
+	name = entry
+	if idx := strings.Index(entry, ": "); idx >= 0 {
+		name = entry[:idx]
+		reason = entry[idx+2:]
+	}
+	return name, reason
+}
+
+func cloneTestResult(in testResult) testResult {
+	out := in
+	out.ReportedAs = append([]string(nil), in.ReportedAs...)
+	return out
+}
+
+func mergeTestResult(existing, incoming testResult) testResult {
+	if testStatusPrecedence(incoming.Status) > testStatusPrecedence(existing.Status) {
+		existing.Status = incoming.Status
+	}
+	for _, reportedAs := range incoming.ReportedAs {
+		if !containsString(existing.ReportedAs, reportedAs) {
+			existing.ReportedAs = append(existing.ReportedAs, reportedAs)
+		}
+	}
+	sort.Strings(existing.ReportedAs)
+	return existing
+}
+
+func mergeNamedResults(dst map[string]testResult, results []testResult) {
+	for _, result := range results {
+		existing, ok := dst[result.Name]
+		if !ok {
+			dst[result.Name] = cloneTestResult(result)
+			continue
+		}
+		dst[result.Name] = mergeTestResult(existing, result)
+	}
+}
+
+func sortedNamedResults(results map[string]testResult) []testResult {
+	names := make([]string, 0, len(results))
+	for name := range results {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]testResult, 0, len(names))
+	for _, name := range names {
+		out = append(out, results[name])
+	}
+	return out
+}
+
+func coverageCommandNames(runs []utilityRun, mf *manifest) []string {
+	names := make([]string, 0, len(runs))
+	seen := make(map[string]struct{})
+	for _, run := range runs {
+		if run.Utility.Name == "explicit-tests" {
+			continue
+		}
+		if _, ok := seen[run.Utility.Name]; ok {
+			continue
+		}
+		seen[run.Utility.Name] = struct{}{}
+		names = append(names, run.Utility.Name)
+	}
+	for _, rule := range mf.AttributionRules {
+		for _, command := range rule.Commands {
+			if _, ok := seen[command]; ok {
+				continue
+			}
+			seen[command] = struct{}{}
+			names = append(names, command)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func attributeTestPath(path string, knownCommands map[string]struct{}, mf *manifest) []testAttribution {
+	attributions := make([]testAttribution, 0)
+	explicitPrimary := false
+	for _, rule := range mf.AttributionRules {
+		if !ruleMatchesPath(rule, path) {
+			continue
+		}
+		for _, command := range rule.Commands {
+			if _, ok := knownCommands[command]; !ok {
+				continue
+			}
+			kind := strings.TrimSpace(rule.Kind)
+			if kind == "" {
+				kind = "shared"
+			}
+			attributions = appendUniqueAttribution(attributions, testAttribution{Command: command, Kind: kind})
+			if kind == "direct" {
+				explicitPrimary = true
+			}
+		}
+	}
+	if !explicitPrimary {
+		if owner, ok := defaultPrimaryOwner(path, knownCommands, mf); ok {
+			attributions = appendUniqueAttribution(attributions, testAttribution{Command: owner, Kind: "direct"})
+		}
+	}
+	sort.Slice(attributions, func(i, j int) bool {
+		if attributions[i].Command == attributions[j].Command {
+			return attributions[i].Kind < attributions[j].Kind
+		}
+		return attributions[i].Command < attributions[j].Command
+	})
+	return attributions
+}
+
+func ruleMatchesPath(rule testAttributionRule, path string) bool {
+	for _, pattern := range rule.Patterns {
+		if matched, err := filepath.Match(pattern, path); err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
+
+func appendUniqueAttribution(items []testAttribution, item testAttribution) []testAttribution {
+	for _, existing := range items {
+		if existing.Command == item.Command && existing.Kind == item.Kind {
+			return items
+		}
+	}
+	return append(items, item)
+}
+
+func defaultPrimaryOwner(path string, knownCommands map[string]struct{}, mf *manifest) (string, bool) {
+	category := testCategory(path)
+	switch category {
+	case "", "help":
+		return "", false
+	case "misc":
+		if owner, ok := miscPrimaryOwner(path, knownCommands); ok {
+			return owner, true
+		}
+		return "", false
+	default:
+		aliases := manifestUtilityAliases(mf)
+		owner := utilityDisplayName(category, aliases)
+		if _, ok := knownCommands[owner]; ok {
+			return owner, true
+		}
+		return "", false
+	}
+}
+
+func miscPrimaryOwner(path string, knownCommands map[string]struct{}) (string, bool) {
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	candidates := []string{base}
+	if trimmed := strings.TrimSuffix(base, "-status"); trimmed != base {
+		candidates = append(candidates, trimmed)
+	}
+	for _, candidate := range candidates {
+		if _, ok := knownCommands[candidate]; ok {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+func testCategory(path string) string {
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	if len(parts) < 3 {
+		return ""
+	}
+	return parts[1]
+}
+
+func summarizeSuiteTests(tests []suiteTest) suiteSummary {
+	summary := suiteSummary{
+		SelectedTotal: len(tests),
+		Tests:         append([]suiteTest(nil), tests...),
+	}
+	for _, test := range tests {
+		if test.Filtered {
+			summary.FilteredTotal++
+			continue
+		}
+		switch test.Status {
+		case "pass":
+			summary.Pass++
+		case "fail":
+			summary.Fail++
+		case "skip":
+			summary.Skip++
+		case "xfail":
+			summary.XFail++
+		case "xpass":
+			summary.XPass++
+		case "error":
+			summary.Error++
+		default:
+			summary.Unreported++
+		}
+	}
+	summary.RunnableTotal = summary.Pass + summary.Fail + summary.XFail + summary.XPass + summary.Error
+	summary.PassPctSelected = percentage(summary.Pass, summary.SelectedTotal)
+	summary.PassPctRunnable = percentage(summary.Pass, summary.RunnableTotal)
+	return summary
+}
+
+func buildCategoryResults(tests []suiteTest) []categoryResult {
+	byName := make(map[string][]suiteTest)
+	for _, test := range tests {
+		byName[test.Category] = append(byName[test.Category], test)
+	}
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	results := make([]categoryResult, 0, len(names))
+	for _, name := range names {
+		categoryTests := append([]suiteTest(nil), byName[name]...)
+		sort.Slice(categoryTests, func(i, j int) bool { return categoryTests[i].Path < categoryTests[j].Path })
+		results = append(results, categoryResult{
+			Name:    name,
+			Summary: summarizeCoverageBucket(categoryTests),
+			Tests:   categoryTests,
+		})
+	}
+	return results
+}
+
+func buildCommandCoverage(commandNames []string, tests []suiteTest) []commandCoverage {
+	results := make([]commandCoverage, 0, len(commandNames))
+	for _, command := range commandNames {
+		coverage := commandCoverage{Name: command}
+		primaryTests := make([]suiteTest, 0)
+		sharedTests := make([]suiteTest, 0)
+		for _, test := range tests {
+			for _, attribution := range test.Attributions {
+				if attribution.Command != command {
+					continue
+				}
+				coverage.Tests = append(coverage.Tests, commandTestRef{
+					Path:     test.Path,
+					Status:   test.Status,
+					Kind:     attribution.Kind,
+					Filtered: test.Filtered,
+				})
+				if attribution.Kind == "shared" {
+					sharedTests = append(sharedTests, test)
+				} else {
+					primaryTests = append(primaryTests, test)
+				}
+			}
+		}
+		sort.Slice(coverage.Tests, func(i, j int) bool {
+			if coverage.Tests[i].Path == coverage.Tests[j].Path {
+				return coverage.Tests[i].Kind < coverage.Tests[j].Kind
+			}
+			return coverage.Tests[i].Path < coverage.Tests[j].Path
+		})
+		coverage.Primary = summarizeCoverageBucket(primaryTests)
+		coverage.Shared = summarizeCoverageBucket(sharedTests)
+		totalSelected := coverage.Primary.SelectedTotal + coverage.Shared.SelectedTotal
+		totalFiltered := coverage.Primary.FilteredTotal + coverage.Shared.FilteredTotal
+		switch {
+		case totalSelected > 0 && totalSelected == totalFiltered:
+			coverage.CoverageState = "filtered-only"
+		case coverage.Primary.SelectedTotal > 0:
+			coverage.CoverageState = "primary"
+		case coverage.Shared.SelectedTotal > 0:
+			coverage.CoverageState = "shared-only"
+		default:
+			coverage.CoverageState = "empty"
+		}
+		results = append(results, coverage)
+	}
+	return results
+}
+
+func summarizeCoverageBucket(tests []suiteTest) coverageBucket {
+	bucket := coverageBucket{
+		SelectedTotal: len(tests),
+	}
+	for _, test := range tests {
+		if test.Filtered {
+			bucket.FilteredTotal++
+			continue
+		}
+		switch test.Status {
+		case "pass":
+			bucket.Pass++
+		case "fail":
+			bucket.Fail++
+		case "skip":
+			bucket.Skip++
+		case "xfail":
+			bucket.XFail++
+		case "xpass":
+			bucket.XPass++
+		case "error":
+			bucket.Error++
+		default:
+			bucket.Unreported++
+		}
+	}
+	bucket.RunnableTotal = bucket.Pass + bucket.Fail + bucket.XFail + bucket.XPass + bucket.Error
+	bucket.PassPctSelected = percentage(bucket.Pass, bucket.SelectedTotal)
+	bucket.PassPctRunnable = percentage(bucket.Pass, bucket.RunnableTotal)
+	return bucket
+}
+
+func summarizeCoverageDebt(commands []commandCoverage, tests []suiteTest, extras []testResult) coverageDebtSummary {
+	debt := coverageDebtSummary{
+		CommandTotal:       len(commands),
+		ExtraReportedTotal: len(extras),
+	}
+	primaryRunnableCommands := 0
+	for _, command := range commands {
+		switch command.CoverageState {
+		case "primary":
+			debt.PrimaryCoveredCommands++
+			primaryRunnableCommands++
+			if command.Primary.RunnableTotal > 0 &&
+				command.Primary.Pass == command.Primary.RunnableTotal &&
+				command.Primary.Fail == 0 &&
+				command.Primary.XPass == 0 &&
+				command.Primary.Error == 0 &&
+				command.Primary.Unreported == 0 {
+				debt.PrimaryPassingCommands++
+			}
+		case "shared-only":
+			debt.SharedOnlyCommands++
+		case "filtered-only":
+			debt.FilteredOnlyCommands++
+			if command.Primary.SelectedTotal > 0 {
+				debt.PrimaryCoveredCommands++
+			}
+		case "empty":
+			debt.EmptyCommands++
+		}
+	}
+	debt.PrimaryPassPct = percentage(debt.PrimaryPassingCommands, primaryRunnableCommands)
+
+	for _, test := range tests {
+		directOwners := 0
+		for _, attribution := range test.Attributions {
+			if attribution.Kind == "direct" {
+				directOwners++
+			}
+		}
+		if directOwners > 1 {
+			debt.MultiDirectTests++
+		}
+		if len(test.Attributions) == 0 {
+			debt.UnmappedSelectedTests++
+			if !test.Filtered {
+				debt.UnmappedRunnableTests++
+			}
+		}
+	}
+	return debt
+}

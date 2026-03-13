@@ -3,186 +3,254 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>gbash GNU Compatibility</title>
+  <title>GNU Test Coverage</title>
   <style>
 :root {
-  color-scheme: light;
-  --bg: #f6f4ef;
-  --panel: #fffdf8;
-  --ink: #1d1a16;
-  --muted: #6e665d;
-  --line: #d8d2c7;
-  --good: #2d7d46;
-  --warn: #9a6b00;
-  --bad: #b83232;
-  --na: #6f6f6f;
-  --accent: #165ba8;
+  color-scheme: dark;
+  --bg: #0a1020;
+  --bg-alt: #0e1730;
+  --panel: rgba(14, 23, 48, 0.86);
+  --line: rgba(187, 197, 219, 0.16);
+  --ink: #e8ebf6;
+  --muted: #b7bfd9;
+  --good: #47c271;
+  --warn: #d8ca86;
+  --bad: #ff4b5c;
+  --accent: #9cc2ff;
+  --track: rgba(255, 255, 255, 0.08);
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  background: radial-gradient(circle at top, #fff8ea 0%, var(--bg) 42%, #ede8de 100%);
   color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(47, 86, 167, 0.18), transparent 34%),
+    radial-gradient(circle at top right, rgba(39, 120, 92, 0.16), transparent 28%),
+    linear-gradient(180deg, #09101f 0%, #0a1121 46%, #08101d 100%);
 }
 main {
-  max-width: 1100px;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 40px 20px 64px;
+  padding: 48px 24px 72px;
 }
-h1, h2 { margin: 0 0 12px; }
+h1, h2 { margin: 0; }
 p { margin: 0; line-height: 1.5; }
 a { color: var(--accent); }
+code, .mono {
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+}
 .lede {
-  margin-top: 10px;
+  margin-top: 16px;
+  max-width: 840px;
   color: var(--muted);
-  max-width: 720px;
+  font-size: 1.05rem;
 }
 .meta {
-  margin-top: 16px;
+  margin-top: 14px;
   color: var(--muted);
   font-size: 0.95rem;
 }
-.cards {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+.summary {
   margin-top: 28px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
-.card {
-  background: rgba(255,255,255,0.78);
+.summary-card {
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.24);
   padding: 18px 18px 16px;
-  box-shadow: 0 10px 30px rgba(29,26,22,0.06);
 }
-.card-label {
+.summary-label {
   color: var(--muted);
-  font-size: 0.9rem;
-  text-transform: uppercase;
+  font-size: 0.84rem;
   letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
-.card-value {
+.summary-value {
   margin-top: 6px;
   font-size: 2rem;
   font-weight: 700;
 }
-.card-detail {
+.summary-detail {
   margin-top: 8px;
   color: var(--muted);
-  font-size: 0.95rem;
+  font-size: 0.94rem;
 }
-.table-wrap {
-  margin-top: 28px;
-  background: rgba(255,255,255,0.82);
+.panel {
+  margin-top: 30px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--panel);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.28);
+  padding: 24px 22px 20px;
+}
+.section-copy {
+  margin-top: 12px;
+  color: var(--muted);
+  max-width: 840px;
+}
+.details-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 22px;
+}
+details.group {
   border: 1px solid var(--line);
   border-radius: 18px;
-  overflow: auto;
-  box-shadow: 0 14px 34px rgba(29,26,22,0.07);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.03);
 }
-table {
+details.group summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 16px 18px;
+}
+details.group summary::-webkit-details-marker {
+  display: none;
+}
+.summary-row {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(110px, 160px) minmax(120px, 160px) 1fr minmax(120px, 180px);
+  align-items: center;
+}
+.counts {
+  font-size: 1.05rem;
+}
+.row-note {
+  color: var(--muted);
+  font-size: 0.93rem;
+  text-align: right;
+}
+.progress {
+  display: flex;
+  width: 100%;
+  height: 18px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--track);
+}
+.progress-segment {
+  display: block;
+  height: 100%;
+}
+.progress-segment.good { background: var(--good); }
+.progress-segment.warn { background: var(--warn); }
+.progress-segment.bad { background: var(--bad); }
+.group-body {
+  border-top: 1px solid var(--line);
+  padding: 10px 18px 16px;
+}
+.subtable {
   width: 100%;
   border-collapse: collapse;
-  min-width: 900px;
 }
-th, td {
+.subtable th, .subtable td {
+  padding: 10px 8px;
   text-align: left;
-  padding: 12px 14px;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
 }
-th {
-  font-size: 0.82rem;
+.subtable th {
   color: var(--muted);
-  letter-spacing: 0.08em;
+  font-size: 0.78rem;
   text-transform: uppercase;
-  background: rgba(246,244,239,0.85);
+  letter-spacing: 0.08em;
 }
-tbody tr:last-child td { border-bottom: 0; }
+.subtable tr:last-child td {
+  border-bottom: 0;
+}
 .pill {
   display: inline-block;
-  min-width: 64px;
+  min-width: 76px;
   padding: 4px 10px;
   border-radius: 999px;
-  font-size: 0.9rem;
+  font-size: 0.84rem;
   font-weight: 700;
+  text-align: center;
 }
-.good { color: var(--good); background: rgba(45,125,70,0.12); }
-.warn { color: var(--warn); background: rgba(154,107,0,0.12); }
-.bad { color: var(--bad); background: rgba(184,50,50,0.12); }
-.na { color: var(--na); background: rgba(111,111,111,0.12); }
-.notes {
-  color: var(--muted);
-  font-size: 0.92rem;
+.good { color: var(--good); background: rgba(71, 194, 113, 0.14); }
+.warn { color: var(--warn); background: rgba(216, 202, 134, 0.14); }
+.bad { color: var(--bad); background: rgba(255, 75, 92, 0.14); }
+.na { color: var(--muted); background: rgba(183, 191, 217, 0.14); }
+@media (max-width: 920px) {
+  .summary-row {
+    grid-template-columns: 1fr;
+  }
+  .row-note {
+    text-align: left;
+  }
 }
   </style>
 </head>
 <body>
   <main>
-    <h1>GNU Coreutils Compatibility</h1>
-    <p class="lede">Latest published compatibility run for <code>gbash</code>, generated from the optional GNU coreutils harness. The JSON summary is the machine-readable source of truth for deeper dashboards and command-by-test grids.</p>
+    <h1>GNU Test Coverage</h1>
+    <p class="lede"><code>gbash</code> is tested against the GNU coreutils test suite. The results below are grouped by the upstream GNU test categories, matching the structure of the suite rather than a derived per-command attribution layer.</p>
     <p class="meta">Generated <strong>{{ .Summary.GeneratedAt }}</strong> against GNU coreutils <strong>{{ .Summary.GNUVersion }}</strong>. Raw data: <a href="summary.json">summary.json</a>.</p>
 
-    <section class="cards">
-      <article class="card">
-        <div class="card-label">Selected Test Pass</div>
-        <div class="card-value">{{ formatPercent .Summary.Overall.PassPctSelected }}</div>
-        <div class="card-detail">{{ .OverallDetail }}</div>
+    <section class="summary">
+      <article class="summary-card">
+        <div class="summary-label">Selected Test Pass</div>
+        <div class="summary-value">{{ formatPercent .Summary.Suite.PassPctSelected }}</div>
+        <div class="summary-detail">{{ .SelectedDetail }}</div>
       </article>
-      <article class="card">
-        <div class="card-label">Runnable Test Pass</div>
-        <div class="card-value">{{ formatPercent .Summary.Overall.PassPctRunnable }}</div>
-        <div class="card-detail">{{ .RunnableDetail }}</div>
+      <article class="summary-card">
+        <div class="summary-label">Runnable Test Pass</div>
+        <div class="summary-value">{{ formatPercent .Summary.Suite.PassPctRunnable }}</div>
+        <div class="summary-detail">{{ .RunnableDetail }}</div>
       </article>
-      <article class="card">
-        <div class="card-label">Runnable Command Pass</div>
-        <div class="card-value">{{ formatPercentOrNA .CommandPassPercent .CommandPassPercentNA }}</div>
-        <div class="card-detail">{{ .CommandDetail }}</div>
-      </article>
-      <article class="card">
-        <div class="card-label">Filtered Skips</div>
-        <div class="card-value">{{ .Summary.Overall.FilteredSkipTotal }}</div>
-        <div class="card-detail">{{ .FilteredDetail }}</div>
+      <article class="summary-card">
+        <div class="summary-label">Coverage Categories</div>
+        <div class="summary-value">{{ len .Summary.Categories }}</div>
+        <div class="summary-detail">{{ .Summary.Suite.SelectedTotal }} total tests across upstream GNU categories.</div>
       </article>
     </section>
 
-    <section class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Utility</th>
-            <th>Runnable %</th>
-            <th>Selected</th>
-            <th>Pass</th>
-            <th>Fail</th>
-            <th>Skip</th>
-            <th>XFail</th>
-            <th>XPass</th>
-            <th>Error</th>
-            <th>Unreported</th>
-            <th>Log</th>
-            <th>Notes</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{- range .Rows }}
-          <tr>
-            <td><strong>{{ .Name }}</strong></td>
-            <td><span class="pill {{ .PercentClass }}">{{ .Percent }}</span></td>
-            <td>{{ .Selected }}</td>
-            <td>{{ .Pass }}</td>
-            <td>{{ .Fail }}</td>
-            <td>{{ .Skip }}</td>
-            <td>{{ .XFail }}</td>
-            <td>{{ .XPass }}</td>
-            <td>{{ .Error }}</td>
-            <td>{{ .Unreported }}</td>
-            <td>{{ if .LogFile }}<a href="{{ .LogFile }}">{{ .LogFile }}</a>{{ else }}<span class="notes">n/a</span>{{ end }}</td>
-            <td class="notes">{{ .Notes }}</td>
-          </tr>
-          {{- end }}
-        </tbody>
-      </table>
+    <section class="panel">
+      <h2>Coverage per category</h2>
+      <p class="section-copy">Click categories to see the names of the tests. Green indicates a passing test, yellow indicates a skipped or filtered test, and red indicates a failed, errored, or unreported test.</p>
+
+      <div class="details-list">
+        {{- range .Summary.Categories }}
+        <details class="group">
+          <summary>
+            <div class="summary-row">
+              <strong class="mono">{{ .Name }}</strong>
+              <span class="mono counts">{{ bucketCounts .Summary }}</span>
+              <div class="progress" aria-hidden="true">
+                {{- range bucketSegments .Summary }}
+                <span class="progress-segment {{ .Class }}" style="width: {{ .Width }}"></span>
+                {{- end }}
+              </div>
+              <span class="row-note">{{ .Summary.SelectedTotal }} tests{{ if gt .Summary.FilteredTotal 0 }}, {{ .Summary.FilteredTotal }} filtered{{ end }}</span>
+            </div>
+          </summary>
+          <div class="group-body">
+            <table class="subtable">
+              <thead>
+                <tr>
+                  <th>Test</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{- range .Tests }}
+                <tr>
+                  <td class="mono">{{ .Path }}</td>
+                  <td><span class="pill {{ testStatusClass .Status .Filtered }}">{{ if .Filtered }}filtered{{ else }}{{ .Status }}{{ end }}</span></td>
+                </tr>
+                {{- end }}
+              </tbody>
+            </table>
+          </div>
+        </details>
+        {{- end }}
+      </div>
     </section>
   </main>
 </body>
