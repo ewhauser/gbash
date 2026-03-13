@@ -140,6 +140,7 @@ type categoryResult struct {
 	Summary  coverageBucket    `json:"summary"`
 	Tests    []suiteTest       `json:"tests,omitempty"`
 	Counts   string            `json:"-"`
+	RowNote  string            `json:"-"`
 	Segments []progressSegment `json:"-"`
 }
 
@@ -174,6 +175,7 @@ type coverageDebtSummary struct {
 
 type indexView struct {
 	Summary        runSummary
+	InScopePassPct float64
 	SelectedDetail string
 	RunnableDetail string
 }
@@ -267,9 +269,11 @@ func writeReport(outputDir string, summary *runSummary) error {
 
 func renderIndex(summary *runSummary) ([]byte, error) {
 	var buf bytes.Buffer
+	inScopeTotal := suiteInScopeTotal(summary)
 	view := indexView{
 		Summary:        *summary,
-		SelectedDetail: fmt.Sprintf("%d selected, %d filtered, %d passing", summary.Suite.SelectedTotal, summary.Suite.FilteredTotal, summary.Suite.Pass),
+		InScopePassPct: suiteInScopePassPct(summary),
+		SelectedDetail: fmt.Sprintf("%d in scope, %d out of scope, %d passing", inScopeTotal, summary.Suite.FilteredTotal, summary.Suite.Pass),
 		RunnableDetail: fmt.Sprintf("%d runnable, %d passing, %d skipped, %d failing", summary.Suite.RunnableTotal, summary.Suite.Pass, summary.Suite.Skip+summary.Suite.XFail, summary.Suite.Fail+summary.Suite.Error+summary.Suite.XPass+summary.Suite.Unreported),
 	}
 	if err := indexTemplate.ExecuteTemplate(&buf, "index.html.tmpl", view); err != nil {
@@ -281,6 +285,7 @@ func renderIndex(summary *runSummary) ([]byte, error) {
 func prepareSummaryView(summary *runSummary) {
 	for i := range summary.Categories {
 		summary.Categories[i].Counts = bucketCounts(&summary.Categories[i].Summary)
+		summary.Categories[i].RowNote = bucketRowNote(&summary.Categories[i].Summary)
 		summary.Categories[i].Segments = bucketSegments(&summary.Categories[i].Summary)
 	}
 }
@@ -296,8 +301,8 @@ func renderBadge(summary *runSummary) ([]byte, error) {
 
 func buildBadgeView(summary *runSummary) badgeView {
 	label := "compat"
-	message := formatPercent(summary.Suite.PassPctSelected)
-	if summary.Suite.SelectedTotal == 0 {
+	message := formatPercent(suiteInScopePassPct(summary))
+	if suiteInScopeTotal(summary) == 0 {
 		message = "n/a"
 	}
 	labelWidth := badgeTextWidth(label)
@@ -319,13 +324,14 @@ func badgeTextWidth(text string) int {
 }
 
 func badgeColor(summary *runSummary) string {
-	if summary.Suite.SelectedTotal == 0 {
+	passPct := suiteInScopePassPct(summary)
+	if suiteInScopeTotal(summary) == 0 {
 		return "#9f9f9f"
 	}
 	switch {
-	case summary.Suite.PassPctSelected >= 90:
+	case passPct >= 90:
 		return "#4c1"
-	case summary.Suite.PassPctSelected >= 70:
+	case passPct >= 70:
 		return "#dfb317"
 	default:
 		return "#e05d44"
@@ -333,7 +339,14 @@ func badgeColor(summary *runSummary) string {
 }
 
 func bucketCounts(bucket *coverageBucket) string {
-	return fmt.Sprintf("%d / %d / %d", bucket.Pass, bucket.Skip+bucket.FilteredTotal+bucket.XFail, bucket.Fail+bucket.Error+bucket.XPass+bucket.Unreported)
+	return fmt.Sprintf("%d / %d / %d", bucket.Pass, bucket.Skip+bucket.XFail, bucket.Fail+bucket.Error+bucket.XPass+bucket.Unreported)
+}
+
+func bucketRowNote(bucket *coverageBucket) string {
+	if bucket.FilteredTotal == 0 {
+		return fmt.Sprintf("%d tests", bucket.SelectedTotal)
+	}
+	return fmt.Sprintf("%d tests, %d out of scope", bucket.SelectedTotal, bucket.FilteredTotal)
 }
 
 func bucketSegments(bucket *coverageBucket) []progressSegment {
@@ -346,7 +359,8 @@ func bucketSegments(bucket *coverageBucket) []progressSegment {
 		count int
 	}{
 		{class: "good", count: bucket.Pass},
-		{class: "warn", count: bucket.Skip + bucket.FilteredTotal + bucket.XFail},
+		{class: "oos", count: bucket.FilteredTotal},
+		{class: "warn", count: bucket.Skip + bucket.XFail},
 		{class: "bad", count: bucket.Fail + bucket.Error + bucket.XPass + bucket.Unreported},
 	}
 	out := make([]progressSegment, 0, len(segments))
@@ -364,7 +378,7 @@ func bucketSegments(bucket *coverageBucket) []progressSegment {
 
 func testStatusClass(status string, filtered bool) string {
 	if filtered {
-		return "warn"
+		return "oos"
 	}
 	switch status {
 	case "pass":
@@ -390,6 +404,22 @@ func formatPercent(value float64) string {
 	formatted := fmt.Sprintf("%.2f", value)
 	formatted = strings.TrimRight(strings.TrimRight(formatted, "0"), ".")
 	return formatted + "%"
+}
+
+func suiteInScopeTotal(summary *runSummary) int {
+	total := summary.Suite.SelectedTotal - summary.Suite.FilteredTotal
+	if total < 0 {
+		return 0
+	}
+	return total
+}
+
+func suiteInScopePassPct(summary *runSummary) float64 {
+	total := suiteInScopeTotal(summary)
+	if total == 0 {
+		return 0
+	}
+	return math.Round((float64(summary.Suite.Pass)/float64(total))*10000) / 100
 }
 
 func fatalf(format string, args ...any) {

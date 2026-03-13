@@ -341,6 +341,147 @@ func testScriptExists(workDir, rel string) bool {
 	return false
 }
 
+var makeVarRefPattern = regexp.MustCompile(`\$\(([^)]+)\)`)
+
+func discoverAuthoritativeTests(workDir string) ([]string, error) {
+	localMKPath := filepath.Join(workDir, "tests", "local.mk")
+	data, err := os.ReadFile(localMKPath)
+	if err != nil {
+		return nil, err
+	}
+	vars := parseMakeVariables(string(data))
+	expanded, err := expandMakeVariable("TESTS", vars, nil)
+	if err != nil {
+		return nil, fmt.Errorf("expand TESTS from %s: %w", localMKPath, err)
+	}
+
+	tests := make([]string, 0)
+	for _, field := range strings.Fields(expanded) {
+		field = filepath.ToSlash(strings.TrimSpace(field))
+		if !strings.HasPrefix(field, "tests/") {
+			continue
+		}
+		tests = append(tests, field)
+	}
+	if len(tests) == 0 {
+		return nil, fmt.Errorf("no authoritative tests found in %s", localMKPath)
+	}
+	return uniqueSortedStrings(tests), nil
+}
+
+func parseMakeVariables(contents string) map[string]string {
+	vars := make(map[string]string)
+	var logical strings.Builder
+
+	flush := func() {
+		line := strings.TrimSpace(logical.String())
+		logical.Reset()
+		if line == "" || strings.HasPrefix(line, "#") {
+			return
+		}
+
+		var (
+			name        string
+			value       string
+			appendValue bool
+		)
+		switch {
+		case strings.Contains(line, "+="):
+			parts := strings.SplitN(line, "+=", 2)
+			name = strings.TrimSpace(parts[0])
+			value = strings.TrimSpace(parts[1])
+			appendValue = true
+		case strings.Contains(line, "="):
+			parts := strings.SplitN(line, "=", 2)
+			name = strings.TrimSpace(parts[0])
+			value = strings.TrimSpace(parts[1])
+		default:
+			return
+		}
+		if name == "" || strings.ContainsAny(name, " \t:") {
+			return
+		}
+		if appendValue && vars[name] != "" && value != "" {
+			vars[name] = vars[name] + " " + value
+			return
+		}
+		if appendValue {
+			vars[name] = vars[name] + value
+			return
+		}
+		vars[name] = value
+	}
+
+	for _, rawLine := range strings.Split(contents, "\n") {
+		line := strings.TrimRight(rawLine, "\r")
+		trimmed := strings.TrimSpace(line)
+		if logical.Len() == 0 && (trimmed == "" || strings.HasPrefix(trimmed, "#")) {
+			continue
+		}
+		continued := strings.HasSuffix(strings.TrimRight(line, " \t"), "\\")
+		if continued {
+			line = strings.TrimRight(strings.TrimRight(line, " \t"), "\\")
+		}
+		if logical.Len() > 0 {
+			logical.WriteByte(' ')
+		}
+		logical.WriteString(strings.TrimSpace(line))
+		if continued {
+			continue
+		}
+		flush()
+	}
+	flush()
+	return vars
+}
+
+func expandMakeVariable(name string, vars map[string]string, stack map[string]bool) (string, error) {
+	if stack == nil {
+		stack = make(map[string]bool)
+	}
+	if stack[name] {
+		return "", fmt.Errorf("recursive make variable reference %q", name)
+	}
+	stack[name] = true
+	defer delete(stack, name)
+
+	value, ok := vars[name]
+	if !ok {
+		return "", nil
+	}
+
+	var out strings.Builder
+	last := 0
+	for _, loc := range makeVarRefPattern.FindAllStringSubmatchIndex(value, -1) {
+		out.WriteString(value[last:loc[0]])
+		refName := value[loc[2]:loc[3]]
+		refValue, err := expandMakeVariable(refName, vars, stack)
+		if err != nil {
+			return "", err
+		}
+		out.WriteString(refValue)
+		last = loc[1]
+	}
+	out.WriteString(value[last:])
+	return out.String(), nil
+}
+
+func testScriptExists(workDir, rel string) bool {
+	path := filepath.Join(workDir, filepath.FromSlash(rel))
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	if ext := filepath.Ext(path); ext != "" {
+		return false
+	}
+	for _, candidate := range []string{path + ".sh", path + ".pl", path + ".xpl"} {
+		if _, err := os.Stat(candidate); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func shouldSkipTest(rel, path string, globalSkips []skipPattern, utilitySkips []string) (skip bool, reason string, err error) {
 	for _, skip := range globalSkips {
 		if matched, err := filepath.Match(skip.Pattern, rel); err == nil && matched {

@@ -139,6 +139,7 @@ details.group summary::-webkit-details-marker {
   height: 100%;
 }
 .progress-segment.good { background: var(--good); }
+.progress-segment.oos { background: rgba(183, 191, 217, 0.36); }
 .progress-segment.warn { background: var(--warn); }
 .progress-segment.bad { background: var(--bad); }
 .group-body {
@@ -174,9 +175,15 @@ details.group summary::-webkit-details-marker {
   text-align: center;
 }
 .good { color: var(--good); background: rgba(71, 194, 113, 0.14); }
+.oos { color: #d6dceb; background: rgba(183, 191, 217, 0.18); }
 .warn { color: var(--warn); background: rgba(216, 202, 134, 0.14); }
 .bad { color: var(--bad); background: rgba(255, 75, 92, 0.14); }
 .na { color: var(--muted); background: rgba(183, 191, 217, 0.14); }
+.test-note {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
 @media (max-width: 920px) {
   .summary-row {
     grid-template-columns: 1fr;
@@ -195,8 +202,8 @@ details.group summary::-webkit-details-marker {
 
     <section class="summary">
       <article class="summary-card">
-        <div class="summary-label">Selected Test Pass</div>
-        <div class="summary-value">{{ formatPercent .Summary.Suite.PassPctSelected }}</div>
+        <div class="summary-label">In-Scope Test Pass</div>
+        <div class="summary-value">{{ formatPercent .InScopePassPct }}</div>
         <div class="summary-detail">{{ .SelectedDetail }}</div>
       </article>
       <article class="summary-card">
@@ -213,7 +220,7 @@ details.group summary::-webkit-details-marker {
 
     <section class="panel">
       <h2>Coverage per category</h2>
-      <p class="section-copy">Click categories to see the names of the tests. Green indicates a passing test, yellow indicates a skipped or filtered test, and red indicates a failed, errored, or unreported test.</p>
+      <p class="section-copy">Click categories to see the names of the tests. Green indicates a passing test, yellow indicates a skipped test, grey indicates an out-of-scope test excluded from the overall pass rate, and red indicates a failed, errored, or unreported test.</p>
 
       <div class="details-list">
         {{- range .Summary.Categories }}
@@ -227,7 +234,7 @@ details.group summary::-webkit-details-marker {
                 <span class="progress-segment {{ .Class }}" style="width: {{ .Width }}"></span>
                 {{- end }}
               </div>
-              <span class="row-note">{{ .Summary.SelectedTotal }} tests{{ if gt .Summary.FilteredTotal 0 }}, {{ .Summary.FilteredTotal }} filtered{{ end }}</span>
+              <span class="row-note">{{ .RowNote }}</span>
             </div>
           </summary>
           <div class="group-body">
@@ -241,8 +248,8 @@ details.group summary::-webkit-details-marker {
               <tbody>
                 {{- range .Tests }}
                 <tr>
-                  <td class="mono">{{ .Path }}</td>
-                  <td><span class="pill {{ testStatusClass .Status .Filtered }}">{{ if .Filtered }}filtered{{ else }}{{ .Status }}{{ end }}</span></td>
+                  <td class="mono">{{ .Path }}{{ if .Filtered }}<div class="test-note">{{ .FilterReason }}</div>{{ end }}</td>
+                  <td><span class="pill {{ testStatusClass .Status .Filtered }}">{{ if .Filtered }}out of scope{{ else }}{{ .Status }}{{ end }}</span></td>
                 </tr>
                 {{- end }}
               </tbody>
