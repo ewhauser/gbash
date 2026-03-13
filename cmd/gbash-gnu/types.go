@@ -1,17 +1,23 @@
 package main
 
 type manifest struct {
-	GNUVersion    string            `json:"gnu_version"`
-	TarballURL    string            `json:"tarball_url"`
-	TarballSHA256 string            `json:"tarball_sha256"`
-	Utilities     []utilityManifest `json:"utilities"`
-	SkipPatterns  []skipPattern     `json:"skip_patterns"`
+	GNUVersion          string               `json:"gnu_version"`
+	TarballURL          string               `json:"tarball_url"`
+	TarballSHA256       string               `json:"tarball_sha256"`
+	UtilityOverrides    []utilityAttribution `json:"utility_overrides"`
+	UtilityDisplayNames []utilityNameAlias   `json:"utility_display_names,omitempty"`
+	SkipPatterns        []skipPattern        `json:"skip_patterns"`
 }
 
-type utilityManifest struct {
+type utilityAttribution struct {
 	Name     string   `json:"name"`
 	Patterns []string `json:"patterns"`
 	Skips    []string `json:"skips,omitempty"`
+}
+
+type utilityNameAlias struct {
+	Name  string `json:"name"`
+	Alias string `json:"alias"`
 }
 
 type skipPattern struct {
@@ -91,9 +97,15 @@ type makeCheckResult struct {
 }
 
 type utilityRun struct {
-	Utility utilityManifest
+	Utility attributedUtility
 	Tests   []string
 	Skipped []string
+}
+
+type attributedUtility struct {
+	Name     string
+	Patterns []string
+	Skips    []string
 }
 
 const sourceCacheVersion = "2"
