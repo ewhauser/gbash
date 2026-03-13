@@ -202,6 +202,9 @@ func prepareExecutionPlan(ctx context.Context, mf *manifest, env *executionEnv, 
 	if err := disableCheckRebuild(env.workDir); err != nil {
 		return nil, err
 	}
+	if err := installCompatTestHooks(env.workDir, env.gbashBin); err != nil {
+		return nil, err
+	}
 	allTests, globalSkipped, err := discoverRunnableTests(env.workDir, mf.SkipPatterns, explicitTests)
 	if err != nil {
 		return nil, err

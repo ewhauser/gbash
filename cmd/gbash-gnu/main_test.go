@@ -463,6 +463,79 @@ func TestPrepareProgramDirAddsCompatShellHelpers(t *testing.T) {
 		t.Fatalf("gnu-programs.txt = %q, want sorted reserved program list", got)
 	}
 }
+
+func TestInstallCompatTestHooksWritesRelinkScriptAndPatchesHarnessFiles(t *testing.T) {
+	workDir := t.TempDir()
+	srcDir := filepath.Join(workDir, "src")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(srcDir) error = %v", err)
+	}
+	gbashBin := filepath.Join(workDir, "gbash's test binary")
+	if err := os.WriteFile(gbashBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile(gbashBin) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workDir, "tests"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(tests) error = %v", err)
+	}
+	makefile := "TESTS_ENVIRONMENT = \\\n  . $(srcdir)/tests/lang-default; \\\n  PATH='$(abs_top_builddir)/src$(PATH_SEPARATOR)'\"$$PATH\" \\\n  ; 9>&2\n"
+	if err := os.WriteFile(filepath.Join(workDir, "Makefile"), []byte(makefile), 0o644); err != nil {
+		t.Fatalf("WriteFile(Makefile) error = %v", err)
+	}
+	initSh := "#!/bin/sh\nsetup_ \"$@\"\n# This trap is here, rather than in the setup_ function, because some\n# shells run the exit trap at shell function exit, rather than script exit.\ntrap remove_tmp_ EXIT\n"
+	if err := os.WriteFile(filepath.Join(workDir, "tests", "init.sh"), []byte(initSh), 0o755); err != nil {
+		t.Fatalf("WriteFile(init.sh) error = %v", err)
+	}
+	if err := prepareProgramDir(workDir, gbashBin, []string{"shred"}); err != nil {
+		t.Fatalf("prepareProgramDir() error = %v", err)
+	}
+
+	if err := installCompatTestHooks(workDir, gbashBin); err != nil {
+		t.Fatalf("installCompatTestHooks() error = %v", err)
+	}
+	if err := installCompatTestHooks(workDir, gbashBin); err != nil {
+		t.Fatalf("installCompatTestHooks() second call error = %v", err)
+	}
+
+	relinkPath := filepath.Join(compatHarnessDir(workDir), "relink.sh")
+	info, err := os.Stat(relinkPath)
+	if err != nil {
+		t.Fatalf("Stat(relink.sh) error = %v", err)
+	}
+	if info.Mode()&0o111 == 0 {
+		t.Fatalf("relink.sh mode = %v, want executable", info.Mode())
+	}
+	relinkData, err := os.ReadFile(relinkPath)
+	if err != nil {
+		t.Fatalf("ReadFile(relink.sh) error = %v", err)
+	}
+	wantQuoted := shellSingleQuoteForScript(gbashBin)
+	if !strings.Contains(string(relinkData), "gbash_bin="+wantQuoted) {
+		t.Fatalf("relink.sh = %q, want quoted gbash path %q", string(relinkData), wantQuoted)
+	}
+
+	makefileData, err := os.ReadFile(filepath.Join(workDir, "Makefile"))
+	if err != nil {
+		t.Fatalf("ReadFile(Makefile) error = %v", err)
+	}
+	if got := strings.Count(string(makefileData), "TESTS_ENVIRONMENT ="); got != 1 {
+		t.Fatalf("Makefile TESTS_ENVIRONMENT count = %d, want 1", got)
+	}
+	if got := strings.Count(string(makefileData), "gbash-harness/relink.sh"); got != 1 {
+		t.Fatalf("Makefile relink hook count = %d, want 1", got)
+	}
+
+	initData, err := os.ReadFile(filepath.Join(workDir, "tests", "init.sh"))
+	if err != nil {
+		t.Fatalf("ReadFile(init.sh) error = %v", err)
+	}
+	if got := strings.Count(string(initData), "jbgo_path_before_setup_=$PATH"); got != 1 {
+		t.Fatalf("init.sh setup patch count = %d, want 1", got)
+	}
+	if !strings.Contains(string(initData), "PATH=$jbgo_path_before_setup_") {
+		t.Fatalf("init.sh missing PATH restoration: %q", string(initData))
+	}
+}
+
 func TestPrepareWorkDirPreservesFileTimes(t *testing.T) {
 	cacheDir := t.TempDir()
 	sourceDir := filepath.Join(t.TempDir(), "source")

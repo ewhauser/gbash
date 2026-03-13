@@ -57,11 +57,24 @@ func compatConfigShellPath(workDir string) (string, error) {
 }
 
 func writeGNUProgramList(workDir string, programs []string) error {
-	hookDir := filepath.Join(workDir, "build-aux", "gbash-harness")
+	hookDir := compatHarnessDir(workDir)
 	if err := os.MkdirAll(hookDir, 0o755); err != nil {
 		return err
 	}
 	return writeLines(filepath.Join(hookDir, "gnu-programs.txt"), programs)
+}
+
+func installCompatTestHooks(workDir, gbashBin string) error {
+	if err := writeCompatRelinkScript(workDir, gbashBin); err != nil {
+		return fmt.Errorf("write relink hook: %w", err)
+	}
+	if err := patchCompatTestsEnvironment(workDir); err != nil {
+		return fmt.Errorf("patch TESTS_ENVIRONMENT: %w", err)
+	}
+	if err := patchCompatInitSetup(workDir); err != nil {
+		return fmt.Errorf("patch tests/init.sh setup: %w", err)
+	}
+	return nil
 }
 
 func disableCheckRebuild(workDir string) error {
@@ -92,4 +105,67 @@ func shellSingleQuoteForScript(value string) string {
 		return "''"
 	}
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+func compatHarnessDir(workDir string) string {
+	return filepath.Join(workDir, "build-aux", "gbash-harness")
+}
+
+func writeCompatRelinkScript(workDir, gbashBin string) error {
+	hookDir := compatHarnessDir(workDir)
+	if err := os.MkdirAll(hookDir, 0o755); err != nil {
+		return err
+	}
+	data, err := renderRelinkScript(gbashBin)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(hookDir, "relink.sh"), data, 0o755)
+}
+
+func patchCompatTestsEnvironment(workDir string) error {
+	makefilePath := filepath.Join(workDir, "Makefile")
+	data, err := os.ReadFile(makefilePath)
+	if err != nil {
+		return err
+	}
+	contents := string(data)
+	if strings.Contains(contents, "gbash-harness/relink.sh") {
+		return nil
+	}
+	insert, err := loadAssetText("patches/tests_environment.txt")
+	if err != nil {
+		return err
+	}
+	updated := strings.Replace(contents, "TESTS_ENVIRONMENT = \\\n", insert, 1)
+	if updated == contents {
+		return fmt.Errorf("TESTS_ENVIRONMENT declaration not found in %s", makefilePath)
+	}
+	return os.WriteFile(makefilePath, []byte(updated), 0o644)
+}
+
+func patchCompatInitSetup(workDir string) error {
+	initPath := filepath.Join(workDir, "tests", "init.sh")
+	data, err := os.ReadFile(initPath)
+	if err != nil {
+		return err
+	}
+	contents := string(data)
+	if strings.Contains(contents, "jbgo_path_before_setup_=$PATH") {
+		return nil
+	}
+	replacement, err := loadAssetText("patches/tests_init_setup.txt")
+	if err != nil {
+		return err
+	}
+	const target = `setup_ "$@"
+# This trap is here, rather than in the setup_ function, because some
+# shells run the exit trap at shell function exit, rather than script exit.
+trap remove_tmp_ EXIT
+`
+	updated := strings.Replace(contents, target, replacement, 1)
+	if updated == contents {
+		return fmt.Errorf("tests/init.sh setup block not found in %s", initPath)
+	}
+	return os.WriteFile(initPath, []byte(updated), 0o644)
 }

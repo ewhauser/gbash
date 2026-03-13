@@ -1,4 +1,4 @@
-.PHONY: lint test build fuzz fuzz-run fuzz-shard fuzz-smoke fuzz-full bench-smoke bench-full gnu-test gnu-test-setup gnu-build-cache-fetch gnu-build-cache-publish release-check release-snapshot
+.PHONY: lint test build fuzz fuzz-run fuzz-shard fuzz-smoke fuzz-full bench-smoke bench-full gnu-test gnu-test-setup gnu-build-cache-fetch gnu-build-cache-publish compat-docker-build compat-docker-run release-check release-snapshot
 
 GO_PACKAGES := ./... ./contrib/extras/... ./contrib/sqlite3/... ./contrib/jq/... ./contrib/yq/... ./examples/...
 BENCH_PACKAGES := ./runtime ./contrib/jq
@@ -178,6 +178,12 @@ gnu-build-cache-publish:
 
 gnu-test:
 	GNU_CACHE_DIR='$(GNU_CACHE_DIR)' GNU_GBASH_BIN='$(GNU_GBASH_BIN)' GNU_RESULTS_DIR='$(GNU_RESULTS_DIR)' GNU_UTILS='$(GNU_UTILS)' GNU_TESTS='$(GNU_TESTS)' GNU_KEEP_WORKDIR='$(GNU_KEEP_WORKDIR)' GNU_FORCE_REBUILD='$(GNU_FORCE_REBUILD)' GNU_BUILD_CACHE_REPO='$(GNU_BUILD_CACHE_REPO)' GNU_BUILD_CACHE_TAG='$(GNU_BUILD_CACHE_TAG)' GNU_BUILD_CACHE_VERSION='$(GNU_BUILD_CACHE_VERSION)' ./scripts/gnu-build-cache.sh run
+
+compat-docker-build:
+	./scripts/compat-docker-build.sh
+
+compat-docker-run:
+	./scripts/compat-docker-run.sh
 
 release-check:
 	go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) check
