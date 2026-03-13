@@ -28,7 +28,7 @@ State:
 - Ledger initialized: yes
 - Active task: TODO migration pass
 - TODO scope at start: 59 command files / 63 command entrypoints
-- Current verification gate: `gzip` / `gunzip` / `zcat` complete; preparing commit and moving to `head` / `tail`
+- Current verification gate: `head` complete; preparing commit and moving to `tail`
 
 Done:
 - Confirmed `CONTINUITY.md` was missing at start of turn.
@@ -76,13 +76,22 @@ Done:
 - Verified `go test ./runtime -run 'TestGzip|TestGunzip'` passed.
 - Verified `go test ./...` passed after the `gzip` / `gunzip` / `zcat` migration.
 - Verified `make lint` passed after the `gzip` / `gunzip` / `zcat` migration.
+- Committed `gzip` / `gunzip` / `zcat` migration as `f0f03d2`.
+- Rewrote `head` onto `CommandSpec` / `RunParsed(...)`.
+- Added a reusable parse-invocation normalization hook in `commands/command_spec.go` so commands can preserve legacy syntaxes like `head -NUM` while still using the spec parser.
+- Preserved `head` legacy `-NUM` parsing and `--silent` alias handling during the migration.
+- Added runtime coverage for `head -2 --silent ...`.
+- Verified `go test ./runtime -run 'TestHead'` passed.
+- Verified explicit GNU compatibility tests `tests/head/head.pl,tests/head/head-c.sh,tests/head/head-pos.sh,tests/head/head-write-error.sh,tests/head/head-elide-tail.pl` passed for all runnable cases via `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/head/head.pl,tests/head/head-c.sh,tests/head/head-pos.sh,tests/head/head-write-error.sh,tests/head/head-elide-tail.pl'` with `head-write-error.sh` skipped by the harness.
+- Verified `go test ./...` passed after the `head` migration.
+- Verified `make lint` passed after the `head` migration.
 
 Now:
-- Commit the completed `gzip` / `gunzip` / `zcat` migration.
-- Move to `head` / `tail`, then run their repo and GNU compatibility gates.
+- Commit the completed `head` migration.
+- Move to `tail`, then run its repo and GNU compatibility gates.
 
 Next:
-- Migrate `head` / `tail`.
+- Migrate `tail`.
 - Keep committing each completed command item before moving to the next TODO entry.
 
 Open questions (UNCONFIRMED if needed):
@@ -102,6 +111,7 @@ Working set (files/ids/commands):
 - File: `commands/env.go`
 - File: `commands/gzip.go`
 - File: `commands/head.go`
+- File: `commands/command_spec.go`
 - File: `commands/tail.go`
 - File: `shell/mvdan.go`
 - File: `internal/compatrun/runner_test.go`
@@ -110,6 +120,7 @@ Working set (files/ids/commands):
 - File: `runtime/base64_commands_test.go`
 - File: `runtime/env_command_parity_test.go`
 - File: `runtime/archive_commands_test.go`
+- File: `runtime/text_commands_test.go`
 - Command: `ls -la`
 - Command: `git status --short`
 - Command: `git branch --show-current`
@@ -126,6 +137,8 @@ Working set (files/ids/commands):
 - Command: `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/env/env.sh,tests/misc/printenv.sh'`
 - Command: `go build -o .cache/gnu/bin/gbash ./cmd/gbash`
 - Command: `go test ./runtime -run 'TestGzip|TestGunzip'`
+- Command: `go test ./runtime -run 'TestHead'`
+- Command: `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/head/head.pl,tests/head/head-c.sh,tests/head/head-pos.sh,tests/head/head-write-error.sh,tests/head/head-elide-tail.pl'`
 
 Migration checklist:
 - [x] `base32`
@@ -137,7 +150,7 @@ Migration checklist:
 - [x] `gzip`
 - [x] `gunzip`
 - [x] `zcat`
-- [ ] `head`
+- [x] `head`
 - [ ] `tail`
 - [ ] `ls`
 - [ ] `dir`
