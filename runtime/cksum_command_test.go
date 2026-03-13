@@ -79,9 +79,9 @@ func TestCksumCheckModeAndValidation(t *testing.T) {
 	session := newSession(t, &Config{})
 	data := []byte("verify-me")
 	writeSessionFile(t, session, "/tmp/input.txt", data)
-	writeSessionFile(t, session, "/tmp/md5.sum", []byte(fmt.Sprintf("MD5 (/tmp/input.txt) = %s\n", md5Hex(data))))
-	writeSessionFile(t, session, "/tmp/sha256.sum", []byte(fmt.Sprintf("%s  /tmp/input.txt\n", sha256Hex(data))))
-	writeSessionFile(t, session, "/tmp/sha256b64.sum", []byte(fmt.Sprintf("SHA256 (/tmp/input.txt) = %s\n", base64.StdEncoding.EncodeToString(mustHexDecode(t, sha256Hex(data))))))
+	writeSessionFile(t, session, "/tmp/md5.sum", fmt.Appendf(nil, "MD5 (/tmp/input.txt) = %s\n", md5Hex(data)))
+	writeSessionFile(t, session, "/tmp/sha256.sum", fmt.Appendf(nil, "%s  /tmp/input.txt\n", sha256Hex(data)))
+	writeSessionFile(t, session, "/tmp/sha256b64.sum", fmt.Appendf(nil, "SHA256 (/tmp/input.txt) = %s\n", base64.StdEncoding.EncodeToString(mustHexDecode(t, sha256Hex(data)))))
 
 	tests := []struct {
 		name   string

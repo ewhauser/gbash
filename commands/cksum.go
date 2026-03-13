@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/sha1"
@@ -526,9 +527,9 @@ func (c *Cksum) readDigestInput(ctx context.Context, inv *Invocation, name strin
 	return data, err
 }
 
-func (c *Cksum) readChecksumList(ctx context.Context, inv *Invocation, name string) ([]byte, string, error) {
+func (c *Cksum) readChecksumList(ctx context.Context, inv *Invocation, name string) (data []byte, displayName string, err error) {
 	if name == "-" {
-		data, err := readAllStdin(inv)
+		data, err = readAllStdin(inv)
 		return data, "standard input", err
 	}
 	info, _, err := statPath(ctx, inv, name)
@@ -538,7 +539,7 @@ func (c *Cksum) readChecksumList(ctx context.Context, inv *Invocation, name stri
 	if info.IsDir() {
 		return nil, name, &stdfs.PathError{Op: "open", Path: name, Err: stdfs.ErrInvalid}
 	}
-	data, _, err := readAllFile(ctx, inv, name)
+	data, _, err = readAllFile(ctx, inv, name)
 	return data, name, err
 }
 
@@ -602,7 +603,7 @@ func renderLegacyDigest(algo cksumAlgorithm, raw []byte, size int, filename stri
 	}
 }
 
-func computeCksumDigest(algo cksumAlgorithm, data []byte) ([]byte, int, error) {
+func computeCksumDigest(algo cksumAlgorithm, data []byte) (digest []byte, size int, err error) {
 	switch algo.family {
 	case cksumSysv:
 		var sum uint32
@@ -730,7 +731,7 @@ func posixCRC(data []byte) uint32 {
 
 func posixCRCByte(crc uint32, b byte) uint32 {
 	crc ^= uint32(b) << 24
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		if crc&0x80000000 != 0 {
 			crc = (crc << 1) ^ 0x04c11db7
 		} else {
@@ -850,7 +851,7 @@ func (c *Cksum) processChecksumLine(ctx context.Context, inv *Invocation, opts c
 	if err != nil {
 		return cksumLineFailedOpen
 	}
-	ok = string(got) == string(line.sum)
+	ok = bytes.Equal(got, line.sum)
 	c.writeVerifyResult(inv, []byte(line.prefix+line.filename), ternary(ok, "OK", "FAILED"), !ok, verbosity)
 	if ok {
 		return cksumLineOK
