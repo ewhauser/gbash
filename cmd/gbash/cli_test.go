@@ -39,6 +39,50 @@ func TestRunCLIPrintsVersion(t *testing.T) {
 	}
 }
 
+func TestRunCLIMulticallBashSupportsVersion(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), filepath.Join(tmp, "bash"), []string{"--version"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
+	}
+	if got := stdout.String(); !strings.Contains(got, "bash") {
+		t.Fatalf("stdout = %q, want bash version text", got)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRunCLIMulticallBashUsesHostBashForTrapCompatibility(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), filepath.Join(tmp, "bash"), []string{"-c", `trap "" PIPE; trap - PIPE; echo ok`}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
+	}
+	if got, want := stdout.String(), "ok\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
 func TestRunCLICompatExecPassesStdin(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)

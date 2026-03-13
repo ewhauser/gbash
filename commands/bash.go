@@ -2,8 +2,11 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	osexec "os/exec"
 )
 
 type Bash struct {
@@ -49,9 +52,26 @@ func (c *Bash) Spec() CommandSpec {
 	}
 }
 
+func (c *Bash) NormalizeInvocation(inv *Invocation) *Invocation {
+	if !c.shouldUseHostShell(inv) || inv == nil || len(inv.Args) == 0 {
+		return inv
+	}
+	switch inv.Args[0] {
+	case "--help", "--version":
+		clone := *inv
+		clone.Args = append([]string{"--"}, inv.Args...)
+		return &clone
+	default:
+		return inv
+	}
+}
+
 func (c *Bash) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
 	if inv.Exec == nil {
 		return fmt.Errorf("%s: subexec callback missing", c.name)
+	}
+	if c.shouldUseHostShell(inv) {
+		return c.runHostShell(ctx, inv)
 	}
 
 	if matches.Has("command") {
@@ -115,6 +135,51 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, script 
 	return exitForExecutionResult(result)
 }
 
+func (c *Bash) shouldUseHostShell(inv *Invocation) bool {
+	if c.name != "bash" || inv == nil {
+		return false
+	}
+	return inv.Env["GBASH_USE_HOST_BASH"] == "1"
+}
+
+func (c *Bash) runHostShell(ctx context.Context, inv *Invocation) error {
+	shellPath, err := c.hostShellPath()
+	if err != nil {
+		return err
+	}
+
+	args := append([]string(nil), inv.Args...)
+	if len(args) == 0 {
+		args = []string{"-s"}
+	}
+
+	cmd := osexec.CommandContext(ctx, shellPath, args...)
+	cmd.Dir = inv.Cwd
+	cmd.Env = sortedEnvPairs(inv.Env)
+	cmd.Stdin = inv.Stdin
+	cmd.Stdout = inv.Stdout
+	cmd.Stderr = inv.Stderr
+	if err := cmd.Run(); err != nil {
+		var exitErr *osexec.ExitError
+		if errors.As(err, &exitErr) {
+			return &ExitError{Code: exitErr.ExitCode()}
+		}
+		return &ExitError{Code: exitCodeForError(err), Err: err}
+	}
+	return nil
+}
+
+func (c *Bash) hostShellPath() (string, error) {
+	for _, candidate := range []string{"/bin/bash", "/usr/bin/bash"} {
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("%s: host bash not available", c.name)
+}
+
 var _ Command = (*Bash)(nil)
 var _ SpecProvider = (*Bash)(nil)
 var _ ParsedRunner = (*Bash)(nil)
+var _ ParseInvocationNormalizer = (*Bash)(nil)
