@@ -216,6 +216,7 @@ The repository uses a committed Go workspace. `examples/` is a separate Go modul
 | [`custom-zstd`](./examples/custom-zstd/) | Demonstrates custom command registration by adding a `zstd` compression/decompression command |
 | [`openai-tool-call`](./examples/openai-tool-call/) | Uses the OpenAI Go SDK Responses API with `gbash` as a `bash` function tool |
 | [`sqlite-backed-fs`](./examples/sqlite-backed-fs/) | Custom `gbfs.FileSystem` backed by a SQLite database for persistent sandbox filesystem state |
+| [`transactional-workspaces`](./examples/transactional-workspaces/) | Narrated snapshot/rollback/branch demo showing how `gbash` sessions become reversible, inspectable shell workspaces |
 | [`website`](./examples/website/) | Vendored Next.js terminal website that runs `gbash` in the browser via WebAssembly |
 
 ## Configuration

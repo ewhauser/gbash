@@ -4,7 +4,7 @@ MODEL ?= gemini-2.5-flash
 SQLITE_FS_DB ?= /tmp/gbash-sandbox.db
 SQLITE_FS_SCRIPT ?= pwd
 
-.PHONY: run run-custom-zstd run-sqlite-backed-fs run-sqlite-backed-fs-repl run-vertex-bash-chat
+.PHONY: run run-custom-zstd run-sqlite-backed-fs run-sqlite-backed-fs-repl run-transactional-workspaces run-vertex-bash-chat
 run: run-vertex-bash-chat
 
 run-custom-zstd:
@@ -35,3 +35,7 @@ run-sqlite-backed-fs:
 run-sqlite-backed-fs-repl:
 	@echo "Running sqlite-backed-fs REPL with backing DB $(SQLITE_FS_DB)"
 	@go run ./sqlite-backed-fs --db "$(SQLITE_FS_DB)" --repl
+
+run-transactional-workspaces:
+	@echo "Running transactional-workspaces demo"
+	@go run ./transactional-workspaces
