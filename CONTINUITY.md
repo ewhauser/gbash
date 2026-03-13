@@ -28,7 +28,7 @@ State:
 - Ledger initialized: yes
 - Active task: TODO migration pass
 - TODO scope at start: 59 command files / 63 command entrypoints
-- Current verification gate: `env` / `printenv` complete; preparing commit and moving to `gzip` / `gunzip` / `zcat`
+- Current verification gate: `gzip` / `gunzip` / `zcat` complete; preparing commit and moving to `head` / `tail`
 
 Done:
 - Confirmed `CONTINUITY.md` was missing at start of turn.
@@ -68,18 +68,27 @@ Done:
 - Verified explicit GNU compatibility tests `tests/env/env.sh,tests/misc/printenv.sh` passed via `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/env/env.sh,tests/misc/printenv.sh'`.
 - Verified `go test ./...` passed after the `env` / `printenv` migration.
 - Verified `make lint` passed after the `env` / `printenv` migration.
+- Committed `env` / `printenv` migration as `1e97c55`.
+- Rewrote `gzip` / `gunzip` / `zcat` onto `CommandSpec` / `RunParsed(...)`.
+- Preserved the existing sandbox gzip behavior while moving flag parsing onto the spec layer.
+- Added long-option coverage for `--stdout`, `--decompress`, `--keep`, and `--suffix`, plus help rendering checks for `gzip` and `zcat`.
+- Confirmed there is no `gzip` implementation in the cloned `uutils/coreutils` snapshot under `.cache/uutils-coreutils`; for this migration the existing repo behavior remained the source of truth.
+- Verified `go test ./runtime -run 'TestGzip|TestGunzip'` passed.
+- Verified `go test ./...` passed after the `gzip` / `gunzip` / `zcat` migration.
+- Verified `make lint` passed after the `gzip` / `gunzip` / `zcat` migration.
 
 Now:
-- Commit the completed `env` / `printenv` migration.
-- Move to `gzip` / `gunzip` / `zcat`, then run their repo and GNU compatibility gates.
+- Commit the completed `gzip` / `gunzip` / `zcat` migration.
+- Move to `head` / `tail`, then run their repo and GNU compatibility gates.
 
 Next:
-- Migrate `gzip` / `gunzip` / `zcat`.
+- Migrate `head` / `tail`.
 - Keep committing each completed command item before moving to the next TODO entry.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: No dedicated GNU test file for `base32` alone was found; `tests/basenc/base64.pl` appears to be the shared GNU compatibility test covering both `base32` and `base64`.
 - UNCONFIRMED: No GNU coreutils compatibility harness target exists for `bash` / `sh`; verification for those commands relies on repo runtime/CLI coverage instead.
+- No GNU coreutils compatibility harness target exists for `gzip` / `gunzip` / `zcat`; verification for those commands relies on repo runtime coverage plus full-repo test/lint gates.
 
 Working set (files/ids/commands):
 - File: `CONTINUITY.md`
@@ -92,12 +101,15 @@ Working set (files/ids/commands):
 - File: `commands/bash.go`
 - File: `commands/env.go`
 - File: `commands/gzip.go`
+- File: `commands/head.go`
+- File: `commands/tail.go`
 - File: `shell/mvdan.go`
 - File: `internal/compatrun/runner_test.go`
 - File: `runtime/process_helper_commands_test.go`
 - File: `runtime/base32_commands_test.go`
 - File: `runtime/base64_commands_test.go`
 - File: `runtime/env_command_parity_test.go`
+- File: `runtime/archive_commands_test.go`
 - Command: `ls -la`
 - Command: `git status --short`
 - Command: `git branch --show-current`
@@ -113,6 +125,7 @@ Working set (files/ids/commands):
 - Command: `go test ./cmd/gbash -run 'TestRunCLICompatExecEnvSupportsDoubleDashCommandSeparator|TestRunCLIMulticallEnvSupportsAssignmentsAfterDoubleDash'`
 - Command: `go run ./cmd/gbash-gnu --cache-dir .cache/gnu --gbash-bin .cache/gnu/bin/gbash --prepared-build-archive .cache/gnu/prebuilt/gnu-build-cache_v1_coreutils-9.10_darwin_arm64.tar.gz --tests 'tests/env/env.sh,tests/misc/printenv.sh'`
 - Command: `go build -o .cache/gnu/bin/gbash ./cmd/gbash`
+- Command: `go test ./runtime -run 'TestGzip|TestGunzip'`
 
 Migration checklist:
 - [x] `base32`
@@ -121,9 +134,9 @@ Migration checklist:
 - [x] `sh`
 - [x] `env`
 - [x] `printenv`
-- [ ] `gzip`
-- [ ] `gunzip`
-- [ ] `zcat`
+- [x] `gzip`
+- [x] `gunzip`
+- [x] `zcat`
 - [ ] `head`
 - [ ] `tail`
 - [ ] `ls`
