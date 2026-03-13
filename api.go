@@ -215,7 +215,10 @@ func resolveConfig(opts []Option) (Config, error) {
 	return cfg, nil
 }
 
-func (cfg Config) runtimeConfig() *runtime.Config {
+func (cfg *Config) runtimeConfig() *runtime.Config {
+	if cfg == nil {
+		return &runtime.Config{}
+	}
 	return &runtime.Config{
 		FileSystem:    cfg.FileSystem.runtimeConfig(),
 		Registry:      cfg.Registry,
@@ -227,8 +230,8 @@ func (cfg Config) runtimeConfig() *runtime.Config {
 	}
 }
 
-func (cfg Config) networkConfig() *network.Config {
-	if cfg.Network == nil {
+func (cfg *Config) networkConfig() *network.Config {
+	if cfg == nil || cfg.Network == nil {
 		return nil
 	}
 	return &network.Config{

@@ -264,7 +264,7 @@ Network access is disabled by default. When you set `Config.Network` or provide 
 
 ```go
 rt, err := gbash.New(
-	gbash.WithNetwork(gbash.NetworkConfig{
+	gbash.WithNetwork(&gbash.NetworkConfig{
 		AllowedURLPrefixes: []string{"https://api.example.com/v1/"},
 		AllowedMethods:     []gbash.Method{gbash.MethodGet, gbash.MethodHead},
 		MaxResponseBytes:   10 << 20,

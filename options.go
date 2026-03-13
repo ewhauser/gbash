@@ -148,9 +148,13 @@ func WithHTTPAccess(prefixes ...string) Option {
 // Use this option when you want to customize methods, limits, timeouts, or
 // private-range denial behavior while still relying on the standard gbash HTTP
 // client implementation.
-func WithNetwork(cfg NetworkConfig) Option {
+func WithNetwork(cfg *NetworkConfig) Option {
 	return func(target *Config) error {
-		cfgCopy := cfg
+		if cfg == nil {
+			target.Network = nil
+			return nil
+		}
+		cfgCopy := *cfg
 		cfgCopy.AllowedURLPrefixes = append([]string(nil), cfg.AllowedURLPrefixes...)
 		cfgCopy.AllowedMethods = append([]Method(nil), cfg.AllowedMethods...)
 		target.Network = &cfgCopy
