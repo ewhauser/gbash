@@ -34,6 +34,8 @@ func runCompatInvocation(ctx context.Context, argv0 string, inv compatInvocation
 	}
 
 	env := environMap(os.Environ())
+	// GNU coreutils tests rely on bash-specific signal trap behavior.
+	env["GBASH_USE_HOST_BASH"] = "1"
 	env["PATH"] = prependCommandDir(commandDir, env["PATH"])
 	runner, err := compatrun.New(&compatrun.Config{
 		Registry:          registry,
