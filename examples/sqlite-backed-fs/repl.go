@@ -21,8 +21,8 @@ type interactiveState struct {
 	env     map[string]string
 }
 
-func runInteractiveShell(ctx context.Context, rt *gbash.Runtime, stdin io.Reader, stdout, stderr io.Writer, workDir string) (int, error) {
-	session, err := rt.NewSession(ctx)
+func runInteractiveShell(ctx context.Context, gb *gbash.Runtime, stdin io.Reader, stdout, stderr io.Writer, workDir string) (int, error) {
+	session, err := gb.NewSession(ctx)
 	if err != nil {
 		return 1, fmt.Errorf("init session: %w", err)
 	}
