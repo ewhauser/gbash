@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -69,6 +70,15 @@ func discoverAttributedUtilities(programs []string, mf *manifest) []attributedUt
 			Skips:    uniqueSortedStrings(append([]string(nil), override.Skips...)),
 		})
 	}
+	for _, rule := range mf.AttributionRules {
+		for _, command := range rule.Commands {
+			if _, ok := seen[command]; ok {
+				continue
+			}
+			utilities = append(utilities, attributedUtility{Name: command})
+			seen[command] = struct{}{}
+		}
+	}
 
 	sort.Slice(utilities, func(i, j int) bool {
 		return utilities[i].Name < utilities[j].Name
@@ -92,11 +102,23 @@ func utilityDisplayName(program string, aliases map[string]string) string {
 }
 
 func discoverRunnableTests(workDir string, globalSkips []skipPattern, explicitTests []string) (testsOut, skippedOut []string, err error) {
+	authoritativeTests, err := discoverAuthoritativeTests(workDir)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	if len(explicitTests) != 0 {
+		available := make(map[string]struct{}, len(authoritativeTests))
+		for _, test := range authoritativeTests {
+			available[test] = struct{}{}
+		}
 		filtered := make([]string, 0, len(explicitTests))
 		skipped := make([]string, 0)
 		for _, test := range explicitTests {
 			rel := filepath.ToSlash(test)
+			if _, ok := available[rel]; !ok && !testScriptExists(workDir, rel) {
+				return nil, nil, fmt.Errorf("unknown GNU test %q", rel)
+			}
 			if skip, reason, err := shouldSkipTest(rel, filepath.Join(workDir, test), globalSkips, nil); err != nil {
 				return nil, nil, err
 			} else if skip {
@@ -108,38 +130,17 @@ func discoverRunnableTests(workDir string, globalSkips []skipPattern, explicitTe
 		return uniqueSortedStrings(filtered), uniqueSortedStrings(skipped), nil
 	}
 
-	tests := make([]string, 0)
+	tests := make([]string, 0, len(authoritativeTests))
 	skipped := make([]string, 0)
-	testsRoot := filepath.Join(workDir, "tests")
-	err = filepath.Walk(testsRoot, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if info.IsDir() {
-			return nil
-		}
-		rel, err := filepath.Rel(workDir, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		if !strings.HasPrefix(rel, "tests/") {
-			return nil
-		}
-		if !isRunnableTestFile(rel, info) {
-			return nil
-		}
+	for _, rel := range authoritativeTests {
+		path := filepath.Join(workDir, filepath.FromSlash(rel))
 		if skip, reason, err := shouldSkipTest(rel, path, globalSkips, nil); err != nil {
-			return err
+			return nil, nil, err
 		} else if skip {
 			skipped = append(skipped, rel+": "+reason)
 		} else {
 			tests = append(tests, rel)
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, nil, err
 	}
 	return uniqueSortedStrings(tests), uniqueSortedStrings(skipped), nil
 }
@@ -199,15 +200,145 @@ func shouldSkipUtilityTest(rel string, utilitySkips []string) (skip bool, reason
 	return false, ""
 }
 
-func isRunnableTestFile(rel string, info os.FileInfo) bool {
-	switch filepath.Ext(rel) {
-	case ".log", ".trs":
-		return false
-	case ".sh", ".pl", ".xpl":
-		return true
-	default:
-		return info.Mode()&0o111 != 0
+var makeVarRefPattern = regexp.MustCompile(`\$\(([^)]+)\)`)
+
+func discoverAuthoritativeTests(workDir string) ([]string, error) {
+	localMKPath := filepath.Join(workDir, "tests", "local.mk")
+	data, err := os.ReadFile(localMKPath)
+	if err != nil {
+		return nil, err
 	}
+	vars := parseMakeVariables(string(data))
+	expanded, err := expandMakeVariable("TESTS", vars, nil)
+	if err != nil {
+		return nil, fmt.Errorf("expand TESTS from %s: %w", localMKPath, err)
+	}
+
+	tests := make([]string, 0)
+	for field := range strings.FieldsSeq(expanded) {
+		field = filepath.ToSlash(strings.TrimSpace(field))
+		if !strings.HasPrefix(field, "tests/") {
+			continue
+		}
+		tests = append(tests, field)
+	}
+	if len(tests) == 0 {
+		return nil, fmt.Errorf("no authoritative tests found in %s", localMKPath)
+	}
+	return uniqueSortedStrings(tests), nil
+}
+
+func parseMakeVariables(contents string) map[string]string {
+	vars := make(map[string]string)
+	var logical strings.Builder
+
+	flush := func() {
+		line := strings.TrimSpace(logical.String())
+		logical.Reset()
+		if line == "" || strings.HasPrefix(line, "#") {
+			return
+		}
+
+		var (
+			name        string
+			value       string
+			appendValue bool
+		)
+		switch {
+		case strings.Contains(line, "+="):
+			parts := strings.SplitN(line, "+=", 2)
+			name = strings.TrimSpace(parts[0])
+			value = strings.TrimSpace(parts[1])
+			appendValue = true
+		case strings.Contains(line, "="):
+			parts := strings.SplitN(line, "=", 2)
+			name = strings.TrimSpace(parts[0])
+			value = strings.TrimSpace(parts[1])
+		default:
+			return
+		}
+		if name == "" || strings.ContainsAny(name, " \t:") {
+			return
+		}
+		if appendValue && vars[name] != "" && value != "" {
+			vars[name] = vars[name] + " " + value
+			return
+		}
+		if appendValue {
+			vars[name] += value
+			return
+		}
+		vars[name] = value
+	}
+
+	for rawLine := range strings.SplitSeq(contents, "\n") {
+		line := strings.TrimRight(rawLine, "\r")
+		trimmed := strings.TrimSpace(line)
+		if logical.Len() == 0 && (trimmed == "" || strings.HasPrefix(trimmed, "#")) {
+			continue
+		}
+		continued := strings.HasSuffix(strings.TrimRight(line, " \t"), "\\")
+		if continued {
+			line = strings.TrimRight(strings.TrimRight(line, " \t"), "\\")
+		}
+		if logical.Len() > 0 {
+			logical.WriteByte(' ')
+		}
+		logical.WriteString(strings.TrimSpace(line))
+		if continued {
+			continue
+		}
+		flush()
+	}
+	flush()
+	return vars
+}
+
+func expandMakeVariable(name string, vars map[string]string, stack map[string]bool) (string, error) {
+	if stack == nil {
+		stack = make(map[string]bool)
+	}
+	if stack[name] {
+		return "", fmt.Errorf("recursive make variable reference %q", name)
+	}
+	stack[name] = true
+	defer delete(stack, name)
+
+	value, ok := vars[name]
+	if !ok {
+		return "", nil
+	}
+
+	var out strings.Builder
+	last := 0
+	for _, loc := range makeVarRefPattern.FindAllStringSubmatchIndex(value, -1) {
+		out.WriteString(value[last:loc[0]])
+		refName := value[loc[2]:loc[3]]
+		refValue, err := expandMakeVariable(refName, vars, stack)
+		if err != nil {
+			return "", err
+		}
+		out.WriteString(refValue)
+		last = loc[1]
+	}
+	out.WriteString(value[last:])
+	return out.String(), nil
+}
+
+func testScriptExists(workDir, rel string) bool {
+	path := filepath.Join(workDir, filepath.FromSlash(rel))
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	if ext := filepath.Ext(path); ext != "" {
+		return false
+	}
+	for _, candidate := range []string{path + ".sh", path + ".pl", path + ".xpl"} {
+		if _, err := os.Stat(candidate); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func shouldSkipTest(rel, path string, globalSkips []skipPattern, utilitySkips []string) (skip bool, reason string, err error) {
@@ -221,9 +352,17 @@ func shouldSkipTest(rel, path string, globalSkips []skipPattern, utilitySkips []
 			return true, "utility-specific skip", nil
 		}
 	}
+	if strings.Contains(rel, "help-version") {
+		return true, "help/version tests are skipped in v1", nil
+	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// Some GNU tests are generated on-demand by make rules, so they are
+			// authoritative suite entries even when the script file is not present yet.
+			return false, "", nil
+		}
 		return false, "", err
 	}
 	contents := string(data)
@@ -234,8 +373,6 @@ func shouldSkipTest(rel, path string, globalSkips []skipPattern, utilitySkips []
 		return true, "root-required tests are skipped in v1", nil
 	case strings.Contains(contents, "require_selinux_"):
 		return true, "SELinux tests are skipped in v1", nil
-	case strings.Contains(rel, "help-version"):
-		return true, "help/version tests are skipped in v1", nil
 	default:
 		return false, "", nil
 	}

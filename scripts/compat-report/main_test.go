@@ -14,44 +14,82 @@ func TestWriteReportWritesIndexAndBadge(t *testing.T) {
 		GeneratedAt: "2026-03-11T18:30:00Z",
 		WorkDir:     "/tmp/coreutils-work",
 		ResultsDir:  "/tmp/compat-results",
-		Overall: testSummary{
-			SelectedTotal:   3,
+		Suite: suiteSummary{
+			SelectedTotal:   4,
+			FilteredTotal:   1,
 			Pass:            1,
 			Fail:            1,
-			RunnableTotal:   2,
 			Skip:            1,
-			PassPctSelected: 33.33,
+			RunnableTotal:   2,
+			PassPctSelected: 25,
 			PassPctRunnable: 50,
+			Tests: []suiteTest{
+				{Path: "tests/misc/basename.pl", Category: "misc", Status: "pass", Attributions: []testAttribution{{Command: "basename", Kind: "direct"}}},
+				{Path: "tests/cat/cat-self.sh", Category: "cat", Status: "skip", Attributions: []testAttribution{{Command: "cat", Kind: "direct"}}},
+				{Path: "tests/misc/dirname.pl", Category: "misc", Status: "fail", Attributions: []testAttribution{{Command: "dirname", Kind: "direct"}}},
+				{Path: "tests/help/help-version.sh", Category: "help", Status: "filtered", Filtered: true},
+			},
 		},
-		UtilitySummary: utilityTotals{
-			Total:           3,
-			Passed:          1,
-			Failed:          1,
-			NoRunnableTests: 1,
-			PassPctTotal:    33.33,
-			PassPctRunnable: 50,
-		},
-		Utilities: []utilityResult{
+		Categories: []categoryResult{
 			{
-				Name:    "basename",
-				LogFile: "basename.log",
-				Summary: testSummary{SelectedTotal: 1, Pass: 1, RunnableTotal: 1, PassPctSelected: 100, PassPctRunnable: 100},
+				Name:    "misc",
+				Summary: coverageBucket{SelectedTotal: 2, Pass: 1, Fail: 1, RunnableTotal: 2, PassPctSelected: 50, PassPctRunnable: 50},
+				Tests: []suiteTest{
+					{Path: "tests/misc/basename.pl", Category: "misc", Status: "pass", Attributions: []testAttribution{{Command: "basename", Kind: "direct"}}},
+					{Path: "tests/misc/dirname.pl", Category: "misc", Status: "fail", Attributions: []testAttribution{{Command: "dirname", Kind: "direct"}}},
+				},
 			},
 			{
 				Name:    "cat",
-				LogFile: "cat.log",
-				Summary: testSummary{SelectedTotal: 1, Skip: 1, RunnableTotal: 0, PassPctSelected: 0, PassPctRunnable: 0},
-			},
-			{
-				Name: "dirname",
-				Summary: testSummary{
-					SelectedTotal:   1,
-					Fail:            1,
-					RunnableTotal:   1,
-					PassPctSelected: 0,
-					PassPctRunnable: 0,
+				Summary: coverageBucket{SelectedTotal: 1, Skip: 1, RunnableTotal: 0, PassPctSelected: 0, PassPctRunnable: 0},
+				Tests: []suiteTest{
+					{Path: "tests/cat/cat-self.sh", Category: "cat", Status: "skip", Attributions: []testAttribution{{Command: "cat", Kind: "direct"}}},
 				},
 			},
+			{
+				Name:    "help",
+				Summary: coverageBucket{SelectedTotal: 1, FilteredTotal: 1, PassPctSelected: 0, PassPctRunnable: 0},
+				Tests: []suiteTest{
+					{Path: "tests/help/help-version.sh", Category: "help", Status: "filtered", Filtered: true},
+				},
+			},
+		},
+		Commands: []commandCoverage{
+			{
+				Name:          "basename",
+				CoverageState: "primary",
+				Primary:       coverageBucket{SelectedTotal: 1, Pass: 1, RunnableTotal: 1, PassPctSelected: 100, PassPctRunnable: 100},
+				Tests:         []commandTestRef{{Path: "tests/misc/basename.pl", Status: "pass", Kind: "direct"}},
+			},
+			{
+				Name:          "cat",
+				CoverageState: "primary",
+				Primary:       coverageBucket{SelectedTotal: 1, Skip: 1, RunnableTotal: 0, PassPctSelected: 0, PassPctRunnable: 0},
+				Tests:         []commandTestRef{{Path: "tests/cat/cat-self.sh", Status: "skip", Kind: "direct"}},
+			},
+			{
+				Name:          "dirname",
+				CoverageState: "primary",
+				Primary:       coverageBucket{SelectedTotal: 1, Fail: 1, RunnableTotal: 1, PassPctSelected: 0, PassPctRunnable: 0},
+				Tests:         []commandTestRef{{Path: "tests/misc/dirname.pl", Status: "fail", Kind: "direct"}},
+			},
+			{
+				Name:          "yes",
+				CoverageState: "empty",
+				Primary:       coverageBucket{},
+				Shared:        coverageBucket{},
+			},
+		},
+		Coverage: coverageDebtSummary{
+			CommandTotal:           4,
+			PrimaryCoveredCommands: 3,
+			PrimaryPassingCommands: 1,
+			EmptyCommands:          1,
+			PrimaryPassPct:         33.33,
+			UnmappedSelectedTests:  1,
+			UnmappedRunnableTests:  0,
+			MultiDirectTests:       0,
+			ExtraReportedTotal:     0,
 		},
 	}
 
@@ -65,21 +103,27 @@ func TestWriteReportWritesIndexAndBadge(t *testing.T) {
 	}
 	index := string(indexData)
 	for _, needle := range []string{
-		"GNU Coreutils Compatibility",
+		"GNU Test Coverage",
 		"Selected Test Pass",
-		"Runnable Command Pass",
+		"Coverage per category",
 		"summary.json",
-		"basename.log",
-		"dirname",
-		"cat.log",
-		"all selected tests skipped",
-		"1 passed, 1 failed, 1 skip-only, 0 empty",
-		"n/a",
-		"33.33%",
+		"tests/misc/dirname.pl",
+		"1 / 0 / 1",
 		"50%",
 	} {
 		if !strings.Contains(index, needle) {
 			t.Fatalf("index.html missing %q", needle)
+		}
+	}
+	for _, needle := range []string{
+		"Commands",
+		"Primary Command Pass",
+		"Coverage Debt",
+		"shared-only",
+		"no attributed coverage",
+	} {
+		if strings.Contains(index, needle) {
+			t.Fatalf("index.html unexpectedly contains %q", needle)
 		}
 	}
 
@@ -88,8 +132,8 @@ func TestWriteReportWritesIndexAndBadge(t *testing.T) {
 		t.Fatalf("ReadFile(badge.svg) error = %v", err)
 	}
 	badge := string(badgeData)
-	if !strings.Contains(badge, "compat") || !strings.Contains(badge, "33.33%") {
-		t.Fatalf("badge.svg content = %q, want compat and 33.33%%", badge)
+	if !strings.Contains(badge, "compat") || !strings.Contains(badge, "25%") {
+		t.Fatalf("badge.svg content = %q, want compat and 25%%", badge)
 	}
 }
 
@@ -102,6 +146,10 @@ func TestLoadSummaryReadsHarnessJSON(t *testing.T) {
   "results_dir": "/tmp/compat-results",
   "overall": { "selected_total": 1, "pass": 1, "fail": 0, "skip": 0, "xfail": 0, "xpass": 0, "error": 0, "unreported": 0, "runnable_total": 1, "pass_pct_selected": 100, "pass_pct_runnable": 100 },
   "utility_summary": { "total": 1, "passed": 1, "failed": 0, "no_runnable_tests": 0, "pass_pct_total": 100, "pass_pct_runnable": 100 },
+  "suite": { "selected_total": 1, "filtered_total": 0, "pass": 1, "fail": 0, "skip": 0, "xfail": 0, "xpass": 0, "error": 0, "unreported": 0, "runnable_total": 1, "pass_pct_selected": 100, "pass_pct_runnable": 100, "tests": [ { "path": "tests/misc/basename.pl", "category": "misc", "status": "pass", "attributions": [ { "command": "basename", "kind": "direct" } ] } ] },
+  "categories": [ { "name": "misc", "summary": { "selected_total": 1, "filtered_total": 0, "pass": 1, "fail": 0, "skip": 0, "xfail": 0, "xpass": 0, "error": 0, "unreported": 0, "runnable_total": 1, "pass_pct_selected": 100, "pass_pct_runnable": 100 }, "tests": [ { "path": "tests/misc/basename.pl", "category": "misc", "status": "pass", "attributions": [ { "command": "basename", "kind": "direct" } ] } ] } ],
+  "commands": [ { "name": "basename", "coverage_state": "primary", "primary": { "selected_total": 1, "filtered_total": 0, "pass": 1, "fail": 0, "skip": 0, "xfail": 0, "xpass": 0, "error": 0, "unreported": 0, "runnable_total": 1, "pass_pct_selected": 100, "pass_pct_runnable": 100 }, "shared": { "selected_total": 0, "filtered_total": 0, "pass": 0, "fail": 0, "skip": 0, "xfail": 0, "xpass": 0, "error": 0, "unreported": 0, "runnable_total": 0, "pass_pct_selected": 0, "pass_pct_runnable": 0 }, "tests": [ { "path": "tests/misc/basename.pl", "status": "pass", "kind": "direct" } ] } ],
+  "coverage": { "command_total": 1, "primary_covered_commands": 1, "primary_passing_commands": 1, "shared_only_commands": 0, "filtered_only_commands": 0, "empty_commands": 0, "primary_pass_pct": 100, "unmapped_selected_tests": 0, "unmapped_runnable_tests": 0, "multi_direct_tests": 0, "extra_reported_total": 0 },
   "utilities": [
     { "name": "basename", "tests": ["tests/misc/basename.pl"], "test_results": [{ "name": "tests/misc/basename.pl", "status": "pass", "reported_as": ["tests/misc/basename.pl"] }], "summary": { "selected_total": 1, "pass": 1, "fail": 0, "skip": 0, "xfail": 0, "xpass": 0, "error": 0, "unreported": 0, "runnable_total": 1, "pass_pct_selected": 100, "pass_pct_runnable": 100 }, "exit_code": 0, "passed": true, "log_file": "basename.log", "log_path": "/tmp/compat-results/basename.log" }
   ]

@@ -195,15 +195,21 @@ func TestLoadManifestIncludesExpandedCompatibilityCoverage(t *testing.T) {
 	for name, want := range map[string][]string{
 		"[":         {"tests/test/*", "tests/misc/invalid-opt.pl"},
 		"arch":      {"tests/misc/arch.sh"},
+		"base32":    {"tests/basenc/bounded-memory.sh", "tests/basenc/large-input.sh"},
 		"basenc":    {"tests/basenc/basenc.pl", "tests/basenc/bounded-memory.sh", "tests/basenc/large-input.sh"},
 		"cksum":     {"tests/cksum/cksum*"},
+		"coreutils": {"tests/misc/coreutils.sh"},
 		"ginstall":  {"tests/install/*"},
 		"md5sum":    {"tests/cksum/md5sum*"},
+		"mkfifo":    {"tests/misc/mknod.sh"},
 		"sha1sum":   {"tests/cksum/sha1sum*"},
 		"sha224sum": {"tests/cksum/sha224sum*"},
-		"sha256sum": {"tests/sum/*", "tests/cksum/*"},
+		"sha256sum": {"tests/cksum/sha256sum*"},
+		"stdbuf":    {"tests/misc/stdbuf.sh"},
 		"sum":       {"tests/cksum/sum*"},
 		"tsort":     {"tests/misc/tsort.pl"},
+		"vdir":      {"tests/ls/*"},
+		"yes":       {"tests/misc/yes.sh"},
 	} {
 		got, ok := gotPatterns[name]
 		if !ok {
@@ -221,6 +227,9 @@ func TestLoadManifestIncludesExpandedCompatibilityCoverage(t *testing.T) {
 	}
 	if len(mf.UtilityDisplayNames) != 1 || mf.UtilityDisplayNames[0].Name != "install" || mf.UtilityDisplayNames[0].Alias != "ginstall" {
 		t.Fatalf("utility display aliases = %#v, want install->ginstall", mf.UtilityDisplayNames)
+	}
+	if len(mf.AttributionRules) == 0 {
+		t.Fatalf("manifest attribution_rules = %#v, want explicit coverage rules", mf.AttributionRules)
 	}
 }
 
@@ -644,6 +653,11 @@ func TestParseListDeduplicatesAndSplitsOnCommonSeparators(t *testing.T) {
 
 func TestDiscoverRunnableTestsAppliesGlobalSkipFilters(t *testing.T) {
 	root := t.TempDir()
+	writeLocalMK(t, root, []string{
+		"tests/cat/basic.sh",
+		"tests/cat/tty.sh",
+		"tests/help/help-version.sh",
+	})
 	writeTestFile(t, root, "tests/cat/basic.sh", "echo ok\n")
 	writeTestFile(t, root, "tests/cat/tty.sh", "require_controlling_input_terminal\n")
 	writeTestFile(t, root, "tests/help/help-version.sh", "echo skip\n")
@@ -663,6 +677,9 @@ func TestDiscoverRunnableTestsAppliesGlobalSkipFilters(t *testing.T) {
 
 func TestDiscoverRunnableTestsSkipsGeneratedArtifacts(t *testing.T) {
 	root := t.TempDir()
+	writeLocalMK(t, root, []string{
+		"tests/seq/seq-precision.sh",
+	})
 	writeTestFile(t, root, "tests/seq/seq-precision.sh", "#!/bin/sh\n")
 	writeTestFile(t, root, "tests/seq/seq-precision.log", "generated\n")
 	writeTestFile(t, root, "tests/seq/seq-precision.trs", "generated\n")
@@ -676,6 +693,40 @@ func TestDiscoverRunnableTestsSkipsGeneratedArtifacts(t *testing.T) {
 	}
 	if len(skipped) != 0 {
 		t.Fatalf("skipped = %#v, want no skipped entries", skipped)
+	}
+}
+
+func TestDiscoverAuthoritativeTestsExpandsMakeVariables(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, root, "tests/local.mk", strings.Join([]string{
+		"TESTS = $(all_tests) $(factor_tests)",
+		"all_tests = tests/cat/basic.sh $(all_root_tests)",
+		"all_root_tests = tests/rm/root.sh",
+		"tf = tests/factor",
+		"factor_tests = $(tf)/t00.sh",
+		"",
+	}, "\n"))
+
+	got, err := discoverAuthoritativeTests(root)
+	if err != nil {
+		t.Fatalf("discoverAuthoritativeTests() error = %v", err)
+	}
+	want := []string{"tests/cat/basic.sh", "tests/factor/t00.sh", "tests/rm/root.sh"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("discoverAuthoritativeTests() = %#v, want %#v", got, want)
+	}
+}
+
+func TestShouldSkipTestAllowsMissingGeneratedScripts(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "tests", "factor", "t00.sh")
+
+	skip, reason, err := shouldSkipTest("tests/factor/t00.sh", path, nil, nil)
+	if err != nil {
+		t.Fatalf("shouldSkipTest() error = %v", err)
+	}
+	if skip {
+		t.Fatalf("shouldSkipTest() = skipped (%s), want runnable", reason)
 	}
 }
 
@@ -706,8 +757,68 @@ func TestDiscoverAttributedUtilitiesUsesDisplayAliasesAndOverrides(t *testing.T)
 	}
 	if utility, ok := gotByName["sha256sum"]; !ok {
 		t.Fatalf("discoverAttributedUtilities() missing sha256sum")
-	} else if !reflect.DeepEqual(utility.Patterns, []string{"tests/cksum/*", "tests/sha256sum/*", "tests/sum/*"}) {
+	} else if !reflect.DeepEqual(utility.Patterns, []string{"tests/cksum/sha256sum*", "tests/sha256sum/*"}) {
 		t.Fatalf("sha256sum patterns = %#v, want merged override + conventional patterns", utility.Patterns)
+	}
+}
+
+func TestBuildCoverageArtifactsSeparatesPrimarySharedAndUnmappedCoverage(t *testing.T) {
+	mf, err := loadManifest()
+	if err != nil {
+		t.Fatalf("loadManifest() error = %v", err)
+	}
+
+	selectedTests := []string{
+		"tests/ls/a-option.sh",
+		"tests/misc/mknod.sh",
+		"tests/help/help-version.sh",
+	}
+	filtered := map[string]string{
+		"tests/help/help-version.sh": "help/version tests are skipped in v1",
+	}
+	suiteResults := []testResult{
+		{Name: "tests/ls/a-option.sh", Status: "pass", ReportedAs: []string{"tests/ls/a-option.sh"}},
+		{Name: "tests/misc/mknod.sh", Status: "skip", ReportedAs: []string{"tests/misc/mknod.sh"}},
+	}
+	runs := []utilityRun{
+		{Utility: attributedUtility{Name: "ls"}},
+		{Utility: attributedUtility{Name: "vdir"}},
+		{Utility: attributedUtility{Name: "mknod"}},
+		{Utility: attributedUtility{Name: "mkfifo"}},
+		{Utility: attributedUtility{Name: "yes"}},
+	}
+
+	suite, categories, commands, coverage, _ := buildCoverageArtifacts(selectedTests, filtered, suiteResults, nil, runs, mf)
+
+	if got, want := suite.SelectedTotal, 3; got != want {
+		t.Fatalf("suite selected total = %d, want %d", got, want)
+	}
+	if got, want := len(categories), 3; got != want {
+		t.Fatalf("len(categories) = %d, want %d", got, want)
+	}
+
+	commandByName := make(map[string]commandCoverage, len(commands))
+	for _, command := range commands {
+		commandByName[command.Name] = command
+	}
+
+	if got := commandByName["ls"].CoverageState; got != "primary" {
+		t.Fatalf("ls coverage state = %q, want primary", got)
+	}
+	if got := commandByName["vdir"].CoverageState; got != "primary" {
+		t.Fatalf("vdir coverage state = %q, want primary", got)
+	}
+	if got := commandByName["mkfifo"].CoverageState; got != "shared-only" {
+		t.Fatalf("mkfifo coverage state = %q, want shared-only", got)
+	}
+	if got := commandByName["yes"].CoverageState; got != "empty" {
+		t.Fatalf("yes coverage state = %q, want empty", got)
+	}
+	if got, want := coverage.UnmappedSelectedTests, 1; got != want {
+		t.Fatalf("unmapped selected tests = %d, want %d", got, want)
+	}
+	if got, want := coverage.SharedOnlyCommands, 1; got != want {
+		t.Fatalf("shared only commands = %d, want %d", got, want)
 	}
 }
 
@@ -743,6 +854,22 @@ func writeTestFile(t *testing.T, root, rel, contents string) {
 	if err := os.WriteFile(path, []byte(contents), mode); err != nil {
 		t.Fatalf("WriteFile(%q) error = %v", path, err)
 	}
+}
+
+func writeLocalMK(t *testing.T, root string, tests []string) {
+	t.Helper()
+	var body strings.Builder
+	body.WriteString("TESTS = \\\n")
+	for i, test := range tests {
+		body.WriteString("  ")
+		body.WriteString(test)
+		if i != len(tests)-1 {
+			body.WriteString(" \\\n")
+		} else {
+			body.WriteByte('\n')
+		}
+	}
+	writeTestFile(t, root, "tests/local.mk", body.String())
 }
 
 func writeTarGz(t *testing.T, path string, headers []tar.Header, contents []string) error {
