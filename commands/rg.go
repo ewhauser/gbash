@@ -31,7 +31,37 @@ func (c *RG) Name() string {
 }
 
 func (c *RG) Run(ctx context.Context, inv *Invocation) error {
-	opts, roots, err := parseRGArgs(inv)
+	return RunCommand(ctx, c, inv)
+}
+
+func (c *RG) Spec() CommandSpec {
+	return CommandSpec{
+		Name:  "rg",
+		About: "Search recursively for lines matching a pattern",
+		Usage: "rg [OPTIONS] PATTERN [PATH ...]\n       rg [OPTIONS] --files [PATH ...]",
+		Options: []OptionSpec{
+			{Name: "line-number", Short: 'n', Help: "show line numbers"},
+			{Name: "ignore-case", Short: 'i', Help: "case-insensitive search"},
+			{Name: "files-with-matches", Short: 'l', Help: "print only paths of files with matches"},
+			{Name: "count", Short: 'c', Help: "print only a count of matching lines per file"},
+			{Name: "hidden", Long: "hidden", Help: "search hidden files and directories"},
+			{Name: "files", Long: "files", Help: "print matching files that would be searched, not matches"},
+			{Name: "glob", Short: 'g', Arity: OptionRequiredValue, ValueName: "GLOB", Repeatable: true, Help: "include or exclude files matching the given glob"},
+		},
+		Args: []ArgSpec{
+			{Name: "args", ValueName: "ARG", Repeatable: true},
+		},
+		Parse: ParseConfig{
+			GroupShortOptions:        true,
+			ShortOptionValueAttached: true,
+			LongOptionValueEquals:    true,
+			StopAtFirstPositional:    true,
+		},
+	}
+}
+
+func (c *RG) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
+	opts, roots, err := parseRGMatches(inv, matches)
 	if err != nil {
 		return err
 	}
@@ -97,48 +127,18 @@ func (c *RG) Run(ctx context.Context, inv *Invocation) error {
 	return &ExitError{Code: 1}
 }
 
-func parseRGArgs(inv *Invocation) (rgOptions, []string, error) {
-	args := inv.Args
-	var opts rgOptions
-	for len(args) > 0 {
-		arg := args[0]
-		if arg == "--" {
-			args = args[1:]
-			break
-		}
-		if arg == "-" || !strings.HasPrefix(arg, "-") {
-			break
-		}
-		switch arg {
-		case "-n":
-			opts.lineNumber = true
-		case "-i":
-			opts.ignoreCase = true
-		case "-l":
-			opts.listFiles = true
-		case "-c":
-			opts.count = true
-		case "--hidden":
-			opts.hidden = true
-		case "--files":
-			opts.listOnly = true
-		case "-g":
-			if len(args) < 2 {
-				return rgOptions{}, nil, exitf(inv, 2, "rg: missing value for -g")
-			}
-			opts.globs = append(opts.globs, args[1])
-			args = args[2:]
-			continue
-		default:
-			if strings.HasPrefix(arg, "-g") && len(arg) > 2 {
-				opts.globs = append(opts.globs, arg[2:])
-			} else {
-				return rgOptions{}, nil, exitf(inv, 2, "rg: unsupported flag %s", arg)
-			}
-		}
-		args = args[1:]
+func parseRGMatches(inv *Invocation, matches *ParsedCommand) (rgOptions, []string, error) {
+	opts := rgOptions{
+		lineNumber: matches.Has("line-number"),
+		ignoreCase: matches.Has("ignore-case"),
+		count:      matches.Has("count"),
+		listFiles:  matches.Has("files-with-matches"),
+		hidden:     matches.Has("hidden"),
+		listOnly:   matches.Has("files"),
+		globs:      matches.Values("glob"),
 	}
 
+	args := matches.Args("args")
 	if opts.listOnly {
 		return opts, args, nil
 	}

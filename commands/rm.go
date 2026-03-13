@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	stdfs "io/fs"
-	"strings"
 
 	"github.com/ewhauser/gbash/policy"
 )
@@ -20,25 +19,34 @@ func (c *RM) Name() string {
 }
 
 func (c *RM) Run(ctx context.Context, inv *Invocation) error {
-	args := inv.Args
-	recursive := false
-	force := false
-	allowDir := false
+	return RunCommand(ctx, c, inv)
+}
 
-	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
-		if args[0] == "--" {
-			args = args[1:]
-			break
-		}
-		if strings.HasPrefix(args[0], "--") || !applyRMShortFlags(args[0], &recursive, &force, &allowDir) {
-			return exitf(inv, 1, "rm: unsupported flag %s", args[0])
-		}
-		args = args[1:]
+func (c *RM) Spec() CommandSpec {
+	return CommandSpec{
+		Name:  "rm",
+		About: "Remove files or directories",
+		Usage: "rm [OPTION]... [FILE]...",
+		Options: []OptionSpec{
+			{Name: "force", Short: 'f', Long: "force", Help: "ignore nonexistent files and arguments, never prompt"},
+			{Name: "recursive", Short: 'r', ShortAliases: []rune{'R'}, Long: "recursive", Help: "remove directories and their contents recursively"},
+			{Name: "dir", Short: 'd', Long: "dir", Help: "remove empty directories"},
+		},
+		Args: []ArgSpec{
+			{Name: "file", ValueName: "FILE", Repeatable: true, Required: true},
+		},
+		Parse: ParseConfig{
+			GroupShortOptions:     true,
+			StopAtFirstPositional: true,
+		},
 	}
+}
 
-	if len(args) == 0 {
-		return exitf(inv, 1, "rm: missing operand")
-	}
+func (c *RM) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
+	recursive := matches.Has("recursive")
+	force := matches.Has("force")
+	allowDir := matches.Has("dir")
+	args := matches.Args("file")
 
 	for _, name := range args {
 		abs, err := allowPath(ctx, inv, policy.FileActionRemove, name)
@@ -64,25 +72,6 @@ func (c *RM) Run(ctx context.Context, inv *Invocation) error {
 	}
 
 	return nil
-}
-
-func applyRMShortFlags(arg string, recursive, force, allowDir *bool) bool {
-	if len(arg) < 2 || arg[0] != '-' {
-		return false
-	}
-	for _, ch := range arg[1:] {
-		switch ch {
-		case 'r', 'R':
-			*recursive = true
-		case 'f':
-			*force = true
-		case 'd':
-			*allowDir = true
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 var _ Command = (*RM)(nil)

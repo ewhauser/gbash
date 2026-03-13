@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"regexp"
 	gosort "sort"
@@ -90,17 +91,92 @@ func (c *Sort) Name() string {
 }
 
 func (c *Sort) Run(ctx context.Context, inv *Invocation) error {
-	opts, files, err := parseSortArgs(inv)
+	return RunCommand(ctx, c, inv)
+}
+
+func (c *Sort) NormalizeInvocation(inv *Invocation) *Invocation {
+	if inv == nil || len(inv.Args) == 0 {
+		return inv
+	}
+	args := normalizeSortLegacyArgs(inv.Args)
+	if slicesEqual(args, inv.Args) {
+		return inv
+	}
+	clone := *inv
+	clone.Args = args
+	return &clone
+}
+
+func (c *Sort) Spec() CommandSpec {
+	return CommandSpec{
+		Name:  "sort",
+		About: "sort lines of text files",
+		Usage: "sort [OPTION]... [FILE]...",
+		HelpRenderer: func(w io.Writer, _ CommandSpec) error {
+			_, err := io.WriteString(w, sortHelpText)
+			return err
+		},
+		VersionRenderer: func(w io.Writer, _ CommandSpec) error {
+			_, err := io.WriteString(w, sortVersionText)
+			return err
+		},
+		Options: []OptionSpec{
+			{Name: "help", Long: "help", Help: "show this help text"},
+			{Name: "version", Long: "version", Help: "output version information and exit"},
+			{Name: "debug", Long: "debug", Help: "annotate the part of the line used to sort, and warn"},
+			{Name: "reverse", Short: 'r', Long: "reverse", Help: "reverse the result of comparisons"},
+			{Name: "numeric-sort", Short: 'n', Long: "numeric-sort", Help: "compare according to numeric value"},
+			{Name: "general-numeric-sort", Short: 'g', Long: "general-numeric-sort", Help: "compare according to general numeric value"},
+			{Name: "random-sort", Short: 'R', Long: "random-sort", Help: "sort by random hash of keys"},
+			{Name: "unique", Short: 'u', Long: "unique", Help: "output only the first of equal lines"},
+			{Name: "ignore-case", Short: 'f', Long: "ignore-case", Help: "fold lower case to upper case characters"},
+			{Name: "ignore-nonprinting", Short: 'i', Long: "ignore-nonprinting", Help: "consider only printable characters"},
+			{Name: "human-numeric-sort", Short: 'h', Long: "human-numeric-sort", Help: "compare human-readable numbers"},
+			{Name: "version-sort", Short: 'V', Long: "version-sort", Help: "natural sort of version numbers"},
+			{Name: "dictionary-order", Short: 'd', Long: "dictionary-order", Help: "consider only blanks and alphanumeric characters"},
+			{Name: "month-sort", Short: 'M', Long: "month-sort", Help: "compare month names"},
+			{Name: "ignore-leading-blanks", Short: 'b', Long: "ignore-leading-blanks", Help: "ignore leading blanks"},
+			{Name: "stable", Short: 's', Long: "stable", Help: "disable last-resort whole-line comparison"},
+			{Name: "merge", Short: 'm', Long: "merge", Help: "merge already sorted files"},
+			{Name: "check", Short: 'c', Long: "check", Arity: OptionOptionalValue, OptionalValueEqualsOnly: true, ValueName: "MODE", Help: "check whether input is sorted"},
+			{Name: "check-silent", Short: 'C', Long: "check-silent", Help: "like -c, but do not diagnose first disorder"},
+			{Name: "zero-terminated", Short: 'z', Long: "zero-terminated", Help: "line delimiter is NUL, not newline"},
+			{Name: "output", Short: 'o', Long: "output", Arity: OptionRequiredValue, ValueName: "FILE", Help: "write result to FILE instead of stdout"},
+			{Name: "field-separator", Short: 't', Long: "field-separator", Arity: OptionRequiredValue, ValueName: "SEP", Help: "use SEP instead of whitespace for field separation"},
+			{Name: "key", Short: 'k', Long: "key", Arity: OptionRequiredValue, ValueName: "KEYDEF", Repeatable: true, Help: "sort via a key definition"},
+			{Name: "sort", Long: "sort", Arity: OptionRequiredValue, ValueName: "WORD", Help: "sort according to WORD"},
+			{Name: "parallel", Long: "parallel", Arity: OptionRequiredValue, ValueName: "N", Help: "change the number of sorts run concurrently"},
+			{Name: "batch-size", Long: "batch-size", Arity: OptionRequiredValue, ValueName: "NMERGE", Help: "merge at most NMERGE inputs at once"},
+			{Name: "buffer-size", Short: 'S', Long: "buffer-size", Arity: OptionRequiredValue, ValueName: "SIZE", Help: "use SIZE for main memory buffer"},
+			{Name: "temporary-directory", Short: 'T', Long: "temporary-directory", Arity: OptionRequiredValue, ValueName: "DIR", Repeatable: true, Help: "use DIR for temporaries, not $TMPDIR or /tmp"},
+			{Name: "compress-program", Long: "compress-program", Arity: OptionRequiredValue, ValueName: "PROG", Help: "compress temporaries with PROG; decompress them with PROG -d"},
+			{Name: "files0-from", Long: "files0-from", Arity: OptionRequiredValue, ValueName: "F", Help: "read input file names from NUL-terminated file F"},
+			{Name: "random-source", Long: "random-source", Arity: OptionRequiredValue, ValueName: "FILE", Help: "get random bytes from FILE"},
+			{Name: "legacy-key", Long: "legacy-key", Arity: OptionRequiredValue, ValueName: "SPEC", Repeatable: true, Hidden: true},
+		},
+		Args: []ArgSpec{
+			{Name: "file", ValueName: "FILE", Repeatable: true},
+		},
+		Parse: ParseConfig{
+			GroupShortOptions:        true,
+			ShortOptionValueAttached: true,
+			LongOptionValueEquals:    true,
+		},
+	}
+}
+
+func (c *Sort) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
+	opts, files, err := parseSortMatches(inv, matches)
 	if err != nil {
 		return err
 	}
-	if opts.help {
-		_, _ = fmt.Fprint(inv.Stdout, sortHelpText)
-		return nil
+	if matches.Has("help") {
+		spec := c.Spec()
+		return RenderCommandHelp(inv.Stdout, &spec)
 	}
-	if opts.showVersion {
-		_, _ = fmt.Fprint(inv.Stdout, sortVersionText)
-		return nil
+	if matches.Has("version") {
+		spec := c.Spec()
+		return RenderCommandVersion(inv.Stdout, &spec)
 	}
 	if err := validateSortOptions(inv, &opts); err != nil {
 		return err
@@ -167,362 +243,145 @@ func (c *Sort) Run(ctx context.Context, inv *Invocation) error {
 	return nil
 }
 
-func parseSortArgs(inv *Invocation) (sortOptions, []string, error) {
-	args := append([]string(nil), inv.Args...)
+func parseSortMatches(inv *Invocation, matches *ParsedCommand) (sortOptions, []string, error) {
 	var opts sortOptions
+	if matches == nil {
+		return opts, nil, nil
+	}
 
-	for len(args) > 0 {
-		arg := args[0]
-		if arg == "--" {
-			args = args[1:]
-			break
-		}
-		if consumed, handled, err := maybeParseLegacySortKey(args, &opts, inv); handled {
-			if err != nil {
-				return sortOptions{}, nil, err
-			}
-			args = args[consumed:]
-			continue
-		}
-		if !strings.HasPrefix(arg, "-") || arg == "-" {
-			break
-		}
-		if strings.HasPrefix(arg, "--") {
-			consumed, err := parseSortLongOption(inv, &opts, args)
-			if err != nil {
-				return sortOptions{}, nil, err
-			}
-			args = args[consumed:]
-			continue
-		}
-		consumed, err := parseSortShortOption(inv, &opts, args)
+	opts.help = matches.Has("help")
+	opts.showVersion = matches.Has("version")
+	opts.debug = matches.Has("debug")
+	opts.reverse = matches.Has("reverse")
+	opts.numeric = matches.Has("numeric-sort")
+	opts.generalNumeric = matches.Has("general-numeric-sort")
+	opts.randomSort = matches.Has("random-sort")
+	opts.unique = matches.Has("unique")
+	opts.ignoreCase = matches.Has("ignore-case")
+	opts.ignoreNonprinting = matches.Has("ignore-nonprinting")
+	opts.humanNumeric = matches.Has("human-numeric-sort")
+	opts.versionSort = matches.Has("version-sort")
+	opts.dictionaryOrder = matches.Has("dictionary-order")
+	opts.monthSort = matches.Has("month-sort")
+	opts.ignoreLeadingBlanks = matches.Has("ignore-leading-blanks")
+	opts.stable = matches.Has("stable")
+	opts.merge = matches.Has("merge")
+	opts.zeroTerminated = matches.Has("zero-terminated")
+	opts.checkOnly = matches.Has("check") || matches.Has("check-silent")
+	opts.checkQuiet = matches.Has("check-silent")
+
+	if matches.Has("output") {
+		opts.outputFile = matches.Value("output")
+	}
+	if matches.Has("field-separator") {
+		delim := matches.Value("field-separator")
+		opts.fieldDelimiter = &delim
+	}
+	if matches.Has("buffer-size") {
+		opts.bufferSize = matches.Value("buffer-size")
+	}
+	if matches.Has("compress-program") {
+		opts.compressProgram = matches.Value("compress-program")
+	}
+	if matches.Has("files0-from") {
+		opts.files0From = matches.Value("files0-from")
+	}
+	if matches.Has("random-source") {
+		opts.randomSource = matches.Value("random-source")
+	}
+	if matches.Has("parallel") {
+		value, err := parseSortPositiveInt(inv, "parallel", matches.Value("parallel"), 1)
 		if err != nil {
 			return sortOptions{}, nil, err
 		}
-		args = args[consumed:]
+		opts.parallel = value
 	}
-
-	return opts, args, nil
-}
-
-func parseSortLongOption(inv *Invocation, opts *sortOptions, args []string) (int, error) {
-	arg := args[0]
-	switch {
-	case arg == "--help":
-		opts.help = true
-		return 1, nil
-	case arg == "--version":
-		opts.showVersion = true
-		return 1, nil
-	case arg == "--debug":
-		opts.debug = true
-		return 1, nil
-	case arg == "--reverse":
-		opts.reverse = true
-		return 1, nil
-	case arg == "--numeric-sort":
-		opts.numeric = true
-		return 1, nil
-	case arg == "--general-numeric-sort":
-		opts.generalNumeric = true
-		return 1, nil
-	case arg == "--random-sort":
-		opts.randomSort = true
-		return 1, nil
-	case arg == "--unique":
-		opts.unique = true
-		return 1, nil
-	case arg == "--ignore-case":
-		opts.ignoreCase = true
-		return 1, nil
-	case arg == "--ignore-nonprinting":
-		opts.ignoreNonprinting = true
-		return 1, nil
-	case arg == "--human-numeric-sort":
-		opts.humanNumeric = true
-		return 1, nil
-	case arg == "--version-sort":
-		opts.versionSort = true
-		return 1, nil
-	case arg == "--dictionary-order":
-		opts.dictionaryOrder = true
-		return 1, nil
-	case arg == "--month-sort":
-		opts.monthSort = true
-		return 1, nil
-	case arg == "--ignore-leading-blanks":
-		opts.ignoreLeadingBlanks = true
-		return 1, nil
-	case arg == "--stable":
-		opts.stable = true
-		return 1, nil
-	case arg == "--merge":
-		opts.merge = true
-		return 1, nil
-	case arg == "--zero-terminated":
-		opts.zeroTerminated = true
-		return 1, nil
-	case arg == "--check":
-		opts.checkOnly = true
-		return 1, nil
-	case arg == "--check=quiet" || arg == "--check=silent":
-		opts.checkOnly = true
-		opts.checkQuiet = true
-		return 1, nil
-	case arg == "--check=diagnose-first":
-		opts.checkOnly = true
-		opts.checkQuiet = false
-		return 1, nil
-	case arg == "--output":
-		if len(args) < 2 {
-			return 0, sortOptionf(inv, "sort: option requires an argument -- 'o'")
+	if matches.Has("batch-size") {
+		value, err := parseSortPositiveInt(inv, "batch-size", matches.Value("batch-size"), 2)
+		if err != nil {
+			return sortOptions{}, nil, err
 		}
-		opts.outputFile = args[1]
-		return 2, nil
-	case strings.HasPrefix(arg, "--output="):
-		opts.outputFile = strings.TrimPrefix(arg, "--output=")
-		return 1, nil
-	case arg == "--field-separator":
-		if len(args) < 2 {
-			return 0, sortOptionf(inv, "sort: option requires an argument -- 't'")
-		}
-		delim := args[1]
-		opts.fieldDelimiter = &delim
-		return 2, nil
-	case strings.HasPrefix(arg, "--field-separator="):
-		delim := strings.TrimPrefix(arg, "--field-separator=")
-		opts.fieldDelimiter = &delim
-		return 1, nil
-	case arg == "--key":
-		if len(args) < 2 {
-			return 0, sortOptionf(inv, "sort: option requires an argument -- 'k'")
-		}
-		if err := appendSortKey(&opts.keys, args[1]); err != nil {
-			return 0, sortOptionf(inv, "sort: invalid field specification %q", args[1])
-		}
-		return 2, nil
-	case strings.HasPrefix(arg, "--key="):
-		value := strings.TrimPrefix(arg, "--key=")
+		opts.batchSize = value
+		opts.batchSizeSet = true
+	}
+	opts.tempDirs = append(opts.tempDirs, matches.Values("temporary-directory")...)
+	for _, value := range matches.Values("key") {
 		if err := appendSortKey(&opts.keys, value); err != nil {
-			return 0, sortOptionf(inv, "sort: invalid field specification %q", value)
+			return sortOptions{}, nil, sortOptionf(inv, "sort: invalid field specification %q", value)
 		}
-		return 1, nil
-	case arg == "--sort":
-		if len(args) < 2 {
-			return 0, sortOptionf(inv, "sort: option requires an argument -- sort")
-		}
-		if err := applySortMode(opts, args[1], inv); err != nil {
-			return 0, err
-		}
-		return 2, nil
-	case strings.HasPrefix(arg, "--sort="):
-		if err := applySortMode(opts, strings.TrimPrefix(arg, "--sort="), inv); err != nil {
-			return 0, err
-		}
-		return 1, nil
-	case arg == "--parallel":
-		if len(args) < 2 {
-			return 0, sortOptionf(inv, "sort: option requires an argument -- parallel")
-		}
-		value, err := parseSortPositiveInt(inv, "parallel", args[1], 1)
-		if err != nil {
-			return 0, err
-		}
-		opts.parallel = value
-		return 2, nil
-	case strings.HasPrefix(arg, "--parallel="):
-		value, err := parseSortPositiveInt(inv, "parallel", strings.TrimPrefix(arg, "--parallel="), 1)
-		if err != nil {
-			return 0, err
-		}
-		opts.parallel = value
-		return 1, nil
-	case arg == "--batch-size":
-		if len(args) < 2 {
-			return 0, sortOptionf(inv, "sort: option requires an argument -- batch-size")
-		}
-		value, err := parseSortPositiveInt(inv, "batch-size", args[1], 2)
-		if err != nil {
-			return 0, err
-		}
-		opts.batchSize = value
-		opts.batchSizeSet = true
-		return 2, nil
-	case strings.HasPrefix(arg, "--batch-size="):
-		value, err := parseSortPositiveInt(inv, "batch-size", strings.TrimPrefix(arg, "--batch-size="), 2)
-		if err != nil {
-			return 0, err
-		}
-		opts.batchSize = value
-		opts.batchSizeSet = true
-		return 1, nil
-	case arg == "--buffer-size":
-		if len(args) < 2 {
-			return 0, sortOptionf(inv, "sort: option requires an argument -- S")
-		}
-		opts.bufferSize = args[1]
-		return 2, nil
-	case strings.HasPrefix(arg, "--buffer-size="):
-		opts.bufferSize = strings.TrimPrefix(arg, "--buffer-size=")
-		return 1, nil
-	case arg == "--temporary-directory":
-		if len(args) < 2 {
-			return 0, sortOptionf(inv, "sort: option requires an argument -- T")
-		}
-		opts.tempDirs = append(opts.tempDirs, args[1])
-		return 2, nil
-	case strings.HasPrefix(arg, "--temporary-directory="):
-		opts.tempDirs = append(opts.tempDirs, strings.TrimPrefix(arg, "--temporary-directory="))
-		return 1, nil
-	case arg == "--compress-program":
-		if len(args) < 2 {
-			return 0, sortOptionf(inv, "sort: option requires an argument -- compress-program")
-		}
-		opts.compressProgram = args[1]
-		return 2, nil
-	case strings.HasPrefix(arg, "--compress-program="):
-		opts.compressProgram = strings.TrimPrefix(arg, "--compress-program=")
-		return 1, nil
-	case arg == "--files0-from":
-		if len(args) < 2 {
-			return 0, sortOptionf(inv, "sort: option requires an argument -- files0-from")
-		}
-		opts.files0From = args[1]
-		return 2, nil
-	case strings.HasPrefix(arg, "--files0-from="):
-		opts.files0From = strings.TrimPrefix(arg, "--files0-from=")
-		return 1, nil
-	case arg == "--random-source":
-		if len(args) < 2 {
-			return 0, sortOptionf(inv, "sort: option requires an argument -- random-source")
-		}
-		opts.randomSource = args[1]
-		return 2, nil
-	case strings.HasPrefix(arg, "--random-source="):
-		opts.randomSource = strings.TrimPrefix(arg, "--random-source=")
-		return 1, nil
-	default:
-		return 0, sortOptionf(inv, "sort: unsupported flag %s", arg)
 	}
-}
-
-func parseSortShortOption(inv *Invocation, opts *sortOptions, args []string) (int, error) {
-	arg := args[0]
-	consumed := 1
-	short := arg[1:]
-	for i := 0; i < len(short); i++ {
-		flag := short[i]
-		switch flag {
-		case 'b':
-			opts.ignoreLeadingBlanks = true
-		case 'c':
-			opts.checkOnly = true
-		case 'C':
-			opts.checkOnly = true
+	for _, value := range matches.Values("legacy-key") {
+		start, end, _ := strings.Cut(value, "\x00")
+		key, err := parseLegacySortKey(start, end)
+		if err != nil {
+			return sortOptions{}, nil, sortOptionf(inv, "sort: invalid field specification %q", start)
+		}
+		opts.keys = append(opts.keys, key)
+	}
+	if matches.Has("sort") {
+		if err := applySortMode(&opts, matches.Value("sort"), inv); err != nil {
+			return sortOptions{}, nil, err
+		}
+	}
+	for _, mode := range matches.Values("check") {
+		switch mode {
+		case "", "diagnose-first":
+			opts.checkQuiet = false
+		case "quiet", "silent":
 			opts.checkQuiet = true
-		case 'd':
-			opts.dictionaryOrder = true
-		case 'f':
-			opts.ignoreCase = true
-		case 'g':
-			opts.generalNumeric = true
-		case 'h':
-			opts.humanNumeric = true
-		case 'i':
-			opts.ignoreNonprinting = true
-		case 'm':
-			opts.merge = true
-		case 'M':
-			opts.monthSort = true
-		case 'n':
-			opts.numeric = true
-		case 'r':
-			opts.reverse = true
-		case 'R':
-			opts.randomSort = true
-		case 's':
-			opts.stable = true
-		case 'u':
-			opts.unique = true
-		case 'V':
-			opts.versionSort = true
-		case 'z':
-			opts.zeroTerminated = true
-		case 'o':
-			value, nextConsumed, err := sortShortOptionValue(inv, args, short, i+1, 'o')
-			if err != nil {
-				return 0, err
-			}
-			opts.outputFile = value
-			return consumed + nextConsumed, nil
-		case 't':
-			value, nextConsumed, err := sortShortOptionValue(inv, args, short, i+1, 't')
-			if err != nil {
-				return 0, err
-			}
-			delim := value
-			opts.fieldDelimiter = &delim
-			return consumed + nextConsumed, nil
-		case 'k':
-			value, nextConsumed, err := sortShortOptionValue(inv, args, short, i+1, 'k')
-			if err != nil {
-				return 0, err
-			}
-			if err := appendSortKey(&opts.keys, value); err != nil {
-				return 0, sortOptionf(inv, "sort: invalid field specification %q", value)
-			}
-			return consumed + nextConsumed, nil
-		case 'S':
-			value, nextConsumed, err := sortShortOptionValue(inv, args, short, i+1, 'S')
-			if err != nil {
-				return 0, err
-			}
-			opts.bufferSize = value
-			return consumed + nextConsumed, nil
-		case 'T':
-			value, nextConsumed, err := sortShortOptionValue(inv, args, short, i+1, 'T')
-			if err != nil {
-				return 0, err
-			}
-			opts.tempDirs = append(opts.tempDirs, value)
-			return consumed + nextConsumed, nil
 		default:
-			return 0, sortOptionf(inv, "sort: unsupported flag -%c", flag)
+			return sortOptions{}, nil, sortOptionf(inv, "sort: invalid argument %q for --check", mode)
 		}
 	}
-	return consumed, nil
+
+	return opts, matches.Args("file"), nil
 }
 
-func sortShortOptionValue(inv *Invocation, args []string, short string, offset int, flag byte) (value string, consumed int, err error) {
-	if offset < len(short) {
-		return short[offset:], 0, nil
-	}
-	if len(args) < 2 {
-		return "", 0, sortOptionf(inv, "sort: option requires an argument -- '%c'", flag)
-	}
-	return args[1], 1, nil
-}
-
-func maybeParseLegacySortKey(args []string, opts *sortOptions, inv *Invocation) (consumed int, handled bool, err error) {
+func normalizeSortLegacyArgs(args []string) []string {
 	if len(args) == 0 {
-		return 0, false, nil
+		return nil
 	}
-	start := args[0]
-	if !strings.HasPrefix(start, "+") || len(start) == 1 {
-		return 0, false, nil
+	out := make([]string, 0, len(args))
+	parsingOptions := true
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !parsingOptions {
+			out = append(out, arg)
+			continue
+		}
+		if arg == "--" {
+			parsingOptions = false
+			out = append(out, arg)
+			continue
+		}
+		if strings.HasPrefix(arg, "+") && len(arg) > 1 {
+			end := ""
+			if i+1 < len(args) && isLegacySortEndArg(args[i+1]) {
+				end = args[i+1]
+				i++
+			}
+			out = append(out, "--legacy-key="+arg+"\x00"+end)
+			continue
+		}
+		if arg == "-" || !strings.HasPrefix(arg, "-") {
+			out = append(out, arg)
+			continue
+		}
+		out = append(out, arg)
 	}
-	end := ""
-	consumed = 1
-	if len(args) > 1 && isLegacySortEndArg(args[1]) {
-		end = args[1]
-		consumed = 2
+	return out
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	key, err := parseLegacySortKey(start, end)
-	if err != nil {
-		return 0, true, sortOptionf(inv, "sort: invalid field specification %q", start)
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
 	}
-	opts.keys = append(opts.keys, key)
-	return consumed, true, nil
+	return true
 }
 
 func isLegacySortEndArg(arg string) bool {

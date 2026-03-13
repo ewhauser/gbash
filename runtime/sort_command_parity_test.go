@@ -70,3 +70,54 @@ func TestSortCheckReportsDisorderIsolated(t *testing.T) {
 		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }
+
+func TestSortSupportsPostOperandOutputFlag(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'b\\na\\n' > /tmp/in.txt\nsort /tmp/in.txt -o /tmp/out.txt\ncat /tmp/out.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "a\nb\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestSortSupportsCheckEqualsSilent(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'a\\nc\\nb\\n' > /tmp/in.txt\nsort --check=silent /tmp/in.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
+func TestSortSupportsLegacyPlusKeySyntax(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'x 2\\ny 10\\nz 1\\n' > /tmp/in.txt\nsort +1 -2n /tmp/in.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "z 1\nx 2\ny 10\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}

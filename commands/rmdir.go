@@ -24,15 +24,37 @@ func (c *Rmdir) Name() string {
 }
 
 func (c *Rmdir) Run(ctx context.Context, inv *Invocation) error {
-	args := inv.Args
-	opts, args, err := parseRmdirArgs(inv, args)
-	if err != nil {
-		return err
-	}
+	return RunCommand(ctx, c, inv)
+}
 
-	if len(args) == 0 {
-		return exitf(inv, 1, "rmdir: missing operand")
+func (c *Rmdir) Spec() CommandSpec {
+	return CommandSpec{
+		Name:  "rmdir",
+		About: "Remove empty directories",
+		Usage: "rmdir [OPTION]... DIRECTORY...",
+		Options: []OptionSpec{
+			{Name: "ignore-fail-on-non-empty", Long: "ignore-fail-on-non-empty", Help: "ignore each failure that is solely because a directory is non-empty"},
+			{Name: "parents", Short: 'p', Long: "parents", Help: "remove DIRECTORY and its ancestors"},
+			{Name: "verbose", Short: 'v', Long: "verbose", Help: "output a diagnostic for every directory processed"},
+		},
+		Args: []ArgSpec{
+			{Name: "dir", ValueName: "DIRECTORY", Repeatable: true, Required: true},
+		},
+		Parse: ParseConfig{
+			InferLongOptions:      true,
+			GroupShortOptions:     true,
+			StopAtFirstPositional: true,
+		},
 	}
+}
+
+func (c *Rmdir) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
+	opts := rmdirOptions{
+		ignoreFailOnNonEmpty: matches.Has("ignore-fail-on-non-empty"),
+		parents:              matches.Has("parents"),
+		verbose:              matches.Has("verbose"),
+	}
+	args := matches.Args("dir")
 
 	for _, dir := range args {
 		abs, err := allowPath(ctx, inv, policy.FileActionRemove, dir)
@@ -57,75 +79,6 @@ type rmdirOptions struct {
 	ignoreFailOnNonEmpty bool
 	parents              bool
 	verbose              bool
-}
-
-func parseRmdirArgs(inv *Invocation, args []string) (rmdirOptions, []string, error) {
-	opts := rmdirOptions{}
-	for len(args) > 0 {
-		arg := args[0]
-		if arg == "--" {
-			return opts, args[1:], nil
-		}
-		if arg == "-" || !strings.HasPrefix(arg, "-") {
-			return opts, args, nil
-		}
-		if strings.HasPrefix(arg, "--") {
-			name, ok := inferRmdirLongOption(arg)
-			if !ok {
-				return rmdirOptions{}, nil, exitf(inv, 1, "rmdir: unsupported flag %s", arg)
-			}
-			switch name {
-			case "ignore-fail-on-non-empty":
-				opts.ignoreFailOnNonEmpty = true
-			case "parents":
-				opts.parents = true
-			case "verbose":
-				opts.verbose = true
-			}
-			args = args[1:]
-			continue
-		}
-		if !applyRmdirShortFlags(arg, &opts) {
-			return rmdirOptions{}, nil, exitf(inv, 1, "rmdir: unsupported flag %s", arg)
-		}
-		args = args[1:]
-	}
-	return opts, args, nil
-}
-
-func inferRmdirLongOption(arg string) (string, bool) {
-	if strings.Contains(arg, "=") {
-		return "", false
-	}
-	name := strings.TrimPrefix(arg, "--")
-	options := []string{"ignore-fail-on-non-empty", "parents", "verbose"}
-	match := ""
-	for _, option := range options {
-		if strings.HasPrefix(option, name) {
-			if match != "" {
-				return "", false
-			}
-			match = option
-		}
-	}
-	return match, match != ""
-}
-
-func applyRmdirShortFlags(arg string, opts *rmdirOptions) bool {
-	if len(arg) < 2 || arg[0] != '-' || strings.HasPrefix(arg, "--") {
-		return false
-	}
-	for _, flag := range arg[1:] {
-		switch flag {
-		case 'p':
-			opts.parents = true
-		case 'v':
-			opts.verbose = true
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 func removeEmptyDir(ctx context.Context, inv *Invocation, raw, abs string, opts rmdirOptions) error {
