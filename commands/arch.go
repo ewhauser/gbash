@@ -48,7 +48,7 @@ func (c *Arch) RunParsed(_ context.Context, inv *Invocation, matches *ParsedComm
 		return commandUsageError(inv, c.Name(), "extra operand %s", quoteGNUOperand(positionals[0]))
 	}
 
-	machine, err := archMachine()
+	machine, err := archMachine(inv)
 	if err != nil {
 		return exitf(inv, 1, "%s: cannot get system name", c.Name())
 	}

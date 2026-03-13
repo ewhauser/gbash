@@ -654,7 +654,7 @@ func testCurrentUserOwns(inv *Invocation, info stdfs.FileInfo) bool {
 	if !ok {
 		return true
 	}
-	return uid == testCurrentID(inv, "EUID", os.Geteuid)
+	return uid == testCurrentID(inv, "EUID")
 }
 
 func testCurrentGroupOwns(inv *Invocation, info stdfs.FileInfo) bool {
@@ -662,13 +662,13 @@ func testCurrentGroupOwns(inv *Invocation, info stdfs.FileInfo) bool {
 	if !ok {
 		return true
 	}
-	return gid == testCurrentID(inv, "EGID", os.Getegid)
+	return gid == testCurrentID(inv, "EGID")
 }
 
 func testHasPermission(inv *Invocation, info stdfs.FileInfo, mask stdfs.FileMode) bool {
 	mode := info.Mode().Perm()
-	currentUID := testCurrentID(inv, "EUID", os.Geteuid)
-	currentGID := testCurrentID(inv, "EGID", os.Getegid)
+	currentUID := testCurrentID(inv, "EUID")
+	currentGID := testCurrentID(inv, "EGID")
 	ownerUID, ownerGID, ok := testOwnerIDs(info)
 	if !ok {
 		ownerUID = currentUID
@@ -773,15 +773,32 @@ func testUintField(value reflect.Value) uint64 {
 	}
 }
 
-func testCurrentID(inv *Invocation, envKey string, fallback func() int) int {
-	if inv != nil && inv.Env != nil {
-		if raw := strings.TrimSpace(inv.Env[envKey]); raw != "" {
+func testCurrentID(inv *Invocation, envKey string) int {
+	env := map[string]string(nil)
+	if inv != nil {
+		env = inv.Env
+	}
+
+	switch envKey {
+	case "EUID":
+		return int(idUintEnv(env, "EUID", idUintEnv(env, "UID", idDefaultUID)))
+	case "EGID":
+		return int(idUintEnv(env, "EGID", idUintEnv(env, "GID", idDefaultGID)))
+	case "UID":
+		return int(idUintEnv(env, "UID", idDefaultUID))
+	case "GID":
+		return int(idUintEnv(env, "GID", idDefaultGID))
+	default:
+		if env == nil {
+			return 0
+		}
+		if raw := strings.TrimSpace(env[envKey]); raw != "" {
 			if parsed, err := strconv.Atoi(raw); err == nil {
 				return parsed
 			}
 		}
+		return 0
 	}
-	return fallback()
 }
 
 func testIsTTY(inv *Invocation, fd int) bool {

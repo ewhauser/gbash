@@ -8,6 +8,7 @@ formatters:
 linters:
   enable:
     - errcheck
+    - forbidigo
     - govet
     - ineffassign
     - staticcheck
@@ -31,6 +32,37 @@ linters:
 
     misspell:
       locale: US
+
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: '^os\.(Open|OpenFile|Create|ReadFile|WriteFile|Stat|Lstat|ReadDir|Mkdir|MkdirAll|Remove|RemoveAll|Rename|Symlink|Link|Chmod|Chown|Chtimes|Readlink|Getwd|Chdir)$'
+          msg: Use inv.FS or the shared command helpers so sandbox policy is enforced.
+        - pattern: '^exec\.(Command|CommandContext)$'
+          pkg: '^os/exec$'
+          msg: Use inv.Exec or executeCommand so subprocess policy is enforced.
+        - pattern: '^net\.(Dial|DialContext|DialTimeout|LookupAddr|LookupCNAME|LookupHost|LookupIP|LookupIPAddr|LookupMX|LookupNS|LookupPort|LookupSRV|LookupTXT)$'
+          pkg: '^net$'
+          msg: Use invocation network capabilities instead of direct host networking.
+        - pattern: '^http\.(DefaultClient|Get|Head|Post|PostForm|NewRequest|NewRequestWithContext)$'
+          pkg: '^net/http$'
+          msg: Use inv.Fetch so network policy is enforced.
+        - pattern: '^syscall\.Kill$'
+          msg: Do not probe host process state directly from commands.
+        - pattern: '^unix\.(Uname|Umask)$'
+          pkg: '^golang\.org/x/sys/unix$'
+          msg: Do not read or mutate host process or kernel state directly from commands.
+        - pattern: '^os\.(FindProcess|Geteuid|Getegid|Getuid|Getgid)$'
+          msg: Use invocation-provided identity or process state instead of host process state.
+
+  exclusions:
+    rules:
+      - path-except: ^commands/
+        linters:
+          - forbidigo
+      - path: ^commands/.*_test\.go$
+        linters:
+          - forbidigo
 
 issues:
   max-issues-per-linter: 50

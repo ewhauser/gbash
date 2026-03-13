@@ -31,6 +31,8 @@ type InvocationOptions struct {
 	Network               network.Client
 	Policy                policy.Policy
 	Trace                 trace.Recorder
+	LookupCNAME           LookupCNAMEFunc
+	ProcessAlive          ProcessAliveFunc
 	Exec                  func(context.Context, *ExecutionRequest) (*ExecutionResult, error)
 	GetRegisteredCommands func() []string
 }
@@ -59,6 +61,8 @@ func NewInvocation(opts *InvocationOptions) *Invocation {
 		Stdin:                 opts.Stdin,
 		Stdout:                opts.Stdout,
 		Stderr:                opts.Stderr,
+		LookupCNAME:           opts.LookupCNAME,
+		ProcessAlive:          opts.ProcessAlive,
 		Exec:                  opts.Exec,
 		GetRegisteredCommands: getCommands,
 		trace:                 opts.Trace,

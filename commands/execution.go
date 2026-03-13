@@ -8,16 +8,18 @@ import (
 )
 
 type ExecutionRequest struct {
-	Name       string
-	Script     string
-	Args       []string
-	Env        map[string]string
-	WorkDir    string
-	Timeout    time.Duration
-	ReplaceEnv bool
-	Stdin      io.Reader
-	Stdout     io.Writer
-	Stderr     io.Writer
+	Name            string
+	Interpreter     string
+	PassthroughArgs []string
+	Script          string
+	Args            []string
+	Env             map[string]string
+	WorkDir         string
+	Timeout         time.Duration
+	ReplaceEnv      bool
+	Stdin           io.Reader
+	Stdout          io.Writer
+	Stderr          io.Writer
 }
 
 type ExecutionResult struct {

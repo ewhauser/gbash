@@ -48,6 +48,8 @@ type Execution struct {
 	Registry          commands.CommandRegistry
 	Policy            policy.Policy
 	Trace             trace.Recorder
+	LookupCNAME       commands.LookupCNAMEFunc
+	ProcessAlive      commands.ProcessAliveFunc
 	Exec              func(context.Context, *commands.ExecutionRequest) (*commands.ExecutionResult, error)
 }
 
@@ -363,17 +365,19 @@ func (m *MVdan) execHandler(exec *Execution, budget *executionBudget) interp.Exe
 		invocationArgs := append([]string(nil), resolved.args...)
 		invocationArgs = append(invocationArgs, args[1:]...)
 		err = commands.RunCommand(ctx, resolved.command, commands.NewInvocation(&commands.InvocationOptions{
-			Args:       invocationArgs,
-			Env:        currentEnv,
-			Cwd:        virtualWD,
-			Stdin:      hc.Stdin,
-			Stdout:     hc.Stdout,
-			Stderr:     hc.Stderr,
-			FileSystem: exec.FS,
-			Network:    exec.Network,
-			Policy:     exec.Policy,
-			Trace:      exec.Trace,
-			Exec:       subexecInvoker(exec.Exec, currentEnv, virtualWD),
+			Args:         invocationArgs,
+			Env:          currentEnv,
+			Cwd:          virtualWD,
+			Stdin:        hc.Stdin,
+			Stdout:       hc.Stdout,
+			Stderr:       hc.Stderr,
+			FileSystem:   exec.FS,
+			Network:      exec.Network,
+			Policy:       exec.Policy,
+			Trace:        exec.Trace,
+			LookupCNAME:  exec.LookupCNAME,
+			ProcessAlive: exec.ProcessAlive,
+			Exec:         subexecInvoker(exec.Exec, currentEnv, virtualWD),
 			GetRegisteredCommands: func() []string {
 				if exec.Registry == nil {
 					return nil

@@ -19,6 +19,10 @@ type Command interface {
 
 type CommandFunc func(ctx context.Context, inv *Invocation) error
 
+type LookupCNAMEFunc func(context.Context, string) (string, error)
+
+type ProcessAliveFunc func(context.Context, int) (bool, error)
+
 type Invocation struct {
 	Args                  []string
 	Env                   map[string]string
@@ -28,6 +32,8 @@ type Invocation struct {
 	Stderr                io.Writer
 	FS                    *CommandFS
 	Fetch                 FetchFunc
+	LookupCNAME           LookupCNAMEFunc
+	ProcessAlive          ProcessAliveFunc
 	Exec                  func(context.Context, *ExecutionRequest) (*ExecutionResult, error)
 	Limits                policy.Limits
 	GetRegisteredCommands func() []string

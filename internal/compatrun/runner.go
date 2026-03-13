@@ -26,6 +26,8 @@ const (
 	defaultMaxFileBytes   = 256 << 20
 )
 
+type HostBashFunc func(context.Context, *commands.ExecutionRequest) error
+
 type Config struct {
 	FS                gbfs.FileSystem
 	Registry          commands.CommandRegistry
@@ -34,6 +36,8 @@ type Config struct {
 	BaseEnv           map[string]string
 	DefaultDir        string
 	BuiltinCommandDir string
+	HostBash          HostBashFunc
+	ProcessAlive      commands.ProcessAliveFunc
 }
 
 type Runner struct {
@@ -106,6 +110,17 @@ func (r *Runner) RunUtilityStreaming(ctx context.Context, name string, args []st
 	if err := validateUtilityName(name); err != nil {
 		return nil, err
 	}
+	if name == "bash" && r.cfg.HostBash != nil {
+		return r.execWithOutputs(ctx, &commands.ExecutionRequest{
+			Name:            name,
+			Interpreter:     name,
+			PassthroughArgs: append([]string(nil), args...),
+			Env:             cloneEnv(r.cfg.BaseEnv),
+			ReplaceEnv:      true,
+			WorkDir:         r.cfg.DefaultDir,
+			Stdin:           stdin,
+		}, stdout, stderr)
+	}
 	return r.execWithOutputs(ctx, &commands.ExecutionRequest{
 		Name:       name,
 		Script:     name + " \"$@\"\n",
@@ -146,24 +161,37 @@ func (r *Runner) exec(ctx context.Context, req *commands.ExecutionRequest, liveS
 	}
 	recorder := trace.NewBuffer()
 	started := time.Now().UTC()
-	runResult, runErr := r.cfg.Engine.Run(ctx, &shell.Execution{
-		Name:              defaultName(req.Name),
-		Script:            req.Script,
-		Args:              req.Args,
-		Env:               execEnv,
-		Dir:               workDir,
-		VisiblePWD:        visiblePWD,
-		HasVisiblePWD:     hasVisiblePWD,
-		BuiltinCommandDir: r.cfg.BuiltinCommandDir,
-		Stdin:             stdinOrEmpty(req.Stdin),
-		Stdout:            stdoutWriter,
-		Stderr:            stderrWriter,
-		FS:                r.cfg.FS,
-		Registry:          r.cfg.Registry,
-		Policy:            r.cfg.Policy,
-		Trace:             recorder,
-		Exec:              r.subexecCallback,
-	})
+	var runResult *shell.RunResult
+	var runErr error
+	if req.Interpreter == "bash" && r.cfg.HostBash != nil {
+		hostReq := *req
+		hostReq.Env = execEnv
+		hostReq.WorkDir = workDir
+		hostReq.Stdin = stdinOrEmpty(req.Stdin)
+		hostReq.Stdout = stdoutWriter
+		hostReq.Stderr = stderrWriter
+		runErr = r.cfg.HostBash(ctx, &hostReq)
+	} else {
+		runResult, runErr = r.cfg.Engine.Run(ctx, &shell.Execution{
+			Name:              defaultName(req.Name),
+			Script:            req.Script,
+			Args:              req.Args,
+			Env:               execEnv,
+			Dir:               workDir,
+			VisiblePWD:        visiblePWD,
+			HasVisiblePWD:     hasVisiblePWD,
+			BuiltinCommandDir: r.cfg.BuiltinCommandDir,
+			Stdin:             stdinOrEmpty(req.Stdin),
+			Stdout:            stdoutWriter,
+			Stderr:            stderrWriter,
+			FS:                r.cfg.FS,
+			Registry:          r.cfg.Registry,
+			Policy:            r.cfg.Policy,
+			Trace:             recorder,
+			ProcessAlive:      r.cfg.ProcessAlive,
+			Exec:              r.subexecCallback,
+		})
+	}
 	finished := time.Now().UTC()
 
 	result := &commands.ExecutionResult{

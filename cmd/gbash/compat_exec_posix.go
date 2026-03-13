@@ -4,15 +4,20 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/ewhauser/gbash/commands"
 	"github.com/ewhauser/gbash/internal/compatrun"
 	"github.com/ewhauser/gbash/internal/compatshims"
+	"mvdan.cc/sh/v3/interp"
 )
 
 func runCompatInvocation(ctx context.Context, argv0 string, inv compatInvocation, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
@@ -34,14 +39,14 @@ func runCompatInvocation(ctx context.Context, argv0 string, inv compatInvocation
 	}
 
 	env := environMap(os.Environ())
-	// GNU coreutils tests rely on bash-specific signal trap behavior.
-	env["GBASH_USE_HOST_BASH"] = "1"
 	env["PATH"] = prependCommandDir(commandDir, env["PATH"])
 	runner, err := compatrun.New(&compatrun.Config{
 		Registry:          registry,
 		BaseEnv:           env,
 		DefaultDir:        filepath.ToSlash(cwd),
 		BuiltinCommandDir: commandDir,
+		HostBash:          runHostBash,
+		ProcessAlive:      hostProcessAlive,
 	})
 	if err != nil {
 		return 1, err
@@ -99,4 +104,55 @@ func prependCommandDir(dir, current string) string {
 	default:
 		return dir + ":" + current
 	}
+}
+
+func hostProcessAlive(_ context.Context, pid int) (bool, error) {
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM, nil
+}
+
+func runHostBash(ctx context.Context, req *commands.ExecutionRequest) error {
+	shellPath, err := osexec.LookPath("bash")
+	if err != nil {
+		return err
+	}
+	if req == nil {
+		req = &commands.ExecutionRequest{}
+	}
+
+	args := append([]string(nil), req.PassthroughArgs...)
+	if len(args) == 0 {
+		args = []string{"-s"}
+	}
+
+	cmd := osexec.CommandContext(ctx, shellPath, args...)
+	cmd.Dir = req.WorkDir
+	cmd.Env = sortedEnvPairs(req.Env)
+	cmd.Stdin = req.Stdin
+	cmd.Stdout = req.Stdout
+	cmd.Stderr = req.Stderr
+	if err := cmd.Run(); err != nil {
+		var exitErr *osexec.ExitError
+		if errors.As(err, &exitErr) {
+			return interp.ExitStatus(exitErr.ExitCode())
+		}
+		return err
+	}
+	return nil
+}
+
+func sortedEnvPairs(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, key+"="+env[key])
+	}
+	return out
 }

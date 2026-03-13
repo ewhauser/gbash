@@ -248,8 +248,14 @@ func (c *Tail) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCo
 	}
 
 	for {
-		if opts.follow != tailFollowNone && opts.pid != 0 && !tailPIDIsAlive(opts.pid) {
-			return nil
+		if opts.follow != tailFollowNone && opts.pid != 0 {
+			alive, err := tailPIDIsAlive(ctx, inv, opts.pid)
+			if err != nil {
+				return err
+			}
+			if !alive {
+				return nil
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -584,7 +590,16 @@ func tailPathIsUntailable(ctx context.Context, inv *Invocation, name string) boo
 	return info.IsDir()
 }
 
-// tailPIDIsAlive is defined in tail_unix.go and tail_windows.go.
+func tailPIDIsAlive(ctx context.Context, inv *Invocation, pid int) (bool, error) {
+	if inv == nil || inv.ProcessAlive == nil {
+		return false, exitf(inv, 1, "tail: --pid is unsupported in this sandbox")
+	}
+	alive, err := inv.ProcessAlive(ctx, pid)
+	if err != nil {
+		return false, exitf(inv, 1, "tail: failed to check pid %d: %v", pid, err)
+	}
+	return alive, nil
+}
 
 func writeTailWarnings(inv *Invocation, opts *tailOptions) error {
 	switch {

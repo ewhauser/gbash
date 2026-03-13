@@ -2,11 +2,8 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"os"
-	osexec "os/exec"
 )
 
 type Bash struct {
@@ -52,26 +49,9 @@ func (c *Bash) Spec() CommandSpec {
 	}
 }
 
-func (c *Bash) NormalizeInvocation(inv *Invocation) *Invocation {
-	if !c.shouldUseHostShell(inv) || inv == nil || len(inv.Args) == 0 {
-		return inv
-	}
-	switch inv.Args[0] {
-	case "--help", "--version":
-		clone := *inv
-		clone.Args = append([]string{"--"}, inv.Args...)
-		return &clone
-	default:
-		return inv
-	}
-}
-
 func (c *Bash) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
 	if inv.Exec == nil {
 		return fmt.Errorf("%s: subexec callback missing", c.name)
-	}
-	if c.shouldUseHostShell(inv) {
-		return c.runHostShell(ctx, inv)
 	}
 
 	if matches.Has("command") {
@@ -91,13 +71,7 @@ func (c *Bash) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCo
 	if err != nil {
 		return exitf(inv, 127, "%s: %s: No such file or directory", c.name, args[0])
 	}
-	result, err := inv.Exec(ctx, &ExecutionRequest{
-		Script:  string(scriptData),
-		Args:    args[1:],
-		Env:     inv.Env,
-		WorkDir: inv.Cwd,
-		Stdin:   inv.Stdin,
-	})
+	result, err := inv.Exec(ctx, c.executionRequest(inv, string(scriptData), args[1:], inv.Stdin))
 	if err != nil {
 		return err
 	}
@@ -119,13 +93,7 @@ func (c *Bash) executeStdinScript(ctx context.Context, inv *Invocation, position
 }
 
 func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, script string, positional []string, stdin io.Reader) error {
-	result, err := inv.Exec(ctx, &ExecutionRequest{
-		Script:  script,
-		Args:    positional,
-		Env:     inv.Env,
-		WorkDir: inv.Cwd,
-		Stdin:   stdin,
-	})
+	result, err := inv.Exec(ctx, c.executionRequest(inv, script, positional, stdin))
 	if err != nil {
 		return err
 	}
@@ -135,51 +103,23 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, script 
 	return exitForExecutionResult(result)
 }
 
-func (c *Bash) shouldUseHostShell(inv *Invocation) bool {
-	if c.name != "bash" || inv == nil {
-		return false
+func (c *Bash) executionRequest(inv *Invocation, script string, positional []string, stdin io.Reader) *ExecutionRequest {
+	req := &ExecutionRequest{
+		Name:            c.name,
+		Interpreter:     c.name,
+		Script:          script,
+		Args:            positional,
+		Env:             inv.Env,
+		WorkDir:         inv.Cwd,
+		Stdin:           stdin,
+		PassthroughArgs: append([]string(nil), inv.Args...),
 	}
-	return inv.Env["GBASH_USE_HOST_BASH"] == "1"
-}
-
-func (c *Bash) runHostShell(ctx context.Context, inv *Invocation) error {
-	shellPath, err := c.hostShellPath()
-	if err != nil {
-		return err
+	if len(req.PassthroughArgs) == 0 {
+		req.PassthroughArgs = []string{"-s"}
 	}
-
-	args := append([]string(nil), inv.Args...)
-	if len(args) == 0 {
-		args = []string{"-s"}
-	}
-
-	cmd := osexec.CommandContext(ctx, shellPath, args...)
-	cmd.Dir = inv.Cwd
-	cmd.Env = sortedEnvPairs(inv.Env)
-	cmd.Stdin = inv.Stdin
-	cmd.Stdout = inv.Stdout
-	cmd.Stderr = inv.Stderr
-	if err := cmd.Run(); err != nil {
-		var exitErr *osexec.ExitError
-		if errors.As(err, &exitErr) {
-			return &ExitError{Code: exitErr.ExitCode()}
-		}
-		return &ExitError{Code: exitCodeForError(err), Err: err}
-	}
-	return nil
-}
-
-func (c *Bash) hostShellPath() (string, error) {
-	for _, candidate := range []string{"/bin/bash", "/usr/bin/bash"} {
-		info, err := os.Stat(candidate)
-		if err == nil && !info.IsDir() {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("%s: host bash not available", c.name)
+	return req
 }
 
 var _ Command = (*Bash)(nil)
 var _ SpecProvider = (*Bash)(nil)
 var _ ParsedRunner = (*Bash)(nil)
-var _ ParseInvocationNormalizer = (*Bash)(nil)

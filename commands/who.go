@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	stdfs "io/fs"
-	"net"
 	"path"
 	"reflect"
 	"runtime"
@@ -341,7 +340,7 @@ func whoWriteUser(ctx context.Context, inv *Invocation, opts whoOptions, record 
 
 	host := record.host
 	if opts.lookup {
-		host = whoCanonicalHost(host)
+		host = whoCanonicalHost(ctx, inv, host)
 	}
 	comment := ""
 	if host != "" {
@@ -482,12 +481,15 @@ func whoUseCLocale(env map[string]string) bool {
 	return false
 }
 
-func whoCanonicalHost(host string) string {
+func whoCanonicalHost(ctx context.Context, inv *Invocation, host string) string {
 	hostname, display, hasDisplay := strings.Cut(host, ":")
 	if hostname == "" {
 		return host
 	}
-	canonical, err := net.LookupCNAME(hostname)
+	if inv == nil || inv.LookupCNAME == nil {
+		return host
+	}
+	canonical, err := inv.LookupCNAME(ctx, hostname)
 	if err != nil {
 		return host
 	}
