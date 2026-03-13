@@ -17,8 +17,10 @@ type executionEnv struct {
 }
 
 type executionPlan struct {
-	runTargets    []utilityManifest
+	runTargets    []attributedUtility
 	explicitTests []string
+	allTests      []string
+	globalSkipped []string
 	configShell   string
 }
 
@@ -68,7 +70,6 @@ func run(ctx context.Context, mf *manifest, opts *options) error {
 		return err
 	}
 	summary.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
-	summary.Overall = summarizeOverall(summary.Utilities)
 	summary.UtilitySummary = summarizeUtilityTotals(summary.Utilities)
 
 	summaryPath := filepath.Join(env.resultsDir, "summary.json")
@@ -176,15 +177,12 @@ func prepareExecutionPlan(ctx context.Context, mf *manifest, env *executionEnv, 
 	if err != nil {
 		return nil, err
 	}
-	selectedUtilities, err := selectUtilities(mf, opts.utils)
+	selectedUtilities, err := selectUtilities(programs, mf, opts.utils)
 	if err != nil {
 		return nil, err
 	}
-	runTargets := append([]utilityManifest(nil), selectedUtilities...)
+	runTargets := append([]attributedUtility(nil), selectedUtilities...)
 	explicitTests := parseList(opts.tests)
-	if len(explicitTests) != 0 {
-		runTargets = []utilityManifest{{Name: "explicit-tests"}}
-	}
 	if err := prepareProgramDir(env.workDir, env.gbashBin, programs); err != nil {
 		return nil, err
 	}
@@ -195,10 +193,16 @@ func prepareExecutionPlan(ctx context.Context, mf *manifest, env *executionEnv, 
 	if err := disableCheckRebuild(env.workDir); err != nil {
 		return nil, err
 	}
+	allTests, globalSkipped, err := discoverRunnableTests(env.workDir, mf.SkipPatterns, explicitTests)
+	if err != nil {
+		return nil, err
+	}
 
 	return &executionPlan{
 		runTargets:    runTargets,
 		explicitTests: explicitTests,
+		allTests:      allTests,
+		globalSkipped: globalSkipped,
 		configShell:   configShell,
 	}, nil
 }
@@ -209,45 +213,32 @@ func executeCompatibilityRun(ctx context.Context, makeBin string, mf *manifest, 
 		WorkDir:    env.workDir,
 		ResultsDir: env.resultsDir,
 	}
-	utilityRuns, err := resolveUtilityRuns(env.workDir, plan.runTargets, mf.SkipPatterns, plan.explicitTests)
+	utilityRuns, _, err := resolveUtilityRuns(env.workDir, plan.runTargets, mf.SkipPatterns, plan.explicitTests)
 	if err != nil {
 		return runSummary{}, false, err
 	}
 
-	results, hadFailure, err := executeUtilityRuns(ctx, makeBin, env, plan.configShell, utilityRuns)
+	results, overall, hadFailure, err := executeUtilityRuns(ctx, makeBin, env, plan.configShell, utilityRuns, plan.allTests, len(plan.globalSkipped))
 	if err != nil {
 		return runSummary{}, false, err
 	}
 	summary.Utilities = append(summary.Utilities, results...)
+	summary.Overall = overall
 	return summary, hadFailure, nil
 }
 
-func resolveUtilityRuns(workDir string, runTargets []utilityManifest, globalSkips []skipPattern, explicitTests []string) ([]utilityRun, error) {
-	runs := make([]utilityRun, 0, len(runTargets))
-	for _, utility := range runTargets {
-		tests, skipped, err := resolveUtilityTests(workDir, utility, globalSkips, explicitTests)
-		if err != nil {
-			return nil, err
-		}
-		runs = append(runs, utilityRun{
-			Utility: utility,
-			Tests:   tests,
-			Skipped: skipped,
-		})
+func executeUtilityRuns(ctx context.Context, makeBin string, env *executionEnv, configShell string, runs []utilityRun, allTests []string, filteredSkipTotal int) ([]utilityResult, testSummary, bool, error) {
+	if len(runs) == 1 && runs[0].Utility.Name == "explicit-tests" {
+		results, overall, hadFailure, err := executeUtilityRunsIndividually(ctx, makeBin, env, configShell, runs)
+		return results, overall, hadFailure, err
 	}
-	return runs, nil
+	return executeUtilityRunsBatched(ctx, makeBin, env, configShell, runs, allTests, filteredSkipTotal)
 }
 
-func executeUtilityRuns(ctx context.Context, makeBin string, env *executionEnv, configShell string, runs []utilityRun) ([]utilityResult, bool, error) {
-	if len(runs) <= 1 {
-		return executeUtilityRunsIndividually(ctx, makeBin, env, configShell, runs)
-	}
-	return executeUtilityRunsBatched(ctx, makeBin, env, configShell, runs)
-}
-
-func executeUtilityRunsIndividually(ctx context.Context, makeBin string, env *executionEnv, configShell string, runs []utilityRun) ([]utilityResult, bool, error) {
+func executeUtilityRunsIndividually(ctx context.Context, makeBin string, env *executionEnv, configShell string, runs []utilityRun) ([]utilityResult, testSummary, bool, error) {
 	results := make([]utilityResult, 0, len(runs))
 	hadFailure := false
+	var overall testSummary
 	for _, run := range runs {
 		result := utilityResult{
 			Name:    run.Utility.Name,
@@ -264,7 +255,7 @@ func executeUtilityRunsIndividually(ctx context.Context, makeBin string, env *ex
 		logPath := filepath.Join(env.resultsDir, logFile)
 		makeCheckResult, err := runMakeCheck(ctx, makeBin, env.workDir, configShell, run.Tests, logPath)
 		if err != nil {
-			return nil, false, err
+			return nil, testSummary{}, false, err
 		}
 		result.TestResults, result.ExtraResults = parseReportedTestResults(makeCheckResult.Output, run.Tests)
 		result.Summary = summarizeTestResults(result.TestResults, len(run.Skipped), len(result.ExtraResults))
@@ -278,12 +269,12 @@ func executeUtilityRunsIndividually(ctx context.Context, makeBin string, env *ex
 		results = append(results, result)
 		fmt.Printf("%s: %d tests, exit=%d, pass=%s\n", run.Utility.Name, len(run.Tests), makeCheckResult.ExitCode, formatPercent(result.Summary.PassPctSelected))
 	}
-	return results, hadFailure, nil
+	overall = summarizeOverall(results)
+	return results, overall, hadFailure, nil
 }
 
-func executeUtilityRunsBatched(ctx context.Context, makeBin string, env *executionEnv, configShell string, runs []utilityRun) ([]utilityResult, bool, error) {
-	combinedTests := combinedTestsForRuns(runs)
-	if len(combinedTests) == 0 {
+func executeUtilityRunsBatched(ctx context.Context, makeBin string, env *executionEnv, configShell string, runs []utilityRun, allTests []string, filteredSkipTotal int) ([]utilityResult, testSummary, bool, error) {
+	if len(allTests) == 0 {
 		results := make([]utilityResult, 0, len(runs))
 		for _, run := range runs {
 			result := utilityResult{
@@ -294,26 +285,23 @@ func executeUtilityRunsBatched(ctx context.Context, makeBin string, env *executi
 			}
 			results = append(results, result)
 		}
-		return results, false, nil
+		return results, testSummary{FilteredSkipTotal: filteredSkipTotal}, false, nil
 	}
 
 	logFile := "compat.log"
 	logPath := filepath.Join(env.resultsDir, logFile)
-	makeCheckResult, err := runMakeCheck(ctx, makeBin, env.workDir, configShell, combinedTests, logPath)
+	makeCheckResult, err := runMakeCheck(ctx, makeBin, env.workDir, configShell, allTests, logPath)
 	if err != nil {
-		return nil, false, err
+		return nil, testSummary{}, false, err
 	}
 
-	results := buildBatchedUtilityResults(runs, makeCheckResult, logFile, logPath)
-	hadFailure := false
+	results, overall := buildBatchedUtilityResults(runs, allTests, filteredSkipTotal, makeCheckResult, logFile, logPath)
+	hadFailure := !utilityPassed(&overall)
 	for i := range results {
 		result := &results[i]
-		if !result.Passed && len(result.Tests) != 0 {
-			hadFailure = true
-		}
 		fmt.Printf("%s: %d tests, exit=%d, pass=%s\n", result.Name, len(result.Tests), result.ExitCode, formatPercent(result.Summary.PassPctSelected))
 	}
-	return results, hadFailure, nil
+	return results, overall, hadFailure, nil
 }
 
 func combinedTestsForRuns(runs []utilityRun) []string {
@@ -331,13 +319,13 @@ func combinedTestsForRuns(runs []utilityRun) []string {
 	return combined
 }
 
-func buildBatchedUtilityResults(runs []utilityRun, makeCheckResult makeCheckResult, logFile, logPath string) []utilityResult {
-	combinedTests := combinedTestsForRuns(runs)
-	combinedResults, combinedExtras := parseReportedTestResults(makeCheckResult.Output, combinedTests)
+func buildBatchedUtilityResults(runs []utilityRun, allTests []string, filteredSkipTotal int, makeCheckResult makeCheckResult, logFile, logPath string) ([]utilityResult, testSummary) {
+	combinedResults, combinedExtras := parseReportedTestResults(makeCheckResult.Output, allTests)
 	resultByName := make(map[string]testResult, len(combinedResults))
 	for _, result := range combinedResults {
 		resultByName[result.Name] = result
 	}
+	overall := summarizeTestResults(combinedResults, filteredSkipTotal, len(combinedExtras))
 
 	results := make([]utilityResult, 0, len(runs))
 	for _, run := range runs {
@@ -372,10 +360,10 @@ func buildBatchedUtilityResults(runs []utilityRun, makeCheckResult makeCheckResu
 		result.Passed = utilityPassed(&result.Summary)
 		results = append(results, result)
 	}
-	return results
+	return results, overall
 }
 
-func extraResultsForUtility(utility utilityManifest, extras []testResult) []testResult {
+func extraResultsForUtility(utility attributedUtility, extras []testResult) []testResult {
 	if len(extras) == 0 {
 		return nil
 	}
@@ -388,7 +376,7 @@ func extraResultsForUtility(utility utilityManifest, extras []testResult) []test
 	return filtered
 }
 
-func utilityMatchesTestPath(utility utilityManifest, rel string) bool {
+func utilityMatchesTestPath(utility attributedUtility, rel string) bool {
 	for _, pattern := range utility.Patterns {
 		if matched, err := filepath.Match(pattern, rel); err == nil && matched {
 			return true

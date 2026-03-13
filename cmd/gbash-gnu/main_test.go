@@ -187,8 +187,8 @@ func TestLoadManifestIncludesExpandedCompatibilityCoverage(t *testing.T) {
 		t.Fatalf("loadManifest() error = %v", err)
 	}
 
-	gotPatterns := make(map[string][]string, len(mf.Utilities))
-	for _, utility := range mf.Utilities {
+	gotPatterns := make(map[string][]string, len(mf.UtilityOverrides))
+	for _, utility := range mf.UtilityOverrides {
 		gotPatterns[utility.Name] = utility.Patterns
 	}
 
@@ -197,15 +197,13 @@ func TestLoadManifestIncludesExpandedCompatibilityCoverage(t *testing.T) {
 		"arch":      {"tests/misc/arch.sh"},
 		"basenc":    {"tests/basenc/basenc.pl", "tests/basenc/bounded-memory.sh", "tests/basenc/large-input.sh"},
 		"cksum":     {"tests/cksum/cksum*"},
-		"dd":        {"tests/dd/*"},
 		"ginstall":  {"tests/install/*"},
-		"head":      {"tests/head/*"},
 		"md5sum":    {"tests/cksum/md5sum*"},
 		"sha1sum":   {"tests/cksum/sha1sum*"},
 		"sha224sum": {"tests/cksum/sha224sum*"},
-		"stdbuf":    {"tests/misc/stdbuf.sh"},
-		"stty":      {"tests/stty/*"},
-		"truncate":  {"tests/truncate/*"},
+		"sha256sum": {"tests/sum/*", "tests/cksum/*"},
+		"sum":       {"tests/cksum/sum*"},
+		"tsort":     {"tests/misc/tsort.pl"},
 	} {
 		got, ok := gotPatterns[name]
 		if !ok {
@@ -221,20 +219,23 @@ func TestLoadManifestIncludesExpandedCompatibilityCoverage(t *testing.T) {
 			t.Fatalf("manifest still contains head skip: %#v", skip)
 		}
 	}
+	if len(mf.UtilityDisplayNames) != 1 || mf.UtilityDisplayNames[0].Name != "install" || mf.UtilityDisplayNames[0].Alias != "ginstall" {
+		t.Fatalf("utility display aliases = %#v, want install->ginstall", mf.UtilityDisplayNames)
+	}
 }
 
 func TestCombinedTestsForRunsDeduplicatesSharedTests(t *testing.T) {
 	runs := []utilityRun{
 		{
-			Utility: utilityManifest{Name: "dir"},
+			Utility: attributedUtility{Name: "dir"},
 			Tests:   []string{"tests/misc/invalid-opt.pl"},
 		},
 		{
-			Utility: utilityManifest{Name: "link"},
+			Utility: attributedUtility{Name: "link"},
 			Tests:   []string{"tests/misc/invalid-opt.pl"},
 		},
 		{
-			Utility: utilityManifest{Name: "test"},
+			Utility: attributedUtility{Name: "test"},
 			Tests:   []string{"tests/misc/invalid-opt.pl"},
 		},
 	}
@@ -249,16 +250,16 @@ func TestCombinedTestsForRunsDeduplicatesSharedTests(t *testing.T) {
 func TestBuildBatchedUtilityResultsSharesLogAndSynthesizesExitCodes(t *testing.T) {
 	runs := []utilityRun{
 		{
-			Utility: utilityManifest{Name: "basename", Patterns: []string{"tests/misc/basename*"}},
+			Utility: attributedUtility{Name: "basename", Patterns: []string{"tests/misc/basename*"}},
 			Tests:   []string{"tests/misc/basename.pl"},
 		},
 		{
-			Utility: utilityManifest{Name: "dirname", Patterns: []string{"tests/misc/dirname*"}},
+			Utility: attributedUtility{Name: "dirname", Patterns: []string{"tests/misc/dirname*"}},
 			Tests:   []string{"tests/misc/dirname.pl"},
 		},
 	}
 
-	got := buildBatchedUtilityResults(runs, makeCheckResult{
+	got, overall := buildBatchedUtilityResults(runs, []string{"tests/misc/basename.pl", "tests/misc/dirname.pl"}, 0, makeCheckResult{
 		ExitCode: 1,
 		Output: []byte(`
 PASS: tests/misc/basename.pl
@@ -281,25 +282,28 @@ FAIL: tests/misc/dirname.pl
 	if got[1].Summary.Fail != 1 {
 		t.Fatalf("dirname summary = %#v, want one failure", got[1].Summary)
 	}
+	if overall.Fail != 1 || overall.Pass != 1 {
+		t.Fatalf("overall summary = %#v, want one pass and one fail", overall)
+	}
 }
 
 func TestBuildBatchedUtilityResultsReusesSharedManifestTestAcrossUtilities(t *testing.T) {
 	runs := []utilityRun{
 		{
-			Utility: utilityManifest{Name: "dir", Patterns: []string{"tests/misc/invalid-opt.pl"}},
+			Utility: attributedUtility{Name: "dir", Patterns: []string{"tests/misc/invalid-opt.pl"}},
 			Tests:   []string{"tests/misc/invalid-opt.pl"},
 		},
 		{
-			Utility: utilityManifest{Name: "link", Patterns: []string{"tests/misc/invalid-opt.pl"}},
+			Utility: attributedUtility{Name: "link", Patterns: []string{"tests/misc/invalid-opt.pl"}},
 			Tests:   []string{"tests/misc/invalid-opt.pl"},
 		},
 		{
-			Utility: utilityManifest{Name: "test", Patterns: []string{"tests/misc/invalid-opt.pl"}},
+			Utility: attributedUtility{Name: "test", Patterns: []string{"tests/misc/invalid-opt.pl"}},
 			Tests:   []string{"tests/misc/invalid-opt.pl"},
 		},
 	}
 
-	got := buildBatchedUtilityResults(runs, makeCheckResult{
+	got, _ := buildBatchedUtilityResults(runs, []string{"tests/misc/invalid-opt.pl"}, 0, makeCheckResult{
 		ExitCode: 0,
 		Output:   []byte("PASS: tests/misc/invalid-opt.pl\n"),
 	}, "compat.log", "/tmp/compat.log")
@@ -320,12 +324,12 @@ func TestBuildBatchedUtilityResultsReusesSharedManifestTestAcrossUtilities(t *te
 func TestBuildBatchedUtilityResultsAttributesMatchingExtras(t *testing.T) {
 	runs := []utilityRun{
 		{
-			Utility: utilityManifest{Name: "basename", Patterns: []string{"tests/misc/basename*"}},
+			Utility: attributedUtility{Name: "basename", Patterns: []string{"tests/misc/basename*"}},
 			Tests:   []string{"tests/misc/basename.pl"},
 		},
 	}
 
-	got := buildBatchedUtilityResults(runs, makeCheckResult{
+	got, _ := buildBatchedUtilityResults(runs, []string{"tests/misc/basename.pl"}, 0, makeCheckResult{
 		ExitCode: 1,
 		Output: []byte(`
 PASS: tests/misc/basename.pl
@@ -638,18 +642,15 @@ func TestParseListDeduplicatesAndSplitsOnCommonSeparators(t *testing.T) {
 	}
 }
 
-func TestResolveUtilityTestsAppliesPatternAndSkipFilters(t *testing.T) {
+func TestDiscoverRunnableTestsAppliesGlobalSkipFilters(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "tests/cat/basic.sh", "echo ok\n")
 	writeTestFile(t, root, "tests/cat/tty.sh", "require_controlling_input_terminal\n")
 	writeTestFile(t, root, "tests/help/help-version.sh", "echo skip\n")
 
-	tests, skipped, err := resolveUtilityTests(root, utilityManifest{
-		Name:     "cat",
-		Patterns: []string{"tests/cat/*", "tests/help/*"},
-	}, []skipPattern{{Pattern: "tests/help/*", Reason: "help/version tests are skipped in v1"}}, nil)
+	tests, skipped, err := discoverRunnableTests(root, []skipPattern{{Pattern: "tests/help/*", Reason: "help/version tests are skipped in v1"}}, nil)
 	if err != nil {
-		t.Fatalf("resolveUtilityTests() error = %v", err)
+		t.Fatalf("discoverRunnableTests() error = %v", err)
 	}
 
 	if got, want := tests, []string{"tests/cat/basic.sh"}; !reflect.DeepEqual(got, want) {
@@ -660,24 +661,71 @@ func TestResolveUtilityTestsAppliesPatternAndSkipFilters(t *testing.T) {
 	}
 }
 
-func TestResolveUtilityTestsSkipsGeneratedArtifacts(t *testing.T) {
+func TestDiscoverRunnableTestsSkipsGeneratedArtifacts(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "tests/seq/seq-precision.sh", "#!/bin/sh\n")
 	writeTestFile(t, root, "tests/seq/seq-precision.log", "generated\n")
 	writeTestFile(t, root, "tests/seq/seq-precision.trs", "generated\n")
 
-	tests, skipped, err := resolveUtilityTests(root, utilityManifest{
-		Name:     "seq",
-		Patterns: []string{"tests/seq/*"},
-	}, nil, nil)
+	tests, skipped, err := discoverRunnableTests(root, nil, nil)
 	if err != nil {
-		t.Fatalf("resolveUtilityTests() error = %v", err)
+		t.Fatalf("discoverRunnableTests() error = %v", err)
 	}
 	if got, want := tests, []string{"tests/seq/seq-precision.sh"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("tests = %#v, want %#v", got, want)
 	}
 	if len(skipped) != 0 {
 		t.Fatalf("skipped = %#v, want no skipped entries", skipped)
+	}
+}
+
+func TestDiscoverAttributedUtilitiesUsesDisplayAliasesAndOverrides(t *testing.T) {
+	mf, err := loadManifest()
+	if err != nil {
+		t.Fatalf("loadManifest() error = %v", err)
+	}
+
+	got := discoverAttributedUtilities([]string{"cat", "install", "sha256sum"}, mf)
+	gotByName := make(map[string]attributedUtility, len(got))
+	for _, utility := range got {
+		gotByName[utility.Name] = utility
+	}
+
+	if _, ok := gotByName["install"]; ok {
+		t.Fatalf("discoverAttributedUtilities() unexpectedly included raw install name")
+	}
+	if utility, ok := gotByName["ginstall"]; !ok {
+		t.Fatalf("discoverAttributedUtilities() missing ginstall alias")
+	} else if !reflect.DeepEqual(utility.Patterns, []string{"tests/install/*"}) {
+		t.Fatalf("ginstall patterns = %#v, want tests/install/*", utility.Patterns)
+	}
+	if utility, ok := gotByName["cat"]; !ok {
+		t.Fatalf("discoverAttributedUtilities() missing cat")
+	} else if !reflect.DeepEqual(utility.Patterns, []string{"tests/cat/*"}) {
+		t.Fatalf("cat patterns = %#v, want tests/cat/*", utility.Patterns)
+	}
+	if utility, ok := gotByName["sha256sum"]; !ok {
+		t.Fatalf("discoverAttributedUtilities() missing sha256sum")
+	} else if !reflect.DeepEqual(utility.Patterns, []string{"tests/cksum/*", "tests/sha256sum/*", "tests/sum/*"}) {
+		t.Fatalf("sha256sum patterns = %#v, want merged override + conventional patterns", utility.Patterns)
+	}
+}
+
+func TestAttributeUtilityTestsAppliesUtilitySpecificSkips(t *testing.T) {
+	tests, skipped := attributeUtilityTests(
+		[]string{"tests/install/basic.sh", "tests/install/root.sh"},
+		attributedUtility{
+			Name:     "ginstall",
+			Patterns: []string{"tests/install/*"},
+			Skips:    []string{"tests/install/root.sh"},
+		},
+	)
+
+	if got, want := tests, []string{"tests/install/basic.sh"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tests = %#v, want %#v", got, want)
+	}
+	if got, want := skipped, []string{"tests/install/root.sh: utility-specific skip"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("skipped = %#v, want %#v", got, want)
 	}
 }
 
