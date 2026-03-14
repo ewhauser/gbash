@@ -32,22 +32,6 @@ type Session struct {
 	inner *internalruntime.Session
 }
 
-// ExecutionRequest describes a single shell execution.
-//
-// Callers usually populate [ExecutionRequest.Script] and optionally provide
-// stdin, environment overrides, or a working directory override.
-type ExecutionRequest = internalruntime.ExecutionRequest
-
-// ExecutionResult captures the output, exit status, timing, and trace events
-// produced by a shell execution.
-type ExecutionResult = internalruntime.ExecutionResult
-
-// InteractiveRequest describes an interactive shell session.
-type InteractiveRequest = internalruntime.InteractiveRequest
-
-// InteractiveResult captures the final exit status from an interactive shell session.
-type InteractiveResult = internalruntime.InteractiveResult
-
 // Method identifies an HTTP method that is allowed by the sandbox network
 // policy.
 type Method = network.Method
@@ -335,7 +319,8 @@ func (r *Runtime) Run(ctx context.Context, req *ExecutionRequest) (*ExecutionRes
 	if r == nil || r.inner == nil {
 		return nil, fmt.Errorf("gbash: runtime is nil")
 	}
-	return r.inner.Run(ctx, req)
+	result, err := r.inner.Run(ctx, req.runtimeRequest())
+	return executionResultFromRuntime(result), err
 }
 
 // Exec runs a script inside the existing session.
@@ -347,7 +332,8 @@ func (s *Session) Exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 	if s == nil || s.inner == nil {
 		return nil, fmt.Errorf("gbash: session is nil")
 	}
-	return s.inner.Exec(ctx, req)
+	result, err := s.inner.Exec(ctx, req.runtimeRequest())
+	return executionResultFromRuntime(result), err
 }
 
 // Interact runs an interactive shell session inside the existing session.
@@ -355,7 +341,8 @@ func (s *Session) Interact(ctx context.Context, req *InteractiveRequest) (*Inter
 	if s == nil || s.inner == nil {
 		return nil, fmt.Errorf("gbash: session is nil")
 	}
-	return s.inner.Interact(ctx, req)
+	result, err := s.inner.Interact(ctx, req.runtimeRequest())
+	return interactiveResultFromRuntime(result), err
 }
 
 // FileSystem returns the live sandbox filesystem for the session.

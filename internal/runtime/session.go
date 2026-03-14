@@ -190,11 +190,13 @@ func (s *Session) interact(ctx context.Context, req *InteractiveRequest) (*Inter
 }
 
 func (s *Session) subexecCallback(ctx context.Context, req *commands.ExecutionRequest) (*commands.ExecutionResult, error) {
-	return s.exec(ctx, req)
+	result, err := s.exec(ctx, executionRequestFromCommand(req))
+	return result.commandResult(), err
 }
 
 func (s *Session) interactCallback(ctx context.Context, req *commands.InteractiveRequest) (*commands.InteractiveResult, error) {
-	return s.interact(ctx, req)
+	result, err := s.interact(ctx, interactiveRequestFromCommand(req))
+	return result.commandResult(), err
 }
 
 func (s *Session) FileSystem() gbfs.FileSystem {

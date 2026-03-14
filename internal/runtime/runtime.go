@@ -39,11 +39,6 @@ type Session struct {
 	mu     sync.Mutex
 }
 
-type ExecutionRequest = commands.ExecutionRequest
-type ExecutionResult = commands.ExecutionResult
-type InteractiveRequest = commands.InteractiveRequest
-type InteractiveResult = commands.InteractiveResult
-
 func New(opts ...Option) (*Runtime, error) {
 	resolved, err := resolveConfig(opts)
 	if err != nil {

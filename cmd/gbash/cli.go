@@ -160,7 +160,21 @@ func runBashInvocation(ctx context.Context, rt *gbash.Runtime, parsed *commands.
 		return 1, fmt.Errorf("read script: %w", readErr)
 	}
 
-	result, err := rt.Run(ctx, parsed.BuildExecutionRequest(nil, "", execStdin, script))
+	req := &gbash.ExecutionRequest{
+		Name:            parsed.ExecutionName,
+		Interpreter:     parsed.Name,
+		PassthroughArgs: append([]string(nil), parsed.RawArgs...),
+		Script:          script,
+		Args:            append([]string(nil), parsed.Args...),
+		StartupOptions:  append([]string(nil), parsed.StartupOptions...),
+		Interactive:     parsed.Interactive,
+		Stdin:           execStdin,
+	}
+	if len(req.PassthroughArgs) == 0 {
+		req.PassthroughArgs = []string{"-s"}
+	}
+
+	result, err := rt.Run(ctx, req)
 	if result != nil {
 		_, _ = io.WriteString(stdout, result.Stdout)
 		_, _ = io.WriteString(stderr, result.Stderr)
