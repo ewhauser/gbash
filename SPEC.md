@@ -24,7 +24,7 @@ The target is not "Bash in Go". The target is a practical shell-shaped runtime f
 - it accepts shell-like scripts and command snippets
 - it evaluates a pragmatic subset of shell semantics
 - it runs entirely inside a sandboxed runtime
-- it exposes structured traces for agent debugging and orchestration
+- it can expose structured traces and lifecycle logs for agent debugging and orchestration when the embedder opts in
 - it uses a virtual filesystem unless a caller explicitly installs another sandboxed backend
 - it never executes unknown commands on the host
 
@@ -45,7 +45,7 @@ The runtime is optimized for LLM and agent workloads:
 3. Support only sandbox mode.
 4. Use explicit Go command implementations instead of host subprocesses.
 5. Default to an in-memory or otherwise virtualized filesystem.
-6. Expose deterministic traces and execution results suitable for agent frameworks.
+6. Expose deterministic observability hooks and execution results suitable for agent frameworks.
 7. Keep the implementation small, explicit, and easy to reason about.
 
 ## 4. Non-Goals
@@ -89,7 +89,7 @@ When Bash compatibility conflicts with deterministic, inspectable behavior for a
 
 ### 5.5 Small explicit surfaces
 
-Every major subsystem should have a narrow interface. Callers should be able to replace the filesystem backend, registry, or trace sink without understanding `mvdan/sh` internals.
+Every major subsystem should have a narrow interface. Callers should be able to replace the filesystem backend, registry, or observability callbacks without understanding `mvdan/sh` internals.
 
 ## 6. Runtime Architecture
 
@@ -108,7 +108,7 @@ Execution flow:
    - session-owned virtual filesystem
    - command registry
    - policy
-   - trace recorder
+   - optional trace recorder and logging callbacks
    - bounded stdout/stderr capture
 3. Configure `interp.Runner` with project handlers for:
    - file open
@@ -118,7 +118,7 @@ Execution flow:
    - command execution
 4. Run the parsed program.
 5. Normalize shell/interpreter errors into an `ExecutionResult`.
-6. Return stdout, stderr, exit code, and structured trace events.
+6. Return stdout, stderr, exit code, and structured trace events when tracing is enabled.
 
 The CLI also provides a minimal interactive shell mode. That mode is a front-end over the same runtime, not a second execution engine:
 
@@ -226,6 +226,8 @@ type Config struct {
     BaseEnv       map[string]string
     Network       *network.Config
     NetworkClient network.Client
+    Tracing       TraceConfig
+    Logger        LogCallback
 }
 
 func New(options ...Option) (*Runtime, error)
@@ -262,6 +264,37 @@ type ExecutionResult struct {
     StdoutTruncated bool
     StderrTruncated bool
 }
+
+type TraceMode uint8
+
+const (
+    TraceOff TraceMode = iota
+    TraceRedacted
+    TraceRaw
+)
+
+type TraceConfig struct {
+    Mode    TraceMode
+    OnEvent func(context.Context, trace.Event)
+}
+
+type LogKind string
+
+type LogEvent struct {
+    Kind        LogKind
+    SessionID   string
+    ExecutionID string
+    Name        string
+    WorkDir     string
+    ExitCode    int
+    Duration    time.Duration
+    Output      string
+    Truncated   bool
+    ShellExited bool
+    Error       string
+}
+
+type LogCallback func(context.Context, LogEvent)
 
 type FileSystem interface {
     Open(ctx context.Context, name string) (File, error)
@@ -330,6 +363,7 @@ type Event struct {
     ExecutionID string
     Kind        trace.Kind
     At          time.Time
+    Redacted    bool
     Command     *CommandEvent
     File        *FileEvent
     Policy      *PolicyEvent
@@ -446,7 +480,7 @@ Responsibilities:
 - resolve shell-relative paths against virtual `PWD`
 - normalize paths using POSIX semantics
 - enforce policy before touching the backend
-- emit file access trace events
+- emit file access trace events when tracing is enabled
 - call the selected `fs.FileSystem` backend
 
 ### 9.5 Call interception
@@ -481,7 +515,7 @@ Flow:
 3. if missing, write a shell-style error to stderr and return exit status `127`
 4. if present, run the Go command implementation
 5. convert command errors into shell exit status errors
-6. emit start/finish trace events
+6. emit start/finish trace events when tracing is enabled
 
 This preserves shell syntax while keeping all execution inside Go.
 
@@ -596,9 +630,9 @@ Path-policy enforcement rule for the current runtime:
 
 ## 13. Trace Model
 
-Tracing is a first-class output.
+Tracing is opt-in at the runtime boundary.
 
-Each execution should emit structured events such as:
+When enabled, each execution should emit structured events such as:
 
 - command argv after expansion
 - command start and finish
@@ -613,11 +647,18 @@ Each execution should emit structured events such as:
 
 Tracing should be useful both for debugging and for building higher-level agent tooling. The event model should favor stable, structured fields over log-style strings.
 
+The root runtime also exposes top-level logging callbacks for `exec.start`, `stdout`, `stderr`, `exec.finish`, and `exec.error`. Logging is callback-only and does not add new fields to `ExecutionResult`.
+
 Implementation detail for the current runtime:
 
 - the schema is project-owned and versioned as `gbash.trace.v1`
 - the core runtime does not adopt OpenTelemetry as its event schema or transport contract
+- tracing is disabled by default; `ExecutionResult.Events` is empty unless the embedder enables tracing
+- `TraceRedacted` is the recommended default and redacts secret-bearing argv values before events are returned or emitted
+- `TraceRaw` preserves full argv and path metadata and is unsafe unless the embedder controls sinks and retention
+- interactive executions only emit trace callbacks; they do not return events
 - every event carries `session_id` and `execution_id`
+- redacted events set `redacted=true`
 - command events carry `resolved_name`, `resolved_path`, and `resolution_source`
 - path-policy and command-policy failures emit explicit `policy.denied` events
 - file mutations emit `file.mutation` events alongside lower-level file access events when useful

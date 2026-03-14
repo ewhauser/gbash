@@ -101,6 +101,16 @@ type Config struct {
 	// NetworkClient replaces the built-in HTTP client. This is the advanced
 	// escape hatch for tests and custom transports.
 	NetworkClient network.Client
+
+	// Tracing controls structured execution events. Tracing is off by default.
+	// When enabled, [ExecutionResult.Events] is populated for non-interactive
+	// executions and OnEvent receives events for both non-interactive and
+	// interactive runs.
+	Tracing TraceConfig
+
+	// Logger receives top-level execution lifecycle events. Logging is off by
+	// default.
+	Logger LogCallback
 }
 
 // FileSystemConfig describes how gbash provisions a session filesystem.
@@ -232,6 +242,8 @@ func (cfg *Config) runtimeConfig() *internalruntime.Config {
 		BaseEnv:       copyStringMap(cfg.BaseEnv),
 		Network:       cfg.networkConfig(),
 		NetworkClient: cfg.NetworkClient,
+		Tracing:       cfg.Tracing,
+		Logger:        cfg.Logger,
 	}
 }
 

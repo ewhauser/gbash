@@ -38,8 +38,8 @@ Shell parsing is delegated to [`mvdan/sh`](https://github.com/mvdan/sh), with pr
 - Persistent sessions with shared filesystem state across executions
 - Host directory mounting with read-only overlay for real project workspaces
 - Execution budgets — command count, loop iterations, glob expansion, stdout/stderr limits
-- Structured trace events for debugging and agent orchestration
-- WebAssembly support
+- Opt-in structured trace events and lifecycle logs for debugging and agent orchestration
+- WebAssembly support — runs in the browser ([demo](./website/))
 
 ## Public Packages
 
@@ -310,13 +310,21 @@ gb, err := gbash.New(
 
 For full transport control in tests or embedding, inject your own `Config.NetworkClient`.
 
+### Observability
+
+Tracing and logging are disabled by default.
+
+Use `WithTracing(TraceConfig{Mode: gbash.TraceRedacted})` to populate `ExecutionResult.Events` for non-interactive runs and to receive structured `OnEvent` callbacks for both non-interactive and interactive executions. `TraceRedacted` is the recommended mode for agent workloads. `TraceRaw` preserves full argv and path metadata and should only be used when you control the sink and retention policy.
+
+Use `WithLogger` to receive top-level lifecycle logs: `exec.start`, `stdout`, `stderr`, `exec.finish`, and `exec.error`. Logger callbacks receive the same captured stdout and stderr strings returned in `ExecutionResult`.
+
 ## Security Model
 
 - The shell only sees the filesystem and runtime configuration you provide.
 - Command execution is registry-backed. Unknown commands never execute host binaries.
 - Network access is off by default. When enabled, requests are constrained by allowlists and runtime limits.
 - The default static policy applies execution budgets such as command-count, loop-iteration, glob-expansion, substitution-depth, and stdout/stderr capture limits.
-- Trace events capture command execution, file access and mutation, and policy denials for debugging and agent orchestration.
+- Structured trace events are opt-in. Redacted tracing is the recommended default, and raw tracing is unsafe unless you tightly control where events go.
 
 This is not a hardened sandbox. If you need stronger containment against denial-of-service or runtime bugs, use OS- or process-level isolation around it. For a detailed threat analysis, see [THREAT_MODEL.md](./THREAT_MODEL.md).
 
@@ -359,7 +367,7 @@ See the [`custom-zstd`](./examples/custom-zstd/) example for how to register cus
 
 ## Shell Features
 
-Shell parsing and execution are delegated to `mvdan/sh/v3`, with project-owned filesystem, command, policy, and trace layers around it.
+Shell parsing and execution are delegated to `mvdan/sh/v3`, with project-owned filesystem, command, policy, and observability layers around it.
 
 The runtime supports a practical shell subset for agent workflows, including:
 

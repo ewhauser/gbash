@@ -69,14 +69,32 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 		stderrWriter = io.MultiWriter(stderr, req.Stderr)
 	}
 	executionID := nextTraceID("exec")
-	recorder := trace.NewBuffer(
-		trace.WithSessionID(s.id),
-		trace.WithExecutionID(executionID),
-	)
+	recorder, traceBuffer := newExecutionTraceRecorder(ctx, s.id, executionID, s.cfg.Tracing, true)
+	if s.layout != nil {
+		layoutRecorder := layoutMutationRecorder{layout: s.layout}
+		if _, ok := recorder.(trace.NopRecorder); ok {
+			recorder = layoutRecorder
+		} else {
+			recorder = trace.NewFanout(recorder, layoutRecorder)
+		}
+	}
 
 	started := time.Now().UTC()
+	baseLogEvent := LogEvent{
+		SessionID:   s.id,
+		ExecutionID: executionID,
+		Name:        defaultName(req.Name),
+		WorkDir:     workDir,
+	}
+	logExecutionEvent(ctx, s.cfg.Logger, &LogEvent{
+		Kind:        LogExecStart,
+		SessionID:   baseLogEvent.SessionID,
+		ExecutionID: baseLogEvent.ExecutionID,
+		Name:        baseLogEvent.Name,
+		WorkDir:     baseLogEvent.WorkDir,
+	})
 	runResult, runErr := s.cfg.Engine.Run(ctx, &shell.Execution{
-		Name:           defaultName(req.Name),
+		Name:           baseLogEvent.Name,
 		Script:         req.Script,
 		Args:           req.Args,
 		StartupOptions: req.StartupOptions,
@@ -98,8 +116,10 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 	})
 	finished := time.Now().UTC()
 
-	events := recorder.Snapshot()
-	s.layout.invalidateForEvents(events)
+	var events []trace.Event
+	if traceBuffer != nil {
+		events = traceBuffer.Snapshot()
+	}
 
 	result := &ExecutionResult{
 		ExitCode:        shell.ExitCode(runErr),
@@ -117,7 +137,12 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 		result.ShellExited = runResult.ShellExited
 	}
 
-	if handled := classifyExecutionControlError(ctx, req.Timeout, runErr, stderr, result); handled {
+	handled := classifyExecutionControlError(ctx, req.Timeout, runErr, stderr, result)
+	logExecutionOutputs(ctx, s.cfg.Logger, &baseLogEvent, result)
+	unexpectedRunErr := runErr != nil && !handled && !shell.IsExitStatus(runErr)
+	logExecutionCompletion(ctx, s.cfg.Logger, &baseLogEvent, result, runErr, unexpectedRunErr)
+
+	if handled {
 		return result, nil
 	}
 	if runErr != nil && !shell.IsExitStatus(runErr) {
@@ -159,10 +184,16 @@ func (s *Session) interact(ctx context.Context, req *InteractiveRequest) (*Inter
 		return nil, fmt.Errorf("shell engine does not support interactive execution")
 	}
 
-	recorder := trace.NewBuffer(
-		trace.WithSessionID(s.id),
-		trace.WithExecutionID(nextTraceID("exec")),
-	)
+	executionID := nextTraceID("exec")
+	recorder, _ := newExecutionTraceRecorder(ctx, s.id, executionID, s.cfg.Tracing, false)
+	if s.layout != nil {
+		layoutRecorder := layoutMutationRecorder{layout: s.layout}
+		if _, ok := recorder.(trace.NopRecorder); ok {
+			recorder = layoutRecorder
+		} else {
+			recorder = trace.NewFanout(recorder, layoutRecorder)
+		}
+	}
 	result, err := engine.Interact(ctx, &shell.Execution{
 		Name:           defaultName(req.Name),
 		Args:           req.Args,

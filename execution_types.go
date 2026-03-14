@@ -29,18 +29,20 @@ type ExecutionRequest struct {
 	Stderr          io.Writer
 }
 
-// ExecutionResult captures the output, exit status, timing, and trace events
-// produced by a shell execution.
+// ExecutionResult captures the output, exit status, timing, and optional trace
+// events produced by a shell execution.
 type ExecutionResult struct {
-	ExitCode        int
-	ShellExited     bool
-	Stdout          string
-	Stderr          string
-	ControlStderr   string
-	FinalEnv        map[string]string
-	StartedAt       time.Time
-	FinishedAt      time.Time
-	Duration        time.Duration
+	ExitCode      int
+	ShellExited   bool
+	Stdout        string
+	Stderr        string
+	ControlStderr string
+	FinalEnv      map[string]string
+	StartedAt     time.Time
+	FinishedAt    time.Time
+	Duration      time.Duration
+	// Events contains structured execution events when tracing is enabled on the
+	// runtime. It is empty by default.
 	Events          []trace.Event
 	StdoutTruncated bool
 	StderrTruncated bool

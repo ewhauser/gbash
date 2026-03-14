@@ -85,7 +85,9 @@ func loadExecutionFixtures(t testing.TB, pattern string) []executionFixture {
 func runExecutionFixture(t testing.TB, fixture *executionFixture) *ExecutionResult {
 	t.Helper()
 
-	session := newSession(t, &Config{})
+	session := newSession(t, &Config{
+		Tracing: TraceConfig{Mode: TraceRaw},
+	})
 	seedSessionFiles(t, session, fixture.Files)
 
 	result, err := session.Exec(context.Background(), &ExecutionRequest{

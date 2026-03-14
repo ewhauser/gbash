@@ -24,6 +24,8 @@ type Config struct {
 	BaseEnv       map[string]string
 	Network       *network.Config
 	NetworkClient network.Client
+	Tracing       TraceConfig
+	Logger        LogCallback
 }
 
 type Runtime struct {

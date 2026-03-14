@@ -9,7 +9,9 @@ import (
 )
 
 func TestTraceEventsIncludeSchemaSessionAndExecutionIDs(t *testing.T) {
-	session := newSession(t, &Config{})
+	session := newSession(t, &Config{
+		Tracing: TraceConfig{Mode: TraceRaw},
+	})
 
 	first := mustExecSession(t, session, "echo first\n")
 	second := mustExecSession(t, session, "echo second\n")
@@ -23,7 +25,9 @@ func TestTraceEventsIncludeSchemaSessionAndExecutionIDs(t *testing.T) {
 }
 
 func TestTraceRecordsCommandResolutionSources(t *testing.T) {
-	session := newSession(t, &Config{})
+	session := newSession(t, &Config{
+		Tracing: TraceConfig{Mode: TraceRaw},
+	})
 	writeSessionFile(t, session, "/home/agent/note.txt", []byte("payload\n"))
 
 	result := mustExecSession(t, session, "echo hi\ncat note.txt\n/bin/cat note.txt\n")
@@ -57,6 +61,7 @@ func TestTraceRecordsCommandResolutionSources(t *testing.T) {
 
 func TestTraceRecordsCommandAndPathPolicyDenials(t *testing.T) {
 	commandDenied := newRuntime(t, &Config{
+		Tracing: TraceConfig{Mode: TraceRaw},
 		Policy: policy.NewStatic(&policy.Config{
 			AllowedCommands: []string{"echo"},
 			ReadRoots:       []string{"/"},
@@ -85,6 +90,7 @@ func TestTraceRecordsCommandAndPathPolicyDenials(t *testing.T) {
 	}
 
 	pathDenied := newRuntime(t, &Config{
+		Tracing: TraceConfig{Mode: TraceRaw},
 		Policy: policy.NewStatic(&policy.Config{
 			AllowedCommands: []string{"cat"},
 			ReadRoots:       []string{"/allowed", "/usr/bin", "/bin"},
@@ -115,7 +121,9 @@ func TestTraceRecordsCommandAndPathPolicyDenials(t *testing.T) {
 }
 
 func TestTraceRecordsFileMutationEvents(t *testing.T) {
-	session := newSession(t, &Config{})
+	session := newSession(t, &Config{
+		Tracing: TraceConfig{Mode: TraceRaw},
+	})
 
 	result := mustExecSession(t, session, ""+
 		"mkdir -p work\n"+

@@ -734,7 +734,10 @@ func (m *workspaceManager) newWorkspace(ctx context.Context, name string, source
 		factory = gbfs.Overlay(gbfs.Snapshot(source))
 	}
 
-	runtime, err := gbash.New(gbash.WithFileSystem(gbash.CustomFileSystem(factory, m.workDir)))
+	runtime, err := gbash.New(
+		gbash.WithFileSystem(gbash.CustomFileSystem(factory, m.workDir)),
+		gbash.WithTracing(gbash.TraceConfig{Mode: gbash.TraceRedacted}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create runtime for %s: %w", name, err)
 	}

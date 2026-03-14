@@ -19,7 +19,8 @@
 //   - network for sandbox HTTP client customization
 //   - policy for sandbox policy implementations
 //   - shell for alternative shell engine implementations
-//   - trace for structured execution event consumption
+//   - trace for structured execution event consumption when callers opt in to
+//     tracing on the runtime
 //
 // Packages under internal/ and other undocumented subpackages are not public
 // API.

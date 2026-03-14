@@ -43,6 +43,12 @@ func WithConfig(cfg *Config) Option {
 		if cfg.NetworkClient != nil {
 			target.NetworkClient = cfg.NetworkClient
 		}
+		if cfg.Tracing.Mode != TraceOff || cfg.Tracing.OnEvent != nil {
+			target.Tracing = cfg.Tracing
+		}
+		if cfg.Logger != nil {
+			target.Logger = cfg.Logger
+		}
 		return nil
 	}
 }
@@ -169,6 +175,22 @@ func WithNetwork(cfg *NetworkConfig) Option {
 func WithNetworkClient(client network.Client) Option {
 	return func(target *Config) error {
 		target.NetworkClient = client
+		return nil
+	}
+}
+
+// WithTracing replaces the runtime tracing configuration.
+func WithTracing(cfg TraceConfig) Option {
+	return func(target *Config) error {
+		target.Tracing = cfg
+		return nil
+	}
+}
+
+// WithLogger installs a top-level execution lifecycle log callback.
+func WithLogger(callback LogCallback) Option {
+	return func(target *Config) error {
+		target.Logger = callback
 		return nil
 	}
 }

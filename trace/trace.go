@@ -24,11 +24,14 @@ type Event struct {
 	ExecutionID string
 	Kind        Kind
 	At          time.Time
-	Command     *CommandEvent
-	File        *FileEvent
-	Policy      *PolicyEvent
-	Message     string
-	Error       string
+	// Redacted reports whether gbash scrubbed sensitive argv material before
+	// the event was recorded or emitted.
+	Redacted bool
+	Command  *CommandEvent
+	File     *FileEvent
+	Policy   *PolicyEvent
+	Message  string
+	Error    string
 }
 
 type CommandEvent struct {
@@ -137,8 +140,45 @@ func (b *Buffer) Snapshot() []Event {
 	return out
 }
 
+// NopRecorder discards every event.
 type NopRecorder struct{}
 
 func (NopRecorder) Record(*Event) {}
 
 func (NopRecorder) Snapshot() []Event { return nil }
+
+// Fanout forwards each event to multiple recorders.
+type Fanout struct {
+	recorders []Recorder
+}
+
+// NewFanout builds a recorder that duplicates events to each non-nil recorder.
+func NewFanout(recorders ...Recorder) *Fanout {
+	filtered := make([]Recorder, 0, len(recorders))
+	for _, recorder := range recorders {
+		if recorder == nil {
+			continue
+		}
+		filtered = append(filtered, recorder)
+	}
+	return &Fanout{recorders: filtered}
+}
+
+func (f *Fanout) Record(event *Event) {
+	if event == nil {
+		return
+	}
+	for _, recorder := range f.recorders {
+		recorder.Record(event)
+	}
+}
+
+func (f *Fanout) Snapshot() []Event {
+	for _, recorder := range f.recorders {
+		snapshot := recorder.Snapshot()
+		if len(snapshot) != 0 {
+			return snapshot
+		}
+	}
+	return nil
+}

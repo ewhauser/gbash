@@ -37,6 +37,12 @@ func WithConfig(cfg *Config) Option {
 		if cfg.NetworkClient != nil {
 			target.NetworkClient = cfg.NetworkClient
 		}
+		if cfg.Tracing.Mode != TraceOff || cfg.Tracing.OnEvent != nil {
+			target.Tracing = cfg.Tracing
+		}
+		if cfg.Logger != nil {
+			target.Logger = cfg.Logger
+		}
 		return nil
 	}
 }
@@ -86,6 +92,20 @@ func WithNetworkConfig(cfg *network.Config) Option {
 func WithNetworkClient(client network.Client) Option {
 	return func(target *Config) error {
 		target.NetworkClient = client
+		return nil
+	}
+}
+
+func WithTracing(cfg TraceConfig) Option {
+	return func(target *Config) error {
+		target.Tracing = cfg
+		return nil
+	}
+}
+
+func WithLogger(callback LogCallback) Option {
+	return func(target *Config) error {
+		target.Logger = callback
 		return nil
 	}
 }

@@ -119,47 +119,43 @@ func (s *sandboxLayoutState) seedTrackedPathsLocked() {
 	}
 }
 
-func (s *sandboxLayoutState) invalidateForEvents(events []trace.Event) {
-	if s == nil || len(events) == 0 {
+func (s *sandboxLayoutState) observeFileMutation(file *trace.FileEvent) {
+	if s == nil || file == nil {
 		return
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.invalidateForFileMutationLocked(file)
+}
+
+func (s *sandboxLayoutState) invalidateForFileMutationLocked(file *trace.FileEvent) bool {
+	if file == nil {
+		return false
+	}
 	if s.dirty || !s.initialized {
-		return
+		return false
 	}
 	if len(s.commands) == 0 {
-		for i := range events {
-			event := events[i]
-			if event.Kind != trace.EventFileMutation || event.File == nil {
-				continue
-			}
-			if s.mutationAffectsUnseededLayout(event.File.Path) ||
-				s.mutationAffectsUnseededLayout(event.File.FromPath) ||
-				s.mutationAffectsUnseededLayout(event.File.ToPath) {
-				s.dirty = true
-				return
-			}
+		if s.mutationAffectsUnseededLayout(file.Path) ||
+			s.mutationAffectsUnseededLayout(file.FromPath) ||
+			s.mutationAffectsUnseededLayout(file.ToPath) {
+			s.dirty = true
+			return true
 		}
-		return
+		return false
 	}
 	if s.dirs == nil || s.stubs == nil {
 		s.seedTrackedPathsLocked()
 	}
-	for i := range events {
-		event := events[i]
-		if event.Kind != trace.EventFileMutation || event.File == nil {
-			continue
-		}
-		if s.mutationAffectsLayout(event.File.Path) ||
-			s.mutationAffectsLayout(event.File.FromPath) ||
-			s.mutationAffectsLayout(event.File.ToPath) {
-			s.dirty = true
-			return
-		}
+	if s.mutationAffectsLayout(file.Path) ||
+		s.mutationAffectsLayout(file.FromPath) ||
+		s.mutationAffectsLayout(file.ToPath) {
+		s.dirty = true
+		return true
 	}
+	return false
 }
 
 func (s *sandboxLayoutState) mutationAffectsUnseededLayout(path string) bool {

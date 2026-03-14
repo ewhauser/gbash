@@ -28,15 +28,17 @@ type ExecutionRequest struct {
 
 // ExecutionResult reports the outcome of an [ExecutionRequest].
 type ExecutionResult struct {
-	ExitCode        int
-	ShellExited     bool
-	Stdout          string
-	Stderr          string
-	ControlStderr   string
-	FinalEnv        map[string]string
-	StartedAt       time.Time
-	FinishedAt      time.Time
-	Duration        time.Duration
+	ExitCode      int
+	ShellExited   bool
+	Stdout        string
+	Stderr        string
+	ControlStderr string
+	FinalEnv      map[string]string
+	StartedAt     time.Time
+	FinishedAt    time.Time
+	Duration      time.Duration
+	// Events contains structured execution events when tracing is enabled on the
+	// parent runtime. It is empty by default.
 	Events          []trace.Event
 	StdoutTruncated bool
 	StderrTruncated bool
