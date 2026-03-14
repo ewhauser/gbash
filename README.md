@@ -33,7 +33,7 @@ Shell parsing is delegated to [`mvdan/sh`](https://github.com/mvdan/sh), with pr
 
 - Virtual in-memory filesystem — no host access by default
 - Registry-backed command execution — unknown commands never run host binaries
-- 60+ built-in commands with GNU coreutils flag parity ([compatibility matrix](https://ewhauser.github.io/gbash/compat/latest/))
+- 90+ built-in commands with GNU coreutils flag parity ([compatibility matrix](https://ewhauser.github.io/gbash/compat/latest/))
 - Optional allowlisted network access via `curl`
 - Persistent sessions with shared filesystem state across executions
 - Host directory mounting with read-only overlay for real project workspaces
@@ -326,11 +326,14 @@ The default registry includes commands for file ops, text processing, archival, 
 
 | Category | Commands |
 |---|---|
-| File and path | `basename` `cat` `chmod` `chown` `cp` `dirname` `du` `file` `find` `ln` `link` `ls` `dir` `mkdir` `mv` `readlink` `rm` `rmdir` `stat` `touch` `tree` |
-| Search and text | `base32` `base64` `column` `comm` `cut` `diff` `grep` `head` `join` `nl` `paste` `printf` `rev` `rg` `sed` `seq` `sort` `split` `tac` `tail` `tee` `tr` `uniq` `wc` |
+| File and path | `basename` `cat` `chmod` `chown` `cp` `dircolors` `dirname` `du` `file` `find` `ln` `link` `ls` `dir` `mkdir` `mktemp` `mv` `readlink` `realpath` `rm` `rmdir` `stat` `touch` `tree` `truncate` `unlink` `vdir` |
+| Search and text | `base32` `base64` `basenc` `column` `comm` `csplit` `cut` `diff` `grep` `head` `join` `nl` `numfmt` `od` `paste` `printf` `rev` `rg` `sed` `seq` `sort` `split` `tac` `tail` `tee` `tr` `uniq` `wc` |
 | Archive | `gzip` `gunzip` `tar` `zcat` |
-| Environment and execution | `bash` `date` `echo` `env` `expr` `false` `help` `id` `md5sum` `printenv` `pwd` `sh` `sha1sum` `sha256sum` `sleep` `timeout` `true` `uptime` `which` `xargs` `yes` |
+| Environment and execution | `arch` `b2sum` `bash` `cksum` `date` `echo` `env` `expr` `factor` `false` `help` `id` `md5sum` `printenv` `pwd` `sh` `sha1sum` `sha224sum` `sha256sum` `sha384sum` `sha512sum` `sleep` `sum` `test` `timeout` `true` `tsort` `tty` `uname` `uptime` `which` `who` `whoami` `xargs` `yes` |
 | Network (when configured) | `curl` |
+| Extras* | `awk` `jq` `sqlite3` `yq` |
+
+\* Use `gbash-extras` for extras commands.
 
 Many commands are ported from [uutils/coreutils](https://github.com/uutils/coreutils) and have full GNU flag parity. See the current [compatibility matrix](https://ewhauser.github.io/gbash/compat/latest/).
 
