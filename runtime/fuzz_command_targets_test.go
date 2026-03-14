@@ -304,6 +304,37 @@ func FuzzTextSearchCommands(f *testing.F) {
 	})
 }
 
+func FuzzCsplitCommand(f *testing.F) {
+	rt := newFuzzRuntime(f)
+
+	seeds := [][]byte{
+		[]byte("alpha\nbeta\ngamma\n"),
+		[]byte("1\n2\n3\n4\n5\n"),
+		[]byte("line-without-trailing-newline"),
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, rawData []byte) {
+		session := newFuzzSession(t, rt)
+		text := normalizeFuzzText(rawData)
+		inputPath := "/tmp/csplit-input.txt"
+
+		writeSessionFile(t, session, inputPath, text)
+
+		script := fmt.Appendf(nil,
+			"csplit -q -f /tmp/csplit-num- %s 2 >/tmp/csplit-num.out || true\ncat /tmp/csplit-num-00 >/tmp/csplit-num-first.txt || true\ncsplit -q -z -f /tmp/csplit-regex- %s '/.*/' '{*}' >/tmp/csplit-regex.out || true\ncat /tmp/csplit-regex-00 >/tmp/csplit-regex-first.txt || true\ncsplit --suppress-matched -q -f /tmp/csplit-offset- %s '/.*/+1' >/tmp/csplit-offset.out || true\ncat /tmp/csplit-offset-00 >/tmp/csplit-offset-first.txt || true\n",
+			shellQuote(inputPath),
+			shellQuote(inputPath),
+			shellQuote(inputPath),
+		)
+
+		result, err := runFuzzSessionScript(t, session, script)
+		assertSecureFuzzOutcome(t, script, result, err)
+	})
+}
+
 func FuzzShellProcessCommands(f *testing.F) {
 	rt := newFuzzRuntime(f)
 
