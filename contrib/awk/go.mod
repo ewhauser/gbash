@@ -1,6 +1,6 @@
 module github.com/ewhauser/gbash/contrib/awk
 
-go 1.26.0
+go 1.26.1
 
 require (
 	github.com/benhoyt/goawk v1.31.0

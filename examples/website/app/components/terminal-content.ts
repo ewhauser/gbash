@@ -87,7 +87,7 @@ grep -n "WithHTTPAccess" README.md
 
 export const FILE_GO_MOD = `module github.com/ewhauser/gbash
 
-go 1.26.0
+go 1.26.1
 
 require (
   golang.org/x/crypto v0.48.0

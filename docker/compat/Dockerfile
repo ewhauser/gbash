@@ -1,6 +1,6 @@
 FROM ubuntu:24.04
 
-ARG GO_VERSION=1.26.0
+ARG GO_VERSION=1.26.1
 ARG TARGETARCH
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -35,5 +35,19 @@ RUN apt-get update && \
     curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" | tar -C /usr/local -xz && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+ARG GNU_COREUTILS_VERSION=9.10
+ARG GNU_COREUTILS_SHA256=e0bde1fb68509447fc723cf2517e8a8c7fa46769919bb7490ed350a2e9238562
+
+RUN curl -fsSL "https://ftp.gnu.org/gnu/coreutils/coreutils-${GNU_COREUTILS_VERSION}.tar.gz" \
+      -o /tmp/coreutils.tar.gz && \
+    echo "${GNU_COREUTILS_SHA256}  /tmp/coreutils.tar.gz" | sha256sum -c - && \
+    mkdir -p /opt/gnu && \
+    tar -xzf /tmp/coreutils.tar.gz -C /opt/gnu && \
+    cd "/opt/gnu/coreutils-${GNU_COREUTILS_VERSION}" && \
+    ./configure --disable-nls --disable-dependency-tracking && \
+    make -j"$(nproc)" && \
+    rm /tmp/coreutils.tar.gz && \
+    tar -czf /opt/gnu/prepared.tar.gz -C "/opt/gnu/coreutils-${GNU_COREUTILS_VERSION}" .
 
 WORKDIR /workspace
