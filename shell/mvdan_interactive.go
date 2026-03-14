@@ -84,7 +84,7 @@ func (m *MVdan) Interact(ctx context.Context, exec *Execution) (*InteractiveResu
 			_, _ = io.WriteString(exec.Stdout, interactivePrompt(interactiveEnv(exec, runner)))
 			continue
 		}
-		if invalid := validateSupportedRedirections(file); invalid != nil {
+		if invalid := validateInterpreterSafety(file); invalid != nil {
 			exitCode = 2
 			_, _ = fmt.Fprintln(exec.Stderr, invalid.Error())
 			_, _ = io.WriteString(exec.Stdout, interactivePrompt(interactiveEnv(exec, runner)))

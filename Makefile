@@ -33,6 +33,7 @@ FUZZ_SMOKE_SHARD_PATHS := \
 	FuzzTruncateCommand \
 	FuzzCompatPredicateCommands \
 	FuzzDirectoryTraversalCommands \
+	FuzzCsplitCommand \
 	FuzzTextSearchCommands \
 	FuzzTSortCommand
 
@@ -87,6 +88,7 @@ FUZZ_FULL_SHARD_2 := \
 
 FUZZ_FULL_SHARD_3 := \
 	FuzzDirectoryTraversalCommands \
+	FuzzCsplitCommand \
 	FuzzTextSearchCommands \
 	FuzzNumfmtCommand \
 	FuzzColumnCommand \

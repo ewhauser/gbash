@@ -128,7 +128,7 @@ func (m *MVdan) Run(ctx context.Context, exec *Execution) (result *RunResult, ru
 		}
 		return &RunResult{FinalEnv: envMapFromVars(nil)}, interp.ExitStatus(126)
 	}
-	if invalid := validateSupportedRedirections(validationProgram); invalid != nil {
+	if invalid := validateInterpreterSafety(validationProgram); invalid != nil {
 		if exec.Stderr != nil {
 			_, _ = fmt.Fprintln(exec.Stderr, invalid.Error())
 		}
@@ -569,7 +569,7 @@ func (m *MVdan) bootstrapRunner(ctx context.Context, runner *interp.Runner, exec
 		}
 		return interp.ExitStatus(126)
 	}
-	if invalid := validateSupportedRedirections(bootstrap); invalid != nil {
+	if invalid := validateInterpreterSafety(bootstrap); invalid != nil {
 		if exec.Stderr != nil {
 			_, _ = fmt.Fprintln(exec.Stderr, invalid.Error())
 		}

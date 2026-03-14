@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/ewhauser/gbash/policy"
@@ -23,6 +24,13 @@ type shellValidationError struct {
 
 func (e *shellValidationError) Error() string {
 	return e.message
+}
+
+func validateInterpreterSafety(program *syntax.File) error {
+	if invalid := validateSupportedRedirections(program); invalid != nil {
+		return invalid
+	}
+	return validateSupportedFunctionDeclarations(program)
 }
 
 func validateExecutionBudgets(program *syntax.File, pol policy.Policy) error {
@@ -120,6 +128,44 @@ func validateSupportedRedirections(program *syntax.File) error {
 		return true
 	})
 	return walkErr
+}
+
+func validateSupportedFunctionDeclarations(program *syntax.File) error {
+	if program == nil {
+		return nil
+	}
+
+	var walkErr error
+	syntax.Walk(program, func(node syntax.Node) bool {
+		if walkErr != nil || node == nil {
+			return walkErr == nil
+		}
+
+		fn, ok := node.(*syntax.FuncDecl)
+		if !ok {
+			return true
+		}
+		if fn.Body == nil || !hasSupportedFunctionName(fn) {
+			walkErr = &shellValidationError{message: "invalid function declaration"}
+			return false
+		}
+		return true
+	})
+	return walkErr
+}
+
+func hasSupportedFunctionName(fn *syntax.FuncDecl) bool {
+	if fn == nil {
+		return false
+	}
+	if hasFunctionNameLiteral(fn.Name) {
+		return true
+	}
+	return slices.ContainsFunc(fn.Names, hasFunctionNameLiteral)
+}
+
+func hasFunctionNameLiteral(name *syntax.Lit) bool {
+	return name != nil && strings.TrimSpace(name.Value) != ""
 }
 
 func isSupportedDupOutTarget(target string) bool {

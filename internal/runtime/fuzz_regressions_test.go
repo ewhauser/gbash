@@ -38,6 +38,26 @@ func TestMalformedRedirectionDoesNotPanic(t *testing.T) {
 	}
 }
 
+func TestMalformedFunctionDeclarationDoesNotPanic(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "()8&3\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode == 0 {
+		t.Fatalf("ExitCode = %d, want non-zero", result.ExitCode)
+	}
+	if !strings.Contains(result.Stderr, "invalid function declaration") {
+		t.Fatalf("Stderr = %q, want invalid-function-declaration message", result.Stderr)
+	}
+	if strings.Contains(result.Stderr, "panic:") {
+		t.Fatalf("Stderr = %q, want sanitized output", result.Stderr)
+	}
+}
+
 func TestCommandPathBelowFileDoesNotEscapeAsInternalError(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 
