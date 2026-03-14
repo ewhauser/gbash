@@ -17,12 +17,12 @@ type rgIgnoreRule struct {
 }
 
 type rgIgnoreMatcher struct {
-	opts   rgOptions
+	opts   *rgOptions
 	rules  []rgIgnoreRule
 	loaded map[string]bool
 }
 
-func newRGIgnoreMatcher(opts rgOptions) *rgIgnoreMatcher {
+func newRGIgnoreMatcher(opts *rgOptions) *rgIgnoreMatcher {
 	return &rgIgnoreMatcher{
 		opts:   opts,
 		loaded: make(map[string]bool),
@@ -86,16 +86,16 @@ func (m *rgIgnoreMatcher) loadDir(ctx context.Context, inv *Invocation, dir stri
 }
 
 func (m *rgIgnoreMatcher) parse(base, content string) {
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		trimmed := strings.TrimRight(line, " \t\r")
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 
 		negated := false
-		if strings.HasPrefix(trimmed, "!") {
+		if rest, ok := strings.CutPrefix(trimmed, "!"); ok {
 			negated = true
-			trimmed = strings.TrimPrefix(trimmed, "!")
+			trimmed = rest
 		}
 
 		directoryOnly := false
@@ -108,9 +108,9 @@ func (m *rgIgnoreMatcher) parse(base, content string) {
 		}
 
 		rooted := false
-		if strings.HasPrefix(trimmed, "/") {
+		if rest, ok := strings.CutPrefix(trimmed, "/"); ok {
 			rooted = true
-			trimmed = strings.TrimPrefix(trimmed, "/")
+			trimmed = rest
 		} else if strings.Contains(trimmed, "/") && !strings.HasPrefix(trimmed, "**/") {
 			rooted = true
 		}
