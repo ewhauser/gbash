@@ -14,6 +14,12 @@ export const docsNavigation: NavItem[] = [
     ],
   },
   {
+    title: "Observability",
+    items: [
+      { title: "Tracing and Logging", href: "/docs/observability/tracing-and-logging" },
+    ],
+  },
+  {
     title: "Performance",
     items: [{ title: "Benchmarks", href: "/docs/performance/benchmarks" }],
   },

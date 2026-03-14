@@ -9,7 +9,7 @@ gbash exposes a Go library for embedding a deterministic bash runtime in your ap
 | `Runtime` | The top-level sandbox runner. Created with `gbash.New(opts...)`. |
 | `Session` | A persistent sandbox with shared filesystem state across executions. Created with `Runtime.NewSession(ctx)`. |
 | `ExecutionRequest` | Input to `Runtime.Run` or `Session.Exec`. Contains the script to execute. |
-| `ExecutionResult` | Output from an execution: exit code, stdout, stderr, timing, and trace events. |
+| `ExecutionResult` | Output from an execution: exit code, stdout, stderr, timing, and optional trace events. |
 
 ## Package Hierarchy
 
@@ -19,7 +19,7 @@ github.com/ewhauser/gbash/commands   Command interface, registry, and invocation
 github.com/ewhauser/gbash/fs         Filesystem abstractions (memory, host overlay, read-write)
 github.com/ewhauser/gbash/network    HTTP client and allowlist configuration for curl
 github.com/ewhauser/gbash/policy     Path access checks and execution limits
-github.com/ewhauser/gbash/trace      Structured trace events emitted during execution
+github.com/ewhauser/gbash/trace      Structured trace events used when tracing is enabled
 github.com/ewhauser/gbash/shell      Shell engine interface (mvdan/sh backend)
 github.com/ewhauser/gbash/cli        Shared CLI frontend for building wrapper binaries
 ```

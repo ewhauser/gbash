@@ -1,6 +1,6 @@
 # Agent Integration
 
-gbash is designed to be used as a tool for AI agents. It provides a sandboxed shell runtime that agents can call repeatedly within a persistent session, with execution budgets and trace events for safety and observability.
+gbash is designed to be used as a tool for AI agents. It provides a sandboxed shell runtime that agents can call repeatedly within a persistent session, with execution budgets and opt-in observability hooks for safety and debugging.
 
 ## Go API integration
 
@@ -72,7 +72,7 @@ When a budget is exceeded, execution stops with an error. The session remains us
 
 ## Trace events for observability
 
-Every execution returns structured trace events in `result.Events`. Use these to observe what the agent did without parsing stdout:
+If you enable tracing, execution results include structured events in `result.Events`. Use these to observe what the agent did without parsing stdout:
 
 ```go
 result, _ := session.Execute(ctx, &gbash.ExecutionRequest{
@@ -97,6 +97,8 @@ Trace events are particularly useful for:
 - Detecting when an agent attempts blocked operations
 - Tracking file modifications between turns
 - Measuring execution cost
+
+See [Tracing and Logging](/docs/observability/tracing-and-logging) for the trace modes and logging callbacks.
 
 ## Examples
 

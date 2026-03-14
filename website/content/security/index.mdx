@@ -28,9 +28,9 @@ Every execution is bounded by configurable limits that prevent runaway scripts:
 | `MaxStderrBytes` | 1 MB | Stderr before truncation |
 | `MaxFileBytes` | 8 MB | Maximum file size |
 
-## Trace events
+## Observability
 
-gbash emits structured trace events for every execution, covering command starts and exits, file access and mutation, and policy denials. These events are returned in `ExecutionResult.Events` and are useful for debugging, auditing, and agent orchestration. See the [policy page](/docs/security/policy) for details.
+Tracing is opt-in. When enabled, gbash can emit structured execution events covering command starts and exits, file access and mutation, and policy denials. Redacted tracing is the recommended mode for shared systems, and lifecycle logging is available through a separate callback API. See [Tracing and Logging](/docs/observability/tracing-and-logging) for details.
 
 ## What gbash is not
 

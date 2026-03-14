@@ -9,7 +9,7 @@ The WASM artifact is built from the Go source using the `js/wasm` target. The bu
 - **`gbash.wasm`** -- the compiled runtime
 - **`wasm_exec.js`** -- the Go WASM support script (from the Go toolchain)
 
-The `@ewhauser/gbash-wasm` package handles building and bundling these artifacts. In the `examples/website` project, `pnpm build` compiles the WASM from source and copies both files into `public/`.
+The `@ewhauser/gbash-wasm` package handles building and bundling these artifacts. In the `website` project, `pnpm build` compiles the WASM from source and copies both files into `public/`.
 
 ## Loading in a web app
 
@@ -101,4 +101,4 @@ await bash.dispose();
 
 ## Reference
 
-The [examples/website](https://github.com/ewhauser/gbash/tree/main/examples/website) directory contains a full Next.js app running gbash in the browser via WASM, including terminal UI integration.
+The [website](https://github.com/ewhauser/gbash/tree/main/website) directory contains a full Next.js app running gbash in the browser via WASM, including terminal UI integration.

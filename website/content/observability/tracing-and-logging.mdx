@@ -1,0 +1,77 @@
+# Tracing and Logging
+
+gbash observability is explicit. Structured tracing and lifecycle logging are both **disabled by default**.
+
+## Tracing
+
+Enable tracing with `WithTracing`:
+
+```go
+rt, err := gbash.New(
+    gbash.WithTracing(gbash.TraceConfig{
+        Mode: gbash.TraceRedacted,
+    }),
+)
+```
+
+### Trace modes
+
+| Mode | Behavior | Recommended use |
+|---|---|---|
+| `TraceOff` | Default. No trace buffer, no returned events, no callbacks. | Production runtimes that do not need execution telemetry |
+| `TraceRedacted` | Returns structured events for non-interactive executions and invokes `OnEvent` callbacks with common secrets scrubbed from argv. | Agent runtimes, audit hooks, and shared internal telemetry |
+| `TraceRaw` | Preserves argv and path metadata verbatim. | Narrow local debugging where you control the sink and retention policy |
+
+When tracing is enabled:
+
+- `ExecutionResult.Events` is populated for `Runtime.Run` and `Session.Exec`
+- `TraceConfig.OnEvent` fires for both non-interactive and interactive executions
+- interactive executions still return `InteractiveResult` only; events are callback-only there
+
+### Redaction behavior
+
+`TraceRedacted` keeps the event structure but replaces common secret-bearing argv values with `[REDACTED]`. That includes:
+
+- `Authorization` and similar header values
+- bearer/basic token-like standalone arguments
+- common credential flags such as `--token` and `--password`
+- sensitive query parameters in URLs such as `token`, `signature`, and `access_token`
+
+The event schema remains `gbash.trace.v1`, and redacted events set `event.Redacted = true`.
+
+## Logging
+
+Use `WithLogger` for top-level execution lifecycle hooks:
+
+```go
+rt, err := gbash.New(
+    gbash.WithLogger(func(ctx context.Context, event gbash.LogEvent) {
+        fmt.Printf("%s %s\n", event.Kind, event.Name)
+    }),
+)
+```
+
+The logger emits:
+
+- `exec.start`
+- `stdout`
+- `stderr`
+- `exec.finish`
+- `exec.error`
+
+Logging is callback-only. Nothing new is added to `ExecutionResult`.
+
+`stdout` and `stderr` log events carry the same captured output strings and truncation flags returned in `ExecutionResult`. `exec.error` is reserved for unexpected runtime or engine failures; normal shell exit statuses still end with `exec.finish`.
+
+## Security guidance
+
+- Prefer `TraceRedacted` unless you have a concrete reason to capture raw argv.
+- Treat `TraceRaw` as unsafe for shared log sinks or long-lived telemetry storage.
+- Logger callbacks can still expose sensitive stdout and stderr, even when tracing is redacted.
+- If you persist observability data, document retention and access controls as part of your runtime integration.
+
+## Related concepts
+
+- Runtime options such as `WithTracing`, `WithLogger`, and `WithConfig`
+- `policy.denied` and `file.mutation` events when tracing is enabled
+- Agent telemetry pipelines that need structured execution data without parsing stdout

@@ -227,7 +227,7 @@ export default function HeroTerminal() {
         "  - Persistent sessions across executions",
         "  - WebAssembly support (you're using it right now!)",
         "  - Execution budgets and policy enforcement",
-        "  - Structured trace events",
+        "  - Opt-in tracing and logging",
         "",
         "  https://github.com/ewhauser/gbash",
         "",

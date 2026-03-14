@@ -1,6 +1,6 @@
 # Getting Started
 
-gbash is a deterministic, sandbox-only, bash-like runtime for AI agents, implemented in Go. Shell parsing is delegated to [mvdan/sh](https://github.com/mvdan/sh), with a project-owned virtual filesystem, registry-backed command execution, policy enforcement, and structured tracing layers around it.
+gbash is a deterministic, sandbox-only, bash-like runtime for AI agents, implemented in Go. Shell parsing is delegated to [mvdan/sh](https://github.com/mvdan/sh), with a project-owned virtual filesystem, registry-backed command execution, policy enforcement, and opt-in observability layers around it.
 
 Commands never fall through to host binaries, and network access is off by default.
 
@@ -15,7 +15,7 @@ Commands never fall through to host binaries, and network access is off by defau
 - **Persistent sessions** with shared filesystem state across executions
 - **Host directory mounting** with read-only overlay for real project workspaces
 - **Execution budgets** — command count, loop iterations, glob expansion, stdout/stderr limits
-- **Structured trace events** for debugging and agent orchestration
+- **Opt-in tracing and logging** for debugging and agent orchestration
 - **WebAssembly support** — runs in the browser
 
 ## Next Steps

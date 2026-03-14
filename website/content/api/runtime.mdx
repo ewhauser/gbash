@@ -37,6 +37,8 @@ gb, err := gbash.New(
 | `WithWorkingDir(dir)` | Override the initial working directory for new sessions. |
 | `WithBaseEnv(env)` | Replace the base environment inherited by each execution. |
 | `WithPolicy(p)` | Replace the sandbox policy (path access, execution limits). |
+| `WithTracing(cfg)` | Enable structured execution tracing. `TraceRedacted` is the recommended default. |
+| `WithLogger(fn)` | Register top-level execution lifecycle logging callbacks. |
 | `WithEngine(engine)` | Replace the shell engine implementation. |
 | `WithConfig(cfg)` | Apply a pre-assembled `Config` struct as a single option. |
 
@@ -80,7 +82,14 @@ The `Script` field is the primary input. Additional fields are available for adv
 | `Stdout` | `string` | Captured standard output (empty when `Stdout` writer is set on the request). |
 | `Stderr` | `string` | Captured standard error (empty when `Stderr` writer is set on the request). |
 | `Duration` | `time.Duration` | Wall-clock execution time. |
-| `Events` | `[]trace.Event` | Structured trace events emitted during execution. |
+| `Events` | `[]trace.Event` | Structured trace events, populated only when tracing is enabled. |
 | `FinalEnv` | `map[string]string` | The environment after execution completes. |
 | `StdoutTruncated` | `bool` | True if stdout exceeded the capture limit. |
 | `StderrTruncated` | `bool` | True if stderr exceeded the capture limit. |
+
+## Observability
+
+Tracing and logging are both opt-in.
+
+- Use [`WithTracing`](/docs/observability/tracing-and-logging) to populate `ExecutionResult.Events` and optionally receive `OnEvent` callbacks.
+- Use [`WithLogger`](/docs/observability/tracing-and-logging) for `exec.start`, `stdout`, `stderr`, `exec.finish`, and `exec.error` lifecycle hooks.
