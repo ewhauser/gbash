@@ -1532,7 +1532,7 @@ func currentSandboxCwd(root string) (string, error) {
 	return sandboxCwd, nil
 }
 
-func sandboxPathWithinRoot(root, cwd string) (string, bool, error) {
+func sandboxPathWithinRoot(root, cwd string) (sandboxPath string, withinRoot bool, err error) {
 	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(cwd))
 	if err != nil {
 		return "", false, err

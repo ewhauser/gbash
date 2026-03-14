@@ -60,12 +60,6 @@ func parseCLIRuntimeOptions(args []string) (cliRuntimeOptions, []string, error) 
 	return opts, nil, nil
 }
 
-func (opts cliRuntimeOptions) hasRuntimeConfiguration() bool {
-	return strings.TrimSpace(opts.root) != "" ||
-		strings.TrimSpace(opts.readWriteRoot) != "" ||
-		strings.TrimSpace(opts.cwd) != ""
-}
-
 func (opts cliRuntimeOptions) runtimeOptions() ([]gbash.Option, error) {
 	rootValue := strings.TrimSpace(opts.root)
 	readWriteRoot := strings.TrimSpace(opts.readWriteRoot)
