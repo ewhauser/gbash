@@ -427,25 +427,55 @@ func runMakeCheck(ctx context.Context, makeBin, workDir, configShell string, tes
 	for {
 		select {
 		case err := <-done:
-			output := stream.Bytes()
-			if err == nil {
+			result, err := makeCheckResultFromWait(err, stream.Bytes(), 0)
+			if err != nil {
+				return makeCheckResult{}, err
+			}
+			if result.ExitCode == 0 {
 				fmt.Printf("gbash-gnu: make check finished in %s\n", time.Since(startedAt).Round(time.Second))
-				return makeCheckResult{Output: output}, nil
+			} else {
+				fmt.Printf("gbash-gnu: make check finished in %s with exit code %d\n", time.Since(startedAt).Round(time.Second), result.ExitCode)
 			}
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) {
-				fmt.Printf("gbash-gnu: make check finished in %s with exit code %d\n", time.Since(startedAt).Round(time.Second), exitErr.ExitCode())
-				return makeCheckResult{ExitCode: exitErr.ExitCode(), Output: output}, nil
-			}
-			return makeCheckResult{}, err
+			return result, nil
 		case <-ctx.Done():
-			_ = terminateIsolatedProcessGroup(cmd)
-			<-done
-			return makeCheckResult{}, ctx.Err()
+			if err := terminateIsolatedProcessGroup(cmd); err != nil {
+				_, _ = fmt.Fprintf(os.Stderr, "gbash-gnu: terminate make check process group: %v\n", err)
+			}
+			result, err := makeCheckResultFromWait(<-done, stream.Bytes(), interruptedMakeCheckExitCode(ctx.Err()))
+			if err != nil {
+				return makeCheckResult{}, err
+			}
+			fmt.Printf("gbash-gnu: make check interrupted after %s with exit code %d\n", time.Since(startedAt).Round(time.Second), result.ExitCode)
+			return result, nil
 		case <-ticker.C:
 			fmt.Printf("gbash-gnu: still running make check after %s (%d test(s))\n", time.Since(startedAt).Round(time.Second), len(tests))
 		}
 	}
+}
+
+func makeCheckResultFromWait(waitErr error, output []byte, fallbackExitCode int) (makeCheckResult, error) {
+	if waitErr == nil {
+		return makeCheckResult{Output: output}, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) {
+		exitCode := exitErr.ExitCode()
+		if exitCode < 0 && fallbackExitCode != 0 {
+			exitCode = fallbackExitCode
+		}
+		return makeCheckResult{ExitCode: exitCode, Output: output}, nil
+	}
+	if fallbackExitCode != 0 {
+		return makeCheckResult{ExitCode: fallbackExitCode, Output: output}, nil
+	}
+	return makeCheckResult{}, waitErr
+}
+
+func interruptedMakeCheckExitCode(err error) int {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return 124
+	}
+	return 143
 }
 
 type captureTeeWriter struct {

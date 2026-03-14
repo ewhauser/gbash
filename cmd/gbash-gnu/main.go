@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	opts, err := parseOptions()
 	if err != nil {
 		fatalf("parse options: %v", err)
@@ -17,6 +21,9 @@ func main() {
 		fatalf("load manifest: %v", err)
 	}
 	if err := run(ctx, manifest, &opts); err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			fatalf("compatibility run interrupted")
+		}
 		fatalf("%v", err)
 	}
 }

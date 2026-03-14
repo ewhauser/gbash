@@ -21,7 +21,7 @@ jobs:
       GNU_BUILD_CACHE_VERSION: v3
       GNU_BUILD_CACHE_TAG: gnu-build-cache-v3
     outputs:
-      exit_code: ${{ steps.run-compat.outputs.exit_code }}
+      exit_code: ${{ steps.compat-exit-code.outputs.exit_code }}
       publishable: ${{ steps.publish-state.outputs.publishable }}
       deployable: ${{ steps.publish-state.outputs.deployable }}
     steps:
@@ -87,15 +87,40 @@ jobs:
 
       - name: Run GNU compatibility harness
         id: run-compat
+        continue-on-error: true
         env:
           GNU_RESULTS_DIR: ${{ runner.temp }}/compat-pages/compat/latest
         run: |
           set +e
           mkdir -p "$GNU_RESULTS_DIR"
-          GNU_RESULTS_DIR="$GNU_RESULTS_DIR" make gnu-test
+          if command -v setsid >/dev/null 2>&1; then
+            setsid env GNU_RESULTS_DIR="$GNU_RESULTS_DIR" make gnu-test
+          else
+            GNU_RESULTS_DIR="$GNU_RESULTS_DIR" make gnu-test
+          fi
           status=$?
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
           exit 0
+
+      - name: Determine compat harness exit code
+        id: compat-exit-code
+        if: always()
+        env:
+          REPORTED_EXIT_CODE: ${{ steps.run-compat.outputs.exit_code }}
+          RUN_COMPAT_OUTCOME: ${{ steps.run-compat.outcome }}
+        run: |
+          set -euo pipefail
+
+          status="${REPORTED_EXIT_CODE:-}"
+          if [ -z "$status" ]; then
+            if [ "$RUN_COMPAT_OUTCOME" = "failure" ]; then
+              status=143
+            else
+              status=0
+            fi
+          fi
+
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
 
       - name: Render compat report assets
         if: always()
@@ -155,7 +180,7 @@ jobs:
         if: always()
         env:
           PAGE_URL: https://ewhauser.github.io/gbash/compat/latest/
-          COMPAT_EXIT_CODE: ${{ steps.run-compat.outputs.exit_code }}
+          COMPAT_EXIT_CODE: ${{ steps.compat-exit-code.outputs.exit_code }}
           PUBLISHABLE: ${{ steps.publish-state.outputs.publishable }}
           DEPLOYABLE: ${{ steps.publish-state.outputs.deployable }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -181,6 +206,7 @@ jobs:
         with:
           name: compat-results-${{ github.run_id }}
           path: ${{ runner.temp }}/compat-pages/compat/latest
+          if-no-files-found: warn
           retention-days: 30
 
       - name: Upload Pages artifact

@@ -462,6 +462,54 @@ func TestRunMakeCheckDoesNotForceVeryExpensiveTests(t *testing.T) {
 	}
 }
 
+func TestRunMakeCheckReturnsPartialOutputOnContextCancel(t *testing.T) {
+	workDir := t.TempDir()
+	makeBin := filepath.Join(workDir, "fake-make.sh")
+	logPath := filepath.Join(workDir, "make.log")
+	readyPath := filepath.Join(workDir, "ready")
+	script := "#!/bin/sh\n" +
+		"printf 'PASS: tests/misc/started.sh\\n'\n" +
+		": > " + shellSingleQuoteForScript(readyPath) + "\n" +
+		"while :; do sleep 1; done\n"
+	if err := os.WriteFile(makeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile(fake make) error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if _, err := os.Stat(readyPath); err == nil {
+				cancel()
+				return
+			}
+			if time.Now().After(deadline) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	result, err := runMakeCheck(ctx, makeBin, workDir, "/bin/sh", []string{"tests/misc/started.sh", "tests/misc/interrupted.sh"}, logPath)
+	<-done
+	if err != nil {
+		t.Fatalf("runMakeCheck() error = %v", err)
+	}
+	if result.ExitCode != 143 {
+		t.Fatalf("runMakeCheck() exit = %d, want 143", result.ExitCode)
+	}
+	output := string(result.Output)
+	if !strings.Contains(output, "PASS: tests/misc/started.sh\n") {
+		t.Fatalf("runMakeCheck() output = %q, want PASS line", output)
+	}
+	if strings.Contains(output, "FAIL: tests/misc/interrupted.sh\n") {
+		t.Fatalf("runMakeCheck() output = %q, want only partial results after interruption", output)
+	}
+}
+
 func TestPrepareProgramDirAddsCompatShellHelpers(t *testing.T) {
 	workDir := t.TempDir()
 	srcDir := filepath.Join(workDir, "src")
