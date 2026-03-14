@@ -5,6 +5,7 @@ use (
 	./contrib/awk
 	./contrib/extras
 	./contrib/jq
+	./contrib/nodejs
 	./contrib/sqlite3
 	./contrib/yq
 	./examples

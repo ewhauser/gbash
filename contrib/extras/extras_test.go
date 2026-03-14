@@ -22,6 +22,9 @@ func TestRegisterAddsContribCommands(t *testing.T) {
 			t.Fatalf("Names() missing %q: %v", name, registry.Names())
 		}
 	}
+	if slices.Contains(registry.Names(), "nodejs") {
+		t.Fatalf("Names() unexpectedly contains %q: %v", "nodejs", registry.Names())
+	}
 }
 
 func TestRegisterSupportsBundledCommands(t *testing.T) {
