@@ -6,6 +6,7 @@ REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 
 IMAGE_NAME=${COMPAT_DOCKER_IMAGE:-gbash-compat-local}
 PLATFORM=${COMPAT_DOCKER_PLATFORM:-linux/amd64}
+PULL_MODE=${COMPAT_DOCKER_PULL:-0}
 GNU_CACHE_DIR=${GNU_CACHE_DIR:-.cache/gnu}
 GNU_RESULTS_DIR=${GNU_RESULTS_DIR:-.cache/gnu/results/docker-latest}
 GNU_FORCE_REBUILD=${GNU_FORCE_REBUILD:-0}
@@ -34,9 +35,23 @@ require_repo_path() {
 }
 
 ensure_image() {
+  case "$PULL_MODE" in
+    1|true|TRUE|always)
+      if docker pull "$IMAGE_NAME" >/dev/null 2>&1; then
+        return
+      fi
+      ;;
+  esac
   if docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
     return
   fi
+  case "$PULL_MODE" in
+    1|true|TRUE|always|missing)
+      if docker pull "$IMAGE_NAME"; then
+        return
+      fi
+      ;;
+  esac
   "$SCRIPT_DIR/compat-docker-build.sh"
 }
 

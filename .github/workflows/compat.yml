@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
   pages: write
   id-token: write
 
@@ -17,6 +18,11 @@ concurrency:
 jobs:
   compat:
     runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}-compat:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     env:
       GNU_BUILD_CACHE_VERSION: v3
       GNU_BUILD_CACHE_TAG: gnu-build-cache-v3
@@ -26,26 +32,6 @@ jobs:
       deployable: ${{ steps.publish-state.outputs.deployable }}
     steps:
       - uses: actions/checkout@v6
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install compat test dependencies
-        run: |
-          sudo apt-get update
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            acl \
-            libacl1-dev \
-            libexpect-perl \
-            libselinux1-dev \
-            locales-all \
-            valgrind
-          python -m pip install --disable-pip-version-check pyinotify
 
       - name: Compute GNU build cache key
         id: gnu-build-cache-key
