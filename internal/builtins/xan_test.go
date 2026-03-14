@@ -986,6 +986,13 @@ func TestXanFrequencyReshapeMultifileAndData(t *testing.T) {
 				wantCode: 0,
 			},
 			{
+				name:     "pivot missing group column",
+				files:    map[string]string{"/data.csv": "region,product,amount\nnorth,A,10\nsouth,B,25\n"},
+				script:   "xan pivot product 'sum(amount)' -g regoin /data.csv",
+				wantErr:  "xan pivot: column 'regoin' not found\n",
+				wantCode: 1,
+			},
+			{
 				name:     "pivot invalid",
 				files:    map[string]string{"/data.csv": "a,b,c\n1,2,3\n"},
 				script:   "xan pivot b 'invalid syntax' /data.csv",
@@ -1299,6 +1306,31 @@ func TestXanFrequencyReshapeMultifileAndData(t *testing.T) {
 			result = mustExecSession(t, session, "xan partition -o /collide region /collision.csv || true")
 			if !strings.Contains(result.Stderr, `xan partition: values "a/b" and "a_b" map to the same output file "a_b.csv"`) {
 				t.Fatalf("partition collision stderr = %q", result.Stderr)
+			}
+		})
+
+		t.Run("split and partition write errors", func(t *testing.T) {
+			session := runXanSession(t, map[string]string{
+				"/data.csv":   "n\n1\n2\n3\n4\n",
+				"/region.csv": "region,value\nnorth,10\nsouth,20\n",
+			}, "/")
+			writeSessionFile(t, session, "/locked", []byte("not a directory"))
+			writeSessionFile(t, session, "/locked-part", []byte("not a directory"))
+
+			result := mustExecSession(t, session, "xan split -c 2 -o /locked /data.csv")
+			if result.ExitCode == 0 {
+				t.Fatalf("split write failure exit code = %d, stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+			}
+			if strings.TrimSpace(result.Stdout) != "" {
+				t.Fatalf("split write failure stdout=%q stderr=%q", result.Stdout, result.Stderr)
+			}
+
+			result = mustExecSession(t, session, "xan partition -o /locked-part region /region.csv")
+			if result.ExitCode == 0 {
+				t.Fatalf("partition write failure exit code = %d, stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+			}
+			if strings.TrimSpace(result.Stdout) != "" {
+				t.Fatalf("partition write failure stdout=%q stderr=%q", result.Stdout, result.Stderr)
 			}
 		})
 	})

@@ -1449,9 +1449,16 @@ func xanRunPivot(ctx context.Context, inv *Invocation, args []string) error {
 			}
 		}
 	}
+	groupNames := make([]string, 0, len(groupCols))
 	groupIdxs := make([]int, 0, len(groupCols))
 	for _, col := range groupCols {
-		groupIdxs = append(groupIdxs, slices.Index(table.Headers, strings.TrimSpace(col)))
+		col = strings.TrimSpace(col)
+		idx := slices.Index(table.Headers, col)
+		if idx < 0 {
+			return exitf(inv, 1, "xan pivot: column '%s' not found", col)
+		}
+		groupNames = append(groupNames, col)
+		groupIdxs = append(groupIdxs, idx)
 	}
 	pivotValues := make([]string, 0)
 	pivotSeen := make(map[string]struct{})
@@ -1485,7 +1492,7 @@ func xanRunPivot(ctx context.Context, inv *Invocation, args []string) error {
 		}
 		groups[groupKey][pivotValue] = append(groups[groupKey][pivotValue], value)
 	}
-	headers := append(append([]string(nil), groupCols...), pivotValues...)
+	headers := append(append([]string(nil), groupNames...), pivotValues...)
 	rows := make([][]string, 0, len(groupOrder))
 	for _, groupKey := range groupOrder {
 		next := strings.Split(groupKey, "\x00")
@@ -2135,31 +2142,22 @@ func xanRunSplit(ctx context.Context, inv *Invocation, args []string) error {
 		baseName = strings.TrimSuffix(baseName, ".csv")
 	}
 	outputPath := inv.FS.Resolve(outputDir)
-	if err := inv.FS.MkdirAll(ctx, outputPath, 0o755); err == nil {
-		writeErr := false
-		for i, partRows := range parts {
-			part := &xanTable{Headers: table.Headers, Rows: partRows}
-			data, err := xanTableCSV(part)
-			if err != nil {
-				return err
-			}
-			name := path.Join(outputPath, fmt.Sprintf("%s_%03d.csv", baseName, i+1))
-			if err := xanWriteSandboxFile(ctx, inv, name, data); err != nil {
-				writeErr = true
-				break
-			}
-		}
-		if !writeErr {
-			_, err := fmt.Fprintf(inv.Stdout, "Split into %d parts\n", len(parts))
-			return err
-		}
+	if err := inv.FS.MkdirAll(ctx, outputPath, 0o755); err != nil {
+		return err
 	}
 	for i, partRows := range parts {
-		if _, err := fmt.Fprintf(inv.Stdout, "Part %d: %d rows\n", i+1, len(partRows)); err != nil {
+		part := &xanTable{Headers: table.Headers, Rows: partRows}
+		data, err := xanTableCSV(part)
+		if err != nil {
+			return err
+		}
+		name := path.Join(outputPath, fmt.Sprintf("%s_%03d.csv", baseName, i+1))
+		if err := xanWriteSandboxFile(ctx, inv, name, data); err != nil {
 			return err
 		}
 	}
-	return nil
+	_, err = fmt.Fprintf(inv.Stdout, "Split into %d parts\n", len(parts))
+	return err
 }
 
 func xanRunPartition(ctx context.Context, inv *Invocation, args []string) error {
@@ -2206,40 +2204,31 @@ func xanRunPartition(ctx context.Context, inv *Invocation, args []string) error 
 		groups[value] = append(groups[value], xanCloneRow(row))
 	}
 	outputPath := inv.FS.Resolve(outputDir)
-	if err := inv.FS.MkdirAll(ctx, outputPath, 0o755); err == nil {
-		filenames := make(map[string]string, len(groupOrder))
-		namesByValue := make(map[string]string, len(groupOrder))
-		for _, value := range groupOrder {
-			name := xanSanitizePartitionValue(value)
-			if previous, ok := filenames[name]; ok && previous != value {
-				return exitf(inv, 1, "xan partition: values %q and %q map to the same output file %q", previous, value, name+".csv")
-			}
-			filenames[name] = value
-			namesByValue[value] = name
+	if err := inv.FS.MkdirAll(ctx, outputPath, 0o755); err != nil {
+		return err
+	}
+	filenames := make(map[string]string, len(groupOrder))
+	namesByValue := make(map[string]string, len(groupOrder))
+	for _, value := range groupOrder {
+		name := xanSanitizePartitionValue(value)
+		if previous, ok := filenames[name]; ok && previous != value {
+			return exitf(inv, 1, "xan partition: values %q and %q map to the same output file %q", previous, value, name+".csv")
 		}
-		writeErr := false
-		for _, value := range groupOrder {
-			part := &xanTable{Headers: table.Headers, Rows: groups[value]}
-			data, err := xanTableCSV(part)
-			if err != nil {
-				return err
-			}
-			if err := xanWriteSandboxFile(ctx, inv, path.Join(outputPath, namesByValue[value]+".csv"), data); err != nil {
-				writeErr = true
-				break
-			}
-		}
-		if !writeErr {
-			_, err := fmt.Fprintf(inv.Stdout, "Partitioned into %d files by '%s'\n", len(groupOrder), column)
-			return err
-		}
+		filenames[name] = value
+		namesByValue[value] = name
 	}
 	for _, value := range groupOrder {
-		if _, err := fmt.Fprintf(inv.Stdout, "%s: %d rows\n", value, len(groups[value])); err != nil {
+		part := &xanTable{Headers: table.Headers, Rows: groups[value]}
+		data, err := xanTableCSV(part)
+		if err != nil {
+			return err
+		}
+		if err := xanWriteSandboxFile(ctx, inv, path.Join(outputPath, namesByValue[value]+".csv"), data); err != nil {
 			return err
 		}
 	}
-	return nil
+	_, err = fmt.Fprintf(inv.Stdout, "Partitioned into %d files by '%s'\n", len(groupOrder), column)
+	return err
 }
 
 func xanSanitizePartitionValue(value string) string {
