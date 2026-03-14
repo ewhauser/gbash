@@ -25,10 +25,11 @@ The supported release path is GitHub Actions driven:
 1. Run `make release` or dispatch the `Prepare Release` workflow manually.
 2. Review and merge the generated `release/vX.Y.Z` PR into `main`.
 3. Let the `Publish Release` workflow create the root plus contrib tags and publish the root GitHub release automatically, including both `gbash` and `gbash-extras` archives plus a shared checksum file.
+4. The same workflow requests each released Go module version from `proxy.golang.org`, which is the supported way to make the new docs show up on `pkg.go.dev` for the root module and the release-tagged contrib modules.
 
 `Prepare Release` derives the next release line by taking the latest root `v*` tag and incrementing the patch number.
 
-`make tag-release RELEASE_VERSION=vX.Y.Z` remains available as a local fallback for debugging or manual recovery, but it is no longer the primary release path.
+`make tag-release RELEASE_VERSION=vX.Y.Z` remains available as a local fallback for debugging or manual recovery, but it is no longer the primary release path. If you need to re-request documentation indexing for an existing release, run `./scripts/publish_pkgsite.sh vX.Y.Z`.
 
 ## Benchmarks
 

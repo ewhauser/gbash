@@ -185,6 +185,11 @@ jobs:
           VERSION: ${{ needs.resolve.outputs.version }}
         run: echo "GitHub release already exists for ${VERSION}; skipping goreleaser."
 
+      - name: Publish Go module docs to pkg.go.dev
+        env:
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: ./scripts/publish_pkgsite.sh
+
       # npm publish for @ewhauser/gbash-wasm is intentionally disabled for now.
       # Keep the package build in release-check and prepare-release so the package
       # stays releasable, but do not publish from the coordinated release workflow
