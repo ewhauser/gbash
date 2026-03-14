@@ -29,6 +29,14 @@ Install the module with `go get github.com/ewhauser/gbash` and import `github.co
 - [Development](#development)
 - [License](#license)
 
+## Public Packages
+
+- `github.com/ewhauser/gbash`: the core Go runtime and embedding API
+- `github.com/ewhauser/gbash/contrib/...`: optional Go command modules
+- `@ewhauser/gbash-wasm`: browser-focused JavaScript packaging for the `js/wasm` build
+
+## Usage
+
 ### Basic API
 
 Use `gbash.New` to configure a runtime and `Runtime.Run` for one-shot execution.
@@ -166,6 +174,7 @@ go install github.com/ewhauser/gbash/cmd/gbash@latest
 ```
 
 Tagged builds are also published as prebuilt archives on the [GitHub Releases page](https://github.com/ewhauser/gbash/releases).
+The browser-facing `@ewhauser/gbash-wasm` package is versioned in-repo, but npm publishing is currently disabled in the release workflow.
 
 After installation, run the binary directly. From a local checkout, replace `gbash` with `go run ./cmd/gbash`.
 
@@ -207,7 +216,7 @@ The interactive shell is intentionally minimal:
 
 ### Workspace Examples
 
-The repository uses a committed Go workspace. `examples/` is a separate Go module for demos, and `contrib/` contains separate opt-in modules for commands that should not bloat the core library dependency graph.
+The repository uses a committed Go workspace plus a pnpm workspace. `examples/` is a separate Go module for demos, `contrib/` contains separate opt-in Go modules for commands that should not bloat the core library dependency graph, and `packages/` contains publishable JavaScript packages such as `@ewhauser/gbash-wasm`.
 
 | Example | Description |
 |---|---|
@@ -356,9 +365,11 @@ Those command paths are virtual stubs used for shell resolution. Command impleme
 
 ## Development
 
-The repo is a Go workspace. The root module has the public `gbash` package, CLI, internal runtime implementation, and core commands. [`contrib/`](./contrib/) and [`examples/`](./examples/) are separate modules to keep optional dependencies out of the core import graph.
+The repo is a Go workspace plus a pnpm workspace. The root module has the public `gbash` package, CLI, internal runtime implementation, and core commands. [`contrib/`](./contrib/) and [`examples/`](./examples/) are separate modules to keep optional dependencies out of the core import graph, while [`packages/`](./packages/) contains publishable JavaScript packages such as [`@ewhauser/gbash-wasm`](./packages/gbash-wasm/).
 
 `make build`, `make test`, and `make lint` cover all modules. See the [`Makefile`](./Makefile) for fuzz, bench, GNU coreutils compat, and release targets.
+
+Use `npm exec --yes pnpm@10.10.0 -- install --frozen-lockfile` at the repo root when you need the JavaScript workspace dependencies, or `pnpm install` if you already manage pnpm locally.
 
 The repo uses both [`go.work`](./go.work) and committed child-module `replace`
 directives. `go.work` keeps the workspace coherent at the repo root, and the
@@ -366,8 +377,9 @@ child-module replaces make each nested module buildable on its own while still
 declaring real tagged dependencies for published consumption.
 
 Use `make fix-modules MODULE_VERSION=vX.Y.Z` when preparing the next coordinated
-root plus contrib release line. That updates the nested module requirements,
-refreshes the local replaces, and runs `go mod tidy` in each child module.
+root, contrib, and `@ewhauser/gbash-wasm` release line. That updates the nested
+module requirements, refreshes the local replaces, updates the npm package
+version, and runs `go mod tidy` in each child Go module.
 
 The supported release path is now GitHub Actions driven:
 

@@ -1,11 +1,11 @@
-type CommandResult = {
+export type CommandResult = {
   stdout: string;
   stderr: string;
   exitCode: number;
   shellExited?: boolean;
 };
 
-type CommandHandler = (args: string[]) => CommandResult | Promise<CommandResult>;
+export type CommandHandler = (args: string[]) => CommandResult | Promise<CommandResult>;
 
 type BridgeShell = {
   exec(command: string): Promise<CommandResult>;
@@ -50,6 +50,13 @@ let runtimePromise: Promise<GBashRuntime> | null = null;
 
 export function defineCommand(name: string, run: CommandHandler): CustomCommand {
   return { name, run };
+}
+
+export function defaultBrowserAssets(): { wasmUrl: string; wasmExecUrl: string } {
+  return {
+    wasmUrl: new URL("./gbash.wasm", import.meta.url).toString(),
+    wasmExecUrl: new URL("./wasm_exec.js", import.meta.url).toString(),
+  };
 }
 
 export class Bash {
@@ -99,15 +106,16 @@ async function loadRuntime(options: BashOptions): Promise<GBashRuntime> {
   }
   if (!runtimePromise) {
     runtimePromise = (async () => {
+      const assets = defaultBrowserAssets();
       if (!window.Go) {
-        await loadScript(options.wasmExecUrl ?? "/wasm_exec.js");
+        await loadScript(options.wasmExecUrl ?? assets.wasmExecUrl);
       }
       if (!window.Go) {
         throw new Error("wasm_exec.js did not define the Go runtime");
       }
 
       const go = new window.Go();
-      const wasmUrl = options.wasmUrl ?? "/gbash.wasm";
+      const wasmUrl = options.wasmUrl ?? assets.wasmUrl;
       const result = await instantiateWasm(wasmUrl, go.importObject);
       go.run(result.instance);
       return waitForRuntime();
@@ -133,6 +141,9 @@ async function instantiateWasm(
 }
 
 function loadScript(src: string): Promise<void> {
+  if (window.Go) {
+    return Promise.resolve();
+  }
   return new Promise((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
     if (existing) {
@@ -265,6 +276,5 @@ function tokenizeSimpleCommand(command: string): string[] | null {
 }
 
 function isShellControl(ch: string): boolean {
-  return ch === "|" || ch === "&" || ch === ";" || ch === "<" || ch === ">" || ch === "(" || ch === ")" || ch === "`";
+  return ch === "|" || ch === "&" || ch === ";" || ch === "<" || ch === ">" || ch === "(" || ch === ")";
 }
-

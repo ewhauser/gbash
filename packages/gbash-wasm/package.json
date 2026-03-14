@@ -1,0 +1,24 @@
+{
+  "name": "@ewhauser/gbash-wasm",
+  "version": "0.0.7",
+  "description": "Browser-focused WebAssembly bridge for gbash",
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && bash scripts/build-wasm.sh",
+    "build:ts": "tsc -p tsconfig.build.json",
+    "build:wasm": "bash scripts/build-wasm.sh"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
