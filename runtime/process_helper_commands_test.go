@@ -820,6 +820,236 @@ func TestArchHelpVersionAndErrors(t *testing.T) {
 	}
 }
 
+func TestUnameReportsSelectedSystemInformation(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+	expected := expectedUname(t)
+
+	tests := []struct {
+		name    string
+		script  string
+		wantOut string
+	}{
+		{
+			name:    "default kernel name",
+			script:  "uname\n",
+			wantOut: expected.kernelName + "\n",
+		},
+		{
+			name:    "all",
+			script:  "uname -a\n",
+			wantOut: expected.all() + "\n",
+		},
+		{
+			name:    "grouped selectors",
+			script:  "uname -snrvmo\n",
+			wantOut: expected.all() + "\n",
+		},
+		{
+			name:    "kernel name short",
+			script:  "uname -s\n",
+			wantOut: expected.kernelName + "\n",
+		},
+		{
+			name:    "kernel name alias",
+			script:  "uname --sysname\n",
+			wantOut: expected.kernelName + "\n",
+		},
+		{
+			name:    "nodename",
+			script:  "uname -n\n",
+			wantOut: expected.nodename + "\n",
+		},
+		{
+			name:    "kernel release short",
+			script:  "uname -r\n",
+			wantOut: expected.kernelRelease + "\n",
+		},
+		{
+			name:    "kernel release alias",
+			script:  "uname --release\n",
+			wantOut: expected.kernelRelease + "\n",
+		},
+		{
+			name:    "kernel version",
+			script:  "uname -v\n",
+			wantOut: expected.kernelVersion + "\n",
+		},
+		{
+			name:    "machine",
+			script:  "uname -m\n",
+			wantOut: expected.machine + "\n",
+		},
+		{
+			name:    "operating system short",
+			script:  "uname -o\n",
+			wantOut: expected.operatingSystem + "\n",
+		},
+		{
+			name:    "operating system long",
+			script:  "uname --operating-system\n",
+			wantOut: expected.operatingSystem + "\n",
+		},
+		{
+			name:    "operating system inferred long",
+			script:  "uname --operating-s\n",
+			wantOut: expected.operatingSystem + "\n",
+		},
+		{
+			name:    "processor compatibility",
+			script:  "uname -p\n",
+			wantOut: "unknown\n",
+		},
+		{
+			name:    "hardware platform compatibility",
+			script:  "uname -i\n",
+			wantOut: "unknown\n",
+		},
+		{
+			name:    "all with compatibility flags",
+			script:  "uname -a -p -i\n",
+			wantOut: expected.allWithCompatibility() + "\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result.ExitCode != 0 {
+				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+			}
+			if got := result.Stdout; got != tc.wantOut {
+				t.Fatalf("Stdout = %q, want %q", got, tc.wantOut)
+			}
+			if result.Stderr != "" {
+				t.Fatalf("Stderr = %q, want empty", result.Stderr)
+			}
+		})
+	}
+}
+
+func TestUnameHelpVersionAndErrors(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	tests := []struct {
+		name               string
+		script             string
+		wantCode           int
+		wantOut            string
+		wantOutContains    []string
+		wantOutNotContains []string
+		wantStderr         string
+	}{
+		{
+			name:     "short help",
+			script:   "uname -h\n",
+			wantCode: 0,
+			wantOutContains: []string{
+				"Print certain system information.",
+				"Usage: uname [OPTION]...",
+				"-a, --all",
+				"-s, --kernel-name",
+				"-o, --operating-system",
+				"-V, --version",
+				"-h, --help",
+			},
+			wantOutNotContains: []string{
+				"--sysname",
+				"--release",
+				"--processor",
+				"--hardware-platform",
+			},
+		},
+		{
+			name:     "long help",
+			script:   "uname --help\n",
+			wantCode: 0,
+			wantOutContains: []string{
+				"Print certain system information.",
+				"Usage: uname [OPTION]...",
+				"-a, --all",
+				"-m, --machine",
+				"-o, --operating-system",
+				"-V, --version",
+				"-h, --help",
+			},
+			wantOutNotContains: []string{
+				"--sysname",
+				"--release",
+				"--processor",
+				"--hardware-platform",
+			},
+		},
+		{
+			name:     "short version",
+			script:   "uname -V\n",
+			wantCode: 0,
+			wantOut:  "uname (gbash)\n",
+		},
+		{
+			name:     "long version",
+			script:   "uname --version\n",
+			wantCode: 0,
+			wantOut:  "uname (gbash)\n",
+		},
+		{
+			name:     "inferred long version",
+			script:   "uname --ver\n",
+			wantCode: 0,
+			wantOut:  "uname (gbash)\n",
+		},
+		{
+			name:       "invalid long option",
+			script:     "uname --definitely-invalid\n",
+			wantCode:   1,
+			wantStderr: "uname: unrecognized option '--definitely-invalid'\nTry 'uname --help' for more information.\n",
+		},
+		{
+			name:       "invalid short option",
+			script:     "uname -x\n",
+			wantCode:   1,
+			wantStderr: "uname: invalid option -- 'x'\nTry 'uname --help' for more information.\n",
+		},
+		{
+			name:       "extra operand",
+			script:     "uname extra\n",
+			wantCode:   1,
+			wantStderr: "uname: extra operand 'extra'\nTry 'uname --help' for more information.\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result.ExitCode != tc.wantCode {
+				t.Fatalf("ExitCode = %d, want %d; stderr=%q", result.ExitCode, tc.wantCode, result.Stderr)
+			}
+			if got := result.Stdout; len(tc.wantOutContains) > 0 {
+				for _, want := range tc.wantOutContains {
+					if !strings.Contains(got, want) {
+						t.Fatalf("Stdout = %q, want to contain %q", got, want)
+					}
+				}
+				for _, unwanted := range tc.wantOutNotContains {
+					if strings.Contains(got, unwanted) {
+						t.Fatalf("Stdout = %q, want not to contain %q", got, unwanted)
+					}
+				}
+			} else if got != tc.wantOut {
+				t.Fatalf("Stdout = %q, want %q", got, tc.wantOut)
+			}
+			if got := result.Stderr; got != tc.wantStderr {
+				t.Fatalf("Stderr = %q, want %q", got, tc.wantStderr)
+			}
+		})
+	}
+}
+
 func TestTtyReportsNotATTYAndSupportsQuietAliases(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 
