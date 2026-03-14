@@ -59,10 +59,14 @@ func run(ctx context.Context, telemetryOut, statusOut io.Writer) (err error) {
 
 	runtime, err := gbash.New(
 		gbash.WithTracing(gbash.TraceConfig{
-			Mode:    gbash.TraceRedacted,
-			OnEvent: bridge.onTraceEvent,
+			Mode: gbash.TraceRedacted,
+			OnEvent: func(ctx context.Context, event gbashtrace.Event) {
+				bridge.onTraceEvent(ctx, &event)
+			},
 		}),
-		gbash.WithLogger(bridge.onLogEvent),
+		gbash.WithLogger(func(ctx context.Context, event gbash.LogEvent) {
+			bridge.onLogEvent(ctx, &event)
+		}),
 	)
 	if err != nil {
 		return fmt.Errorf("create runtime: %w", err)
@@ -102,7 +106,9 @@ func runExecution(ctx context.Context, session *gbash.Session, statusOut io.Writ
 	}
 
 	if statusOut != nil {
-		fmt.Fprintf(statusOut, "%s exit=%d stdout=%q\n", name, result.ExitCode, strings.TrimSpace(result.Stdout))
+		if _, err := fmt.Fprintf(statusOut, "%s exit=%d stdout=%q\n", name, result.ExitCode, strings.TrimSpace(result.Stdout)); err != nil {
+			return fmt.Errorf("write status output: %w", err)
+		}
 	}
 
 	return nil
@@ -180,11 +186,13 @@ func (b *telemetryBridge) Shutdown(ctx context.Context) error {
 	)
 }
 
-func (b *telemetryBridge) onLogEvent(ctx context.Context, event gbash.LogEvent) {
+func (b *telemetryBridge) onLogEvent(ctx context.Context, event *gbash.LogEvent) {
+	if event == nil {
+		return
+	}
 	timestamp := time.Now().UTC()
 
-	switch event.Kind {
-	case gbash.LogExecStart:
+	if event.Kind == gbash.LogExecStart {
 		b.startExecution(event, timestamp)
 	}
 
@@ -213,7 +221,10 @@ func (b *telemetryBridge) onLogEvent(ctx context.Context, event gbash.LogEvent) 
 	}
 }
 
-func (b *telemetryBridge) onTraceEvent(ctx context.Context, event gbashtrace.Event) {
+func (b *telemetryBridge) onTraceEvent(ctx context.Context, event *gbashtrace.Event) {
+	if event == nil {
+		return
+	}
 	state := b.lookupExecution(event.ExecutionID)
 	if state == nil {
 		state = b.ensureExecution(event.SessionID, event.ExecutionID, event.ExecutionID, "", time.Now().UTC())
@@ -234,11 +245,11 @@ func (b *telemetryBridge) onTraceEvent(ctx context.Context, event gbashtrace.Eve
 	)
 }
 
-func (b *telemetryBridge) startExecution(event gbash.LogEvent, now time.Time) {
+func (b *telemetryBridge) startExecution(event *gbash.LogEvent, now time.Time) {
 	b.ensureExecution(event.SessionID, event.ExecutionID, event.Name, event.WorkDir, now)
 }
 
-func (b *telemetryBridge) finishExecution(event gbash.LogEvent, now time.Time, markError bool) {
+func (b *telemetryBridge) finishExecution(event *gbash.LogEvent, now time.Time, markError bool) {
 	state := b.lookupExecution(event.ExecutionID)
 	if state == nil {
 		state = b.ensureExecution(event.SessionID, event.ExecutionID, event.Name, event.WorkDir, now)
@@ -257,16 +268,17 @@ func (b *telemetryBridge) finishExecution(event gbash.LogEvent, now time.Time, m
 		attribute.Int64("gbash.exec.duration_ms", event.Duration.Milliseconds()),
 		attribute.Bool("shell_exited", event.ShellExited),
 	)
-	if markError {
+	switch {
+	case markError:
 		if event.Error != "" {
 			state.span.RecordError(errors.New(event.Error), oteltrace.WithTimestamp(endAt))
 			state.span.SetStatus(codes.Error, event.Error)
 		} else {
 			state.span.SetStatus(codes.Error, "execution failed")
 		}
-	} else if event.ExitCode == 0 {
+	case event.ExitCode == 0:
 		state.span.SetStatus(codes.Ok, "")
-	} else {
+	default:
 		state.span.SetStatus(codes.Error, fmt.Sprintf("exit code %d", event.ExitCode))
 	}
 	state.span.End(oteltrace.WithTimestamp(endAt))
@@ -339,7 +351,7 @@ func spanName(name string) string {
 	return "gbash.exec." + name
 }
 
-func logBody(event gbash.LogEvent) string {
+func logBody(event *gbash.LogEvent) string {
 	switch event.Kind {
 	case gbash.LogStdout, gbash.LogStderr:
 		return event.Output
@@ -355,7 +367,7 @@ func logBody(event gbash.LogEvent) string {
 	}
 }
 
-func severityForLogEvent(event gbash.LogEvent) otellog.Severity {
+func severityForLogEvent(event *gbash.LogEvent) otellog.Severity {
 	switch event.Kind {
 	case gbash.LogStderr:
 		return otellog.SeverityWarn
@@ -366,7 +378,7 @@ func severityForLogEvent(event gbash.LogEvent) otellog.Severity {
 	}
 }
 
-func logAttributes(event gbash.LogEvent) []attribute.KeyValue {
+func logAttributes(event *gbash.LogEvent) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
 		attribute.String("session.id", event.SessionID),
 		attribute.String("execution.id", event.ExecutionID),
@@ -383,7 +395,7 @@ func logAttributes(event gbash.LogEvent) []attribute.KeyValue {
 	return attrs
 }
 
-func traceAttributes(event gbashtrace.Event) []attribute.KeyValue {
+func traceAttributes(event *gbashtrace.Event) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
 		attribute.String("gbash.trace.schema", event.Schema),
 		attribute.String("session.id", event.SessionID),
