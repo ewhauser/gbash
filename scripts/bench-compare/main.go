@@ -90,6 +90,7 @@ type scenarioConfig struct {
 	ExpectedStdout string
 	Workspace      bool
 	Fixture        *fixtureSummary
+	WarmupScript   string
 }
 
 type runtimeConfig struct {
@@ -187,22 +188,7 @@ func runMain(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		gbashNodeWasmRuntime(repoRoot, wasmAssetDir, wasmSize),
 		justBashRuntime(opts.JustBashSpec, justBashSize),
 	}
-	scenarios := []scenarioConfig{
-		{
-			Name:           "startup_echo",
-			Description:    "Cold process start plus one simple command.",
-			Command:        "echo benchmark\n",
-			ExpectedStdout: "benchmark\n",
-		},
-		{
-			Name:           "workspace_inventory",
-			Description:    "Inventory a generated host workspace with a pipe-free file count that runs on every runtime.",
-			Command:        "set -- $(find . -type f); echo $#\n",
-			ExpectedStdout: fmt.Sprintf("%d\n", fixture.FileCount),
-			Workspace:      true,
-			Fixture:        &fixture,
-		},
-	}
+	scenarios := benchmarkScenarios(fixture)
 
 	report := benchmarkReport{
 		GeneratedAt:  time.Now().UTC().Format(time.RFC3339),
@@ -245,7 +231,7 @@ func parseOptions(args []string) (options, error) {
 	fs := flag.NewFlagSet("bench-compare", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	fs.IntVar(&opts.Runs, "runs", defaultRuns, "number of cold sequential trials per runtime and scenario")
+	fs.IntVar(&opts.Runs, "runs", defaultRuns, "number of timed sequential trials per runtime and scenario")
 	fs.StringVar(&opts.JSONOut, "json-out", "", "optional path to write a JSON report")
 	fs.StringVar(&opts.JustBashSpec, "just-bash-spec", defaultJustBashSpec, "npm package spec used for npx just-bash invocations")
 
@@ -435,6 +421,41 @@ func justBashRuntime(spec string, artifactSizeBytes int64) runtimeConfig {
 	}
 }
 
+func benchmarkScenarios(fixture fixtureSummary) []scenarioConfig {
+	return []scenarioConfig{
+		{
+			Name:           "startup_echo_cold_start",
+			Description:    "Cold process start plus one simple command.",
+			Command:        "echo benchmark\n",
+			ExpectedStdout: "benchmark\n",
+		},
+		{
+			Name:           "startup_echo_warm_run",
+			Description:    "Same command after one untimed warm-up launch for each runtime.",
+			Command:        "echo benchmark\n",
+			ExpectedStdout: "benchmark\n",
+			WarmupScript:   "true\n",
+		},
+		{
+			Name:           "workspace_inventory_cold_start",
+			Description:    "Cold process start plus a pipe-free workspace inventory.",
+			Command:        "set -- $(find . -type f); echo $#\n",
+			ExpectedStdout: fmt.Sprintf("%d\n", fixture.FileCount),
+			Workspace:      true,
+			Fixture:        &fixture,
+		},
+		{
+			Name:           "workspace_inventory_warm_run",
+			Description:    "Same workspace inventory after one untimed warm-up launch for each runtime.",
+			Command:        "set -- $(find . -type f); echo $#\n",
+			ExpectedStdout: fmt.Sprintf("%d\n", fixture.FileCount),
+			Workspace:      true,
+			Fixture:        &fixture,
+			WarmupScript:   "true\n",
+		},
+	}
+}
+
 func createWorkspaceFixture(root string) (fixtureSummary, error) {
 	const (
 		packages         = 12
@@ -477,6 +498,16 @@ func runTrials(ctx context.Context, runtime runtimeConfig, scenario *scenarioCon
 		ArtifactSizeBytes: runtime.ArtifactSizeBytes,
 		Trials:            make([]trialResult, 0, runs),
 	}
+	if err := warmRuntimeForScenario(ctx, runtime, scenario); err != nil {
+		for i := range runs {
+			report.FailureCount++
+			report.Trials = append(report.Trials, trialResult{
+				Index: i + 1,
+				Error: err.Error(),
+			})
+		}
+		return report
+	}
 	successDurations := make([]time.Duration, 0, runs)
 	for i := range runs {
 		result := runCommand(ctx, runtime.Command, scenario)
@@ -508,6 +539,26 @@ func runTrials(ctx context.Context, runtime runtimeConfig, scenario *scenarioCon
 		report.Stats = &stats
 	}
 	return report
+}
+
+func warmRuntimeForScenario(ctx context.Context, runtime runtimeConfig, scenario *scenarioConfig) error {
+	warmup := strings.TrimSpace(scenario.WarmupScript)
+	if warmup == "" {
+		return nil
+	}
+	warmScenario := *scenario
+	warmScenario.Command = scenario.WarmupScript
+	result := runCommand(ctx, runtime.Command, &warmScenario)
+	switch {
+	case result.Error != "":
+		return fmt.Errorf("warmup failed: %s", result.Error)
+	case result.ExitCode != 0:
+		return fmt.Errorf("warmup failed: unexpected exit code %d", result.ExitCode)
+	case result.Stdout != "":
+		return fmt.Errorf("warmup failed: unexpected stdout %q", result.Stdout)
+	default:
+		return nil
+	}
 }
 
 func runCommand(ctx context.Context, build func(context.Context, *scenarioConfig) *exec.Cmd, scenario *scenarioConfig) commandResult {

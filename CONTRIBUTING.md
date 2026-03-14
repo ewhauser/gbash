@@ -44,13 +44,18 @@ Write the same report to JSON with:
 make bench-compare JSON_OUT=bench-compare.json
 ```
 
-The comparison report includes five cold-start runtimes:
+The comparison report includes five runtimes across paired cold-start and warm-run scenarios:
 
 - `gbash`: the native Go helper process
 - `GNU bash`: the host `bash` interpreter launched with profiles disabled
 - `gbash-extras`: the shipped extras CLI with `awk`, `jq`, `sqlite3`, and `yq` pre-registered
 - `gbash-node-wasm`: the `packages/gbash-wasm/wasm` artifact booted inside Node.js
 - `just-bash`: the published npm package invoked through `npx`
+
+Each command currently appears twice:
+
+- `*_cold_start`: the first timed launch for that runtime in the scenario
+- `*_warm_run`: the same timed command after one untimed warm-up launch for that runtime
 
 `workspace_inventory` still uses the same generated fixture for every runtime. The
 native helpers mount that fixture directly, while `gbash-node-wasm` preloads the
