@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/ewhauser/gbash/internal/compatshims"
 )
 
 func listGNUPrograms(ctx context.Context, workDir string) ([]string, error) {
@@ -26,52 +24,46 @@ func listGNUPrograms(ctx context.Context, workDir string) ([]string, error) {
 
 func prepareProgramDir(workDir, gbashBin string, programs []string) error {
 	srcDir := filepath.Join(workDir, "src")
-	for _, name := range programs {
-		if err := os.RemoveAll(filepath.Join(srcDir, name)); err != nil {
-			return err
-		}
-	}
-	if err := compatshims.SymlinkCommands(srcDir, gbashBin, programs); err != nil {
+	if err := writeProgramWrappers(srcDir, programs); err != nil {
 		return err
 	}
-	helperShells := compatHelperShells()
-	if err := compatshims.SymlinkCommands(srcDir, gbashBin, helperShells); err != nil {
+	if err := writeGNUProgramList(workDir, programs); err != nil {
 		return err
 	}
-	if err := compatshims.SymlinkCommands(srcDir, gbashBin, []string{"ginstall"}); err != nil {
-		return err
-	}
-	return writeGNUProgramList(workDir, programs)
+	return writeHarnessLauncher(workDir, gbashBin)
 }
 
-func compatHelperShells() []string {
+func harnessHelperShells() []string {
 	return []string{"bash", "sh"}
 }
 
-func compatConfigShellPath(workDir string) (string, error) {
+func harnessConfigShellPath(workDir string) (string, error) {
 	path := filepath.Join(workDir, "src", "bash")
 	if err := ensureExecutable(path); err != nil {
-		return "", fmt.Errorf("prepare compat config shell: %w", err)
+		return "", fmt.Errorf("prepare harness config shell: %w", err)
 	}
 	return path, nil
 }
 
 func writeGNUProgramList(workDir string, programs []string) error {
-	hookDir := compatHarnessDir(workDir)
+	hookDir := harnessDir(workDir)
 	if err := os.MkdirAll(hookDir, 0o755); err != nil {
 		return err
 	}
 	return writeLines(filepath.Join(hookDir, "gnu-programs.txt"), programs)
 }
 
-func installCompatTestHooks(workDir, gbashBin string) error {
-	if err := writeCompatRelinkScript(workDir, gbashBin); err != nil {
+func installHarnessTestHooks(workDir, gbashBin string) error {
+	if err := writeHarnessLauncher(workDir, gbashBin); err != nil {
+		return fmt.Errorf("write launcher hook: %w", err)
+	}
+	if err := writeHarnessRelinkScript(workDir); err != nil {
 		return fmt.Errorf("write relink hook: %w", err)
 	}
-	if err := patchCompatTestsEnvironment(workDir); err != nil {
+	if err := patchHarnessTestsEnvironment(workDir); err != nil {
 		return fmt.Errorf("patch TESTS_ENVIRONMENT: %w", err)
 	}
-	if err := patchCompatInitSetup(workDir); err != nil {
+	if err := patchHarnessInitSetup(workDir); err != nil {
 		return fmt.Errorf("patch tests/init.sh setup: %w", err)
 	}
 	return nil
@@ -107,23 +99,87 @@ func shellSingleQuoteForScript(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
-func compatHarnessDir(workDir string) string {
+func harnessDir(workDir string) string {
 	return filepath.Join(workDir, "build-aux", "gbash-harness")
 }
 
-func writeCompatRelinkScript(workDir, gbashBin string) error {
-	hookDir := compatHarnessDir(workDir)
+type harnessWrapperSpec struct {
+	path        string
+	commandName string
+}
+
+func writeProgramWrappers(srcDir string, programs []string) error {
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		return err
+	}
+	for _, spec := range harnessWrapperSpecs(srcDir, programs) {
+		var (
+			data []byte
+			err  error
+		)
+		if spec.commandName == "" {
+			data, err = renderShellWrapperScript()
+		} else {
+			data, err = renderProgramWrapperScript(spec.commandName)
+		}
+		if err != nil {
+			return err
+		}
+		if err := os.RemoveAll(spec.path); err != nil {
+			return err
+		}
+		if err := os.WriteFile(spec.path, data, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func harnessWrapperSpecs(srcDir string, programs []string) []harnessWrapperSpec {
+	specs := make([]harnessWrapperSpec, 0, len(programs)+len(harnessHelperShells())+1)
+	for _, name := range programs {
+		specs = append(specs, harnessWrapperSpec{
+			path:        filepath.Join(srcDir, name),
+			commandName: name,
+		})
+	}
+	for _, name := range harnessHelperShells() {
+		specs = append(specs, harnessWrapperSpec{
+			path: filepath.Join(srcDir, name),
+		})
+	}
+	specs = append(specs, harnessWrapperSpec{
+		path:        filepath.Join(srcDir, "ginstall"),
+		commandName: "install",
+	})
+	return specs
+}
+
+func writeHarnessLauncher(workDir, gbashBin string) error {
+	hookDir := harnessDir(workDir)
 	if err := os.MkdirAll(hookDir, 0o755); err != nil {
 		return err
 	}
-	data, err := renderRelinkScript(gbashBin)
+	data, err := renderLauncherScript(gbashBin)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(hookDir, "gbash"), data, 0o755)
+}
+
+func writeHarnessRelinkScript(workDir string) error {
+	hookDir := harnessDir(workDir)
+	if err := os.MkdirAll(hookDir, 0o755); err != nil {
+		return err
+	}
+	data, err := renderRelinkScript()
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(hookDir, "relink.sh"), data, 0o755)
 }
 
-func patchCompatTestsEnvironment(workDir string) error {
+func patchHarnessTestsEnvironment(workDir string) error {
 	makefilePath := filepath.Join(workDir, "Makefile")
 	data, err := os.ReadFile(makefilePath)
 	if err != nil {
@@ -144,7 +200,7 @@ func patchCompatTestsEnvironment(workDir string) error {
 	return os.WriteFile(makefilePath, []byte(updated), 0o644)
 }
 
-func patchCompatInitSetup(workDir string) error {
+func patchHarnessInitSetup(workDir string) error {
 	initPath := filepath.Join(workDir, "tests", "init.sh")
 	data, err := os.ReadFile(initPath)
 	if err != nil {

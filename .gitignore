@@ -29,5 +29,5 @@ dist/
 # Go fuzz generated artifacts
 runtime/testdata/fuzz/Fuzz*/
 
-gbash-gnu
+/gbash-gnu
 CONTINUITY.md

@@ -462,7 +462,7 @@ func TestRunMakeCheckDoesNotForceVeryExpensiveTests(t *testing.T) {
 	}
 }
 
-func TestPrepareProgramDirAddsCompatShellHelpers(t *testing.T) {
+func TestPrepareProgramDirAddsHarnessWrappers(t *testing.T) {
 	workDir := t.TempDir()
 	srcDir := filepath.Join(workDir, "src")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
@@ -480,13 +480,34 @@ func TestPrepareProgramDirAddsCompatShellHelpers(t *testing.T) {
 
 	for _, name := range []string{"bash", "futuregnu", "ginstall", "sh", "sort"} {
 		path := filepath.Join(srcDir, name)
-		info, err := os.Lstat(path)
+		info, err := os.Stat(path)
 		if err != nil {
-			t.Fatalf("Lstat(%q) error = %v", path, err)
+			t.Fatalf("Stat(%q) error = %v", path, err)
 		}
-		if info.Mode()&os.ModeSymlink == 0 {
-			t.Fatalf("%q is not a symlink", path)
+		if info.Mode().IsRegular() == false || info.Mode()&0o111 == 0 {
+			t.Fatalf("%q mode = %v, want executable wrapper", path, info.Mode())
 		}
+	}
+	sortData, err := os.ReadFile(filepath.Join(srcDir, "sort"))
+	if err != nil {
+		t.Fatalf("ReadFile(sort wrapper) error = %v", err)
+	}
+	if !strings.Contains(string(sortData), "--readwrite-root \"$root_dir\"") {
+		t.Fatalf("sort wrapper = %q, want readwrite-root invocation", string(sortData))
+	}
+	ginstallData, err := os.ReadFile(filepath.Join(srcDir, "ginstall"))
+	if err != nil {
+		t.Fatalf("ReadFile(ginstall wrapper) error = %v", err)
+	}
+	if !strings.Contains(string(ginstallData), "_ 'install' \"$@\"") {
+		t.Fatalf("ginstall wrapper = %q, want install alias dispatch", string(ginstallData))
+	}
+	launcherData, err := os.ReadFile(filepath.Join(workDir, "build-aux", "gbash-harness", "gbash"))
+	if err != nil {
+		t.Fatalf("ReadFile(harness launcher) error = %v", err)
+	}
+	if !strings.Contains(string(launcherData), "exec '"+gbashBin+"' \"$@\"") {
+		t.Fatalf("launcher = %q, want quoted gbash exec path", string(launcherData))
 	}
 	data, err := os.ReadFile(filepath.Join(workDir, "build-aux", "gbash-harness", "gnu-programs.txt"))
 	if err != nil {
@@ -497,7 +518,7 @@ func TestPrepareProgramDirAddsCompatShellHelpers(t *testing.T) {
 	}
 }
 
-func TestInstallCompatTestHooksWritesRelinkScriptAndPatchesHarnessFiles(t *testing.T) {
+func TestInstallHarnessTestHooksWritesRelinkScriptAndPatchesHarnessFiles(t *testing.T) {
 	workDir := t.TempDir()
 	srcDir := filepath.Join(workDir, "src")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
@@ -522,14 +543,14 @@ func TestInstallCompatTestHooksWritesRelinkScriptAndPatchesHarnessFiles(t *testi
 		t.Fatalf("prepareProgramDir() error = %v", err)
 	}
 
-	if err := installCompatTestHooks(workDir, gbashBin); err != nil {
-		t.Fatalf("installCompatTestHooks() error = %v", err)
+	if err := installHarnessTestHooks(workDir, gbashBin); err != nil {
+		t.Fatalf("installHarnessTestHooks() error = %v", err)
 	}
-	if err := installCompatTestHooks(workDir, gbashBin); err != nil {
-		t.Fatalf("installCompatTestHooks() second call error = %v", err)
+	if err := installHarnessTestHooks(workDir, gbashBin); err != nil {
+		t.Fatalf("installHarnessTestHooks() second call error = %v", err)
 	}
 
-	relinkPath := filepath.Join(compatHarnessDir(workDir), "relink.sh")
+	relinkPath := filepath.Join(harnessDir(workDir), "relink.sh")
 	info, err := os.Stat(relinkPath)
 	if err != nil {
 		t.Fatalf("Stat(relink.sh) error = %v", err)
@@ -541,9 +562,25 @@ func TestInstallCompatTestHooksWritesRelinkScriptAndPatchesHarnessFiles(t *testi
 	if err != nil {
 		t.Fatalf("ReadFile(relink.sh) error = %v", err)
 	}
+	if !strings.Contains(string(relinkData), "build-aux/gbash-harness/gbash") {
+		t.Fatalf("relink.sh = %q, want harness launcher path", string(relinkData))
+	}
+
+	launcherPath := filepath.Join(harnessDir(workDir), "gbash")
+	launcherInfo, err := os.Stat(launcherPath)
+	if err != nil {
+		t.Fatalf("Stat(launcher) error = %v", err)
+	}
+	if launcherInfo.Mode()&0o111 == 0 {
+		t.Fatalf("launcher mode = %v, want executable", launcherInfo.Mode())
+	}
+	launcherData, err := os.ReadFile(launcherPath)
+	if err != nil {
+		t.Fatalf("ReadFile(launcher) error = %v", err)
+	}
 	wantQuoted := shellSingleQuoteForScript(gbashBin)
-	if !strings.Contains(string(relinkData), "gbash_bin="+wantQuoted) {
-		t.Fatalf("relink.sh = %q, want quoted gbash path %q", string(relinkData), wantQuoted)
+	if !strings.Contains(string(launcherData), "exec "+wantQuoted+" \"$@\"") {
+		t.Fatalf("launcher = %q, want quoted gbash path %q", string(launcherData), wantQuoted)
 	}
 
 	makefileData, err := os.ReadFile(filepath.Join(workDir, "Makefile"))

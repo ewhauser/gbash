@@ -134,12 +134,7 @@ The normal CLI entrypoint also accepts filesystem selection flags before the she
 - `gbash --readwrite-root <dir> ...` mounts `<dir>` as sandbox `/` so writes persist back to the host, but only when `<dir>` is inside the system temp directory
 - when `--cwd` is omitted, `--root` starts at `/home/agent/project` and `--readwrite-root` starts at `/`
 
-The CLI also exposes a developer-only compatibility path for external test harnesses:
-
-- `gbash compat exec <utility> [args...]` runs one registered utility directly instead of reading a shell script from stdin
-- multicall invocation through `argv[0]` is supported so symlinked names like `ls` or `printf` can dispatch to the same path
-- this mode is CLI-only and opt-in; it is not the default library/runtime contract
-- it uses a host-backed filesystem view and host environment specifically so external suites such as GNU coreutils tests can treat `gbash` like a utility binary
+External test harnesses should use the normal CLI entrypoint together with the filesystem selection flags above. In particular, GNU-style wrapper scripts may invoke `gbash --readwrite-root <tempdir> --cwd <dir> -c 'exec "$@"' _ <utility> ...` so the harness exercises the same shell and runtime path as normal `gbash` execution.
 
 ### 6.1 Session model
 
@@ -197,7 +192,7 @@ Package responsibilities:
 - `examples/`: runnable demos that can depend on external SDKs without affecting the root module build list
 - `tests/`: black-box runtime tests and corpus-driven shell fixtures
 
-We intentionally do not create a `compat/` package because compatibility mode is not a product feature.
+We intentionally do not create a `compat/` package because external harness support should ride on the normal CLI and runtime surfaces, not a second execution API.
 
 The repository itself should be maintained as a committed Go workspace. The root module stays focused on the runtime, CLI, and core commands, while direct children under `contrib/` are separate modules for optional heavyweight commands and `examples/` is a separate module used for demos that may need external SDK dependencies or looser version pinning.
 
@@ -504,8 +499,7 @@ Important properties:
 - the default backend is in-memory
 - the default backend exposes a Unix-like virtual layout rooted at `/`
 - host-backed filesystems must still satisfy policy checks and must never imply host command execution
-- a read-write host-backed filesystem may be enabled explicitly for compatibility harnesses or advanced embedding, but it is not the default runtime backend
-- developer-only CLI compatibility runs may use a host-backed filesystem adapter, but that adapter is not the default runtime backend and is only for opt-in test harnesses
+- a read-write host-backed filesystem may be enabled explicitly for external test harnesses or advanced embedding, but it is not the default runtime backend
 - shell redirects and command file access share the same filesystem view
 - symlink support is optional and must default to the safer behavior when policy is ambiguous
 - for backends without symlink creation/traversal support, `Lstat` behaves like `Stat`, `Readlink` fails for non-symlinks, and `Realpath` resolves only existing virtual paths
@@ -524,7 +518,7 @@ Current and planned backends:
 
 - `MemoryFS`: default mutable sandbox
 - `HostFS`: read-only host-backed directory view mounted at a configurable virtual root with sanitized errors and a backend-local regular-file read cap
-- `ReadWriteFS`: mutable host-backed directory view rooted at `/` with sanitized errors and a backend-local regular-file read cap for opt-in compatibility workflows
+- `ReadWriteFS`: mutable host-backed directory view rooted at `/` with sanitized errors and a backend-local regular-file read cap for opt-in host-backed workflows
 - `OverlayFS`: copy-on-write backend with a read-only lower layer, writable in-memory upper layer, merged `readdir`, and tombstones for deletions
 - `SnapshotFS`: deterministic read-only clone of another filesystem for tests and replay fixtures
 
@@ -532,7 +526,7 @@ Backend boundary for the current implementation:
 
 - `gbash.Config.FileSystem` is the public setup boundary for session storage and starting directory; callers should not have to coordinate separate runtime knobs to mount a backend and choose the initial working directory
 - `HostFS` is an opt-in lower-layer backend exposed through `gbfs.Host(...)`; it is intended to sit underneath `gbfs.Overlay(...)`, not to replace the default in-memory runtime path
-- `ReadWriteFS` is an opt-in mutable backend exposed through `gbfs.ReadWrite(...)`; it is intended for developer tooling, external compatibility harnesses, and embedders that explicitly want host mutations
+- `ReadWriteFS` is an opt-in mutable backend exposed through `gbfs.ReadWrite(...)`; it is intended for developer tooling, external test harnesses, and embedders that explicitly want host mutations
 - `OverlayFS` is intended for internal session use and is exposed through `gbfs.Overlay(...)`
 - `SnapshotFS` is a read-only backend for deterministic fixtures and direct tests
 - `SnapshotFS` is not the default `runtime` session backend because session bootstrap still creates the sandbox layout and command stubs

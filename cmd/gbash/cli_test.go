@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -434,58 +435,14 @@ func TestRunCLIInteractiveScriptUsesInteractiveShellSemantics(t *testing.T) {
 	}
 }
 
-func TestRunCLIMulticallBashSupportsVersion(t *testing.T) {
+func TestRunCLIHostUtilityPassesStdin(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), filepath.Join(tmp, "bash"), []string{"--version"}, strings.NewReader(""), &stdout, &stderr, false)
-	if err != nil {
-		t.Fatalf("runCLI() error = %v", err)
-	}
-	if exitCode != 0 {
-		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
-	}
-	if got := stdout.String(); !strings.Contains(got, "bash") {
-		t.Fatalf("stdout = %q, want bash version text", got)
-	}
-	if got := stderr.String(); got != "" {
-		t.Fatalf("stderr = %q, want empty", got)
-	}
-}
-
-func TestRunCLIMulticallBashUsesHostBashForTrapCompatibility(t *testing.T) {
-	tmp := t.TempDir()
-	t.Chdir(tmp)
-
-	var stdout strings.Builder
-	var stderr strings.Builder
-
-	exitCode, err := runCLI(context.Background(), filepath.Join(tmp, "bash"), []string{"-c", `trap "" PIPE; trap - PIPE; echo ok`}, strings.NewReader(""), &stdout, &stderr, false)
-	if err != nil {
-		t.Fatalf("runCLI() error = %v", err)
-	}
-	if exitCode != 0 {
-		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
-	}
-	if got, want := stdout.String(), "ok\n"; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
-	}
-	if got := stderr.String(); got != "" {
-		t.Fatalf("stderr = %q, want empty", got)
-	}
-}
-
-func TestRunCLICompatExecPassesStdin(t *testing.T) {
-	tmp := t.TempDir()
-	t.Chdir(tmp)
-
-	var stdout strings.Builder
-	var stderr strings.Builder
-
-	exitCode, err := runCLI(context.Background(), "gbash", []string{"compat", "exec", "cat"}, strings.NewReader("stdin-data"), &stdout, &stderr, false)
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "cat", nil, strings.NewReader("stdin-data"), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
@@ -500,50 +457,14 @@ func TestRunCLICompatExecPassesStdin(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecCatRejectsAppendToSelf(t *testing.T) {
-	tmp := t.TempDir()
-	t.Chdir(tmp)
-
-	target := filepath.Join(tmp, "out")
-	if err := os.WriteFile(target, []byte("x\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	stdoutFile, err := os.OpenFile(target, os.O_WRONLY|os.O_APPEND, 0)
-	if err != nil {
-		t.Fatalf("OpenFile() error = %v", err)
-	}
-	defer func() { _ = stdoutFile.Close() }()
-
-	var stderr strings.Builder
-	exitCode, err := runCLI(context.Background(), "gbash", []string{"compat", "exec", "cat", "out"}, strings.NewReader(""), stdoutFile, &stderr, false)
-	if err != nil {
-		t.Fatalf("runCLI() error = %v", err)
-	}
-	if exitCode != 1 {
-		t.Fatalf("exitCode = %d, want 1", exitCode)
-	}
-	if got, want := stderr.String(), "cat: out: input file is output file\n"; got != want {
-		t.Fatalf("stderr = %q, want %q", got, want)
-	}
-
-	data, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
-	}
-	if got, want := string(data), "x\n"; got != want {
-		t.Fatalf("file contents = %q, want %q", got, want)
-	}
-}
-
-func TestRunCLICompatExecUnknownCommandReturns127(t *testing.T) {
+func TestRunCLIHostUtilityUnknownCommandReturns127(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), "gbash", []string{"compat", "exec", "missing-command"}, strings.NewReader(""), &stdout, &stderr, false)
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "missing-command", nil, strings.NewReader(""), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
@@ -555,26 +476,7 @@ func TestRunCLICompatExecUnknownCommandReturns127(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecDeletedCommandReportsNotImplemented(t *testing.T) {
-	tmp := t.TempDir()
-	t.Chdir(tmp)
-
-	var stdout strings.Builder
-	var stderr strings.Builder
-
-	exitCode, err := runCLI(context.Background(), "gbash", []string{"compat", "exec", "mkfifo"}, strings.NewReader(""), &stdout, &stderr, false)
-	if err != nil {
-		t.Fatalf("runCLI() error = %v", err)
-	}
-	if exitCode != 1 {
-		t.Fatalf("exitCode = %d, want 1", exitCode)
-	}
-	if !strings.Contains(stderr.String(), "mkfifo: not implemented") {
-		t.Fatalf("stderr = %q, want not-implemented message", stderr.String())
-	}
-}
-
-func TestRunCLICompatExecYesReportsSingleWriteErrorOnDevFull(t *testing.T) {
+func TestRunCLIHostUtilityYesReportsSingleWriteErrorOnDevFull(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -590,7 +492,7 @@ func TestRunCLICompatExecYesReportsSingleWriteErrorOnDevFull(t *testing.T) {
 	defer func() { _ = full.Close() }()
 
 	var stderr strings.Builder
-	exitCode, err := runCLI(context.Background(), "gbash", []string{"compat", "exec", "yes", "x"}, strings.NewReader(""), full, &stderr, false)
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "yes", []string{"x"}, strings.NewReader(""), full, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
@@ -602,25 +504,21 @@ func TestRunCLICompatExecYesReportsSingleWriteErrorOnDevFull(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecEnvSupportsDoubleDashCommandSeparator(t *testing.T) {
+func TestRunCLIHostUtilityEnvSupportsDoubleDashCommandSeparator(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), "gbash", []string{"compat", "exec", "env", "--", "pwd", "-P"}, strings.NewReader(""), &stdout, &stderr, false)
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "env", []string{"--", "pwd", "-P"}, strings.NewReader(""), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
 	if exitCode != 0 {
 		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
 	}
-	physicalTmp, err := filepath.EvalSymlinks(tmp)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(%q) error = %v", tmp, err)
-	}
-	if got, want := stdout.String(), filepath.ToSlash(physicalTmp)+"\n"; got != want {
+	if got, want := stdout.String(), "/\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 	if got := stderr.String(); got != "" {
@@ -628,21 +526,8 @@ func TestRunCLICompatExecEnvSupportsDoubleDashCommandSeparator(t *testing.T) {
 	}
 }
 
-func TestRunCLIMulticallEnvSupportsAssignmentsAfterDoubleDash(t *testing.T) {
+func TestRunCLIHostUtilityEnvSupportsAssignmentsAfterDoubleDash(t *testing.T) {
 	tmp := t.TempDir()
-
-	commandDir := filepath.Join(tmp, "bin")
-	if err := os.MkdirAll(commandDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	envPath := filepath.Join(commandDir, "env")
-	if err := os.WriteFile(envPath, []byte("# compat shim\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile(%q) error = %v", envPath, err)
-	}
-	pwdPath := filepath.Join(commandDir, "pwd")
-	if err := os.WriteFile(pwdPath, []byte("# compat shim\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile(%q) error = %v", pwdPath, err)
-	}
 
 	physicalDir := filepath.Join(tmp, "a", "b")
 	if err := os.MkdirAll(physicalDir, 0o755); err != nil {
@@ -658,14 +543,14 @@ func TestRunCLIMulticallEnvSupportsAssignmentsAfterDoubleDash(t *testing.T) {
 
 	var stdout strings.Builder
 	var stderr strings.Builder
-	exitCode, err := runCLI(context.Background(), envPath, []string{"--", "POSIXLY_CORRECT=1", "pwd"}, strings.NewReader(""), &stdout, &stderr, false)
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "env", []string{"--", "POSIXLY_CORRECT=1", "pwd"}, strings.NewReader(""), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
 	if exitCode != 0 {
 		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
 	}
-	if got, want := stdout.String(), filepath.ToSlash(logicalDir)+"\n"; got != want {
+	if got, want := stdout.String(), "/a/b\n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 	if got := stderr.String(); got != "" {
@@ -673,7 +558,7 @@ func TestRunCLIMulticallEnvSupportsAssignmentsAfterDoubleDash(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecStreamsOutputBeforeExit(t *testing.T) {
+func TestRunCLIHostUtilityStreamsOutputBeforeExit(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -688,7 +573,7 @@ func TestRunCLICompatExecStreamsOutputBeforeExit(t *testing.T) {
 	}, 1)
 
 	go func() {
-		exitCode, err := runCLI(ctx, "gbash", []string{"compat", "exec", "seq", "999999", "inf"}, strings.NewReader(""), stdout, &stderr, false)
+		exitCode, err := runCLIHostUtility(t, ctx, tmp, "seq", []string{"999999", "inf"}, strings.NewReader(""), stdout, &stderr, false)
 		done <- struct {
 			exitCode int
 			err      error
@@ -696,7 +581,7 @@ func TestRunCLICompatExecStreamsOutputBeforeExit(t *testing.T) {
 	}()
 
 	if !stdout.WaitForSubstring("999999\n1000000\n", 500*time.Millisecond) {
-		t.Fatalf("stdout did not stream expected prefix before compat exec exited; got %q", stdout.String())
+		t.Fatalf("stdout did not stream expected prefix before the host utility exited; got %q", stdout.String())
 	}
 
 	result := <-done
@@ -711,7 +596,7 @@ func TestRunCLICompatExecStreamsOutputBeforeExit(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecTailFollowMissingFileByName(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowMissingFileByName(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -726,9 +611,7 @@ func TestRunCLICompatExecTailFollowMissingFileByName(t *testing.T) {
 	}, 1)
 
 	go func() {
-		exitCode, err := runCLI(ctx, "gbash", []string{
-			"compat", "exec", "tail", "-F", "-s0.05", "--max-unchanged-stats=1", "missing/file",
-		}, strings.NewReader(""), stdout, stderr, false)
+		exitCode, err := runCLIHostUtility(t, ctx, tmp, "tail", []string{"-F", "-s0.05", "--max-unchanged-stats=1", "missing/file"}, strings.NewReader(""), stdout, stderr, false)
 		done <- struct {
 			exitCode int
 			err      error
@@ -763,7 +646,7 @@ func TestRunCLICompatExecTailFollowMissingFileByName(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecTailFollowMissingFlatFileByName(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowMissingFlatFileByName(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -778,9 +661,7 @@ func TestRunCLICompatExecTailFollowMissingFlatFileByName(t *testing.T) {
 	}, 1)
 
 	go func() {
-		exitCode, err := runCLI(ctx, "gbash", []string{
-			"compat", "exec", "tail", "--follow=name", "--retry", "-s0.05", "--max-unchanged-stats=1", "missing",
-		}, strings.NewReader(""), stdout, stderr, false)
+		exitCode, err := runCLIHostUtility(t, ctx, tmp, "tail", []string{"--follow=name", "--retry", "-s0.05", "--max-unchanged-stats=1", "missing"}, strings.NewReader(""), stdout, stderr, false)
 		done <- struct {
 			exitCode int
 			err      error
@@ -812,7 +693,7 @@ func TestRunCLICompatExecTailFollowMissingFlatFileByName(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecTailFollowUntailableByNameUntilFileAppears(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowUntailableByNameUntilFileAppears(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -831,9 +712,7 @@ func TestRunCLICompatExecTailFollowUntailableByNameUntilFileAppears(t *testing.T
 	}, 1)
 
 	go func() {
-		exitCode, err := runCLI(ctx, "gbash", []string{
-			"compat", "exec", "tail", "-F", "-s0.05", "--max-unchanged-stats=1", "untailable",
-		}, strings.NewReader(""), stdout, stderr, false)
+		exitCode, err := runCLIHostUtility(t, ctx, tmp, "tail", []string{"-F", "-s0.05", "--max-unchanged-stats=1", "untailable"}, strings.NewReader(""), stdout, stderr, false)
 		done <- struct {
 			exitCode int
 			err      error
@@ -875,7 +754,7 @@ func TestRunCLICompatExecTailFollowUntailableByNameUntilFileAppears(t *testing.T
 	}
 }
 
-func TestRunCLICompatExecTailFollowDescriptorSurvivesRename(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowDescriptorSurvivesRename(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -894,9 +773,7 @@ func TestRunCLICompatExecTailFollowDescriptorSurvivesRename(t *testing.T) {
 	}, 1)
 
 	go func() {
-		exitCode, err := runCLI(ctx, "gbash", []string{
-			"compat", "exec", "tail", "-f", "-s0.05", "a",
-		}, strings.NewReader(""), stdout, stderr, false)
+		exitCode, err := runCLIHostUtility(t, ctx, tmp, "tail", []string{"-f", "-s0.05", "a"}, strings.NewReader(""), stdout, stderr, false)
 		done <- struct {
 			exitCode int
 			err      error
@@ -939,7 +816,7 @@ func TestRunCLICompatExecTailFollowDescriptorSurvivesRename(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecTailFollowByNameHandlesRenameAndReplacement(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowByNameHandlesRenameAndReplacement(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -960,9 +837,7 @@ func TestRunCLICompatExecTailFollowByNameHandlesRenameAndReplacement(t *testing.
 	}, 1)
 
 	go func() {
-		exitCode, err := runCLI(ctx, "gbash", []string{
-			"compat", "exec", "tail", "-F", "-s0.05", "--max-unchanged-stats=1", "a", "b",
-		}, strings.NewReader(""), stdout, stderr, false)
+		exitCode, err := runCLIHostUtility(t, ctx, tmp, "tail", []string{"-F", "-s0.05", "--max-unchanged-stats=1", "a", "b"}, strings.NewReader(""), stdout, stderr, false)
 		done <- struct {
 			exitCode int
 			err      error
@@ -1047,7 +922,7 @@ func TestRunCLICompatExecTailFollowByNameHandlesRenameAndReplacement(t *testing.
 	}
 }
 
-func TestRunCLICompatExecTailGroupedQuietFollowFlags(t *testing.T) {
+func TestRunCLIHostUtilityTailGroupedQuietFollowFlags(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1068,9 +943,7 @@ func TestRunCLICompatExecTailGroupedQuietFollowFlags(t *testing.T) {
 	}, 1)
 
 	go func() {
-		exitCode, err := runCLI(ctx, "gbash", []string{
-			"compat", "exec", "tail", "-qF", "-s0.05", "--max-unchanged-stats=1", "1", "2",
-		}, strings.NewReader(""), stdout, stderr, false)
+		exitCode, err := runCLIHostUtility(t, ctx, tmp, "tail", []string{"-qF", "-s0.05", "--max-unchanged-stats=1", "1", "2"}, strings.NewReader(""), stdout, stderr, false)
 		done <- struct {
 			exitCode int
 			err      error
@@ -1102,16 +975,14 @@ func TestRunCLICompatExecTailGroupedQuietFollowFlags(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecTailFollowByNameWithoutRetryFailsWhenMissingInitially(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowByNameWithoutRetryFailsWhenMissingInitially(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), "gbash", []string{
-		"compat", "exec", "tail", "--follow=name", "no-such",
-	}, strings.NewReader(""), &stdout, &stderr, false)
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "tail", []string{"--follow=name", "no-such"}, strings.NewReader(""), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
@@ -1129,7 +1000,7 @@ func TestRunCLICompatExecTailFollowByNameWithoutRetryFailsWhenMissingInitially(t
 	}
 }
 
-func TestRunCLICompatExecTailFollowByNameWithoutRetryStopsWhenFileDisappears(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowByNameWithoutRetryStopsWhenFileDisappears(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1148,9 +1019,7 @@ func TestRunCLICompatExecTailFollowByNameWithoutRetryStopsWhenFileDisappears(t *
 	}, 1)
 
 	go func() {
-		exitCode, err := runCLI(ctx, "gbash", []string{
-			"compat", "exec", "tail", "--follow=name", "-s0.05", "--max-unchanged-stats=1", "file",
-		}, strings.NewReader(""), stdout, stderr, false)
+		exitCode, err := runCLIHostUtility(t, ctx, tmp, "tail", []string{"--follow=name", "-s0.05", "--max-unchanged-stats=1", "file"}, strings.NewReader(""), stdout, stderr, false)
 		done <- struct {
 			exitCode int
 			err      error
@@ -1184,7 +1053,7 @@ func TestRunCLICompatExecTailFollowByNameWithoutRetryStopsWhenFileDisappears(t *
 	}
 }
 
-func TestRunCLICompatExecTailFollowByNameWithoutRetryTracksReappearingFileWhileOthersRemain(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowByNameWithoutRetryTracksReappearingFileWhileOthersRemain(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1205,9 +1074,7 @@ func TestRunCLICompatExecTailFollowByNameWithoutRetryTracksReappearingFileWhileO
 	}, 1)
 
 	go func() {
-		exitCode, err := runCLI(ctx, "gbash", []string{
-			"compat", "exec", "tail", "--follow=name", "-s0.05", "--max-unchanged-stats=1", "a", "foo",
-		}, strings.NewReader(""), stdout, stderr, false)
+		exitCode, err := runCLIHostUtility(t, ctx, tmp, "tail", []string{"--follow=name", "-s0.05", "--max-unchanged-stats=1", "a", "foo"}, strings.NewReader(""), stdout, stderr, false)
 		done <- struct {
 			exitCode int
 			err      error
@@ -1254,7 +1121,7 @@ func TestRunCLICompatExecTailFollowByNameWithoutRetryTracksReappearingFileWhileO
 	}
 }
 
-func TestRunCLICompatExecTailFollowPidIsUnsupported(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowPidIsUnsupported(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1265,9 +1132,7 @@ func TestRunCLICompatExecTailFollowPidIsUnsupported(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), "gbash", []string{
-		"compat", "exec", "tail", "-f", "-s0.05", "--pid=2147483647", "--pid=" + strconv.Itoa(os.Getpid()), "here",
-	}, strings.NewReader(""), &stdout, &stderr, false)
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "tail", []string{"-f", "-s0.05", "--pid=2147483647", "--pid=" + strconv.Itoa(os.Getpid()), "here"}, strings.NewReader(""), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
@@ -1282,7 +1147,7 @@ func TestRunCLICompatExecTailFollowPidIsUnsupported(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecTailFollowPidIsUnsupportedForDeadPidToo(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowPidIsUnsupportedForDeadPidToo(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1293,9 +1158,7 @@ func TestRunCLICompatExecTailFollowPidIsUnsupportedForDeadPidToo(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), "gbash", []string{
-		"compat", "exec", "tail", "-f", "-s10", "--pid=2147483647", "empty",
-	}, strings.NewReader(""), &stdout, &stderr, false)
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "tail", []string{"-f", "-s10", "--pid=2147483647", "empty"}, strings.NewReader(""), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
@@ -1310,7 +1173,7 @@ func TestRunCLICompatExecTailFollowPidIsUnsupportedForDeadPidToo(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecTailRetryWarnsWithoutFollow(t *testing.T) {
+func TestRunCLIHostUtilityTailRetryWarnsWithoutFollow(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1321,9 +1184,7 @@ func TestRunCLICompatExecTailRetryWarnsWithoutFollow(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), "gbash", []string{
-		"compat", "exec", "tail", "--retry", "file",
-	}, strings.NewReader(""), &stdout, &stderr, false)
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "tail", []string{"--retry", "file"}, strings.NewReader(""), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
@@ -1338,7 +1199,7 @@ func TestRunCLICompatExecTailRetryWarnsWithoutFollow(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecTailRetryDescriptorReportsAppearanceAndTruncation(t *testing.T) {
+func TestRunCLIHostUtilityTailRetryDescriptorReportsAppearanceAndTruncation(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1353,9 +1214,7 @@ func TestRunCLICompatExecTailRetryDescriptorReportsAppearanceAndTruncation(t *te
 	}, 1)
 
 	go func() {
-		exitCode, err := runCLI(ctx, "gbash", []string{
-			"compat", "exec", "tail", "--follow=descriptor", "--retry", "-s0.05", "missing",
-		}, strings.NewReader(""), stdout, stderr, false)
+		exitCode, err := runCLIHostUtility(t, ctx, tmp, "tail", []string{"--follow=descriptor", "--retry", "-s0.05", "missing"}, strings.NewReader(""), stdout, stderr, false)
 		done <- struct {
 			exitCode int
 			err      error
@@ -1399,7 +1258,7 @@ func TestRunCLICompatExecTailRetryDescriptorReportsAppearanceAndTruncation(t *te
 	}
 }
 
-func TestRunCLICompatExecTailRetryDescriptorGivesUpOnUntailableReplacement(t *testing.T) {
+func TestRunCLIHostUtilityTailRetryDescriptorGivesUpOnUntailableReplacement(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1411,9 +1270,7 @@ func TestRunCLICompatExecTailRetryDescriptorGivesUpOnUntailableReplacement(t *te
 	}, 1)
 
 	go func() {
-		exitCode, err := runCLI(context.Background(), "gbash", []string{
-			"compat", "exec", "tail", "--follow=descriptor", "--retry", "-s0.05", "missing",
-		}, strings.NewReader(""), &stdout, stderr, false)
+		exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "tail", []string{"--follow=descriptor", "--retry", "-s0.05", "missing"}, strings.NewReader(""), &stdout, stderr, false)
 		done <- struct {
 			exitCode int
 			err      error
@@ -1445,16 +1302,14 @@ func TestRunCLICompatExecTailRetryDescriptorGivesUpOnUntailableReplacement(t *te
 	}
 }
 
-func TestRunCLICompatExecTailFollowDashReadsStandardInput(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowDashReadsStandardInput(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), "gbash", []string{
-		"compat", "exec", "tail", "-f", "-",
-	}, strings.NewReader("line\n"), &stdout, &stderr, false)
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "tail", []string{"-f", "-"}, strings.NewReader("line\n"), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
@@ -1469,7 +1324,7 @@ func TestRunCLICompatExecTailFollowDashReadsStandardInput(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecTailFollowDashReportsClosedStdin(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowDashReportsClosedStdin(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1488,9 +1343,7 @@ func TestRunCLICompatExecTailFollowDashReportsClosedStdin(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), "gbash", []string{
-		"compat", "exec", "tail", "-f", "-",
-	}, stdin, &stdout, &stderr, false)
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "tail", []string{"-f", "-"}, stdin, &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
@@ -1508,16 +1361,14 @@ func TestRunCLICompatExecTailFollowDashReportsClosedStdin(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecTailFollowNameRejectsDash(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowNameRejectsDash(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), "gbash", []string{
-		"compat", "exec", "tail", "--follow=name", "-",
-	}, strings.NewReader("line\n"), &stdout, &stderr, false)
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "tail", []string{"--follow=name", "-"}, strings.NewReader("line\n"), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
@@ -1532,7 +1383,7 @@ func TestRunCLICompatExecTailFollowNameRejectsDash(t *testing.T) {
 	}
 }
 
-func TestRunCLICompatExecTailDebugReportsPollingMode(t *testing.T) {
+func TestRunCLIHostUtilityTailDebugReportsPollingMode(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1551,9 +1402,7 @@ func TestRunCLICompatExecTailDebugReportsPollingMode(t *testing.T) {
 	}, 1)
 
 	go func() {
-		exitCode, err := runCLI(ctx, "gbash", []string{
-			"compat", "exec", "tail", "--debug", "-n0", "-F", "-s0.05", "a",
-		}, strings.NewReader(""), &stdout, stderr, false)
+		exitCode, err := runCLIHostUtility(t, ctx, tmp, "tail", []string{"--debug", "-n0", "-F", "-s0.05", "a"}, strings.NewReader(""), &stdout, stderr, false)
 		done <- struct {
 			exitCode int
 			err      error
@@ -1576,90 +1425,8 @@ func TestRunCLICompatExecTailDebugReportsPollingMode(t *testing.T) {
 	}
 }
 
-func TestRunCLIMulticallUsesArgv0CommandAndBypassesTTYRepl(t *testing.T) {
+func TestRunCLIHostUtilityPwdHonorsLogicalAndPhysicalModes(t *testing.T) {
 	tmp := t.TempDir()
-	t.Chdir(tmp)
-
-	commandDir := filepath.Join(tmp, "bin")
-	if err := os.MkdirAll(commandDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	commandPath := filepath.Join(commandDir, "pwd")
-	if err := os.WriteFile(commandPath, []byte("# compat shim\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile(%q) error = %v", commandPath, err)
-	}
-
-	var stdout strings.Builder
-	var stderr strings.Builder
-
-	exitCode, err := runCLI(context.Background(), commandPath, nil, strings.NewReader("ignored"), &stdout, &stderr, true)
-	if err != nil {
-		t.Fatalf("runCLI() error = %v", err)
-	}
-	if exitCode != 0 {
-		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
-	}
-	physicalTmp, err := filepath.EvalSymlinks(tmp)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(%q) error = %v", tmp, err)
-	}
-	want := filepath.ToSlash(physicalTmp) + "\n"
-	if stdout.String() != want {
-		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
-	}
-	if strings.Contains(stdout.String(), "~$") {
-		t.Fatalf("stdout = %q, did not expect interactive prompt", stdout.String())
-	}
-	if got := stderr.String(); got != "" {
-		t.Fatalf("stderr = %q, want empty", got)
-	}
-}
-
-func TestRunCLIMulticallBareArgv0ResolvesCommandDirFromPATH(t *testing.T) {
-	tmp := t.TempDir()
-	t.Chdir(tmp)
-
-	commandDir := filepath.Join(tmp, "bin")
-	if err := os.MkdirAll(commandDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	for _, name := range []string{"sh", "echo", "printf"} {
-		commandPath := filepath.Join(commandDir, name)
-		if err := os.WriteFile(commandPath, []byte("# compat shim\n"), 0o755); err != nil {
-			t.Fatalf("WriteFile(%q) error = %v", commandPath, err)
-		}
-	}
-	t.Setenv("PATH", commandDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	var stdout strings.Builder
-	var stderr strings.Builder
-
-	exitCode, err := runCLI(context.Background(), "sh", []string{"-c", "printf 'ok\\n'; echo $#", "ignored", "1", "2", "3"}, strings.NewReader(""), &stdout, &stderr, false)
-	if err != nil {
-		t.Fatalf("runCLI() error = %v", err)
-	}
-	if exitCode != 0 {
-		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
-	}
-	if got, want := stdout.String(), "ok\n3\n"; got != want {
-		t.Fatalf("stdout = %q, want %q", got, want)
-	}
-	if got := stderr.String(); got != "" {
-		t.Fatalf("stderr = %q, want empty", got)
-	}
-}
-
-func TestRunCLIMulticallPwdHonorsLogicalAndPhysicalModes(t *testing.T) {
-	tmp := t.TempDir()
-
-	commandDir := filepath.Join(tmp, "bin")
-	if err := os.MkdirAll(commandDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	commandPath := filepath.Join(commandDir, "pwd")
-	if err := os.WriteFile(commandPath, []byte("# compat shim\n"), 0o755); err != nil {
-		t.Fatalf("WriteFile(%q) error = %v", commandPath, err)
-	}
 
 	physicalDir := filepath.Join(tmp, "a", "b")
 	if err := os.MkdirAll(physicalDir, 0o755); err != nil {
@@ -1672,23 +1439,18 @@ func TestRunCLIMulticallPwdHonorsLogicalAndPhysicalModes(t *testing.T) {
 
 	t.Chdir(logicalDir)
 	t.Setenv("PWD", filepath.ToSlash(logicalDir))
-	physicalLogicalDir, err := filepath.EvalSymlinks(logicalDir)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(%q) error = %v", logicalDir, err)
-	}
-	physicalLogicalDir = filepath.ToSlash(physicalLogicalDir)
 
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), commandPath, []string{"-L"}, strings.NewReader("ignored"), &stdout, &stderr, false)
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "pwd", []string{"-L"}, strings.NewReader("ignored"), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI(-L) error = %v", err)
 	}
 	if exitCode != 0 {
 		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
 	}
-	if got, want := stdout.String(), filepath.ToSlash(logicalDir)+"\n"; got != want {
+	if got, want := stdout.String(), "/a/b\n"; got != want {
 		t.Fatalf("stdout(-L) = %q, want %q", got, want)
 	}
 	if got := stderr.String(); got != "" {
@@ -1697,14 +1459,14 @@ func TestRunCLIMulticallPwdHonorsLogicalAndPhysicalModes(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	exitCode, err = runCLI(context.Background(), commandPath, []string{"--physical"}, strings.NewReader("ignored"), &stdout, &stderr, false)
+	exitCode, err = runCLIHostUtility(t, context.Background(), tmp, "pwd", []string{"--physical"}, strings.NewReader("ignored"), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI(--physical) error = %v", err)
 	}
 	if exitCode != 0 {
 		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
 	}
-	if got, want := stdout.String(), physicalLogicalDir+"\n"; got != want {
+	if got, want := stdout.String(), "/a/b\n"; got != want {
 		t.Fatalf("stdout(--physical) = %q, want %q", got, want)
 	}
 	if got := stderr.String(); got != "" {
@@ -1714,19 +1476,75 @@ func TestRunCLIMulticallPwdHonorsLogicalAndPhysicalModes(t *testing.T) {
 	t.Setenv("POSIXLY_CORRECT", "1")
 	stdout.Reset()
 	stderr.Reset()
-	exitCode, err = runCLI(context.Background(), commandPath, nil, strings.NewReader("ignored"), &stdout, &stderr, false)
+	exitCode, err = runCLIHostUtility(t, context.Background(), tmp, "pwd", nil, strings.NewReader("ignored"), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI(POSIXLY_CORRECT) error = %v", err)
 	}
 	if exitCode != 0 {
 		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
 	}
-	if got, want := stdout.String(), filepath.ToSlash(logicalDir)+"\n"; got != want {
+	if got, want := stdout.String(), "/a/b\n"; got != want {
 		t.Fatalf("stdout(POSIXLY_CORRECT) = %q, want %q", got, want)
 	}
 	if got := stderr.String(); got != "" {
 		t.Fatalf("stderr(POSIXLY_CORRECT) = %q, want empty", got)
 	}
+}
+
+func runCLIHostUtility(t *testing.T, ctx context.Context, root, utility string, utilityArgs []string, stdin io.Reader, stdout, stderr io.Writer, stdinTTY bool) (int, error) {
+	t.Helper()
+
+	sandboxCwd, err := currentSandboxCwd(root)
+	if err != nil {
+		t.Fatalf("currentSandboxCwd(%q) error = %v", root, err)
+	}
+
+	args := []string{"--readwrite-root", root, "--cwd", sandboxCwd, "-c", `exec "$@"`, "_", utility}
+	args = append(args, utilityArgs...)
+	return runCLI(ctx, "gbash", args, stdin, stdout, stderr, stdinTTY)
+}
+
+func currentSandboxCwd(root string) (string, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	cwd, err = filepath.EvalSymlinks(cwd)
+	if err != nil {
+		return "", err
+	}
+	sandboxCwd, ok, err := sandboxPathWithinRoot(root, cwd)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("cwd %q is outside %q", cwd, root)
+	}
+	return sandboxCwd, nil
+}
+
+func sandboxPathWithinRoot(root, cwd string) (string, bool, error) {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(cwd))
+	if err != nil {
+		return "", false, err
+	}
+	if rel == "." {
+		return "/", true, nil
+	}
+	parent := ".." + string(os.PathSeparator)
+	if rel == ".." || strings.HasPrefix(rel, parent) {
+		return "", false, nil
+	}
+	return "/" + filepath.ToSlash(rel), true, nil
 }
 
 type streamingWriter struct {

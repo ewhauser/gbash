@@ -195,14 +195,14 @@ func prepareExecutionPlan(ctx context.Context, mf *manifest, env *executionEnv, 
 	if err := prepareProgramDir(env.workDir, env.gbashBin, programs); err != nil {
 		return nil, err
 	}
-	configShell, err := compatConfigShellPath(env.workDir)
+	configShell, err := harnessConfigShellPath(env.workDir)
 	if err != nil {
 		return nil, err
 	}
 	if err := disableCheckRebuild(env.workDir); err != nil {
 		return nil, err
 	}
-	if err := installCompatTestHooks(env.workDir, env.gbashBin); err != nil {
+	if err := installHarnessTestHooks(env.workDir, env.gbashBin); err != nil {
 		return nil, err
 	}
 	allTests, globalSkipped, err := discoverRunnableTests(env.workDir, mf.SkipPatterns, explicitTests)
