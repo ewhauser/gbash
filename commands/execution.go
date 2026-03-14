@@ -7,6 +7,8 @@ import (
 	"github.com/ewhauser/gbash/trace"
 )
 
+// ExecutionRequest describes a non-interactive nested shell or command
+// execution launched through [Invocation.Exec].
 type ExecutionRequest struct {
 	Name            string
 	Interpreter     string
@@ -24,6 +26,7 @@ type ExecutionRequest struct {
 	Stderr          io.Writer
 }
 
+// ExecutionResult reports the outcome of an [ExecutionRequest].
 type ExecutionResult struct {
 	ExitCode        int
 	ShellExited     bool
@@ -39,6 +42,8 @@ type ExecutionResult struct {
 	StderrTruncated bool
 }
 
+// InteractiveRequest describes an interactive nested shell launched through
+// [Invocation.Interact].
 type InteractiveRequest struct {
 	Name           string
 	Args           []string
@@ -51,6 +56,7 @@ type InteractiveRequest struct {
 	Stderr         io.Writer
 }
 
+// InteractiveResult reports the outcome of an [InteractiveRequest].
 type InteractiveResult struct {
 	ExitCode int
 }

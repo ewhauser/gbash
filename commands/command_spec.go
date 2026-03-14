@@ -9,26 +9,38 @@ import (
 	"strings"
 )
 
+// SpecProvider exposes declarative command metadata for shared parsing, help,
+// and version rendering.
 type SpecProvider interface {
 	Spec() CommandSpec
 }
 
+// ParsedRunner executes a command after [ParseCommandSpec] has matched its
+// arguments to a [CommandSpec].
 type ParsedRunner interface {
 	RunParsed(context.Context, *Invocation, *ParsedCommand) error
 }
 
+// ParseInvocationNormalizer lets a command adjust the invocation used for
+// parsing without affecting the execution invocation.
 type ParseInvocationNormalizer interface {
 	NormalizeInvocation(*Invocation) *Invocation
 }
 
+// ParseErrorNormalizer lets a command rewrite parse failures from the shared
+// parser into command-specific errors.
 type ParseErrorNormalizer interface {
 	NormalizeParseError(*Invocation, error) error
 }
 
+// LegacySpecProvider marks commands that intentionally keep legacy parsing
+// behavior instead of the shared spec layer.
 type LegacySpecProvider interface {
 	LegacyReason() string
 }
 
+// CommandSpec describes a command's help text, arguments, options, and parser
+// behavior.
 type CommandSpec struct {
 	Name            string
 	About           string
@@ -41,6 +53,7 @@ type CommandSpec struct {
 	VersionRenderer func(io.Writer, CommandSpec) error
 }
 
+// ParseConfig controls which command-line forms [ParseCommandSpec] accepts.
 type ParseConfig struct {
 	InferLongOptions         bool
 	GroupShortOptions        bool
@@ -53,14 +66,19 @@ type ParseConfig struct {
 	AutoVersion              bool
 }
 
+// OptionArity describes whether an option accepts a value.
 type OptionArity int
 
 const (
+	// OptionNoValue declares a flag that does not accept a value.
 	OptionNoValue OptionArity = iota
+	// OptionRequiredValue declares an option that must be followed by a value.
 	OptionRequiredValue
+	// OptionOptionalValue declares an option that may carry a value.
 	OptionOptionalValue
 )
 
+// OptionSpec describes one named option in a [CommandSpec].
 type OptionSpec struct {
 	Name                    string
 	Short                   rune
@@ -77,6 +95,7 @@ type OptionSpec struct {
 	OptionalValueEqualsOnly bool
 }
 
+// ArgSpec describes one positional argument in a [CommandSpec].
 type ArgSpec struct {
 	Name       string
 	ValueName  string
@@ -86,6 +105,7 @@ type ArgSpec struct {
 	Default    []string
 }
 
+// ParsedCommand contains the parsed values for one [CommandSpec] invocation.
 type ParsedCommand struct {
 	Spec         CommandSpec
 	optionValues map[string][]string
@@ -95,10 +115,12 @@ type ParsedCommand struct {
 	positionals  []string
 }
 
+// Has reports whether option name was seen.
 func (m *ParsedCommand) Has(name string) bool {
 	return m != nil && m.optionCount[name] > 0
 }
 
+// Count reports how many times option name was seen.
 func (m *ParsedCommand) Count(name string) int {
 	if m == nil {
 		return 0
@@ -106,6 +128,7 @@ func (m *ParsedCommand) Count(name string) int {
 	return m.optionCount[name]
 }
 
+// Value returns the last parsed value for option name.
 func (m *ParsedCommand) Value(name string) string {
 	if m == nil {
 		return ""
@@ -117,6 +140,7 @@ func (m *ParsedCommand) Value(name string) string {
 	return values[len(values)-1]
 }
 
+// Values returns all parsed values for option name.
 func (m *ParsedCommand) Values(name string) []string {
 	if m == nil {
 		return nil
@@ -124,6 +148,7 @@ func (m *ParsedCommand) Values(name string) []string {
 	return append([]string(nil), m.optionValues[name]...)
 }
 
+// Arg returns the first parsed value for positional argument name.
 func (m *ParsedCommand) Arg(name string) string {
 	if m == nil {
 		return ""
@@ -135,6 +160,7 @@ func (m *ParsedCommand) Arg(name string) string {
 	return values[0]
 }
 
+// Args returns all parsed values for positional argument name.
 func (m *ParsedCommand) Args(name string) []string {
 	if m == nil {
 		return nil
@@ -142,6 +168,7 @@ func (m *ParsedCommand) Args(name string) []string {
 	return append([]string(nil), m.argValues[name]...)
 }
 
+// Positionals returns the raw positional arguments in parse order.
 func (m *ParsedCommand) Positionals() []string {
 	if m == nil {
 		return nil
@@ -149,6 +176,8 @@ func (m *ParsedCommand) Positionals() []string {
 	return append([]string(nil), m.positionals...)
 }
 
+// RunCommand executes cmd through the shared spec layer when it implements
+// [SpecProvider] and [ParsedRunner], otherwise it falls back to [Command.Run].
 func RunCommand(ctx context.Context, cmd Command, inv *Invocation) error {
 	if cmd == nil {
 		return nil
@@ -203,6 +232,10 @@ func runCommandWithSpec(ctx context.Context, cmd Command, inv, parseInv *Invocat
 	}
 }
 
+// ParseCommandSpec parses inv.Args against spec and returns the parsed matches.
+//
+// The returned action is "help" or "version" when automatic help/version
+// handling should take over.
 func ParseCommandSpec(inv *Invocation, spec *CommandSpec) (*ParsedCommand, string, error) {
 	spec = normalizeCommandSpec(spec)
 	parsed := &ParsedCommand{
@@ -490,6 +523,8 @@ func matchShortOption(spec *CommandSpec, short rune) (*OptionSpec, bool) {
 	return nil, false
 }
 
+// RenderCommandHelp writes help text for spec using either the command-specific
+// renderer or the shared default renderer.
 func RenderCommandHelp(w io.Writer, spec *CommandSpec) error {
 	spec = normalizeCommandSpec(spec)
 	displaySpec := *spec
@@ -553,6 +588,8 @@ func RenderCommandHelp(w io.Writer, spec *CommandSpec) error {
 	return err
 }
 
+// RenderCommandVersion writes version output for spec using either the
+// command-specific renderer or the shared default renderer.
 func RenderCommandVersion(w io.Writer, spec *CommandSpec) error {
 	if spec.VersionRenderer != nil {
 		return spec.VersionRenderer(w, *spec)

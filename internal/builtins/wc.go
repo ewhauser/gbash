@@ -122,7 +122,7 @@ func (c *WC) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedComm
 			data, _, err = readAllFile(ctx, inv, file)
 		}
 		if err != nil {
-			_, _ = fmt.Fprintf(inv.Stderr, "wc: %s: No such file or directory\n", file)
+			_, _ = fmt.Fprintf(inv.Stderr, "wc: %s: %s\n", file, readAllErrorText(err))
 			exitCode = 1
 			continue
 		}
@@ -210,7 +210,7 @@ func wcResolveInputs(ctx context.Context, inv *Invocation, opts *wcOptions, file
 	} else {
 		data, _, readErr = readAllFile(ctx, inv, source)
 		if readErr != nil {
-			return nil, 0, exitf(inv, 1, "wc: cannot open %s for reading: No such file or directory", quoteGNUOperand(source))
+			return nil, 0, exitf(inv, 1, "wc: cannot open %s for reading: %s", quoteGNUOperand(source), readAllErrorText(readErr))
 		}
 	}
 	return parseWCFiles0From(inv, source, data), 0, nil

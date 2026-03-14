@@ -43,7 +43,14 @@ Creates `Invocation` instances and exposes the policy-enforced filesystem wrappe
 - `NewInvocation(opts)` — builds an `Invocation` from `InvocationOptions`
 - `InvocationOptions` — inputs for constructing an invocation
 - `CommandFS` — wraps `gbfs.FileSystem` with policy-aware filesystem operations
+- `(*CommandFS).ReadFile(ctx, name)` — slurp a file while enforcing `Limits.MaxFileBytes`
 - `FetchFunc` — network callback type using `network.Request` / `network.Response`
+
+### read.go
+Shared bounded-read helpers for command authors.
+
+- `ReadAll(ctx, inv, reader)` — read from a reader with context cancellation and `Limits.MaxFileBytes` enforcement
+- `ReadAllStdin(ctx, inv)` — read `inv.Stdin` with the same limit enforcement
 
 ### execution.go
 Data types for subprocess and interactive shell execution.

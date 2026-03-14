@@ -628,7 +628,7 @@ func collectSortInput(ctx context.Context, inv *Invocation, opts *sortOptions, f
 		default:
 			read, _, err := readAllFile(ctx, inv, file)
 			if err != nil {
-				_, _ = fmt.Fprintf(inv.Stderr, "sort: %s: No such file or directory\n", file)
+				_, _ = fmt.Fprintf(inv.Stderr, "sort: %s: %s\n", file, readAllErrorText(err))
 				exitCode = 1
 				continue
 			}
@@ -662,7 +662,7 @@ func sortInputFiles(ctx context.Context, inv *Invocation, opts *sortOptions, fil
 	} else {
 		data, _, err = readAllFile(ctx, inv, source)
 		if err != nil {
-			return nil, sortOptionf(inv, "sort: open failed: %s: No such file or directory", source)
+			return nil, sortOptionf(inv, "sort: open failed: %s: %s", source, readAllErrorText(err))
 		}
 	}
 	return parseSortFiles0From(inv, source, data)

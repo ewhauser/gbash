@@ -440,6 +440,9 @@ func (m *MVdan) execHandler(exec *Execution, budget *executionBudget) interp.Exe
 		}
 
 		if code, ok := commands.ExitCode(err); ok {
+			if message, ok := commands.DiagnosticMessage(err); ok && hc.Stderr != nil {
+				_, _ = fmt.Fprintln(hc.Stderr, message)
+			}
 			if !internal {
 				recordCommand(exec.Trace, trace.EventCommandExit, traceCommandInfo(args, false, &commandTraceResolution{
 					Dir:              virtualWD,

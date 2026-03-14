@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	stdfs "io/fs"
 	"path"
 	"strconv"
@@ -136,7 +135,7 @@ func loadPermissionPasswd(ctx context.Context, inv *Invocation, db *permissionId
 		return
 	}
 	defer func() { _ = input.Close() }()
-	data, err := io.ReadAll(input)
+	data, err := readAllReader(ctx, inv, input)
 	if err != nil {
 		return
 	}
@@ -165,7 +164,7 @@ func loadPermissionGroup(ctx context.Context, inv *Invocation, db *permissionIde
 		return
 	}
 	defer func() { _ = input.Close() }()
-	data, err := io.ReadAll(input)
+	data, err := readAllReader(ctx, inv, input)
 	if err != nil {
 		return
 	}

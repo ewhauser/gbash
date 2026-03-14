@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/ewhauser/gbash/policy"
 )
 
 type endlessClosableReader struct {
@@ -51,7 +53,15 @@ func TestTimeoutCancelsSplitStdinReadWhenReaderIsNotClosable(t *testing.T) {
 func assertTimedSplit(t *testing.T, stdin io.Reader) {
 	t.Helper()
 
-	rt := newRuntime(t, &Config{})
+	rt := newRuntime(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:  []string{"/"},
+			WriteRoots: []string{"/"},
+			Limits: policy.Limits{
+				MaxFileBytes: 1 << 30,
+			},
+		}),
+	})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
 		Script: "timeout 0.02 split --filter='head -c1 >/dev/null' -n r/1 - || echo timed\n",

@@ -2,7 +2,6 @@ package builtins
 
 import (
 	"context"
-	"io"
 	"syscall"
 )
 
@@ -166,7 +165,7 @@ func readBasencInput(ctx context.Context, inv *Invocation, name string) ([]byte,
 	}
 	defer func() { _ = file.Close() }()
 
-	data, err := io.ReadAll(file)
+	data, err := readAllReader(ctx, inv, file)
 	if err != nil {
 		return nil, basencReadError(inv, err)
 	}

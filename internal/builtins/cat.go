@@ -253,7 +253,7 @@ func catHostOffset(file catHostHandle) int64 {
 
 func readCatInput(ctx context.Context, inv *Invocation, name string) (data []byte, label string, err error) {
 	if name == "-" {
-		data, err := io.ReadAll(inv.Stdin)
+		data, err := readAllReader(ctx, inv, inv.Stdin)
 		return data, name, err
 	}
 	abs, err := allowPath(ctx, inv, policy.FileActionRead, name)
@@ -274,7 +274,7 @@ func readCatInput(ctx context.Context, inv *Invocation, name string) (data []byt
 	if info, statErr := file.Stat(); statErr == nil && info != nil && info.IsDir() {
 		return nil, abs, errors.New("is a directory")
 	}
-	data, err = io.ReadAll(file)
+	data, err = readAllReader(ctx, inv, file)
 	return data, abs, err
 }
 

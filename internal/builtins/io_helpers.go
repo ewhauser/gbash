@@ -3,9 +3,8 @@ package builtins
 import (
 	"context"
 	"io"
-	"strings"
 
-	"github.com/ewhauser/gbash/internal/commandutil"
+	"github.com/ewhauser/gbash/commands"
 )
 
 func readAllFile(ctx context.Context, inv *Invocation, name string) (data []byte, abs string, err error) {
@@ -15,21 +14,28 @@ func readAllFile(ctx context.Context, inv *Invocation, name string) (data []byte
 	}
 	defer func() { _ = file.Close() }()
 
-	data, err = io.ReadAll(file)
+	data, err = readAllReader(ctx, inv, file)
 	if err != nil {
-		return nil, "", &ExitError{Code: 1, Err: err}
+		return nil, "", err
 	}
 	return data, abs, nil
 }
 
 func readAllStdin(ctx context.Context, inv *Invocation) ([]byte, error) {
-	stdin := io.Reader(strings.NewReader(""))
-	if inv != nil && inv.Stdin != nil {
-		stdin = inv.Stdin
+	return commands.ReadAllStdin(ctx, inv)
+}
+
+func readAllReader(ctx context.Context, inv *Invocation, reader io.Reader) ([]byte, error) {
+	return commands.ReadAll(ctx, inv, reader)
+}
+
+func readAllErrorText(err error) string {
+	switch {
+	case errorsIsNotExist(err):
+		return "No such file or directory"
+	case errorsIsDirectory(err):
+		return "Is a directory"
+	default:
+		return err.Error()
 	}
-	data, err := io.ReadAll(commandutil.ReaderWithContext(ctx, stdin))
-	if err != nil {
-		return nil, &ExitError{Code: 1, Err: err}
-	}
-	return data, nil
 }

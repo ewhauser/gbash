@@ -2,8 +2,10 @@ package builtins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	stdfs "io/fs"
 )
 
 type Bash struct {
@@ -91,7 +93,10 @@ func (c *Bash) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCo
 	case BashSourceFile:
 		scriptData, _, err := readAllFile(ctx, inv, parsed.ScriptPath)
 		if err != nil {
-			return exitf(inv, 127, "%s: %s: No such file or directory", c.name, parsed.ScriptPath)
+			if errors.Is(err, stdfs.ErrNotExist) {
+				return exitf(inv, 127, "%s: %s: No such file or directory", c.name, parsed.ScriptPath)
+			}
+			return exitf(inv, 1, "%s: %s: %s", c.name, parsed.ScriptPath, readAllErrorText(err))
 		}
 		return c.executeInlineScript(ctx, inv, parsed, string(scriptData), inv.Stdin)
 	default:
@@ -100,9 +105,9 @@ func (c *Bash) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCo
 }
 
 func (c *Bash) executeStdinScript(ctx context.Context, inv *Invocation, parsed *BashInvocation) error {
-	data, err := io.ReadAll(inv.Stdin)
+	data, err := readAllReader(ctx, inv, inv.Stdin)
 	if err != nil {
-		return &ExitError{Code: 1, Err: err}
+		return err
 	}
 	if len(data) == 0 {
 		return nil

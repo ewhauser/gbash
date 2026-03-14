@@ -36,10 +36,10 @@ linters:
 
     depguard:
       rules:
-        commands_host_packages:
+        builtins_host_packages:
           files:
-            - commands/*.go
-            - "!commands/*_test.go"
+            - internal/builtins/*.go
+            - "!internal/builtins/*_test.go"
           deny:
             - pkg: os/exec$
               desc: Use inv.Exec or executeCommand so subprocess policy is enforced.
@@ -55,45 +55,45 @@ linters:
               desc: Use inv.Fetch instead of direct host TLS clients or listeners.
             - pkg: net$
               desc: Use invocation network capabilities instead of direct host networking.
-        commands_net_http:
+        builtins_net_http:
           files:
-            - commands/*.go
-            - "!commands/*_test.go"
-            - "!commands/curl.go"
-            - "!commands/file.go"
+            - internal/builtins/*.go
+            - "!internal/builtins/*_test.go"
+            - "!internal/builtins/curl.go"
+            - "!internal/builtins/file.go"
           deny:
             - pkg: net/http
               desc: Use inv.Fetch for network access; keep pure HTTP helpers behind reviewed wrappers.
-        commands_term:
+        builtins_term:
           files:
-            - commands/*.go
-            - "!commands/*_test.go"
-            - "!commands/ls.go"
-            - "!commands/test.go"
+            - internal/builtins/*.go
+            - "!internal/builtins/*_test.go"
+            - "!internal/builtins/ls.go"
+            - "!internal/builtins/test.go"
           deny:
             - pkg: golang.org/x/term$
               desc: Use reviewed helpers for terminal detection instead of raw file descriptor probes.
-        commands_syscall_imports:
+        builtins_syscall_imports:
           files:
-            - commands/*.go
-            - "!commands/*_test.go"
-            - "!commands/basenc.go"
-            - "!commands/basenc_formats.go"
-            - "!commands/readlink.go"
-            - "!commands/realpath.go"
-            - "!commands/rmdir.go"
-            - "!commands/tee.go"
-            - "!commands/truncate.go"
-            - "!commands/unlink.go"
-            - "!commands/yes.go"
+            - internal/builtins/*.go
+            - "!internal/builtins/*_test.go"
+            - "!internal/builtins/basenc.go"
+            - "!internal/builtins/basenc_formats.go"
+            - "!internal/builtins/readlink.go"
+            - "!internal/builtins/realpath.go"
+            - "!internal/builtins/rmdir.go"
+            - "!internal/builtins/tee.go"
+            - "!internal/builtins/truncate.go"
+            - "!internal/builtins/unlink.go"
+            - "!internal/builtins/yes.go"
           deny:
             - pkg: syscall$
               desc: Do not access host syscalls directly from commands.
-        commands_unix_imports:
+        builtins_unix_imports:
           files:
-            - commands/*.go
-            - "!commands/*_test.go"
-            - "!commands/cat_appendmode_unix.go"
+            - internal/builtins/*.go
+            - "!internal/builtins/*_test.go"
+            - "!internal/builtins/cat_appendmode_unix.go"
           deny:
             - pkg: golang.org/x/sys/unix$
               desc: Do not access host kernel APIs directly from commands.
@@ -127,21 +127,32 @@ linters:
         - pattern: '^commands\.CommandFS\.raw$'
           pkg: '^github\.com/ewhauser/gbash/commands$'
           msg: Do not bypass CommandFS policy checks; use inv.FS methods instead.
+        - pattern: '^io\.ReadAll$'
+          pkg: '^io$'
+          msg: Use commands.ReadAll, commands.ReadAllStdin, or inv.FS.ReadFile so MaxFileBytes is enforced.
         - pattern: '^os\.(FindProcess|Geteuid|Getegid|Getuid|Getgid|Getpid|Getppid)$'
           msg: Use invocation-provided identity or process state instead of host process state.
 
   exclusions:
     rules:
-      - path-except: ^commands/
+      - path-except: ^internal/builtins/
         linters:
           - depguard
+      - path-except: ^(commands|internal/builtins)/
+        linters:
           - forbidigo
-      - path: ^commands/.*_test\.go$
+      - path: ^internal/builtins/.*_test\.go$
         linters:
           - depguard
+      - path: ^(commands|internal/builtins)/.*_test\.go$
+        linters:
           - forbidigo
       - path: ^commands/invocation_capabilities\.go$
         text: "use of `fs\\.raw` forbidden because \"Do not bypass CommandFS policy checks; use inv\\.FS methods instead\\.\""
+        linters:
+          - forbidigo
+      - path: ^commands/read\.go$
+        text: "use of `io\\.ReadAll` forbidden because \"Use commands\\.ReadAll, commands\\.ReadAllStdin, or inv\\.FS\\.ReadFile so MaxFileBytes is enforced\\.\""
         linters:
           - forbidigo
 

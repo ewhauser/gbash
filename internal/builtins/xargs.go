@@ -454,7 +454,7 @@ func readXArgsInput(ctx context.Context, inv *Invocation, opts *xargsOptions) ([
 	}
 	data, _, err := readAllFile(ctx, inv, opts.inputFile)
 	if err != nil {
-		return nil, exitf(inv, 1, "xargs: Cannot open input file %s", quoteGNUOperand(opts.inputFile))
+		return nil, exitf(inv, 1, "xargs: Cannot open input file %s: %s", quoteGNUOperand(opts.inputFile), readAllErrorText(err))
 	}
 	return data, nil
 }

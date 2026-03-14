@@ -6,8 +6,11 @@ import (
 	"sync"
 )
 
+// LazyCommandLoader constructs a command on first use.
 type LazyCommandLoader func() (Command, error)
 
+// CommandRegistry is the interface expected by gbash runtimes and embedders
+// that need command lookup and registration.
 type CommandRegistry interface {
 	Register(cmd Command) error
 	RegisterLazy(name string, loader LazyCommandLoader) error
@@ -15,6 +18,7 @@ type CommandRegistry interface {
 	Names() []string
 }
 
+// Registry is the default in-memory [CommandRegistry] implementation.
 type Registry struct {
 	mu       sync.RWMutex
 	commands map[string]Command
@@ -28,6 +32,7 @@ type lazyCommand struct {
 	err    error
 }
 
+// NewRegistry constructs a registry and eagerly registers cmds.
 func NewRegistry(cmds ...Command) *Registry {
 	registry := &Registry{
 		commands: make(map[string]Command),
@@ -38,6 +43,8 @@ func NewRegistry(cmds ...Command) *Registry {
 	return registry
 }
 
+// Register stores cmd by name, replacing any existing command with the same
+// name.
 func (r *Registry) Register(cmd Command) error {
 	if cmd == nil {
 		return nil
@@ -50,6 +57,8 @@ func (r *Registry) Register(cmd Command) error {
 	return nil
 }
 
+// RegisterLazy registers a name that will be materialized by loader on first
+// execution.
 func (r *Registry) RegisterLazy(name string, loader LazyCommandLoader) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -61,6 +70,7 @@ func (r *Registry) RegisterLazy(name string, loader LazyCommandLoader) error {
 	return nil
 }
 
+// Lookup returns the registered command for name.
 func (r *Registry) Lookup(name string) (Command, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -69,6 +79,7 @@ func (r *Registry) Lookup(name string) (Command, bool) {
 	return cmd, ok
 }
 
+// Names returns the sorted list of registered command names.
 func (r *Registry) Names() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

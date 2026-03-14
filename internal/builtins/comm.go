@@ -238,7 +238,7 @@ func readCommInput(ctx context.Context, inv *Invocation, name string) (data []by
 	if info, statErr := file.Stat(); statErr == nil && info != nil && info.IsDir() {
 		return nil, abs, errors.New("is a directory")
 	}
-	data, err = io.ReadAll(file)
+	data, err = readAllReader(ctx, inv, file)
 	return data, abs, err
 }
 

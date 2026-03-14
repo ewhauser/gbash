@@ -531,7 +531,7 @@ func readODInputs(ctx context.Context, inv *Invocation, opts *odOptions) ([]byte
 			closer = file
 		}
 
-		chunk, err := odReadAll(reader, limited, limitBytes-uint64(len(data)))
+		chunk, err := odReadAll(ctx, inv, reader, limited, limitBytes-uint64(len(data)))
 		if closer != nil {
 			_ = closer.Close()
 		}
@@ -1230,11 +1230,11 @@ func odKeywordPrefix(value, keyword string) bool {
 	return value != "" && strings.HasPrefix(keyword, value)
 }
 
-func odReadAll(r io.Reader, limited bool, remaining uint64) ([]byte, error) {
-	if !limited {
-		return io.ReadAll(r)
+func odReadAll(ctx context.Context, inv *Invocation, r io.Reader, limited bool, remaining uint64) ([]byte, error) {
+	if limited {
+		return readAllReader(ctx, inv, io.LimitReader(r, int64(remaining)))
 	}
-	return io.ReadAll(io.LimitReader(r, int64(remaining)))
+	return readAllReader(ctx, inv, r)
 }
 
 func odInputError(inv *Invocation, name string, err error) error {

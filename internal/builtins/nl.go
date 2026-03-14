@@ -327,7 +327,7 @@ func readNLInput(ctx context.Context, inv *Invocation, name string, stdinData *[
 	}
 	defer func() { _ = file.Close() }()
 
-	data, err = io.ReadAll(file)
+	data, err = readAllReader(ctx, inv, file)
 	if err != nil {
 		return nil, false, err
 	}

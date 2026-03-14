@@ -189,7 +189,14 @@ func (c *Tail) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCo
 				})
 				continue
 			}
-			writeTailMissingError(inv, file)
+			switch {
+			case errorsIsDirectory(err):
+				writeTailErrorReadingDirectory(inv, file)
+			case errorsIsNotExist(err):
+				writeTailMissingError(inv, file)
+			default:
+				_, _ = fmt.Fprintf(inv.Stderr, "tail: error reading '%s': %s\n", file, readAllErrorText(err))
+			}
 			if opts.follow != tailFollowNone && opts.retry {
 				states = append(states, tailFollowState{
 					path:            file,
@@ -316,10 +323,10 @@ func readTailInitialFile(ctx context.Context, inv *Invocation, name string, foll
 		_ = file.Close()
 		return nil, nil, nil, &ExitError{Code: 1, Err: err}
 	}
-	data, err := io.ReadAll(file)
+	data, err := readAllReader(ctx, inv, file)
 	if err != nil {
 		_ = file.Close()
-		return nil, nil, nil, &ExitError{Code: 1, Err: err}
+		return nil, nil, nil, err
 	}
 	if follow == tailFollowDescriptor {
 		return data, file, info, nil
@@ -483,9 +490,9 @@ func (c *Tail) pollTailDescriptor(
 		}
 	}
 
-	data, err := io.ReadAll(state.file)
+	data, err := readAllReader(ctx, inv, state.file)
 	if err != nil {
-		return &ExitError{Code: 1, Err: err}
+		return err
 	}
 	if len(data) == 0 {
 		return nil

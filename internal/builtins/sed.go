@@ -114,7 +114,7 @@ func (c *Sed) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCom
 	for _, file := range files {
 		data, abs, err := readAllFile(ctx, inv, file)
 		if err != nil {
-			_, _ = fmt.Fprintf(inv.Stderr, "sed: %s: No such file or directory\n", file)
+			_, _ = fmt.Fprintf(inv.Stderr, "sed: %s: %s\n", file, readAllErrorText(err))
 			exitCode = 1
 			continue
 		}
@@ -170,7 +170,7 @@ func parseSedMatches(ctx context.Context, inv *Invocation, matches *ParsedComman
 func appendSedScriptFile(ctx context.Context, inv *Invocation, scripts *[]string, name string) error {
 	data, _, err := readAllFile(ctx, inv, name)
 	if err != nil {
-		return err
+		return exitf(inv, 1, "sed: %s: %s", name, readAllErrorText(err))
 	}
 	appendSedScriptSource(scripts, string(data))
 	return nil

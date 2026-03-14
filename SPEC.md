@@ -302,6 +302,10 @@ type CommandFS struct {
     // runtime-owned, policy-aware filesystem facade for commands
 }
 
+func ReadAll(ctx context.Context, inv *Invocation, reader io.Reader) ([]byte, error)
+func ReadAllStdin(ctx context.Context, inv *Invocation) ([]byte, error)
+func (*CommandFS) ReadFile(ctx context.Context, name string) ([]byte, error)
+
 type FetchFunc func(context.Context, *network.Request) (*network.Response, error)
 
 type LazyCommandLoader func() (Command, error)
@@ -382,6 +386,7 @@ Key design decisions:
 - commands that need sub-execution should use the injected `Invocation.Exec` callback rather than reaching around the runtime
 - `Invocation.Exec` inherits the current command environment and virtual working directory by default while staying inside the same session and policy boundary
 - direct filesystem and text-processing commands should prefer `Invocation.FS` over nested shell execution
+- commands that need whole-input reads should use `commands.ReadAll`, `commands.ReadAllStdin`, or `Invocation.FS.ReadFile` so `MaxFileBytes` and diagnostic behavior stay consistent
 - orchestration-style commands such as `xargs`, `find -exec`, and shell-wrapper helpers should use `Invocation.Exec`
 - policy is an explicit interface so embedders can swap simple allowlists for richer policy engines later
 

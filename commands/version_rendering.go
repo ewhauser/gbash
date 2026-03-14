@@ -6,6 +6,7 @@ import (
 	"strings"
 )
 
+// VersionInfo contains the metadata rendered by [RenderDetailedVersion].
 type VersionInfo struct {
 	Name    string
 	Version string
@@ -14,11 +15,13 @@ type VersionInfo struct {
 	BuiltBy string
 }
 
+// RenderSimpleVersion writes a short "<name> (gbash)" version line.
 func RenderSimpleVersion(w io.Writer, name string) error {
 	_, err := fmt.Fprintf(w, "%s (gbash)\n", strings.TrimSpace(name))
 	return err
 }
 
+// RenderDetailedVersion writes a multiline version report from info.
 func RenderDetailedVersion(w io.Writer, info *VersionInfo) error {
 	version := strings.TrimSpace(info.Version)
 	if version == "" {
