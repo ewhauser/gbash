@@ -38,14 +38,40 @@ Run the local comparison benchmark from the repo root:
 make bench-compare
 ```
 
-Sample local results from March 13, 2026, using the default 100 runs:
+Write the same report to JSON with:
 
-| Scenario | `gbash` median | `gbash` p95 | `just-bash` median | `just-bash` p95 |
-| --- | ---: | ---: | ---: | ---: |
-| `startup_echo` | `5.08ms` | `6.86ms` | `618.94ms` | `956.86ms` |
-| `workspace_inventory` | `18.50ms` | `51.81ms` | `618.30ms` | `725.79ms` |
+```bash
+make bench-compare JSON_OUT=bench-compare.json
+```
 
-These numbers are a local reference point, not a portability guarantee. Startup comparisons may not be fully apples to apples yet, because `just-bash` currently embeds tools like Python in its base container and `gbash` does not.
+The comparison report includes five runtimes:
+
+- `gbash`: the native Go helper process
+- `GNU bash`: the host `bash` interpreter launched with profiles disabled
+- `gbash-extras`: the shipped extras CLI with `awk`, `jq`, `sqlite3`, and `yq` pre-registered
+- `gbash-node-wasm`: the `packages/gbash-wasm/wasm` artifact booted inside Node.js
+- `just-bash`: the published npm package invoked through `npx`
+
+Before timed trials begin, the harness runs one untimed primer launch for each
+runtime and scenario. That keeps the reported numbers from being dominated by the
+fresh-binary first-exec penalty on macOS while still measuring a fresh process for
+every timed trial.
+
+`workspace_inventory` still uses the same generated fixture for every runtime. The
+native helpers mount that fixture directly, while `gbash-node-wasm` preloads the
+fixture into the in-memory `js/wasm` filesystem because host-backed filesystems are
+not available there. The shared command is intentionally pipe-free so it also runs
+on the current `js/wasm` target.
+
+These numbers are a local reference point, not a portability guarantee. Startup
+comparisons are still not fully apples to apples, because `just-bash` currently
+embeds tools like Python in its base container and `gbash` does not.
+
+When JSON output is enabled, each runtime result includes `artifact_size_bytes`.
+For the native runtimes this is the built executable size, for `GNU bash` it is the
+host `bash` executable size, for Node/WASM it is the `gbash.wasm` size, and for
+`just-bash` it is the installed `node_modules` closure size measured from a
+temporary `npm install` plus the host `node` executable size.
 
 ## GNU Coreutils Compatibility Testing
 
