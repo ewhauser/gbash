@@ -47,6 +47,8 @@ func DefaultRegistry() *commands.Registry {
 		NewFalse(),
 		NewWhich(),
 		NewHelp(),
+		NewComplete(),
+		NewCompopt(),
 		NewDate(),
 		NewID(),
 		NewWhoami(),

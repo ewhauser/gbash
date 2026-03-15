@@ -18,6 +18,14 @@ var builtinHelp = map[string]helpTopic{
 		Synopsis: "cd [dir]",
 		Body:     "Change the virtual current directory.",
 	},
+	"complete": {
+		Synopsis: "complete [-pr] [-D] [-o option] [-A action] [-W wordlist] [-F function] [-C command] [name ...]",
+		Body:     "Set, print, or remove programmable completion specifications.",
+	},
+	"compopt": {
+		Synopsis: "compopt [-o option] [+o option] [name ...]",
+		Body:     "Modify programmable completion options for a command or completion scope.",
+	},
 	"echo": {
 		Synopsis: "echo [arg ...]",
 		Body:     "Write arguments to standard output.",

@@ -128,6 +128,7 @@ The CLI also provides a minimal interactive shell mode. That mode is a front-end
 - it executes each completed entry via `Session.Exec`
 - it carries forward the virtual cwd and shell-visible variable state between entries at the CLI layer
 - it may expose session-local command history via the `history` command, with entries stored in `BASH_HISTORY`
+- it supports programmable completion state via the `complete` and `compopt` shell builtins, but the shipped CLI still does not provide a readline/tab-completion frontend
 
 The normal CLI entrypoint also accepts filesystem selection flags before the shell arguments:
 
@@ -153,6 +154,7 @@ That frontend is also exposed as a public `cli` package so shipped binaries can 
 - `Session` owns the filesystem instance, command registry, policy, base environment, and default working directory
 - each `Exec` call creates a fresh `interp.Runner`
 - shell-local variables, shell functions, and option state are per-execution by default
+- programmable completion specs created by `complete` and modified by `compopt` are runner-local shell state: they persist within one `Exec` call and within an interactive shell session, but not across separate `Session.Exec` calls
 - filesystem state persists across executions within the same session
 
 This matches the agent workflow we care about: a sequence of shell calls operating on a shared sandboxed workspace, without requiring shell-local state to leak between calls unless we explicitly add that feature later.
@@ -196,7 +198,7 @@ Package responsibilities:
 - `shell/`: parser and runner adapter; no product policy lives here
 - `fs/`: POSIX-like path normalization, memory filesystem, host-backed lower layers, overlay, and snapshot backends
 - `network/`: runtime-owned HTTP sandbox with URL-prefix allowlists, method controls, redirect revalidation, and response-size limits
-- `commands/`: registry and Go-native command implementations such as `clear`, `echo`, `egrep`, `fgrep`, `grep`, `history`, `ls`, `pwd`, `strings`, and `xan`
+- `commands/`: registry and Go-native command implementations such as `clear`, `complete`, `compopt`, `echo`, `egrep`, `fgrep`, `grep`, `history`, `ls`, `pwd`, `strings`, and `xan`
 - `contrib/`: opt-in command modules that stay outside the root module dependency graph so heavyweight helpers do not inflate the core runtime. The repository may also expose umbrella contrib helpers such as `contrib/extras` to register the stable official contrib command set without changing the default runtime surface, and may ship official opt-in binaries such as `contrib/extras/cmd/gbash-extras` from the corresponding contrib module. Current examples include `awk`, `html-to-markdown`, `jq`, `nodejs`, `sqlite3`, and `yq`.
 - `packages/`: publishable JavaScript and TypeScript packages. `packages/gbash-wasm` owns the `js/wasm` assets plus explicit host entrypoints such as `@ewhauser/gbash-wasm/browser` and `@ewhauser/gbash-wasm/node`.
 - `policy/`: allowlists, root restrictions, size limits, network stance, and decision helpers
