@@ -8,7 +8,7 @@ It is intentionally not included in `contrib/extras` yet. To use it, register it
 
 - experimental
 - opt-in only
-- not part of `commands.DefaultRegistry()`
+- not part of `gbash.DefaultRegistry()`
 - not bundled by `contrib/extras`
 
 ## How It Works
@@ -54,7 +54,7 @@ The sandbox contract is owned by gbash, not by `goja_nodejs`.
 ## Registering The Command
 
 ```go
-registry := commands.DefaultRegistry()
+registry := gbash.DefaultRegistry()
 if err := nodejs.Register(registry); err != nil {
     return err
 }

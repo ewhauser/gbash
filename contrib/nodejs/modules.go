@@ -420,7 +420,7 @@ func (rt *nodeRuntime) bytesArg(call goja.FunctionCall, index int, name string, 
 	return gojabuffer.DecodeBytes(rt.vm, value, encodingArg), nil
 }
 
-func (rt *nodeRuntime) readEncodingOption(value goja.Value) (string, bool, error) {
+func (rt *nodeRuntime) readEncodingOption(value goja.Value) (encoding string, present bool, err error) {
 	if goja.IsUndefined(value) || goja.IsNull(value) {
 		return "", false, nil
 	}
@@ -472,12 +472,12 @@ func (rt *nodeRuntime) readFileData(name string) ([]byte, error) {
 	}
 	defer func() { _ = file.Close() }()
 
-	data, err := readAllReaderLimited(commands.ReaderWithContext(rt.ctx, file), maxFileBytes(rt.inv))
+	data, err := commands.ReadAll(rt.ctx, rt.inv, file)
 	if err != nil {
-		if errors.Is(err, errFileTooLarge) {
+		if isMaxFileBytesError(rt.inv, err) {
 			return nil, fmt.Errorf("nodejs: %s: file too large (max %d bytes)", name, maxFileBytes(rt.inv))
 		}
-		return nil, &commands.ExitError{Code: 1, Err: err}
+		return nil, err
 	}
 	return data, nil
 }

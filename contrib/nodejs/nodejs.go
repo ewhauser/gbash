@@ -197,7 +197,9 @@ func newNodeRuntime(ctx context.Context, inv *commands.Invocation, source nodeSo
 		return nil, fmt.Errorf("nodejs: require() was not installed")
 	}
 	rt.rawRequire = rawRequire
-	rt.vm.Set("require", rt.require)
+	if err := rt.vm.Set("require", rt.require); err != nil {
+		return nil, err
+	}
 
 	if err := rt.installGlobals(); err != nil {
 		return nil, err
@@ -237,8 +239,12 @@ func (rt *nodeRuntime) installGlobals() error {
 		return err
 	}
 
-	rt.vm.Set("console", consoleObj)
-	rt.vm.Set("process", processObj)
+	if err := rt.vm.Set("console", consoleObj); err != nil {
+		return err
+	}
+	if err := rt.vm.Set("process", processObj); err != nil {
+		return err
+	}
 
 	if err := freezeObject(rt.vm, consoleObj); err != nil {
 		return err
@@ -288,7 +294,9 @@ func (rt *nodeRuntime) loadConsoleModule(runtime *goja.Runtime, module *goja.Obj
 		_ = freezeObject(runtime, rt.consoleExports)
 		return
 	}
-	module.Set("exports", rt.consoleExports)
+	if err := module.Set("exports", rt.consoleExports); err != nil {
+		panic(runtime.NewGoError(err))
+	}
 }
 
 func (rt *nodeRuntime) loadProcessModule(runtime *goja.Runtime, module *goja.Object) {
@@ -296,7 +304,9 @@ func (rt *nodeRuntime) loadProcessModule(runtime *goja.Runtime, module *goja.Obj
 	if err != nil {
 		panic(runtime.NewGoError(err))
 	}
-	module.Set("exports", exports)
+	if err := module.Set("exports", exports); err != nil {
+		panic(runtime.NewGoError(err))
+	}
 }
 
 func (rt *nodeRuntime) loadFSModule(runtime *goja.Runtime, module *goja.Object) {
@@ -304,7 +314,9 @@ func (rt *nodeRuntime) loadFSModule(runtime *goja.Runtime, module *goja.Object) 
 	if err != nil {
 		panic(runtime.NewGoError(err))
 	}
-	module.Set("exports", exports)
+	if err := module.Set("exports", exports); err != nil {
+		panic(runtime.NewGoError(err))
+	}
 }
 
 func (rt *nodeRuntime) loadPathModule(runtime *goja.Runtime, module *goja.Object) {
@@ -312,7 +324,9 @@ func (rt *nodeRuntime) loadPathModule(runtime *goja.Runtime, module *goja.Object
 	if err != nil {
 		panic(runtime.NewGoError(err))
 	}
-	module.Set("exports", exports)
+	if err := module.Set("exports", exports); err != nil {
+		panic(runtime.NewGoError(err))
+	}
 }
 
 func (rt *nodeRuntime) require(call goja.FunctionCall) goja.Value {
@@ -383,9 +397,9 @@ func (rt *nodeRuntime) loadModuleSource(name string) ([]byte, error) {
 	}
 	defer func() { _ = file.Close() }()
 
-	data, err := readAllReaderLimited(commands.ReaderWithContext(rt.ctx, file), maxFileBytes(rt.inv))
+	data, err := commands.ReadAll(rt.ctx, rt.inv, file)
 	if err != nil {
-		if errors.Is(err, errFileTooLarge) {
+		if isMaxFileBytesError(rt.inv, err) {
 			return nil, fmt.Errorf("nodejs: %s: file too large (max %d bytes)", name, maxFileBytes(rt.inv))
 		}
 		return nil, err
@@ -512,34 +526,13 @@ func isFileOrDirectoryPath(name string) bool {
 		strings.HasPrefix(name, "../")
 }
 
-var errFileTooLarge = errors.New("file too large")
-
 func readAllStdinLimited(ctx context.Context, inv *commands.Invocation) ([]byte, error) {
-	reader := io.Reader(strings.NewReader(""))
-	if inv != nil && inv.Stdin != nil {
-		reader = inv.Stdin
-	}
-	data, err := readAllReaderLimited(commands.ReaderWithContext(ctx, reader), maxFileBytes(inv))
+	data, err := commands.ReadAllStdin(ctx, inv)
 	if err != nil {
-		if errors.Is(err, errFileTooLarge) {
+		if isMaxFileBytesError(inv, err) {
 			return nil, commands.Exitf(inv, 1, "nodejs: stdin too large (max %d bytes)", maxFileBytes(inv))
 		}
-		return nil, &commands.ExitError{Code: 1, Err: err}
-	}
-	return data, nil
-}
-
-func readAllReaderLimited(reader io.Reader, limit int64) ([]byte, error) {
-	if limit <= 0 {
-		return io.ReadAll(reader)
-	}
-	limited := io.LimitReader(reader, limit+1)
-	data, err := io.ReadAll(limited)
-	if err != nil {
 		return nil, err
-	}
-	if int64(len(data)) > limit {
-		return nil, errFileTooLarge
 	}
 	return data, nil
 }
@@ -549,6 +542,17 @@ func maxFileBytes(inv *commands.Invocation) int64 {
 		return 0
 	}
 	return inv.Limits.MaxFileBytes
+}
+
+func isMaxFileBytesError(inv *commands.Invocation, err error) bool {
+	if err == nil || maxFileBytes(inv) <= 0 {
+		return false
+	}
+	message, ok := commands.DiagnosticMessage(err)
+	if !ok {
+		return false
+	}
+	return message == fmt.Sprintf("input exceeds maximum file size of %d bytes", maxFileBytes(inv))
 }
 
 func freezeObject(runtime *goja.Runtime, obj *goja.Object) error {
@@ -562,7 +566,7 @@ func freezeObject(runtime *goja.Runtime, obj *goja.Object) error {
 	object := objectCtor.ToObject(runtime)
 	freeze, ok := goja.AssertFunction(object.Get("freeze"))
 	if !ok {
-		return fmt.Errorf("Object.freeze is not available")
+		return fmt.Errorf("object.freeze is not available")
 	}
 	_, err := freeze(object, obj)
 	return err

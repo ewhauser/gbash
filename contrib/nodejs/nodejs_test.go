@@ -8,7 +8,6 @@ import (
 	"time"
 
 	gbruntime "github.com/ewhauser/gbash"
-	"github.com/ewhauser/gbash/commands"
 	"github.com/ewhauser/gbash/policy"
 	"github.com/ewhauser/gbash/trace"
 )
@@ -20,7 +19,7 @@ func TestRegisterAddsNodeJSCommand(t *testing.T) {
 	if !slices.Contains(registry.Names(), "nodejs") {
 		t.Fatalf("Names() missing %q: %v", "nodejs", registry.Names())
 	}
-	if slices.Contains(commands.DefaultRegistry().Names(), "nodejs") {
+	if slices.Contains(gbruntime.DefaultRegistry().Names(), "nodejs") {
 		t.Fatalf("DefaultRegistry() should not include nodejs")
 	}
 }
@@ -167,6 +166,7 @@ func TestNodeJSFileSystemUsesSandboxPolicyAndTraces(t *testing.T) {
 	registry := newNodeRegistry(t)
 	rt, err := gbruntime.New(gbruntime.WithConfig(&gbruntime.Config{
 		Registry: registry,
+		Tracing:  gbruntime.TraceConfig{Mode: gbruntime.TraceRaw},
 		Policy: policy.NewStatic(&policy.Config{
 			AllowedCommands: []string{"nodejs"},
 			ReadRoots:       []string{"/allowed", "/tmp", "/usr/bin", "/bin", "/home/agent"},
@@ -176,7 +176,6 @@ func TestNodeJSFileSystemUsesSandboxPolicyAndTraces(t *testing.T) {
 				MaxStderrBytes: 1 << 20,
 				MaxFileBytes:   8 << 20,
 			},
-			NetworkMode: policy.NetworkDisabled,
 			SymlinkMode: policy.SymlinkDeny,
 		}),
 	}))
@@ -255,7 +254,8 @@ func TestNodeJSShebangViaEnvWorks(t *testing.T) {
 }
 
 func hasFileAccess(events []trace.Event, action, name string) bool {
-	for _, event := range events {
+	for i := range events {
+		event := &events[i]
 		if event.Kind != trace.EventFileAccess || event.File == nil {
 			continue
 		}
@@ -267,7 +267,8 @@ func hasFileAccess(events []trace.Event, action, name string) bool {
 }
 
 func hasPolicyPath(events []trace.Event, name string) bool {
-	for _, event := range events {
+	for i := range events {
+		event := &events[i]
 		if event.Kind != trace.EventPolicyDenied || event.Policy == nil {
 			continue
 		}

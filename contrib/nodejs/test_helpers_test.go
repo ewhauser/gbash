@@ -2,7 +2,6 @@ package nodejs
 
 import (
 	"context"
-	"io"
 	"os"
 	"path"
 	"testing"
@@ -14,7 +13,7 @@ import (
 func newNodeRegistry(tb testing.TB) *commands.Registry {
 	tb.Helper()
 
-	registry := commands.DefaultRegistry()
+	registry := gbruntime.DefaultRegistry()
 	if err := Register(registry); err != nil {
 		tb.Fatalf("Register(nodejs) error = %v", err)
 	}
@@ -67,20 +66,4 @@ func writeSessionFile(tb testing.TB, session *gbruntime.Session, name string, da
 	if _, err := file.Write(data); err != nil {
 		tb.Fatalf("Write(%q) error = %v", name, err)
 	}
-}
-
-func readSessionFile(tb testing.TB, session *gbruntime.Session, name string) []byte {
-	tb.Helper()
-
-	file, err := session.FileSystem().Open(context.Background(), name)
-	if err != nil {
-		tb.Fatalf("Open(%q) error = %v", name, err)
-	}
-	defer func() { _ = file.Close() }()
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		tb.Fatalf("ReadAll(%q) error = %v", name, err)
-	}
-	return data
 }
