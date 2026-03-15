@@ -1,5 +1,6 @@
 //go:build js && wasm
 
+// Package main exposes the js/wasm entrypoint for the GBashWasm browser API.
 package main
 
 import (

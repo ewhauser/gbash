@@ -218,6 +218,12 @@ We intentionally do not create a `compat/` package because external harness supp
 
 The repository itself should be maintained as a committed Go workspace plus a pnpm workspace. The root module stays focused on the runtime, CLI, and core commands, while direct children under `contrib/` are separate modules for optional heavyweight commands, `packages/` contains publishable JavaScript packages, and `examples/` is a separate module used for demos that may need external SDK dependencies or looser version pinning.
 
+Top-level repository directories such as `cmd/`, `contrib/`, `packages/`,
+`scripts/`, and `third_party/` may also carry doc-only package comments so
+pkg.go.dev can render repository layout pages and directory synopses. Those
+overview packages are for navigation and documentation only; supported Go APIs
+remain the concrete runtime packages and documented nested modules.
+
 Optional language runtimes in `contrib/` must preserve the same sandbox contract as core commands. The current `contrib/nodejs` design is experimental and intentionally excluded from `contrib/extras` until its surface stabilizes. It uses `goja` plus a curated `goja_nodejs` allowlist, with gbash-owned replacements for host-sensitive modules such as `process`, `console`, `fs`, and `path`. It does not expose host subprocesses, host filesystem access, or unrestricted network APIs, and any supported file access must flow through `Invocation.FS`.
 
 ## 8. Core Interfaces
