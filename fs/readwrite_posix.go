@@ -625,6 +625,16 @@ func (f *readWriteFile) Close() error {
 	return f.file.Close()
 }
 
+func (f *readWriteFile) Seek(offset int64, whence int) (int64, error) {
+	seeker, ok := f.file.(interface {
+		Seek(offset int64, whence int) (int64, error)
+	})
+	if !ok {
+		return 0, stdfs.ErrInvalid
+	}
+	return seeker.Seek(offset, whence)
+}
+
 func (f *readWriteFile) Stat() (stdfs.FileInfo, error) {
 	info, err := f.file.Stat()
 	if err != nil {
