@@ -467,7 +467,8 @@ Implementation detail for MVP:
 - the runtime prepends a shell shim that initializes `PWD` and `OLDPWD`
 - the shim owns virtual `cd`, `pushd`, `popd`, and `dirs`, and it keeps a shell-local directory stack aligned with virtual `PWD`
 - the shim wraps shell-visible `pwd` to the Go `pwd` command so `-L` / `-P` still honor virtual `PWD`
-- `let` clauses are rewritten through an internal helper so quoted and runtime-expanded arithmetic expressions still mutate the current shell state
+- raw user scripts normalize bare command-position `let` to a same-width internal helper alias before parse so bash-valid runtime-expanded arithmetic forms still parse and mutate the current shell state
+- prebuilt AST programs still rewrite `let` clauses through the internal helper so quoted and runtime-expanded arithmetic expressions keep the same shell-state mutation behavior when callers bypass raw-script parsing
 - all project path handlers resolve relative paths from virtual `PWD`, not from `HandlerContext.Dir`
 
 ### 9.3 Stdio

@@ -109,7 +109,7 @@ func rewriteLetClause(printer *syntax.Printer, parser *syntax.Parser, cmd syntax
 		return nil, fmt.Errorf("unexpected let rendering: %q", source)
 	}
 
-	file, err := parser.Parse(strings.NewReader(letHelperCommandName+rest+"\n"), "let-helper")
+	file, err := parser.Parse(strings.NewReader(letHelperCommandAlias+rest+"\n"), "let-helper")
 	if err != nil {
 		return nil, err
 	}

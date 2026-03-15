@@ -83,7 +83,11 @@ type MVdan struct {
 }
 
 const hostRunnerDir = "/"
-const letHelperCommandName = "__jb_let"
+
+const (
+	letHelperCommandName  = "__jb_let"
+	letHelperCommandAlias = "__l"
+)
 
 func New() *MVdan {
 	return &MVdan{
@@ -96,7 +100,7 @@ func (m *MVdan) Parse(name, script string) (*syntax.File, error) {
 }
 
 func (m *MVdan) parseUserProgram(name, script string) (*syntax.File, error) {
-	return m.Parse(name, prependRuntimePreludeLines(script))
+	return m.Parse(name, prependRuntimePreludeLines(normalizeLetCommands(script)))
 }
 
 func (m *MVdan) Run(ctx context.Context, exec *Execution) (result *RunResult, runErr error) {
@@ -123,9 +127,10 @@ func (m *MVdan) Run(ctx context.Context, exec *Execution) (result *RunResult, ru
 			return nil, err
 		}
 		validationProgram = parsed
-	}
-	if err := rewriteLetClauses(validationProgram); err != nil {
-		return nil, err
+	} else {
+		if err := rewriteLetClauses(validationProgram); err != nil {
+			return nil, err
+		}
 	}
 	if violation := validateExecutionBudgets(validationProgram, exec.Policy); violation != nil {
 		if exec.Stderr != nil {
@@ -146,8 +151,7 @@ func (m *MVdan) Run(ctx context.Context, exec *Execution) (result *RunResult, ru
 			return nil, err
 		}
 		program = parsed
-	}
-	if program != validationProgram {
+	} else if program != validationProgram {
 		if err := rewriteLetClauses(program); err != nil {
 			return nil, err
 		}
@@ -383,7 +387,7 @@ func (m *MVdan) execHandler(exec *Execution, budget *executionBudget) interp.Exe
 		if args[0] == loopIterCommandName {
 			return budget.beforeLoopIteration(ctx, args[1:])
 		}
-		if args[0] == letHelperCommandName {
+		if args[0] == letHelperCommandName || args[0] == letHelperCommandAlias {
 			return execLetHelper(ctx, args[1:])
 		}
 
@@ -1539,7 +1543,12 @@ func prependRuntimePreludeLines(script string) string {
 }
 
 func isInternalHelperCommand(name string) bool {
-	return strings.HasPrefix(name, "__jb_")
+	switch name {
+	case loopIterCommandName, letHelperCommandName, letHelperCommandAlias:
+		return true
+	default:
+		return false
+	}
 }
 
 func execLetHelper(ctx context.Context, args []string) error {

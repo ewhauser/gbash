@@ -63,14 +63,24 @@ func TestLoopRegressionSupportsForControlFlow(t *testing.T) {
 	}
 }
 
-func TestLetRegressionSupportsQuotedAndExpandedArithmeticExpressions(t *testing.T) {
+func TestLetRegressionSupportsQuotedExpandedAndRuntimeExpandedArithmeticExpressions(t *testing.T) {
 	session := newSession(t, &Config{})
 
-	result := mustExecSession(t, session, "expr='x = 1 + 2'\nlet \"$expr\"\nlet 'y=4+5' z=6+7\nprintf '%s,%s,%s\\n' \"$x\" \"$y\" \"$z\"\n")
+	result := mustExecSession(t, session, ""+
+		"expr='x = 1 + 2'\n"+
+		"let \"$expr\"\n"+
+		"let 'y=4+5' z=6+7\n"+
+		"a=b\n"+
+		"b=3\n"+
+		"let $a+=1\n"+
+		"let ${a}+=1\n"+
+		"let $a++\n"+
+		"let ++$a\n"+
+		"printf '%s,%s,%s,%s\\n' \"$x\" \"$y\" \"$z\" \"$b\"\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "3,9,13\n"; got != want {
+	if got, want := result.Stdout, "3,9,13,7\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
