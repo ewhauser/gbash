@@ -36,7 +36,7 @@ Shell parsing is delegated to [`mvdan/sh`](https://github.com/mvdan/sh), with pr
 - 90+ built-in commands with GNU coreutils compatibility coverage ([compatibility report](https://ewhauser.github.io/gbash/docs/performance/compatibility/))
 - Optional allowlisted network access via `curl`
 - Persistent sessions with shared filesystem state across executions
-- Shared Unix-socket server mode for session-oriented hosts and wrapper binaries
+- Shared JSON-RPC server mode for session-oriented hosts and wrapper binaries
 - Host directory mounting with read-only overlay for real project workspaces
 - Execution budgets — command count, loop iterations, glob expansion, stdout/stderr limits
 - Opt-in structured trace events and lifecycle logs for debugging and agent orchestration
@@ -45,7 +45,7 @@ Shell parsing is delegated to [`mvdan/sh`](https://github.com/mvdan/sh), with pr
 ## Public Packages
 
 - `github.com/ewhauser/gbash`: the core Go runtime and embedding API
-- `github.com/ewhauser/gbash/server`: shared Unix-socket JSON-RPC server mode for hosting persistent gbash sessions
+- `github.com/ewhauser/gbash/server`: shared JSON-RPC server mode for hosting persistent gbash sessions
 - `github.com/ewhauser/gbash/contrib/...`: optional Go command modules
 - `@ewhauser/gbash-wasm/browser`: the explicit browser entrypoint for the `js/wasm` package. It is versioned in-repo today; npm publishing remains disabled in the release workflow for now.
 - `@ewhauser/gbash-wasm/node`: the explicit Node entrypoint for the same `js/wasm` package.
@@ -218,13 +218,17 @@ gbash -c 'echo hello' --json
 
 The JSON payload includes `stdout`, `stderr`, `exitCode`, truncation flags, timing metadata, and trace metadata when the wrapper enables tracing on the underlying runtime.
 
-For long-lived agent or editor integrations, the same shared CLI frontend can serve a Unix domain socket protocol instead of executing one script:
+For long-lived agent or editor integrations, the same shared CLI frontend can serve a JSON-RPC protocol instead of executing one script:
 
 ```bash
 gbash --server --socket /tmp/gbash.sock --session-ttl 30m
 ```
 
-The server speaks JSON-RPC 2.0 over the Unix socket. `session_id` maps 1:1 to a persistent sandbox session, and `session.exec` runs one non-interactive shell execution inside that session and returns the full result in one response. Filesystem shape is still chosen at server startup through the normal CLI/runtime options such as `--root`, `--readwrite-root`, and `--cwd`; it is not configured over the wire.
+```bash
+gbash --server --listen 127.0.0.1:8080 --session-ttl 30m
+```
+
+The server speaks JSON-RPC 2.0 over either a Unix socket or an explicit loopback TCP listener. `session_id` maps 1:1 to a persistent sandbox session, and `session.exec` runs one non-interactive shell execution inside that session and returns the full result in one response. Filesystem shape is still chosen at server startup through the normal CLI/runtime options such as `--root`, `--readwrite-root`, and `--cwd`; it is not configured over the wire. The shared CLI requires exactly one transport flag, `--socket PATH` or `--listen HOST:PORT`, and `--listen` is restricted to loopback hosts because the protocol has no built-in authentication.
 
 Install `gbash-extras` when you want the same CLI surface with the stable official contrib commands (`awk`, `html-to-markdown`, `jq`, `sqlite3`, and `yq`) pre-registered:
 
@@ -232,7 +236,7 @@ Install `gbash-extras` when you want the same CLI surface with the stable offici
 gbash-extras -c 'jq -r .name data.json'
 ```
 
-`gbash-extras --server --socket /tmp/gbash-extras.sock` exposes the same JSON-RPC protocol with the stable extras registry already installed.
+`gbash-extras --server --socket /tmp/gbash-extras.sock` and `gbash-extras --server --listen 127.0.0.1:8081` expose the same JSON-RPC protocol with the stable extras registry already installed.
 
 The shared frontend is also exposed as the public `github.com/ewhauser/gbash/cli` package. Call `cli.Run` with a `cli.Config` to reuse the stock flag parsing, interactive mode, server mode, and runtime setup from your own wrapper binary. For direct embedding without going through the CLI package, use `github.com/ewhauser/gbash/server`.
 ## Configuration

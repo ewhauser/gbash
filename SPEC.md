@@ -140,7 +140,8 @@ The normal CLI entrypoint also accepts filesystem selection flags before the she
 - `gbash --cwd <dir> ...` sets the initial sandbox working directory
 - `gbash --readwrite-root <dir> ...` mounts `<dir>` as sandbox `/` so writes persist back to the host, but only when `<dir>` is inside the system temp directory
 - `gbash --json ...` emits one JSON object for a non-interactive execution with `stdout`, `stderr`, `exitCode`, truncation flags, timing metadata, and optional trace metadata when tracing is enabled
-- `gbash --server --socket <path>` serves a long-lived Unix domain socket protocol instead of executing a script
+- `gbash --server --socket <path>` serves a long-lived JSON-RPC protocol over a Unix domain socket instead of executing a script
+- `gbash --server --listen <host:port>` serves the same protocol over an explicit loopback TCP listener instead of executing a script
 - `gbash --session-ttl <duration>` controls how long idle server sessions survive without active work
 - when `--cwd` is omitted, `--root` starts at `/home/agent/project` and `--readwrite-root` starts at `/`
 
@@ -150,7 +151,7 @@ That frontend is also exposed as a public `cli` package so shipped binaries can 
 
 - `cmd/gbash` is a thin wrapper over `github.com/ewhauser/gbash/cli`
 - `contrib/extras/cmd/gbash-extras` is a thin wrapper over the same package with `contrib/extras` pre-registered into the runtime
-- `github.com/ewhauser/gbash/server` is the shared public server surface used by both wrapper binaries to host the same session protocol over Unix sockets
+- `github.com/ewhauser/gbash/server` is the shared public server surface used by both wrapper binaries to host the same session protocol over Unix sockets or caller-provided listeners
 
 ### 6.1 Session model
 
@@ -170,8 +171,10 @@ This matches the agent workflow we care about: a sequence of shell calls operati
 
 `gbash` should also expose a local-first server mode for hosts that want a long-lived control endpoint instead of direct in-process method calls.
 
-- the server transport is a Unix domain socket in v1
+- the server protocol is JSON-RPC 2.0 over either a Unix domain socket or a caller-provided listener such as loopback TCP
 - the protocol is JSON-RPC 2.0 request/response, not a custom streaming transport
+- the shared CLI requires exactly one transport flag: `--socket` or `--listen`
+- the shared CLI restricts `--listen` to loopback hosts because v1 has no authentication layer
 - `session_id` maps 1:1 to a persistent `Session`
 - filesystem shape is configured once at server startup through the normal runtime options and is not part of the wire protocol
 - the primary remote operation is `session.exec`, which runs one non-interactive `Session.Exec` call and returns the full execution result in one response
@@ -227,7 +230,7 @@ Because `mvdan/sh` currently validates `interp.Dir(...)` against the host filesy
 ```text
 cli/                   reusable CLI frontend shared by shipped binaries
 cmd/gbash/             CLI entrypoint for local execution
-server/                public Unix-socket server surface shared by wrapper binaries
+server/                public JSON-RPC server surface shared by wrapper binaries
 internal/runtime/      internal runtime implementation and execution orchestration
 shell/                mvdan/sh integration and handler wiring
 fs/                   project-owned filesystem interfaces and virtual backends
@@ -244,7 +247,7 @@ tests/                integration fixtures and compatibility-style harnesses
 Package responsibilities:
 
 - `cli/`: reusable CLI frontend that parses shell flags, renders help/version output, handles interactive mode, and provisions runtimes for thin wrapper binaries
-- `server/`: public shared server implementation that owns Unix-socket listeners, JSON-RPC framing, and session registries for both shipped CLIs and external hosts
+- `server/`: public shared server implementation that owns JSON-RPC framing and session registries for both shipped CLIs and external hosts, plus Unix-socket listener helpers
 - `internal/runtime/`: internal runtime/session creation, run configuration, result collection, output capture
 - `shell/`: parser and runner adapter; no product policy lives here
 - `fs/`: POSIX-like path normalization, memory filesystem, host-backed lower layers, overlay, and snapshot backends

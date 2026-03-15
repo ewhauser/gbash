@@ -78,10 +78,11 @@ func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 	}
 
 	srv := &serverState{
-		ctx:      ctx,
-		cfg:      cfg,
-		sessions: make(map[string]*serverSession),
-		conns:    make(map[string]*clientConn),
+		ctx:       ctx,
+		cfg:       cfg,
+		transport: listenerTransport(ln),
+		sessions:  make(map[string]*serverSession),
+		conns:     make(map[string]*clientConn),
 	}
 
 	done := make(chan struct{})
@@ -109,8 +110,9 @@ func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 }
 
 type serverState struct {
-	ctx context.Context
-	cfg Config
+	ctx       context.Context
+	cfg       Config
+	transport string
 
 	nextID atomic.Uint64
 
@@ -176,6 +178,18 @@ func normalizeConfig(cfg Config) Config {
 		cfg.Version = "dev"
 	}
 	return cfg
+}
+
+func listenerTransport(ln net.Listener) string {
+	if ln == nil || ln.Addr() == nil {
+		return ""
+	}
+	switch strings.TrimSpace(ln.Addr().Network()) {
+	case "tcp4", "tcp6":
+		return "tcp"
+	default:
+		return strings.TrimSpace(ln.Addr().Network())
+	}
 }
 
 func removeStaleUnixSocket(socketPath string) error {
@@ -364,7 +378,7 @@ func (c *clientConn) handleRequest(req *rpcRequest) *rpcResponse {
 			Protocol:      jsonRPCVersion,
 			Capabilities: helloCapabilities{
 				Binary:             c.server.cfg.Name,
-				Transport:          "unix",
+				Transport:          c.server.transport,
 				PersistentSessions: true,
 				SessionExec:        true,
 				FileSystemRPC:      false,

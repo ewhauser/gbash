@@ -18,7 +18,7 @@ func ListenAndServeUnix(ctx context.Context, socketPath string, cfg Config) erro
 func Serve(ctx context.Context, ln net.Listener, cfg Config) error
 ```
 
-Use `ListenAndServeUnix` when you want the package to create and manage the Unix domain socket path for you. Use `Serve` when your host already owns the listener.
+Use `ListenAndServeUnix` when you want the package to create and manage the Unix domain socket path for you. Use `Serve` when your host already owns the listener, including a loopback TCP listener.
 
 ## Starting the Server
 
@@ -29,19 +29,34 @@ gbash --server --socket /tmp/gbash.sock --session-ttl 30m
 ```
 
 ```bash
+gbash --server --listen 127.0.0.1:8080 --session-ttl 30m
+```
+
+```bash
 gbash-extras --server --socket /tmp/gbash-extras.sock
+```
+
+```bash
+gbash-extras --server --listen 127.0.0.1:8081
 ```
 
 Filesystem layout is fixed at server startup through the normal runtime or CLI options such as `--root`, `--readwrite-root`, and `--cwd`. The protocol does not provide filesystem RPC in v1.
 
+The shared CLI requires exactly one transport flag:
+
+- `--socket PATH` for a Unix domain socket
+- `--listen HOST:PORT` for a loopback TCP listener
+
+`--listen` only accepts loopback hosts such as `127.0.0.1`, `[::1]`, and `localhost` because v1 has no built-in authentication or authorization layer.
+
 ## Transport
 
-- v1 transport is a Unix domain socket
+- v1 transport is listener-based: Unix domain sockets or loopback TCP
 - protocol is JSON-RPC 2.0
 - messages are a stream of JSON values on the socket
 - requests and responses share the same connection
 - there are no async server-pushed events in v1
-- clients can open more than one socket if they want concurrent outstanding requests
+- clients can open more than one connection if they want concurrent outstanding requests
 
 The current implementation uses Go's `json.Encoder` and `json.Decoder`, so newline-delimited JSON works in practice, but clients should treat the socket as a stream of JSON objects rather than depending on whitespace details.
 
@@ -220,7 +235,7 @@ Success result:
 Current capability values:
 
 - `binary`: binary identity, for example `gbash` or `gbash-extras`
-- `transport`: always `unix`
+- `transport`: `unix` for Unix domain sockets and `tcp` for TCP listeners
 - `persistent_sessions`: always `true`
 - `session_exec`: always `true`
 - `filesystem_rpc`: always `false`

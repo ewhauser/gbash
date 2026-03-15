@@ -20,6 +20,7 @@ type runtimeOptions struct {
 	json          bool
 	server        bool
 	socket        string
+	listen        string
 	sessionTTL    time.Duration
 }
 
@@ -72,6 +73,14 @@ func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
 			opts.socket = args[i]
 		case strings.HasPrefix(arg, "--socket="):
 			opts.socket = strings.TrimPrefix(arg, "--socket=")
+		case arg == "--listen":
+			if i+1 >= len(args) {
+				return opts, nil, fmt.Errorf("--listen requires a host:port")
+			}
+			i++
+			opts.listen = args[i]
+		case strings.HasPrefix(arg, "--listen="):
+			opts.listen = strings.TrimPrefix(arg, "--listen=")
 		case arg == "--session-ttl":
 			if i+1 >= len(args) {
 				return opts, nil, fmt.Errorf("--session-ttl requires a duration")
@@ -262,6 +271,7 @@ func renderHelp(w io.Writer, name string) error {
 		"\nCLI server options:\n"+
 		"  --server                run the shared gbash JSON-RPC server instead of executing a script\n"+
 		"  --socket PATH           listen on PATH for Unix domain socket clients\n"+
+		"  --listen HOST:PORT      listen on loopback HOST:PORT for TCP clients\n"+
 		"  --session-ttl DURATION  keep idle sessions alive for DURATION before expiry\n")
 	return err
 }

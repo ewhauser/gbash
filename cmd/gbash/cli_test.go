@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -122,7 +123,7 @@ func TestRunCLIHelpRendersServerFlags(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exitCode = %d, want 0", exitCode)
 	}
-	for _, want := range []string{"CLI server options:", "--server", "--socket PATH", "--session-ttl DURATION"} {
+	for _, want := range []string{"CLI server options:", "--server", "--socket PATH", "--listen HOST:PORT", "--session-ttl DURATION"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout = %q, want help to contain %q", stdout.String(), want)
 		}
@@ -216,19 +217,55 @@ func TestRunCLIJSONOutputRejectsInteractiveShell(t *testing.T) {
 	}
 }
 
-func TestRunCLIServerRequiresSocket(t *testing.T) {
+func TestRunCLIServerRequiresTransport(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
 
 	exitCode, err := runCLI(context.Background(), "gbash", []string{"--server"}, strings.NewReader(""), &stdout, &stderr, false)
 	if err == nil {
-		t.Fatal("runCLI() error = nil, want socket requirement")
+		t.Fatal("runCLI() error = nil, want transport requirement")
 	}
 	if exitCode != 2 {
 		t.Fatalf("exitCode = %d, want 2", exitCode)
 	}
-	if !strings.Contains(err.Error(), "--socket is required") {
-		t.Fatalf("error = %v, want socket requirement", err)
+	if !strings.Contains(err.Error(), "--socket or --listen") {
+		t.Fatalf("error = %v, want transport requirement", err)
+	}
+}
+
+func TestRunCLIServerRejectsMultipleTransportFlags(t *testing.T) {
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), "gbash", []string{
+		"--server",
+		"--socket", filepath.Join(t.TempDir(), "gbash.sock"),
+		"--listen", "127.0.0.1:9000",
+	}, strings.NewReader(""), &stdout, &stderr, false)
+	if err == nil {
+		t.Fatal("runCLI() error = nil, want transport conflict")
+	}
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2", exitCode)
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("error = %v, want transport conflict", err)
+	}
+}
+
+func TestRunCLIServerRejectsNonLoopbackListen(t *testing.T) {
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), "gbash", []string{"--server", "--listen", "0.0.0.0:9000"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err == nil {
+		t.Fatal("runCLI() error = nil, want loopback requirement")
+	}
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2", exitCode)
+	}
+	if !strings.Contains(err.Error(), "loopback host") {
+		t.Fatalf("error = %v, want loopback requirement", err)
 	}
 }
 
@@ -265,6 +302,87 @@ func TestRunCLIServerRejectsJSONMode(t *testing.T) {
 	}
 	if got := stderr.String(); got != "" {
 		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRunCLIServerListensOnTCP(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	addr := reserveLoopbackTCPAddress(t)
+	var stdout strings.Builder
+	var stderr strings.Builder
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := runCLI(ctx, "gbash", []string{"--server", "--listen", addr}, strings.NewReader(""), &stdout, &stderr, false)
+		errCh <- err
+	}()
+
+	var conn net.Conn
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-errCh:
+			t.Fatalf("server exited before tcp listener became ready: %v", err)
+		default:
+		}
+		dialed, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+		if err == nil {
+			conn = dialed
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if conn == nil {
+		t.Fatalf("timed out waiting for gbash server tcp listener at %s", addr)
+	}
+	defer func() { _ = conn.Close() }()
+
+	enc := json.NewEncoder(conn)
+	dec := json.NewDecoder(conn)
+	if err := enc.Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "1",
+		"method":  "system.hello",
+		"params":  map[string]any{"client_name": "test"},
+	}); err != nil {
+		t.Fatalf("Encode(system.hello) error = %v", err)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline() error = %v", err)
+	}
+	var resp struct {
+		Result struct {
+			Capabilities struct {
+				Transport string `json:"transport"`
+			} `json:"capabilities"`
+		} `json:"result"`
+		Error any `json:"error"`
+	}
+	if err := dec.Decode(&resp); err != nil {
+		t.Fatalf("Decode(system.hello) error = %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("system.hello error = %#v, want success", resp.Error)
+	}
+	if got, want := resp.Result.Capabilities.Transport, "tcp"; got != want {
+		t.Fatalf("transport = %q, want %q", got, want)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("server exited with error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for gbash server shutdown")
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("server stdout = %q, want empty", got)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("server stderr = %q, want empty", got)
 	}
 }
 
@@ -339,6 +457,20 @@ func mustParseCLIJSONResult(t *testing.T, raw string) cliJSONResult {
 		t.Fatalf("Unmarshal(JSON output) error = %v; raw=%q", err, raw)
 	}
 	return out
+}
+
+func reserveLoopbackTCPAddress(t *testing.T) string {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen(tcp) error = %v", err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("Close(tcp listener) error = %v", err)
+	}
+	return addr
 }
 
 func TestRunCLIRootMountReadsHostFilesWithoutPersistingWrites(t *testing.T) {

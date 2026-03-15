@@ -251,6 +251,57 @@ func TestServerSessionTTLExpiry(t *testing.T) {
 	}
 }
 
+func TestServeTCPListenerReportsTCPTransport(t *testing.T) {
+	rt, err := gbash.New()
+	if err != nil {
+		t.Fatalf("gbash.New() error = %v", err)
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen(tcp) error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- gbserver.Serve(ctx, ln, gbserver.Config{
+			Runtime:    rt,
+			Name:       "gbash",
+			Version:    "test",
+			SessionTTL: time.Second,
+		})
+	}()
+
+	client := &testClient{
+		t:    t,
+		conn: mustDialTCP(t, ln.Addr().String()),
+	}
+	client.enc = json.NewEncoder(client.conn)
+	client.dec = json.NewDecoder(client.conn)
+	defer client.Close()
+
+	resp := client.call("system.hello", map[string]any{"client_name": "test"})
+	mustOK(t, &resp)
+
+	var payload helloResult
+	decodeResult(t, &resp, &payload)
+	if got, want := payload.Capabilities.Transport, "tcp"; got != want {
+		t.Fatalf("transport = %q, want %q", got, want)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Serve(tcp) error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for tcp server shutdown")
+	}
+}
+
 func startServer(t *testing.T, cfg gbserver.Config, opts ...gbash.Option) *serverHandle {
 	t.Helper()
 
@@ -310,6 +361,16 @@ func dialClient(t *testing.T, socket string) *testClient {
 		enc:  json.NewEncoder(conn),
 		dec:  json.NewDecoder(conn),
 	}
+}
+
+func mustDialTCP(t *testing.T, addr string) net.Conn {
+	t.Helper()
+
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("DialTimeout(%q) error = %v", addr, err)
+	}
+	return conn
 }
 
 func (c *testClient) Close() {

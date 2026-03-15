@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 
@@ -68,8 +69,17 @@ func run(ctx context.Context, cfg Config, argv0 string, args []string, stdin io.
 		if parsed.Source != builtins.BashSourceStdin || parsed.Interactive {
 			return 2, fmt.Errorf("--server cannot be combined with script execution or interactive shell flags")
 		}
-		if strings.TrimSpace(runtimeOpts.socket) == "" {
-			return 2, fmt.Errorf("--socket is required when --server is set")
+		socketPath := strings.TrimSpace(runtimeOpts.socket)
+		listenAddr := strings.TrimSpace(runtimeOpts.listen)
+		switch {
+		case socketPath == "" && listenAddr == "":
+			return 2, fmt.Errorf("either --socket or --listen is required when --server is set")
+		case socketPath != "" && listenAddr != "":
+			return 2, fmt.Errorf("--socket and --listen are mutually exclusive")
+		case listenAddr != "":
+			if err := validateLoopbackListenAddress(listenAddr); err != nil {
+				return 2, err
+			}
 		}
 	}
 	if runtimeOpts.json && parsed.Source == builtins.BashSourceStdin && (parsed.Interactive || stdinTTY) {
@@ -91,12 +101,7 @@ func run(ctx context.Context, cfg Config, argv0 string, args []string, stdin io.
 	}
 	if runtimeOpts.server {
 		meta := currentBuildInfo(cfg.Build)
-		err = gbserver.ListenAndServeUnix(ctx, runtimeOpts.socket, gbserver.Config{
-			Runtime:    rt,
-			Name:       cfg.Name,
-			Version:    meta.Version,
-			SessionTTL: runtimeOpts.sessionTTL,
-		})
+		err = serveServer(ctx, rt, cfg.Name, meta.Version, &runtimeOpts)
 		if err != nil {
 			return 1, fmt.Errorf("server error: %w", err)
 		}
@@ -110,6 +115,44 @@ func run(ctx context.Context, cfg Config, argv0 string, args []string, stdin io.
 		return runBashInvocationJSON(ctx, cfg.Name, rt, parsed, stdin, stdout)
 	}
 	return runBashInvocation(ctx, rt, parsed, stdin, stdout, stderr)
+}
+
+func serveServer(ctx context.Context, rt *gbash.Runtime, name, version string, runtimeOpts *runtimeOptions) error {
+	cfg := gbserver.Config{
+		Runtime: rt,
+		Name:    name,
+		Version: version,
+	}
+	var socketPath string
+	var listenAddr string
+	if runtimeOpts != nil {
+		cfg.SessionTTL = runtimeOpts.sessionTTL
+		socketPath = strings.TrimSpace(runtimeOpts.socket)
+		listenAddr = strings.TrimSpace(runtimeOpts.listen)
+	}
+	if socketPath != "" {
+		return gbserver.ListenAndServeUnix(ctx, socketPath, cfg)
+	}
+	ln, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		return fmt.Errorf("listen on tcp address: %w", err)
+	}
+	defer func() { _ = ln.Close() }()
+	return gbserver.Serve(ctx, ln, cfg)
+}
+
+func validateLoopbackListenAddress(addr string) error {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		return fmt.Errorf("parse --listen: %w", err)
+	}
+	if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("--listen must use a loopback host such as 127.0.0.1, [::1], or localhost")
 }
 
 func runBashInvocation(ctx context.Context, rt *gbash.Runtime, parsed *builtins.BashInvocation, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
