@@ -17,7 +17,7 @@ import (
 
 const (
 	fuzzMaxScriptBytes = 4 << 10
-	fuzzTimeout        = 1 * time.Second
+	fuzzTimeout        = 500 * time.Millisecond
 	fuzzMaxDataBytes   = 2 << 10
 	fuzzWarmupTimeout  = 5 * time.Second
 )

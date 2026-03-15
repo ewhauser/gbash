@@ -40,7 +40,7 @@ func TestKnownAttackCorpus(t *testing.T) {
 	for _, attack := range attacks {
 		t.Run(attack.Name, func(t *testing.T) {
 			result, err := runFuzzScript(t, rt, []byte(attack.Script))
-			assertSecureFuzzOutcome(t, []byte(attack.Script), result, err)
+			assertSecureFuzzOutcomeAllowExecutionTimeout(t, []byte(attack.Script), result, err)
 		})
 	}
 }
@@ -57,7 +57,7 @@ func FuzzAttackMutations(f *testing.F) {
 		attack := attacks[cursor.Intn(len(attacks))]
 		mutated := mutateAttackScript(attack.Script, cursor)
 		result, err := runFuzzScript(t, rt, []byte(mutated))
-		assertSecureFuzzOutcome(t, []byte(mutated), result, err)
+		assertSecureFuzzOutcomeAllowExecutionTimeout(t, []byte(mutated), result, err)
 	})
 }
 

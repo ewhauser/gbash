@@ -24,10 +24,64 @@ const fuzzMaxAcceptableDuration = 2 * time.Second
 func assertSecureFuzzOutcome(t *testing.T, script []byte, result *ExecutionResult, err error) {
 	t.Helper()
 
+	assertSecureFuzzOutcomeWithOptions(t, script, result, err, fuzzOutcomeOptions{})
+}
+
+func assertSecureFuzzOutcomeAllowExecutionTimeout(t *testing.T, script []byte, result *ExecutionResult, err error) {
+	t.Helper()
+
+	assertSecureFuzzOutcomeWithOptions(t, script, result, err, fuzzOutcomeOptions{
+		allowExecutionTimeout: true,
+	})
+}
+
+func assertExecutionTimeoutFuzzOutcome(t *testing.T, script []byte, result *ExecutionResult, err error) {
+	t.Helper()
+
+	assertSecureFuzzOutcomeWithOptions(t, script, result, err, fuzzOutcomeOptions{
+		allowExecutionTimeout:   true,
+		requireExecutionTimeout: true,
+	})
+}
+
+type fuzzOutcomeOptions struct {
+	allowExecutionTimeout   bool
+	requireExecutionTimeout bool
+}
+
+func assertSecureFuzzOutcomeWithOptions(t *testing.T, script []byte, result *ExecutionResult, err error, opts fuzzOutcomeOptions) {
+	t.Helper()
+
 	assertBaseFuzzOutcome(t, script, result, err)
 	assertNoInternalLeak(t, script, result, err)
 	assertNoSensitiveLeak(t, script, result, err)
+	assertExecutionTimeoutState(t, script, result, opts)
 	assertNoRunawayExecution(t, script, result)
+}
+
+func assertExecutionTimeoutState(t *testing.T, script []byte, result *ExecutionResult, opts fuzzOutcomeOptions) {
+	t.Helper()
+
+	timedOut := isNormalizedExecutionTimeout(result)
+	if timedOut && !opts.allowExecutionTimeout {
+		t.Fatalf("unexpected execution timeout\nscript=%q\nstderr=%q", previewFuzzScript(script), result.Stderr)
+	}
+	if !timedOut && opts.requireExecutionTimeout {
+		if result == nil {
+			t.Fatalf("expected normalized execution timeout\nscript=%q", previewFuzzScript(script))
+		}
+		t.Fatalf("expected normalized execution timeout\nscript=%q\nexit=%d\nstderr=%q", previewFuzzScript(script), result.ExitCode, result.Stderr)
+	}
+}
+
+func isNormalizedExecutionTimeout(result *ExecutionResult) bool {
+	if result == nil || result.ExitCode != 124 {
+		return false
+	}
+	if strings.Contains(result.ControlStderr, "execution timed out") {
+		return true
+	}
+	return strings.Contains(result.Stderr, "execution timed out")
 }
 
 func assertNoInternalLeak(t *testing.T, script []byte, result *ExecutionResult, err error) {

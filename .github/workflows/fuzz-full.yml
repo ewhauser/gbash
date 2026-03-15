@@ -37,3 +37,12 @@ jobs:
         env:
           FUZZ_SHARD: ${{ matrix.make_var }}
           FUZZTIME: 10s
+
+      - name: Upload fuzz corpus artifacts
+        if: failure()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: fuzz-full-${{ matrix.shard }}-corpus
+          if-no-files-found: ignore
+          path: |
+            **/testdata/fuzz/Fuzz*/*

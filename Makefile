@@ -5,6 +5,7 @@ BENCH_PACKAGES := ./internal/runtime ./cmd/gbash ./contrib/jq
 
 FUZZTIME ?= 10s
 FUZZ_SMOKE_TIME ?= 3s
+FUZZ_DEEP_TIME ?= 15s
 GORELEASER_VERSION ?= v2.14.3
 GOLANGCI_LINT_VERSION ?= v2.11.3
 GOLANGCI_LINT := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
@@ -91,6 +92,9 @@ FUZZ_FULL_SHARD_2 := \
 	FuzzRealpathCommand \
 	FuzzTruncateCommand \
 	FuzzCompatPredicateCommands \
+	./policy:FuzzCheckPathReadSymlinkPolicy \
+	./policy:FuzzCheckPathWriteSymlinkPolicy \
+	./fs:FuzzOverlayFSRealpath \
 	FuzzMVFlagsCommand \
 	FuzzPasteFlagsCommand \
 	FuzzFindFlagsCommand \
@@ -112,6 +116,8 @@ FUZZ_FULL_SHARD_3 := \
 	FuzzTRFlagsCommand \
 	FuzzCatCommand \
 	FuzzDiffCommand \
+	FuzzTarCommand \
+	FuzzChecksumCommands \
 	./contrib/sqlite3:FuzzSQLiteCommands \
 	FuzzGeneratedPrograms
 
@@ -129,6 +135,8 @@ FUZZ_FULL_SHARD_4 := \
 	FuzzShellProcessCommands \
 	FuzzNestedShellCommands \
 	FuzzDataCommands \
+	FuzzHostOverlaySymlinkPolicy \
+	./network:FuzzHTTPClientPolicy \
 	./contrib/sqlite3:FuzzSQLiteFileCommands \
 	./contrib/yq:FuzzYQCommands \
 	./contrib/jq:FuzzJQCommands \
@@ -164,7 +172,8 @@ fuzz: fuzz-full
 
 fuzz-run:
 	@test -n "$(strip $(FUZZ_TARGETS))" || { echo "FUZZ_TARGETS is required"; exit 1; }
-	@set -e; \
+	@set -eu; \
+	failed=""; \
 	for target in $(FUZZ_TARGETS); do \
 		pkg=./internal/runtime; \
 		fuzz_target=$$target; \
@@ -175,8 +184,14 @@ fuzz-run:
 				;; \
 		esac; \
 		echo "==> $$pkg $$fuzz_target"; \
-		go test $$pkg -run=^$$ -fuzz=$$fuzz_target -fuzztime=$(FUZZTIME); \
-	done
+		if ! go test $$pkg -run=^$$ -fuzz=$$fuzz_target -fuzztime=$(FUZZTIME); then \
+			failed="$$failed $$target"; \
+		fi; \
+	done; \
+	if [ -n "$$failed" ]; then \
+		echo "fuzz failures:$$failed"; \
+		exit 1; \
+	fi
 
 fuzz-shard:
 	@test -n "$(FUZZ_SHARD)" || { echo "FUZZ_SHARD is required"; exit 1; }

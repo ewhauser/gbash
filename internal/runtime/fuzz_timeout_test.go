@@ -18,11 +18,11 @@ func FuzzTimeoutCommand(f *testing.F) {
 		timeoutValue := sanitizePositiveDurationToken(rawTimeout, "0.01")
 
 		script := []byte(
-			"timeout --signal TERM --kill-after " + shellQuote(killAfter) + " " + shellQuote(timeoutValue) + " sleep 1 || true\n",
+			"timeout --signal TERM --kill-after " + shellQuote(killAfter) + " " + shellQuote(timeoutValue) + " sleep 1\n",
 		)
 
 		result, err := runFuzzSessionScript(t, session, script)
-		assertSecureFuzzOutcome(t, script, result, err)
+		assertExecutionTimeoutFuzzOutcome(t, script, result, err)
 	})
 }
 

@@ -31,7 +31,15 @@ website/out/
 .claude
 
 # Go fuzz generated artifacts
-runtime/testdata/fuzz/Fuzz*/
+**/testdata/fuzz/Fuzz*/
+!contrib/sqlite3/testdata/
+!contrib/sqlite3/testdata/fuzz/
+!contrib/sqlite3/testdata/fuzz/FuzzSQLiteCommands/
+!contrib/sqlite3/testdata/fuzz/FuzzSQLiteCommands/aa698c6aa0a203f1
+!contrib/jq/testdata/
+!contrib/jq/testdata/fuzz/
+!contrib/jq/testdata/fuzz/FuzzJQCommands/
+!contrib/jq/testdata/fuzz/FuzzJQCommands/09acab89b2271fbf
 
 /gbash-gnu
 CONTINUITY.md

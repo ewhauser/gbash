@@ -3,6 +3,8 @@ package sqlite3
 import (
 	"context"
 	"io"
+	"os"
+	"path"
 	"testing"
 
 	gbruntime "github.com/ewhauser/gbash"
@@ -58,4 +60,22 @@ func readSessionFile(tb testing.TB, session *gbruntime.Session, name string) []b
 		tb.Fatalf("ReadAll(%q) error = %v", name, err)
 	}
 	return data
+}
+
+func writeSessionFile(tb testing.TB, session *gbruntime.Session, name string, data []byte) {
+	tb.Helper()
+
+	if err := session.FileSystem().MkdirAll(context.Background(), path.Dir(name), 0o755); err != nil {
+		tb.Fatalf("MkdirAll(%q) error = %v", path.Dir(name), err)
+	}
+
+	file, err := session.FileSystem().OpenFile(context.Background(), name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		tb.Fatalf("OpenFile(%q) error = %v", name, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	if _, err := file.Write(data); err != nil {
+		tb.Fatalf("Write(%q) error = %v", name, err)
+	}
 }

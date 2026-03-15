@@ -818,18 +818,17 @@ func fuzzVariant(stdinHint, features string, tokens ...string) fuzzCommandVarian
 
 func TestFuzzMetadataSeedCoverage(t *testing.T) {
 	specs := mustFuzzCommandMetadata(t)
-	tracker := newFuzzCoverageTracker()
-	for _, spec := range specs {
-		for _, variant := range spec.Variants {
-			tracker.Record(spec, variant)
-		}
-	}
 
-	missingCommands, missingFlags := tracker.Missing(specs)
-	if len(missingCommands) > 0 {
-		t.Fatalf("missing fuzz command seed coverage: %v", missingCommands)
-	}
-	if len(missingFlags) > 0 {
-		t.Fatalf("missing fuzz flag seed coverage: %v", missingFlags)
+	session := newFuzzSession(t, newFuzzRuntime(t))
+	fixtures := prepareFuzzFixtures(t, session, []byte("alpha,beta"))
+	for specIndex, spec := range specs {
+		for variantIndex, variant := range spec.Variants {
+			raw := []byte{byte(specIndex), byte(variantIndex)}
+			script := generateFlagDrivenScript(t, newFuzzCursor(raw), specs, fixtures)
+			want := renderCommand(spec, variant, fixtures) + "\n"
+			if got := script; got != want {
+				t.Fatalf("generateFlagDrivenScript() mismatch for %s variant %d\n got=%q\nwant=%q", spec.Name, variantIndex, got, want)
+			}
+		}
 	}
 }

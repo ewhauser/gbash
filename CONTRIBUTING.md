@@ -12,6 +12,26 @@ The repo uses both [`go.work`](./go.work) and committed child-module `replace` d
 
 Use `npm exec --yes pnpm@10.10.0 -- install --frozen-lockfile` at the repo root when you need the JavaScript workspace dependencies, or `pnpm install` if you already manage pnpm locally.
 
+## Fuzzing
+
+The repo uses Go native fuzzing locally and in GitHub Actions.
+
+- `make fuzz-smoke` runs the PR-oriented smoke shards.
+- `make fuzz-full` runs the broader shard set used on `main` and on the scheduled full-fuzz workflow.
+- `make fuzz-shard FUZZ_SHARD=FUZZ_FULL_SHARD_2 FUZZTIME=15s` reruns one shard locally.
+- `make fuzz-run FUZZ_TARGETS="./contrib/sqlite3:FuzzSQLiteCommands ./network:FuzzHTTPClientPolicy" FUZZTIME=15s` reruns exact targets.
+
+Fuzz failures can emit minimized corpus files under `testdata/fuzz/Fuzz*/...`. Those files should be kept when they capture a real bug or harness regression, because plain `go test` will replay them as regression inputs.
+
+Typical local workflow:
+
+1. Reproduce the failure with the `go test -run='FuzzName/<hash>'` command printed by Go.
+2. Fix the bug or harness issue.
+3. Keep the minimized input under `testdata/fuzz/...` if it still adds regression value after the fix.
+4. Re-run the owning fuzz target plus the relevant shard.
+
+CI uploads any generated fuzz corpus artifacts from failing fuzz jobs so minimized inputs can be downloaded directly from the workflow run.
+
 ## Module Versioning
 
 Published versions are coordinated with the root module release line. The root module uses plain tags like `v0.0.7`; contrib modules use nested-module tags like `contrib/jq/v0.0.7` and `contrib/sqlite3/v0.0.7`. The child modules keep real version requirements in `go.mod`, plus committed local `replace` directives so the repo still builds against the local checkout during development. The shipped `gbash-extras` binary lives under the `contrib/extras` module and follows that coordinated version line.
