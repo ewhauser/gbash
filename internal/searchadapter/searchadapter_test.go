@@ -147,6 +147,39 @@ func TestSearchVerifierFiltersIndexedCandidates(t *testing.T) {
 	}
 }
 
+func TestSearchVerifierAppliesLimitAfterFiltering(t *testing.T) {
+	fsys := searchCapableFS{
+		FileSystem: seededMemory(t, map[string]string{
+			"/workspace/a.txt": "needle\n",
+			"/workspace/b.txt": "needle\n",
+		}),
+		provider: fixedHitsProvider{
+			hits: []gbfs.SearchHit{
+				{Path: "/workspace/a.txt", Verified: true},
+				{Path: "/workspace/b.txt", Verified: true},
+			},
+		},
+	}
+
+	result, err := Search(context.Background(), fsys, &Query{
+		Roots:         []string{"/workspace"},
+		Literal:       "needle",
+		Limit:         1,
+		IndexEligible: true,
+	}, func(_ context.Context, hit gbfs.SearchHit) (bool, error) {
+		return hit.Path == "/workspace/b.txt", nil
+	})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if !result.UsedIndex {
+		t.Fatal("UsedIndex = false, want true")
+	}
+	if got, want := hitPaths(result.Hits), []string{"/workspace/b.txt"}; !slices.Equal(got, want) {
+		t.Fatalf("Paths = %v, want %v", got, want)
+	}
+}
+
 func TestSearchFallbackWhenProviderWrapsUnsupported(t *testing.T) {
 	fsys := searchCapableFS{
 		FileSystem: seededMemory(t, map[string]string{
@@ -222,6 +255,45 @@ func (wrappedUnsupportedProvider) IndexStatus() gbfs.IndexStatus {
 		CurrentGeneration: 1,
 		IndexedGeneration: 1,
 		Backend:           "wrapped-unsupported",
+	}
+}
+
+type fixedHitsProvider struct {
+	hits []gbfs.SearchHit
+}
+
+func (p fixedHitsProvider) Search(_ context.Context, query *gbfs.SearchQuery) (gbfs.SearchResult, error) {
+	hits := append([]gbfs.SearchHit(nil), p.hits...)
+	if query != nil && query.Limit > 0 && len(hits) > query.Limit {
+		return gbfs.SearchResult{
+			Hits:      hits[:query.Limit],
+			Truncated: true,
+			Status: gbfs.IndexStatus{
+				CurrentGeneration: 1,
+				IndexedGeneration: 1,
+				Backend:           "fixed-hits",
+			},
+		}, nil
+	}
+	return gbfs.SearchResult{
+		Hits: hits,
+		Status: gbfs.IndexStatus{
+			CurrentGeneration: 1,
+			IndexedGeneration: 1,
+			Backend:           "fixed-hits",
+		},
+	}, nil
+}
+
+func (fixedHitsProvider) SearchCapabilities() gbfs.SearchCapabilities {
+	return gbfs.SearchCapabilities{LiteralSearch: true}
+}
+
+func (fixedHitsProvider) IndexStatus() gbfs.IndexStatus {
+	return gbfs.IndexStatus{
+		CurrentGeneration: 1,
+		IndexedGeneration: 1,
+		Backend:           "fixed-hits",
 	}
 }
 

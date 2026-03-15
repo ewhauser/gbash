@@ -72,13 +72,17 @@ func Search(ctx context.Context, fsys gbfs.FileSystem, query *Query, verify Veri
 			return scan(ctx, fsys, roots, query, verify)
 		}
 
+		limit := remainingLimit(query.Limit, len(hits))
+		if verify != nil {
+			limit = 0
+		}
 		result, err := provider.Search(ctx, &gbfs.SearchQuery{
 			Root:         root,
 			Literal:      query.Literal,
 			IgnoreCase:   query.IgnoreCase,
 			IncludeGlobs: query.IncludeGlobs,
 			ExcludeGlobs: query.ExcludeGlobs,
-			Limit:        remainingLimit(query.Limit, len(hits)),
+			Limit:        limit,
 			WantOffsets:  query.WantOffsets,
 		})
 		if err != nil {
