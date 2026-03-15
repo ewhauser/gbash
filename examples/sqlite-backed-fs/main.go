@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/ewhauser/gbash"
+	"github.com/ewhauser/gbash/examples/internal/sqlitefs"
 )
 
 const defaultWorkDir = "/home/agent"
@@ -33,7 +34,7 @@ func run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, args []
 
 	gb, err := gbash.New(gbash.WithFileSystem(
 		gbash.CustomFileSystem(
-			sqliteFSFactory{dbPath: opts.dbPath},
+			sqlitefs.Factory{DBPath: opts.dbPath},
 			opts.workDir,
 		),
 	))

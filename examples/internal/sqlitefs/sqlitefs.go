@@ -1,4 +1,4 @@
-package main
+package sqlitefs
 
 import (
 	"context"
@@ -24,12 +24,12 @@ const (
 
 var errTooManySymlinks = errors.New("too many levels of symbolic links")
 
-type sqliteFSFactory struct {
-	dbPath string
+type Factory struct {
+	DBPath string
 }
 
-func (f sqliteFSFactory) New(ctx context.Context) (gbfs.FileSystem, error) {
-	return newSQLiteFS(ctx, f.dbPath)
+func (f Factory) New(ctx context.Context) (gbfs.FileSystem, error) {
+	return newSQLiteFS(ctx, f.DBPath)
 }
 
 type sqliteFS struct {
@@ -143,6 +143,10 @@ func (s *sqliteFS) close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.conn.Close()
+}
+
+func (s *sqliteFS) Close() error {
+	return s.close()
 }
 
 func (s *sqliteFS) Open(ctx context.Context, name string) (gbfs.File, error) {
@@ -1230,7 +1234,7 @@ func canWrite(flag int) bool {
 	}
 }
 
-var _ gbfs.Factory = sqliteFSFactory{}
+var _ gbfs.Factory = Factory{}
 var _ gbfs.FileSystem = (*sqliteFS)(nil)
 var _ gbfs.File = (*sqliteFile)(nil)
 var _ stdfs.FileInfo = sqliteFileInfo{}
