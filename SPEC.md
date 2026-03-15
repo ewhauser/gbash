@@ -616,6 +616,8 @@ Optional experimental search capability:
 - search remains an accelerator, not the semantic source of truth for `grep`/`rg`; callers may use provider hits as verified matches or as prefiltered candidates and still apply exact userspace verification
 - `grep` may use indexed providers as a per-root prefilter when it can extract safe mandatory literals from the compiled pattern; candidate files are still opened and matched in userspace before output is emitted
 - `grep` falls back per root when a provider is unavailable, stale, unsupported, or the current search mode cannot produce a bounded safe literal set; stdin, invert-match mode, and symlink-directory descendants stay on the direct scan path
+- `rg` may use indexed providers as a per-root prefilter after its normal root walking, ignore, glob, type, hidden-file, and max-depth filtering; candidate files are still opened and matched in userspace before output is emitted
+- `rg` falls back per root when a provider is unavailable, stale, unsupported, or the current search mode cannot produce a bounded safe literal set; invert-match mode and symlink-directory descendants stay on the direct scan path, and binary-sensitive guaranteed-miss modes such as `-c` and `--files-without-match` without `--text` still read the file to preserve ripgrep-style binary behavior
 
 Backend boundary for the current implementation:
 
