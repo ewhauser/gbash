@@ -3,6 +3,7 @@ package searchadapter
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	stdfs "io/fs"
@@ -81,7 +82,7 @@ func Search(ctx context.Context, fsys gbfs.FileSystem, query *Query, verify Veri
 			WantOffsets:  query.WantOffsets,
 		})
 		if err != nil {
-			if err == gbfs.ErrSearchUnsupported {
+			if errors.Is(err, gbfs.ErrSearchUnsupported) {
 				return scan(ctx, fsys, roots, query, verify)
 			}
 			return Result{}, err

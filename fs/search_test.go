@@ -189,6 +189,32 @@ func TestSearchableFSMutations(t *testing.T) {
 	assertIndexGeneration(t, provider, 9)
 }
 
+func TestSearchableFSIndexesNewLinks(t *testing.T) {
+	fsys, err := NewSearchableFileSystem(context.Background(), NewMemory(), nil)
+	if err != nil {
+		t.Fatalf("NewSearchableFileSystem() error = %v", err)
+	}
+	provider := mustSearchProvider(t, fsys, "/")
+
+	writeSearchFile(t, fsys, "/docs/file.txt", "hello needle\n")
+	if err := fsys.Symlink(context.Background(), "file.txt", "/docs/link-sym.txt"); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+	if err := fsys.Link(context.Background(), "/docs/file.txt", "/docs/link-hard.txt"); err != nil {
+		t.Fatalf("Link() error = %v", err)
+	}
+
+	assertSearchPaths(t, provider, &SearchQuery{Root: "/docs", Literal: "needle"}, []string{
+		"/docs/file.txt",
+		"/docs/link-hard.txt",
+		"/docs/link-sym.txt",
+	})
+	status := provider.IndexStatus()
+	if status.CurrentGeneration != status.IndexedGeneration {
+		t.Fatalf("index status = %+v, want current generation indexed", status)
+	}
+}
+
 func TestSearchableFSOpenFileTracksCreateWithoutWrite(t *testing.T) {
 	fsys, err := NewSearchableFileSystem(context.Background(), NewMemory(), nil)
 	if err != nil {

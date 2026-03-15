@@ -143,23 +143,20 @@ func (s *searchableFS) Realpath(ctx context.Context, name string) (string, error
 }
 
 func (s *searchableFS) Symlink(ctx context.Context, target, linkName string) error {
-	if err := s.inner.Symlink(ctx, target, linkName); err != nil {
+	abs := Resolve(s.inner.Getwd(), linkName)
+	if err := s.inner.Symlink(ctx, target, abs); err != nil {
 		return err
 	}
-	return s.search.ApplySearchMutation(ctx, &SearchMutation{
-		Kind: SearchMutationMetadata,
-		Path: Resolve(s.inner.Getwd(), linkName),
-	})
+	return s.syncSearchPath(ctx, abs)
 }
 
 func (s *searchableFS) Link(ctx context.Context, oldName, newName string) error {
-	if err := s.inner.Link(ctx, oldName, newName); err != nil {
+	oldAbs := Resolve(s.inner.Getwd(), oldName)
+	newAbs := Resolve(s.inner.Getwd(), newName)
+	if err := s.inner.Link(ctx, oldAbs, newAbs); err != nil {
 		return err
 	}
-	return s.search.ApplySearchMutation(ctx, &SearchMutation{
-		Kind: SearchMutationMetadata,
-		Path: Resolve(s.inner.Getwd(), newName),
-	})
+	return s.syncSearchPath(ctx, newAbs)
 }
 
 func (s *searchableFS) Chown(ctx context.Context, name string, uid, gid uint32, follow bool) error {
@@ -261,22 +258,7 @@ func (f *searchableFile) Close() error {
 	if !f.dirty && !f.dirtyOnEnd {
 		return nil
 	}
-
-	data, err := readAllSearchFile(context.Background(), f.owner.inner, f.path)
-	if err != nil {
-		if errors.Is(err, stdfs.ErrNotExist) {
-			return f.owner.search.ApplySearchMutation(context.Background(), &SearchMutation{
-				Kind: SearchMutationRemove,
-				Path: f.path,
-			})
-		}
-		return err
-	}
-	return f.owner.search.ApplySearchMutation(context.Background(), &SearchMutation{
-		Kind: SearchMutationWrite,
-		Path: f.path,
-		Data: data,
-	})
+	return f.owner.syncSearchPath(context.Background(), f.path)
 }
 
 func (f *searchableFile) Stat() (stdfs.FileInfo, error) {
@@ -340,6 +322,59 @@ func readAllSearchFile(ctx context.Context, fsys FileSystem, name string) ([]byt
 	}
 	defer func() { _ = file.Close() }()
 	return io.ReadAll(file)
+}
+
+func (s *searchableFS) syncSearchPath(ctx context.Context, name string) error {
+	abs := Resolve(s.inner.Getwd(), name)
+	linfo, err := s.inner.Lstat(ctx, abs)
+	if err != nil {
+		if errors.Is(err, stdfs.ErrNotExist) {
+			return s.search.ApplySearchMutation(ctx, &SearchMutation{
+				Kind: SearchMutationRemove,
+				Path: abs,
+			})
+		}
+		return err
+	}
+	if linfo.IsDir() {
+		return s.search.ApplySearchMutation(ctx, &SearchMutation{
+			Kind: SearchMutationRemove,
+			Path: abs,
+		})
+	}
+	if linfo.Mode()&stdfs.ModeSymlink != 0 {
+		info, err := s.inner.Stat(ctx, abs)
+		switch {
+		case errors.Is(err, stdfs.ErrNotExist), errors.Is(err, stdfs.ErrInvalid):
+			return s.search.ApplySearchMutation(ctx, &SearchMutation{
+				Kind: SearchMutationRemove,
+				Path: abs,
+			})
+		case err != nil:
+			return err
+		case info.IsDir():
+			return s.search.ApplySearchMutation(ctx, &SearchMutation{
+				Kind: SearchMutationRemove,
+				Path: abs,
+			})
+		}
+	}
+
+	data, err := readAllSearchFile(ctx, s.inner, abs)
+	if err != nil {
+		if errors.Is(err, stdfs.ErrNotExist) {
+			return s.search.ApplySearchMutation(ctx, &SearchMutation{
+				Kind: SearchMutationRemove,
+				Path: abs,
+			})
+		}
+		return err
+	}
+	return s.search.ApplySearchMutation(ctx, &SearchMutation{
+		Kind: SearchMutationWrite,
+		Path: abs,
+		Data: data,
+	})
 }
 
 // SearchProviderForPath returns a translated provider for the mounted

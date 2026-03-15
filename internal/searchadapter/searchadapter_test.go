@@ -2,6 +2,7 @@ package searchadapter
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -146,6 +147,30 @@ func TestSearchVerifierFiltersIndexedCandidates(t *testing.T) {
 	}
 }
 
+func TestSearchFallbackWhenProviderWrapsUnsupported(t *testing.T) {
+	fsys := searchCapableFS{
+		FileSystem: seededMemory(t, map[string]string{
+			"/workspace/a.txt": "needle\n",
+		}),
+		provider: wrappedUnsupportedProvider{},
+	}
+
+	result, err := Search(context.Background(), fsys, &Query{
+		Roots:         []string{"/workspace"},
+		Literal:       "needle",
+		IndexEligible: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if result.UsedIndex {
+		t.Fatal("UsedIndex = true, want false")
+	}
+	if got, want := hitPaths(result.Hits), []string{"/workspace/a.txt"}; !slices.Equal(got, want) {
+		t.Fatalf("Paths = %v, want %v", got, want)
+	}
+}
+
 type searchCapableFS struct {
 	gbfs.FileSystem
 	provider gbfs.SearchProvider
@@ -179,6 +204,24 @@ func (staleProvider) IndexStatus() gbfs.IndexStatus {
 		CurrentGeneration: 2,
 		IndexedGeneration: 1,
 		Backend:           "stale-test",
+	}
+}
+
+type wrappedUnsupportedProvider struct{}
+
+func (wrappedUnsupportedProvider) Search(context.Context, *gbfs.SearchQuery) (gbfs.SearchResult, error) {
+	return gbfs.SearchResult{}, fmt.Errorf("wrapped unsupported: %w", gbfs.ErrSearchUnsupported)
+}
+
+func (wrappedUnsupportedProvider) SearchCapabilities() gbfs.SearchCapabilities {
+	return gbfs.SearchCapabilities{LiteralSearch: true}
+}
+
+func (wrappedUnsupportedProvider) IndexStatus() gbfs.IndexStatus {
+	return gbfs.IndexStatus{
+		CurrentGeneration: 1,
+		IndexedGeneration: 1,
+		Backend:           "wrapped-unsupported",
 	}
 }
 
