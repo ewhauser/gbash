@@ -47,6 +47,34 @@ func TestSearchUsesIndexWhenSupportedAndFresh(t *testing.T) {
 	}
 }
 
+func TestSearchResolvesRelativeRootsFromFilesystemCWD(t *testing.T) {
+	fsys, err := gbfs.NewSearchableFileSystem(context.Background(), seededMemory(t, map[string]string{
+		"/workspace/docs/a.txt": "needle\n",
+		"/docs/b.txt":           "needle\n",
+	}), nil)
+	if err != nil {
+		t.Fatalf("NewSearchableFileSystem() error = %v", err)
+	}
+	if err := fsys.Chdir("/workspace"); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+
+	result, err := Search(context.Background(), fsys, &Query{
+		Roots:         []string{"docs"},
+		Literal:       "needle",
+		IndexEligible: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if !result.UsedIndex {
+		t.Fatal("UsedIndex = false, want true")
+	}
+	if got, want := hitPaths(result.Hits), []string{"/workspace/docs/a.txt"}; !slices.Equal(got, want) {
+		t.Fatalf("Paths = %v, want %v", got, want)
+	}
+}
+
 func TestSearchFallbackWhenUnsupported(t *testing.T) {
 	fsys := seededMemory(t, map[string]string{
 		"/workspace/a.txt":      "needle\n",
@@ -112,6 +140,92 @@ func TestSearchFallbackWhenIneligible(t *testing.T) {
 	}
 	if got, want := hitPaths(result.Hits), []string{"/workspace/a.txt"}; !slices.Equal(got, want) {
 		t.Fatalf("Paths = %v, want %v", got, want)
+	}
+}
+
+func TestSearchFallbackWhenProviderLacksRequestedCapabilities(t *testing.T) {
+	tests := []struct {
+		name      string
+		files     map[string]string
+		query     Query
+		wantPaths []string
+	}{
+		{
+			name: "ignore-case",
+			files: map[string]string{
+				"/workspace/a.txt": "Needle\n",
+			},
+			query: Query{
+				Roots:         []string{"/workspace"},
+				Literal:       "needle",
+				IgnoreCase:    true,
+				IndexEligible: true,
+			},
+			wantPaths: []string{"/workspace/a.txt"},
+		},
+		{
+			name: "include-globs",
+			files: map[string]string{
+				"/workspace/a.txt": "needle\n",
+				"/workspace/b.log": "needle\n",
+			},
+			query: Query{
+				Roots:         []string{"/workspace"},
+				Literal:       "needle",
+				IncludeGlobs:  []string{"**/*.txt"},
+				IndexEligible: true,
+			},
+			wantPaths: []string{"/workspace/a.txt"},
+		},
+		{
+			name: "exclude-globs",
+			files: map[string]string{
+				"/workspace/a.txt":      "needle\n",
+				"/workspace/skip/b.txt": "needle\n",
+			},
+			query: Query{
+				Roots:         []string{"/workspace"},
+				Literal:       "needle",
+				ExcludeGlobs:  []string{"skip/**"},
+				IndexEligible: true,
+			},
+			wantPaths: []string{"/workspace/a.txt"},
+		},
+		{
+			name: "offsets",
+			files: map[string]string{
+				"/workspace/a.txt": "needle\n",
+			},
+			query: Query{
+				Roots:         []string{"/workspace"},
+				Literal:       "needle",
+				WantOffsets:   true,
+				IndexEligible: true,
+			},
+			wantPaths: []string{"/workspace/a.txt"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fsys := searchCapableFS{
+				FileSystem: seededMemory(t, tc.files),
+				provider: limitedCapabilitiesProvider{
+					hits: []gbfs.SearchHit{{Path: "/workspace/wrong.txt", Verified: true}},
+				},
+			}
+
+			result, err := Search(context.Background(), fsys, &tc.query, nil)
+			if err != nil {
+				t.Fatalf("Search() error = %v", err)
+			}
+			if result.UsedIndex {
+				t.Fatal("UsedIndex = true, want false")
+			}
+			if got := hitPaths(result.Hits); !slices.Equal(got, tc.wantPaths) {
+				t.Fatalf("Paths = %v, want %v", got, tc.wantPaths)
+			}
+		})
 	}
 }
 
@@ -278,7 +392,10 @@ func (p staleProvider) Search(context.Context, *gbfs.SearchQuery) (gbfs.SearchRe
 }
 
 func (staleProvider) SearchCapabilities() gbfs.SearchCapabilities {
-	return gbfs.SearchCapabilities{LiteralSearch: true}
+	return gbfs.SearchCapabilities{
+		LiteralSearch:   true,
+		RootRestriction: true,
+	}
 }
 
 func (staleProvider) IndexStatus() gbfs.IndexStatus {
@@ -305,7 +422,10 @@ func (p staleAfterSearchProvider) Search(context.Context, *gbfs.SearchQuery) (gb
 }
 
 func (staleAfterSearchProvider) SearchCapabilities() gbfs.SearchCapabilities {
-	return gbfs.SearchCapabilities{LiteralSearch: true}
+	return gbfs.SearchCapabilities{
+		LiteralSearch:   true,
+		RootRestriction: true,
+	}
 }
 
 func (staleAfterSearchProvider) IndexStatus() gbfs.IndexStatus {
@@ -323,7 +443,10 @@ func (wrappedUnsupportedProvider) Search(context.Context, *gbfs.SearchQuery) (gb
 }
 
 func (wrappedUnsupportedProvider) SearchCapabilities() gbfs.SearchCapabilities {
-	return gbfs.SearchCapabilities{LiteralSearch: true}
+	return gbfs.SearchCapabilities{
+		LiteralSearch:   true,
+		RootRestriction: true,
+	}
 }
 
 func (wrappedUnsupportedProvider) IndexStatus() gbfs.IndexStatus {
@@ -362,7 +485,10 @@ func (p fixedHitsProvider) Search(_ context.Context, query *gbfs.SearchQuery) (g
 }
 
 func (fixedHitsProvider) SearchCapabilities() gbfs.SearchCapabilities {
-	return gbfs.SearchCapabilities{LiteralSearch: true}
+	return gbfs.SearchCapabilities{
+		LiteralSearch:   true,
+		RootRestriction: true,
+	}
 }
 
 func (fixedHitsProvider) IndexStatus() gbfs.IndexStatus {
@@ -370,6 +496,40 @@ func (fixedHitsProvider) IndexStatus() gbfs.IndexStatus {
 		CurrentGeneration: 1,
 		IndexedGeneration: 1,
 		Backend:           "fixed-hits",
+	}
+}
+
+type limitedCapabilitiesProvider struct {
+	hits []gbfs.SearchHit
+}
+
+func (p limitedCapabilitiesProvider) Search(_ context.Context, query *gbfs.SearchQuery) (gbfs.SearchResult, error) {
+	hits := append([]gbfs.SearchHit(nil), p.hits...)
+	if query != nil && query.Limit > 0 && len(hits) > query.Limit {
+		hits = hits[:query.Limit]
+	}
+	return gbfs.SearchResult{
+		Hits: hits,
+		Status: gbfs.IndexStatus{
+			CurrentGeneration: 1,
+			IndexedGeneration: 1,
+			Backend:           "limited-capabilities",
+		},
+	}, nil
+}
+
+func (limitedCapabilitiesProvider) SearchCapabilities() gbfs.SearchCapabilities {
+	return gbfs.SearchCapabilities{
+		LiteralSearch:   true,
+		RootRestriction: true,
+	}
+}
+
+func (limitedCapabilitiesProvider) IndexStatus() gbfs.IndexStatus {
+	return gbfs.IndexStatus{
+		CurrentGeneration: 1,
+		IndexedGeneration: 1,
+		Backend:           "limited-capabilities",
 	}
 }
 

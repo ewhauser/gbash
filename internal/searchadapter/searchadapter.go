@@ -47,7 +47,7 @@ func Search(ctx context.Context, fsys gbfs.FileSystem, query *Query, verify Veri
 	if query == nil {
 		return Result{}, fmt.Errorf("searchadapter: query is required")
 	}
-	roots := normalizedRoots(query.Roots)
+	roots := normalizedRoots(fsys, query.Roots)
 	if query.Literal == "" {
 		return Result{}, fmt.Errorf("searchadapter: literal is required")
 	}
@@ -65,6 +65,9 @@ func Search(ctx context.Context, fsys gbfs.FileSystem, query *Query, verify Veri
 	for _, root := range roots {
 		provider, ok := capable.SearchProviderForPath(root)
 		if !ok {
+			return scan(ctx, fsys, roots, query, verify)
+		}
+		if !providerSupportsQuery(provider.SearchCapabilities(), root, query) {
 			return scan(ctx, fsys, roots, query, verify)
 		}
 		status := provider.IndexStatus()
@@ -238,15 +241,41 @@ func scanFile(ctx context.Context, fsys gbfs.FileSystem, root, name string, quer
 	return nil
 }
 
-func normalizedRoots(roots []string) []string {
+func normalizedRoots(fsys gbfs.FileSystem, roots []string) []string {
 	if len(roots) == 0 {
 		return []string{"/"}
 	}
+	cwd := "/"
+	if fsys != nil {
+		cwd = fsys.Getwd()
+	}
 	out := make([]string, 0, len(roots))
 	for _, root := range roots {
-		out = append(out, gbfs.Clean(root))
+		out = append(out, gbfs.Resolve(cwd, root))
 	}
 	return out
+}
+
+func providerSupportsQuery(caps gbfs.SearchCapabilities, root string, query *Query) bool {
+	if query == nil || !caps.LiteralSearch {
+		return false
+	}
+	if query.IgnoreCase && !caps.IgnoreCaseLiteralSearch {
+		return false
+	}
+	if len(query.IncludeGlobs) > 0 && !caps.IncludeGlobs {
+		return false
+	}
+	if len(query.ExcludeGlobs) > 0 && !caps.ExcludeGlobs {
+		return false
+	}
+	if query.WantOffsets && !caps.Offsets {
+		return false
+	}
+	if gbfs.Clean(root) != "/" && !caps.RootRestriction {
+		return false
+	}
+	return true
 }
 
 func remainingLimit(limit, used int) int {
