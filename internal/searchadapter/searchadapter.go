@@ -388,12 +388,7 @@ func regexpTreeHasFoldCase(re *syntax.Regexp) bool {
 	if re.Flags&syntax.FoldCase != 0 {
 		return true
 	}
-	for _, sub := range re.Sub {
-		if regexpTreeHasFoldCase(sub) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(re.Sub, regexpTreeHasFoldCase)
 }
 
 func mandatoryLiteralSet(re *syntax.Regexp) []string {
