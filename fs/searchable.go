@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -47,8 +48,12 @@ func NewSearchableFileSystem(ctx context.Context, fsys FileSystem, provider Sear
 	}
 
 	return &searchableFS{
-		inner:  fsys,
-		search: provider,
+		inner:                fsys,
+		search:               provider,
+		hardLinkGroupByPath:  make(map[string]uint64),
+		hardLinkGroups:       make(map[uint64]map[string]struct{}),
+		symlinkTargetByPath:  make(map[string]string),
+		symlinkPathsByTarget: make(map[string]map[string]struct{}),
 	}, nil
 }
 
@@ -79,6 +84,13 @@ func NewSearchableFactory(base Factory, newProvider func() SearchIndexer) Factor
 type searchableFS struct {
 	inner  FileSystem
 	search SearchIndexer
+
+	mu                   sync.Mutex
+	nextHardLinkGroup    uint64
+	hardLinkGroupByPath  map[string]uint64
+	hardLinkGroups       map[uint64]map[string]struct{}
+	symlinkTargetByPath  map[string]string
+	symlinkPathsByTarget map[string]map[string]struct{}
 }
 
 func (s *searchableFS) SearchProviderForPath(string) (SearchProvider, bool) {
@@ -147,6 +159,9 @@ func (s *searchableFS) Symlink(ctx context.Context, target, linkName string) err
 	if err := s.inner.Symlink(ctx, target, abs); err != nil {
 		return err
 	}
+	if err := s.refreshTrackedSymlink(ctx, abs); err != nil {
+		return err
+	}
 	return s.syncSearchPath(ctx, abs)
 }
 
@@ -156,6 +171,7 @@ func (s *searchableFS) Link(ctx context.Context, oldName, newName string) error 
 	if err := s.inner.Link(ctx, oldAbs, newAbs); err != nil {
 		return err
 	}
+	s.recordHardLink(oldAbs, newAbs)
 	return s.syncSearchPath(ctx, newAbs)
 }
 
@@ -204,10 +220,21 @@ func (s *searchableFS) Remove(ctx context.Context, name string, recursive bool) 
 	if err := s.inner.Remove(ctx, abs, recursive); err != nil {
 		return err
 	}
-	return s.search.ApplySearchMutation(ctx, &SearchMutation{
+	if err := s.search.ApplySearchMutation(ctx, &SearchMutation{
 		Kind: SearchMutationRemove,
 		Path: abs,
-	})
+	}); err != nil {
+		return err
+	}
+	for _, related := range s.removeTrackedPath(abs) {
+		if err := s.syncSearchPath(ctx, related); err != nil {
+			return err
+		}
+		if err := s.refreshTrackedSymlink(ctx, related); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *searchableFS) Rename(ctx context.Context, oldName, newName string) error {
@@ -216,11 +243,22 @@ func (s *searchableFS) Rename(ctx context.Context, oldName, newName string) erro
 	if err := s.inner.Rename(ctx, oldAbs, newAbs); err != nil {
 		return err
 	}
-	return s.search.ApplySearchMutation(ctx, &SearchMutation{
+	if err := s.search.ApplySearchMutation(ctx, &SearchMutation{
 		Kind:    SearchMutationRename,
 		OldPath: oldAbs,
 		NewPath: newAbs,
-	})
+	}); err != nil {
+		return err
+	}
+	for _, related := range s.renameTrackedPaths(oldAbs, newAbs) {
+		if err := s.syncSearchPath(ctx, related); err != nil {
+			return err
+		}
+		if err := s.refreshTrackedSymlink(ctx, related); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *searchableFS) Getwd() string {
@@ -258,7 +296,7 @@ func (f *searchableFile) Close() error {
 	if !f.dirty && !f.dirtyOnEnd {
 		return nil
 	}
-	return f.owner.syncSearchPath(context.Background(), f.path)
+	return f.owner.syncSearchPathAndAliases(context.Background(), f.path)
 }
 
 func (f *searchableFile) Stat() (stdfs.FileInfo, error) {
@@ -375,6 +413,258 @@ func (s *searchableFS) syncSearchPath(ctx context.Context, name string) error {
 		Path: abs,
 		Data: data,
 	})
+}
+
+func (s *searchableFS) syncSearchPathAndAliases(ctx context.Context, name string) error {
+	abs := Resolve(s.inner.Getwd(), name)
+	primary := map[string]struct{}{
+		abs: {},
+	}
+	if resolved, err := s.inner.Realpath(ctx, abs); err == nil {
+		primary[Clean(resolved)] = struct{}{}
+	} else if !errors.Is(err, stdfs.ErrNotExist) && !errors.Is(err, stdfs.ErrInvalid) {
+		return err
+	}
+
+	for pathValue := range primary {
+		if err := s.syncSearchPath(ctx, pathValue); err != nil {
+			return err
+		}
+		if err := s.refreshTrackedSymlink(ctx, pathValue); err != nil {
+			return err
+		}
+	}
+
+	for _, related := range s.trackedRelatedPaths(primary) {
+		if _, ok := primary[related]; ok {
+			continue
+		}
+		if err := s.syncSearchPath(ctx, related); err != nil {
+			return err
+		}
+		if err := s.refreshTrackedSymlink(ctx, related); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *searchableFS) trackedRelatedPaths(paths map[string]struct{}) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	related := make(map[string]struct{})
+	for pathValue := range paths {
+		if groupID, ok := s.hardLinkGroupByPath[pathValue]; ok {
+			for member := range s.hardLinkGroups[groupID] {
+				related[member] = struct{}{}
+			}
+		}
+		if aliases, ok := s.symlinkPathsByTarget[pathValue]; ok {
+			for alias := range aliases {
+				related[alias] = struct{}{}
+			}
+		}
+	}
+
+	out := make([]string, 0, len(related))
+	for pathValue := range related {
+		out = append(out, pathValue)
+	}
+	return out
+}
+
+func (s *searchableFS) refreshTrackedSymlink(ctx context.Context, name string) error {
+	abs := Resolve(s.inner.Getwd(), name)
+	linfo, err := s.inner.Lstat(ctx, abs)
+	if err != nil {
+		if errors.Is(err, stdfs.ErrNotExist) {
+			s.removeTrackedSymlink(abs)
+			return nil
+		}
+		return err
+	}
+	if linfo.Mode()&stdfs.ModeSymlink == 0 {
+		s.removeTrackedSymlink(abs)
+		return nil
+	}
+
+	info, err := s.inner.Stat(ctx, abs)
+	switch {
+	case errors.Is(err, stdfs.ErrNotExist), errors.Is(err, stdfs.ErrInvalid):
+		s.removeTrackedSymlink(abs)
+		return nil
+	case err != nil:
+		return err
+	case info.IsDir():
+		s.removeTrackedSymlink(abs)
+		return nil
+	}
+
+	target, err := s.inner.Realpath(ctx, abs)
+	switch {
+	case errors.Is(err, stdfs.ErrNotExist), errors.Is(err, stdfs.ErrInvalid):
+		s.removeTrackedSymlink(abs)
+		return nil
+	case err != nil:
+		return err
+	}
+	s.setTrackedSymlink(abs, target)
+	return nil
+}
+
+func (s *searchableFS) recordHardLink(oldPath, newPath string) {
+	oldPath = Clean(oldPath)
+	newPath = Clean(newPath)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	groupID, ok := s.hardLinkGroupByPath[oldPath]
+	if !ok {
+		s.nextHardLinkGroup++
+		groupID = s.nextHardLinkGroup
+		s.hardLinkGroupByPath[oldPath] = groupID
+		s.hardLinkGroups[groupID] = map[string]struct{}{
+			oldPath: {},
+		}
+	}
+	group := s.hardLinkGroups[groupID]
+	group[oldPath] = struct{}{}
+	group[newPath] = struct{}{}
+	s.hardLinkGroupByPath[newPath] = groupID
+}
+
+func (s *searchableFS) removeTrackedPath(pathValue string) []string {
+	pathValue = Clean(pathValue)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	affected := make(map[string]struct{})
+	for target, aliases := range s.symlinkPathsByTarget {
+		if !pathWithinSearchRoot(target, pathValue) {
+			continue
+		}
+		for alias := range aliases {
+			if !pathWithinSearchRoot(alias, pathValue) {
+				affected[alias] = struct{}{}
+			}
+		}
+	}
+
+	for alias := range s.symlinkTargetByPath {
+		if pathWithinSearchRoot(alias, pathValue) {
+			s.removeTrackedSymlinkLocked(alias)
+		}
+	}
+	for alias := range s.hardLinkGroupByPath {
+		if pathWithinSearchRoot(alias, pathValue) {
+			s.removeHardLinkPathLocked(alias)
+		}
+	}
+
+	out := make([]string, 0, len(affected))
+	for alias := range affected {
+		out = append(out, alias)
+	}
+	return out
+}
+
+func (s *searchableFS) renameTrackedPaths(oldPath, newPath string) []string {
+	oldPath = Clean(oldPath)
+	newPath = Clean(newPath)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	affected := make(map[string]struct{})
+	for alias, target := range s.symlinkTargetByPath {
+		switch {
+		case pathWithinSearchRoot(alias, oldPath):
+			affected[renameTrackedPath(alias, oldPath, newPath)] = struct{}{}
+			s.removeTrackedSymlinkLocked(alias)
+		case pathWithinSearchRoot(target, oldPath):
+			affected[alias] = struct{}{}
+		}
+	}
+
+	for alias, groupID := range s.hardLinkGroupByPath {
+		if !pathWithinSearchRoot(alias, oldPath) {
+			continue
+		}
+		renamed := renameTrackedPath(alias, oldPath, newPath)
+		group := s.hardLinkGroups[groupID]
+		delete(group, alias)
+		group[renamed] = struct{}{}
+		delete(s.hardLinkGroupByPath, alias)
+		s.hardLinkGroupByPath[renamed] = groupID
+	}
+
+	out := make([]string, 0, len(affected))
+	for alias := range affected {
+		out = append(out, alias)
+	}
+	return out
+}
+
+func renameTrackedPath(pathValue, oldPrefix, newPrefix string) string {
+	if pathValue == oldPrefix {
+		return newPrefix
+	}
+	return Clean(newPrefix + strings.TrimPrefix(pathValue, oldPrefix))
+}
+
+func (s *searchableFS) removeTrackedSymlink(pathValue string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.removeTrackedSymlinkLocked(Clean(pathValue))
+}
+
+func (s *searchableFS) setTrackedSymlink(pathValue, target string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	pathValue = Clean(pathValue)
+	target = Clean(target)
+	s.removeTrackedSymlinkLocked(pathValue)
+	s.symlinkTargetByPath[pathValue] = target
+	paths := s.symlinkPathsByTarget[target]
+	if paths == nil {
+		paths = make(map[string]struct{})
+		s.symlinkPathsByTarget[target] = paths
+	}
+	paths[pathValue] = struct{}{}
+}
+
+func (s *searchableFS) removeTrackedSymlinkLocked(pathValue string) {
+	target, ok := s.symlinkTargetByPath[pathValue]
+	if !ok {
+		return
+	}
+	delete(s.symlinkTargetByPath, pathValue)
+	paths := s.symlinkPathsByTarget[target]
+	delete(paths, pathValue)
+	if len(paths) == 0 {
+		delete(s.symlinkPathsByTarget, target)
+	}
+}
+
+func (s *searchableFS) removeHardLinkPathLocked(pathValue string) {
+	groupID, ok := s.hardLinkGroupByPath[pathValue]
+	if !ok {
+		return
+	}
+	delete(s.hardLinkGroupByPath, pathValue)
+	group := s.hardLinkGroups[groupID]
+	delete(group, pathValue)
+	if len(group) > 1 {
+		return
+	}
+	for alias := range group {
+		delete(s.hardLinkGroupByPath, alias)
+	}
+	delete(s.hardLinkGroups, groupID)
 }
 
 // SearchProviderForPath returns a translated provider for the mounted

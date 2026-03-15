@@ -209,6 +209,15 @@ func TestSearchableFSIndexesNewLinks(t *testing.T) {
 		"/docs/link-hard.txt",
 		"/docs/link-sym.txt",
 	})
+
+	writeSearchFile(t, fsys, "/docs/file.txt", "fresh token\n")
+	assertSearchPaths(t, provider, &SearchQuery{Root: "/docs", Literal: "fresh"}, []string{
+		"/docs/file.txt",
+		"/docs/link-hard.txt",
+		"/docs/link-sym.txt",
+	})
+	assertSearchPaths(t, provider, &SearchQuery{Root: "/docs", Literal: "needle"}, nil)
+
 	status := provider.IndexStatus()
 	if status.CurrentGeneration != status.IndexedGeneration {
 		t.Fatalf("index status = %+v, want current generation indexed", status)
