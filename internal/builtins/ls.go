@@ -597,7 +597,7 @@ func (c *LS) renderPathEntry(ctx context.Context, inv *Invocation, target, abs s
 		return "", 0, lsRenderResult{}, err
 	}
 	if opts.longFormat {
-		line, dired := formatLSLongLine(name, info, opts, ranges)
+		line, dired := formatLSLongLine(inv, name, info, opts, ranges)
 		if opts.dired {
 			line = "  " + line
 			for i := range dired {
@@ -647,7 +647,7 @@ func lsRenderEntries(ctx context.Context, inv *Invocation, dirAbs string, entrie
 			return lsRenderResult{}, err
 		}
 		if opts.longFormat {
-			line, dired := formatLSLongLine(name, entry.info, opts, ranges)
+			line, dired := formatLSLongLine(inv, name, entry.info, opts, ranges)
 			if opts.dired {
 				line = "  " + line
 				for i := range dired {
@@ -1477,7 +1477,7 @@ func lsNumericChunk(value string) (chunk, rest string) {
 	return value[:index], value[index:]
 }
 
-func formatLSLongLine(name string, info stdfs.FileInfo, opts *lsOptions, nameRanges []lsByteRange) (string, []lsByteRange) {
+func formatLSLongLine(inv *Invocation, name string, info stdfs.FileInfo, opts *lsOptions, nameRanges []lsByteRange) (string, []lsByteRange) {
 	fields := make([]string, 0, 9)
 	userToken, groupToken, authorToken := lsIdentityTokens(info, opts.numericIDs, opts.identityDB)
 	if opts.showInode {
