@@ -281,8 +281,8 @@ func TestB2SumStrictCheckAcceptsOpenSSLTaggedLengthLines(t *testing.T) {
 	for _, name := range files {
 		data := []byte(name + "\n")
 		writeSessionFile(t, session, name, data)
-		content.WriteString(fmt.Sprintf("BLAKE2b(%s)= %s\n", name[len("/tmp/"):], b2Hex(data)))
-		content.WriteString(fmt.Sprintf("BLAKE2b-128(%s)= %s\n", name[len("/tmp/"):], b2HexSized(data, 16)))
+		fmt.Fprintf(&content, "BLAKE2b(%s)= %s\n", name[len("/tmp/"):], b2Hex(data))
+		fmt.Fprintf(&content, "BLAKE2b-128(%s)= %s\n", name[len("/tmp/"):], b2HexSized(data, 16))
 	}
 	writeSessionFile(t, session, "/tmp/openssl.b2sum", []byte(content.String()))
 
