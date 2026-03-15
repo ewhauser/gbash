@@ -332,8 +332,8 @@ func sanitizeCksumLength(inv *Invocation, algo cksumAlgorithm, value string) (ck
 				return cksumAlgorithm{}, &ExitError{Code: 1}
 			}
 		}
-		switch bits := lengthBytes * 8; {
-		case bits == 512:
+		switch bits := lengthBytes * 8; bits {
+		case 512:
 			algo.bits = 0
 			return algo, nil
 		default:
