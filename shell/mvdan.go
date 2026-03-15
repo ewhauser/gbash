@@ -1543,12 +1543,7 @@ func prependRuntimePreludeLines(script string) string {
 }
 
 func isInternalHelperCommand(name string) bool {
-	switch name {
-	case loopIterCommandName, letHelperCommandName, letHelperCommandAlias:
-		return true
-	default:
-		return false
-	}
+	return strings.HasPrefix(name, "__jb_") || name == letHelperCommandAlias
 }
 
 func execLetHelper(ctx context.Context, args []string) error {

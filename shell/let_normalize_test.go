@@ -45,3 +45,41 @@ func TestNormalizeLetCommandsSkipsNonCommandContexts(t *testing.T) {
 		t.Fatalf("normalizeLetCommands() = %q, want unchanged script", got)
 	}
 }
+
+func TestNormalizeLetCommandsHandlesCasePatterns(t *testing.T) {
+	t.Parallel()
+
+	// 'let' as a case pattern must not be rewritten.
+	script := "" +
+		"case \"$x\" in\n" +
+		"  let) echo matched ;;\n" +
+		"  a|let) echo compound ;;\n" +
+		"  *) let a+=1 ;;\n" +
+		"esac\n"
+
+	want := "" +
+		"case \"$x\" in\n" +
+		"  let) echo matched ;;\n" +
+		"  a|let) echo compound ;;\n" +
+		"  *) " + letHelperCommandAlias + " a+=1 ;;\n" +
+		"esac\n"
+
+	if got := normalizeLetCommands(script); got != want {
+		t.Fatalf("normalizeLetCommands() =\n  %q\nwant\n  %q", got, want)
+	}
+}
+
+func TestNormalizeLetCommandsHandlesNestedCase(t *testing.T) {
+	t.Parallel()
+
+	script := "" +
+		"case \"$x\" in\n" +
+		"  a) case \"$y\" in let) echo inner ;; esac ;;\n" +
+		"  let) echo outer ;;\n" +
+		"esac\n"
+
+	// 'let' in pattern positions must stay, 'let' in command positions would be rewritten.
+	if got := normalizeLetCommands(script); got != script {
+		t.Fatalf("normalizeLetCommands() =\n  %q\nwant unchanged script", got)
+	}
+}

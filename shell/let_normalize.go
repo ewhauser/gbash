@@ -15,6 +15,10 @@ type letNormalizer struct {
 	expectRedirTarget bool
 	pendingHeredocOp  *pendingHeredoc
 	pendingHeredocs   []pendingHeredoc
+	caseDepth         int
+	inCasePattern     bool
+	sawCase           bool
+	expectCaseIn      bool
 }
 
 func normalizeLetCommands(script string) string {
@@ -46,6 +50,9 @@ func (n *letNormalizer) run() string {
 		case '#':
 			n.copyComment()
 		case ';':
+			if n.caseDepth > 0 && (strings.HasPrefix(n.src[n.i:], ";;") || strings.HasPrefix(n.src[n.i:], ";&")) {
+				n.inCasePattern = true
+			}
 			n.copyOperator()
 			n.wantCommandWord = true
 			n.expectRedirTarget = false
@@ -69,7 +76,12 @@ func (n *letNormalizer) run() string {
 		case ')':
 			n.out.WriteByte(c)
 			n.i++
-			n.wantCommandWord = false
+			if n.inCasePattern {
+				n.inCasePattern = false
+				n.wantCommandWord = true
+			} else {
+				n.wantCommandWord = false
+			}
 			n.expectRedirTarget = false
 		case '{':
 			n.out.WriteByte(c)
@@ -174,15 +186,37 @@ func (n *letNormalizer) copyWord() {
 	case n.expectRedirTarget:
 		n.out.WriteString(raw)
 		n.expectRedirTarget = false
-	case n.wantCommandWord && raw == "let" && !startsFunctionDeclaration(n.src, end):
+	case n.sawCase:
+		n.out.WriteString(raw)
+		n.sawCase = false
+		n.expectCaseIn = true
+		n.wantCommandWord = false
+	case n.expectCaseIn && raw == "in":
+		n.out.WriteString(raw)
+		n.expectCaseIn = false
+		n.caseDepth++
+		n.inCasePattern = true
+		n.wantCommandWord = false
+	case n.wantCommandWord && raw == "let" && !n.inCasePattern && !startsFunctionDeclaration(n.src, end):
 		n.out.WriteString(letHelperCommandAlias)
 		n.wantCommandWord = false
 	default:
 		n.out.WriteString(raw)
+		if n.expectCaseIn {
+			n.expectCaseIn = false
+		}
 		if n.wantCommandWord {
-			if isAssignmentWord(raw) || keywordStartsCommand(raw) {
+			switch {
+			case raw == "case":
+				n.sawCase = true
+				n.wantCommandWord = false
+			case raw == "esac" && n.caseDepth > 0:
+				n.caseDepth--
+				n.inCasePattern = false
+				n.wantCommandWord = false
+			case isAssignmentWord(raw) || keywordStartsCommand(raw):
 				n.wantCommandWord = true
-			} else {
+			default:
 				n.wantCommandWord = false
 			}
 		}
