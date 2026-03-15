@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	gbfs "github.com/ewhauser/gbash/fs"
 	"github.com/ewhauser/gbash/policy"
 	"golang.org/x/term"
 )
@@ -437,7 +438,7 @@ func renderStaticVersion(text string) func(io.Writer, CommandSpec) error {
 }
 
 func (c *LS) listPath(ctx context.Context, inv *Invocation, target string, opts *lsOptions, showHeader bool) (output string, status int, rendered lsRenderResult, err error) {
-	info, abs, exists, err := statMaybe(ctx, inv, policy.FileActionStat, target)
+	info, abs, exists, err := lsStatMaybeForTarget(ctx, inv, target, opts)
 	if err != nil {
 		return "", 0, lsRenderResult{}, err
 	}
@@ -548,13 +549,38 @@ func (c *LS) listPath(ctx context.Context, inv *Invocation, target string, opts 
 	return out.String(), 0, result, nil
 }
 
+func lsStatMaybeForTarget(ctx context.Context, inv *Invocation, target string, opts *lsOptions) (info stdfs.FileInfo, abs string, exists bool, err error) {
+	switch {
+	case opts == nil || opts.dereference == lsDerefAll || opts.dereference == lsDerefArgs:
+		return statMaybe(ctx, inv, policy.FileActionStat, target)
+	case opts.dereference == lsDerefDirArgs:
+		linfo, lAbs, lExists, lErr := lstatMaybe(ctx, inv, policy.FileActionLstat, target)
+		if lErr != nil || !lExists {
+			return linfo, lAbs, lExists, lErr
+		}
+		if linfo.Mode()&stdfs.ModeSymlink == 0 {
+			return linfo, lAbs, true, nil
+		}
+		targetInfo, _, targetExists, targetErr := statMaybe(ctx, inv, policy.FileActionStat, target)
+		if targetErr != nil {
+			return nil, "", false, targetErr
+		}
+		if targetExists && targetInfo.IsDir() {
+			return targetInfo, lAbs, true, nil
+		}
+		return linfo, lAbs, true, nil
+	default:
+		return lstatMaybe(ctx, inv, policy.FileActionLstat, target)
+	}
+}
+
 func (c *LS) renderPathEntry(ctx context.Context, inv *Invocation, target, abs string, info stdfs.FileInfo, opts *lsOptions) (output string, status int, rendered lsRenderResult, err error) {
 	name, ranges, err := lsDecoratedName(ctx, inv, target, abs, info, opts, func(value string) string { return value })
 	if err != nil {
 		return "", 0, lsRenderResult{}, err
 	}
 	if opts.longFormat {
-		line, dired := formatLSLongLine(name, info, opts, ranges)
+		line, dired := formatLSLongLine(inv, name, info, opts, ranges)
 		if opts.dired {
 			line = "  " + line
 			for i := range dired {
@@ -604,7 +630,7 @@ func lsRenderEntries(ctx context.Context, inv *Invocation, dirAbs string, entrie
 			return lsRenderResult{}, err
 		}
 		if opts.longFormat {
-			line, dired := formatLSLongLine(name, entry.info, opts, ranges)
+			line, dired := formatLSLongLine(inv, name, entry.info, opts, ranges)
 			if opts.dired {
 				line = "  " + line
 				for i := range dired {
@@ -1434,8 +1460,9 @@ func lsNumericChunk(value string) (chunk, rest string) {
 	return value[:index], value[index:]
 }
 
-func formatLSLongLine(name string, info stdfs.FileInfo, opts *lsOptions, nameRanges []lsByteRange) (string, []lsByteRange) {
+func formatLSLongLine(inv *Invocation, name string, info stdfs.FileInfo, opts *lsOptions, nameRanges []lsByteRange) (string, []lsByteRange) {
 	fields := make([]string, 0, 9)
+	userToken, groupToken, authorToken := lsIdentityTokens(inv, info, opts.numericIDs)
 	if opts.showInode {
 		fields = append(fields, strconv.FormatUint(statInode(info), 10))
 	}
@@ -1444,13 +1471,13 @@ func formatLSLongLine(name string, info stdfs.FileInfo, opts *lsOptions, nameRan
 	}
 	fields = append(fields, formatModeLong(info.Mode()), "1")
 	if opts.showOwner {
-		fields = append(fields, lsIdentityToken("user", "0", opts.numericIDs))
+		fields = append(fields, userToken)
 	}
 	if opts.showGroup {
-		fields = append(fields, lsIdentityToken("group", "0", opts.numericIDs))
+		fields = append(fields, groupToken)
 	}
 	if opts.showAuthor {
-		fields = append(fields, lsIdentityToken("author", "0", opts.numericIDs))
+		fields = append(fields, authorToken)
 	}
 	fields = append(fields, formatLSSize(info, opts), formatLSDateStyle(info.ModTime(), opts))
 	prefix := strings.Join(fields, " ")
@@ -1543,11 +1570,23 @@ func formatLSShortPrefix(info stdfs.FileInfo, opts *lsOptions) string {
 	return strings.Join(parts, " ") + " "
 }
 
-func lsIdentityToken(name, numeric string, numericIDs bool) string {
-	if numericIDs {
-		return numeric
+func lsIdentityTokens(inv *Invocation, info stdfs.FileInfo, numericIDs bool) (userToken, groupToken, authorToken string) {
+	ownership, ok := gbfs.OwnershipFromFileInfo(info)
+	if !ok {
+		ownership = gbfs.DefaultOwnership()
 	}
-	return name
+	userToken = strconv.FormatUint(uint64(ownership.UID), 10)
+	groupToken = strconv.FormatUint(uint64(ownership.GID), 10)
+	authorToken = userToken
+	if numericIDs {
+		return userToken, groupToken, authorToken
+	}
+	db := loadPermissionIdentityDB(context.Background(), inv)
+	owner := permissionLookupOwnership(db, info)
+	userToken = permissionNameOrID(owner.user, owner.uid)
+	groupToken = permissionNameOrID(owner.group, owner.gid)
+	authorToken = userToken
+	return userToken, groupToken, authorToken
 }
 
 func formatLSDate(ts time.Time) string {

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ewhauser/gbash/policy"
 )
 
 func TestLSSupportsHelpDirectoryAndHumanReadableFlags(t *testing.T) {
@@ -196,6 +198,27 @@ func TestLSReturnsMissingPathExitCode(t *testing.T) {
 	}
 	if !strings.Contains(result.Stderr, "ls: /tmp/missing: No such file or directory") {
 		t.Fatalf("Stderr = %q, want missing-path error", result.Stderr)
+	}
+}
+
+func TestLSLongFormatListsDanglingSymlinkWithoutDereferencing(t *testing.T) {
+	session := newSession(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	result := mustExecSession(t, session, "cd /home/agent\nln -s no-such dangle\nls -ldo dangle\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+	if !strings.Contains(result.Stdout, "dangle -> no-such") {
+		t.Fatalf("Stdout = %q, want dangling symlink listing", result.Stdout)
 	}
 }
 

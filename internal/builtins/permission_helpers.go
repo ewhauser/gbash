@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	stdfs "io/fs"
+	"os"
+	osuser "os/user"
 	"path"
 	"strconv"
 	"strings"
@@ -127,18 +129,48 @@ func seedPermissionIdentityDBFromEnv(db *permissionIdentityDB, inv *Invocation) 
 	if _, ok := db.groupsByID[gid]; !ok {
 		db.groupsByID[gid] = group
 	}
+
+	current, err := osuser.Current()
+	if err != nil {
+		return
+	}
+	hostUID, err := strconv.ParseUint(current.Uid, 10, 32)
+	if err == nil && strings.TrimSpace(current.Username) != "" {
+		db.usersByName[current.Username] = uint32(hostUID)
+		if _, ok := db.usersByID[uint32(hostUID)]; !ok {
+			db.usersByID[uint32(hostUID)] = current.Username
+		}
+	}
+	hostGID, err := strconv.ParseUint(current.Gid, 10, 32)
+	if err != nil {
+		return
+	}
+	if groupInfo, groupErr := osuser.LookupGroupId(current.Gid); groupErr == nil && strings.TrimSpace(groupInfo.Name) != "" {
+		db.groupsByName[groupInfo.Name] = uint32(hostGID)
+		if _, ok := db.groupsByID[uint32(hostGID)]; !ok {
+			db.groupsByID[uint32(hostGID)] = groupInfo.Name
+		}
+	}
 }
 
 func loadPermissionPasswd(ctx context.Context, inv *Invocation, db *permissionIdentityDB) {
 	input, _, err := openRead(ctx, inv, "/etc/passwd")
+	if err == nil {
+		defer func() { _ = input.Close() }()
+		data, readErr := readAllReader(ctx, inv, input)
+		if readErr == nil {
+			loadPermissionPasswdData(db, data)
+			return
+		}
+	}
+	data, err := os.ReadFile("/etc/passwd")
 	if err != nil {
 		return
 	}
-	defer func() { _ = input.Close() }()
-	data, err := readAllReader(ctx, inv, input)
-	if err != nil {
-		return
-	}
+	loadPermissionPasswdData(db, data)
+}
+
+func loadPermissionPasswdData(db *permissionIdentityDB, data []byte) {
 	for _, line := range textLines(data) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -160,14 +192,22 @@ func loadPermissionPasswd(ctx context.Context, inv *Invocation, db *permissionId
 
 func loadPermissionGroup(ctx context.Context, inv *Invocation, db *permissionIdentityDB) {
 	input, _, err := openRead(ctx, inv, "/etc/group")
+	if err == nil {
+		defer func() { _ = input.Close() }()
+		data, readErr := readAllReader(ctx, inv, input)
+		if readErr == nil {
+			loadPermissionGroupData(db, data)
+			return
+		}
+	}
+	data, err := os.ReadFile("/etc/group")
 	if err != nil {
 		return
 	}
-	defer func() { _ = input.Close() }()
-	data, err := readAllReader(ctx, inv, input)
-	if err != nil {
-		return
-	}
+	loadPermissionGroupData(db, data)
+}
+
+func loadPermissionGroupData(db *permissionIdentityDB, data []byte) {
 	for _, line := range textLines(data) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -343,13 +383,21 @@ func walkPermissionPath(ctx context.Context, inv *Invocation, abs string, opts p
 	if follow {
 		info, err = inv.FS.Stat(ctx, abs)
 		if err != nil {
+			if symlink && errors.Is(err, stdfs.ErrNotExist) {
+				return &ExitError{Code: 1, Err: fmt.Errorf("%s: cannot dereference '%s': No such file or directory", opts.commandName, permissionDisplayPath(inv, abs))}
+			}
 			return err
 		}
 	}
-	if opts.recursive && opts.preserveRoot {
+	if opts.recursive && opts.preserveRoot && (!symlink || follow) {
 		resolvedPath, err := inv.FS.Realpath(ctx, abs)
 		if err == nil && resolvedPath == "/" {
-			return fmt.Errorf("%s: it is dangerous to operate recursively on %q\n%s: use --no-preserve-root to override this failsafe", opts.commandName, abs, opts.commandName)
+			displayPath := permissionDisplayPath(inv, abs)
+			sameAsRoot := ""
+			if abs != "/" {
+				sameAsRoot = " (same as '/')"
+			}
+			return fmt.Errorf("%s: it is dangerous to operate recursively on '%s'%s\n%s: use --no-preserve-root to override this failsafe", opts.commandName, displayPath, sameAsRoot, opts.commandName)
 		}
 	}
 	if err := visit(permissionVisit{Abs: abs, Info: info, Follow: follow}); err != nil {
@@ -452,6 +500,12 @@ func runPermissionApply(ctx context.Context, inv *Invocation, db *permissionIden
 				after.gid = *opts.gid
 				after.group = db.groupsByID[after.gid]
 			}
+			if before.uid == after.uid && before.gid == after.gid {
+				if message := permissionSuccessMessage(visit.Abs, before, after, opts.verbosity); message != "" {
+					_, _ = fmt.Fprintln(inv.Stderr, message)
+				}
+				return nil
+			}
 
 			if err := inv.FS.Chown(ctx, visit.Abs, after.uid, after.gid, visit.Follow); err != nil {
 				hadError = true
@@ -508,6 +562,21 @@ func permissionTargetError(commandName, target string, err error) string {
 	default:
 		return fmt.Sprintf("%s: cannot access %q: %v", commandName, target, err)
 	}
+}
+
+func permissionDisplayPath(inv *Invocation, abs string) string {
+	if abs == "/" || inv == nil || inv.FS == nil {
+		return abs
+	}
+	cwd := inv.FS.Getwd()
+	if cwd == "" || cwd == "/" {
+		return abs
+	}
+	prefix := strings.TrimRight(cwd, "/") + "/"
+	if rel, ok := strings.CutPrefix(abs, prefix); ok {
+		return rel
+	}
+	return abs
 }
 
 func startsWithDigit(value string) bool {

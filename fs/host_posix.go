@@ -550,8 +550,9 @@ func withinHostRoot(candidate, root string) bool {
 }
 
 type namedFileInfo struct {
-	name string
-	info stdfs.FileInfo
+	name      string
+	info      stdfs.FileInfo
+	ownership *FileOwnership
 }
 
 func (i namedFileInfo) Name() string         { return i.name }
@@ -561,6 +562,9 @@ func (i namedFileInfo) ModTime() time.Time   { return i.info.ModTime() }
 func (i namedFileInfo) IsDir() bool          { return i.info.IsDir() }
 func (i namedFileInfo) Sys() any             { return i.info.Sys() }
 func (i namedFileInfo) Ownership() (FileOwnership, bool) {
+	if i.ownership != nil {
+		return *i.ownership, true
+	}
 	return OwnershipFromSys(i.info.Sys())
 }
 

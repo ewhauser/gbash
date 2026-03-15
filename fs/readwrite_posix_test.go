@@ -132,6 +132,53 @@ func TestReadWriteFSStatPreservesRawSysStat(t *testing.T) {
 	}
 }
 
+func TestReadWriteFSChownOverridesOwnershipWithoutHostMutation(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	fsys, err := NewReadWrite(ReadWriteOptions{Root: root})
+	if err != nil {
+		t.Fatalf("NewReadWrite() error = %v", err)
+	}
+
+	before, err := fsys.Stat(context.Background(), "/note.txt")
+	if err != nil {
+		t.Fatalf("Stat(before) error = %v", err)
+	}
+	if err := fsys.Chown(context.Background(), "/note.txt", 123, 456, true); err != nil {
+		t.Fatalf("Chown() error = %v", err)
+	}
+
+	after, err := fsys.Stat(context.Background(), "/note.txt")
+	if err != nil {
+		t.Fatalf("Stat(after) error = %v", err)
+	}
+	ownership, ok := OwnershipFromFileInfo(after)
+	if !ok {
+		t.Fatalf("OwnershipFromFileInfo(after) = not found")
+	}
+	if got, want := ownership, (FileOwnership{UID: 123, GID: 456}); got != want {
+		t.Fatalf("ownership = %#v, want %#v", got, want)
+	}
+	hostInfo, err := os.Stat(filepath.Join(root, "note.txt"))
+	if err != nil {
+		t.Fatalf("os.Stat() error = %v", err)
+	}
+	hostOwnership, ok := OwnershipFromSys(hostInfo.Sys())
+	if !ok {
+		t.Fatalf("OwnershipFromSys(host) = not found")
+	}
+	beforeOwnership, ok := OwnershipFromFileInfo(before)
+	if !ok {
+		t.Fatalf("OwnershipFromFileInfo(before) = not found")
+	}
+	if got, want := hostOwnership, beforeOwnership; got != want {
+		t.Fatalf("host ownership = %#v, want unchanged %#v", got, want)
+	}
+}
+
 func TestReadWriteFSReadCapRejectsLargeFiles(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte("hello"), 0o644); err != nil {
