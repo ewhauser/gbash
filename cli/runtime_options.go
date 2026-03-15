@@ -117,10 +117,7 @@ func (opts runtimeOptions) gbashOptions() ([]gbash.Option, error) {
 		}
 		runtimeOpts = append(runtimeOpts,
 			gbash.WithFileSystem(gbash.ReadWriteDirectoryFileSystem(root, gbash.ReadWriteDirectoryOptions{})),
-			gbash.WithBaseEnv(map[string]string{
-				"HOME": "/home",
-				"PATH": "/bin",
-			}),
+			gbash.WithBaseEnv(readWriteRootBaseEnv()),
 		)
 		if cwdValue == "" {
 			cwdValue = "/"
@@ -131,6 +128,39 @@ func (opts runtimeOptions) gbashOptions() ([]gbash.Option, error) {
 		runtimeOpts = append(runtimeOpts, gbash.WithWorkingDir(normalizeSandboxPath(cwdValue)))
 	}
 	return runtimeOpts, nil
+}
+
+func readWriteRootBaseEnv() map[string]string {
+	env := map[string]string{
+		"HOME": "/home",
+		"PATH": "/bin",
+	}
+
+	user := strings.TrimSpace(os.Getenv("USER"))
+	logname := strings.TrimSpace(os.Getenv("LOGNAME"))
+	switch {
+	case user == "" && logname != "":
+		user = logname
+	case logname == "" && user != "":
+		logname = user
+	}
+	if user != "" {
+		env["USER"] = user
+	}
+	if logname != "" {
+		env["LOGNAME"] = logname
+	}
+	if group := strings.TrimSpace(os.Getenv("GROUP")); group != "" {
+		env["GROUP"] = group
+	} else if user != "" {
+		env["GROUP"] = user
+	}
+	for _, key := range []string{"UID", "EUID", "GID", "EGID", "GROUPS"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			env[key] = value
+		}
+	}
+	return env
 }
 
 func ensureReadWriteRootIsTemporary(root string) error {

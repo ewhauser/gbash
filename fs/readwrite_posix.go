@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	stdfs "io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -28,6 +29,13 @@ type ReadWriteFS struct {
 	canonicalRoot    string
 	cwd              string
 	maxFileReadBytes int64
+	ownership        map[string]FileOwnership
+}
+
+type readWriteFile struct {
+	file      File
+	name      string
+	ownership *FileOwnership
 }
 
 // NewReadWrite creates a concrete read-write host-backed filesystem instance.
@@ -70,6 +78,7 @@ func NewReadWrite(opts ReadWriteOptions) (*ReadWriteFS, error) {
 		canonicalRoot:    canonicalRoot,
 		cwd:              "/",
 		maxFileReadBytes: maxFileReadBytes,
+		ownership:        make(map[string]FileOwnership),
 	}, nil
 }
 
@@ -102,7 +111,11 @@ func (h *ReadWriteFS) OpenFile(_ context.Context, name string, flag int, perm st
 		}
 	}
 
-	return file, nil
+	return &readWriteFile{
+		file:      file,
+		name:      path.Base(abs),
+		ownership: h.lookupOwnership(target),
+	}, nil
 }
 
 func (h *ReadWriteFS) Stat(_ context.Context, name string) (stdfs.FileInfo, error) {
@@ -116,7 +129,7 @@ func (h *ReadWriteFS) Stat(_ context.Context, name string) (stdfs.FileInfo, erro
 	if err != nil {
 		return nil, h.pathError("stat", abs, err)
 	}
-	return namedFileInfo{name: path.Base(abs), info: info}, nil
+	return namedFileInfo{name: path.Base(abs), info: info, ownership: h.lookupOwnership(canonical)}, nil
 }
 
 func (h *ReadWriteFS) Lstat(_ context.Context, name string) (stdfs.FileInfo, error) {
@@ -130,7 +143,7 @@ func (h *ReadWriteFS) Lstat(_ context.Context, name string) (stdfs.FileInfo, err
 	if err != nil {
 		return nil, h.pathError("lstat", abs, err)
 	}
-	return namedFileInfo{name: path.Base(abs), info: info}, nil
+	return namedFileInfo{name: path.Base(abs), info: info, ownership: h.lookupOwnership(leaf)}, nil
 }
 
 func (h *ReadWriteFS) ReadDir(_ context.Context, name string) ([]stdfs.DirEntry, error) {
@@ -233,16 +246,21 @@ func (h *ReadWriteFS) Chown(_ context.Context, name string, uid, gid uint32, fol
 	abs := h.resolve(name)
 
 	target, err := h.resolveLeaf(abs)
-	op := os.Lchown
 	if follow {
 		target, err = h.resolveCanonical(abs)
-		op = os.Chown
 	}
 	if err != nil {
 		return h.pathError("chown", abs, err)
 	}
-	if err := op(target, int(uid), int(gid)); err != nil {
+	info, err := os.Lstat(target)
+	if err != nil {
 		return h.pathError("chown", abs, err)
+	}
+	h.recordOwnership(target, FileOwnership{UID: uid, GID: gid})
+	if info.Mode()&stdfs.ModeSymlink == 0 {
+		if canonical, canonErr := filepath.EvalSymlinks(target); canonErr == nil {
+			h.recordOwnership(filepath.Clean(canonical), FileOwnership{UID: uid, GID: gid})
+		}
 	}
 	return nil
 }
@@ -300,9 +318,17 @@ func (h *ReadWriteFS) Remove(_ context.Context, name string, recursive bool) err
 		return h.pathError("remove", abs, err)
 	}
 	if recursive {
-		return h.pathError("remove", abs, os.RemoveAll(target))
+		if err := os.RemoveAll(target); err != nil {
+			return h.pathError("remove", abs, err)
+		}
+		h.clearOwnershipSubtree(target)
+		return nil
 	}
-	return h.pathError("remove", abs, os.Remove(target))
+	if err := os.Remove(target); err != nil {
+		return h.pathError("remove", abs, err)
+	}
+	h.clearOwnershipTarget(target)
+	return nil
 }
 
 func (h *ReadWriteFS) Rename(_ context.Context, oldName, newName string) error {
@@ -323,6 +349,7 @@ func (h *ReadWriteFS) Rename(_ context.Context, oldName, newName string) error {
 	if err := os.Rename(oldTarget, newTarget); err != nil {
 		return h.pathError("rename", oldAbs, err)
 	}
+	h.moveOwnership(oldTarget, newTarget)
 	return nil
 }
 
@@ -359,6 +386,72 @@ func (h *ReadWriteFS) Chdir(name string) error {
 	h.cwd = abs
 	h.mu.Unlock()
 	return nil
+}
+
+func (h *ReadWriteFS) lookupOwnership(target string) *FileOwnership {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	ownership, ok := h.ownership[target]
+	if !ok {
+		return nil
+	}
+	ownershipCopy := ownership
+	return &ownershipCopy
+}
+
+func (h *ReadWriteFS) recordOwnership(target string, ownership FileOwnership) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.ownership[target] = ownership
+}
+
+func (h *ReadWriteFS) clearOwnershipTarget(target string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.ownership, filepath.Clean(target))
+}
+
+func (h *ReadWriteFS) clearOwnershipSubtree(target string) {
+	target = filepath.Clean(target)
+	prefix := target + string(os.PathSeparator)
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for key := range h.ownership {
+		if key == target || strings.HasPrefix(key, prefix) {
+			delete(h.ownership, key)
+		}
+	}
+}
+
+func (h *ReadWriteFS) moveOwnership(oldTarget, newTarget string) {
+	oldTarget = filepath.Clean(oldTarget)
+	newTarget = filepath.Clean(newTarget)
+	oldPrefix := oldTarget + string(os.PathSeparator)
+	newPrefix := newTarget + string(os.PathSeparator)
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	for key := range h.ownership {
+		if key == newTarget || strings.HasPrefix(key, newPrefix) {
+			delete(h.ownership, key)
+		}
+	}
+
+	moved := make(map[string]FileOwnership)
+	for key, ownership := range h.ownership {
+		switch {
+		case key == oldTarget:
+			moved[newTarget] = ownership
+			delete(h.ownership, key)
+		case strings.HasPrefix(key, oldPrefix):
+			suffix := strings.TrimPrefix(key, oldPrefix)
+			moved[filepath.Join(newTarget, suffix)] = ownership
+			delete(h.ownership, key)
+		}
+	}
+	maps.Copy(h.ownership, moved)
 }
 
 func (h *ReadWriteFS) resolve(name string) string {
@@ -518,6 +611,36 @@ func (h *ReadWriteFS) sanitizeSymlinkTarget(target string) string {
 		return h.canonicalRoot
 	}
 	return filepath.Join(h.canonicalRoot, filepath.FromSlash(strings.TrimPrefix(virtualTarget, "/")))
+}
+
+func (f *readWriteFile) Read(p []byte) (int, error) {
+	return f.file.Read(p)
+}
+
+func (f *readWriteFile) Write(p []byte) (int, error) {
+	return f.file.Write(p)
+}
+
+func (f *readWriteFile) Close() error {
+	return f.file.Close()
+}
+
+func (f *readWriteFile) Seek(offset int64, whence int) (int64, error) {
+	seeker, ok := f.file.(interface {
+		Seek(offset int64, whence int) (int64, error)
+	})
+	if !ok {
+		return 0, stdfs.ErrInvalid
+	}
+	return seeker.Seek(offset, whence)
+}
+
+func (f *readWriteFile) Stat() (stdfs.FileInfo, error) {
+	info, err := f.file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return namedFileInfo{name: f.name, info: info, ownership: f.ownership}, nil
 }
 
 func (h *ReadWriteFS) checkFileSize(info stdfs.FileInfo) error {

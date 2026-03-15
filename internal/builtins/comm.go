@@ -160,6 +160,8 @@ finish:
 
 func parseCommMatches(inv *Invocation, matches *ParsedCommand) (opts commOptions, leftName, rightName string, err error) {
 	opts.outputDelimiter = "\t"
+	delimiterValues := commDelimiterValues(inv, matches)
+	delimiterIndex := 0
 	for _, name := range matches.OptionOrder() {
 		switch name {
 		case "column-1":
@@ -177,9 +179,13 @@ func parseCommMatches(inv *Invocation, matches *ParsedCommand) (opts commOptions
 		case "nocheck-order":
 			opts.noCheckOrder = true
 		case "output-delimiter":
-			if err := setCommDelimiter(inv, &opts, matches.Value("output-delimiter")); err != nil {
+			if delimiterIndex >= len(delimiterValues) {
+				return commOptions{}, "", "", exitf(inv, 1, "comm: internal option parse error")
+			}
+			if err := setCommDelimiter(inv, &opts, delimiterValues[delimiterIndex]); err != nil {
 				return commOptions{}, "", "", err
 			}
+			delimiterIndex++
 		}
 	}
 
@@ -213,6 +219,38 @@ func setCommDelimiter(inv *Invocation, opts *commOptions, value string) error {
 	opts.outputDelimiter = actual
 	opts.delimiterSet = true
 	return nil
+}
+
+func commDelimiterValues(inv *Invocation, matches *ParsedCommand) []string {
+	values := matches.Values("output-delimiter")
+	if matches.Count("output-delimiter") == len(values) {
+		return values
+	}
+
+	var rebuilt []string
+	args := inv.Args
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			break
+		}
+		if delimiter, ok := strings.CutPrefix(arg, "--output-delimiter="); ok {
+			rebuilt = append(rebuilt, delimiter)
+			continue
+		}
+		if arg == "--output-delimiter" {
+			if i+1 < len(args) {
+				rebuilt = append(rebuilt, args[i+1])
+				i++
+			} else {
+				rebuilt = append(rebuilt, "")
+			}
+		}
+	}
+	if len(rebuilt) == matches.Count("output-delimiter") {
+		return rebuilt
+	}
+	return values
 }
 
 func readCommInput(ctx context.Context, inv *Invocation, name string) (data []byte, label string, err error) {

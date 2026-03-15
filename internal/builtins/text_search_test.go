@@ -93,6 +93,47 @@ func TestCommSupportsTotalDelimiterAndZeroTerminated(t *testing.T) {
 	}
 }
 
+func TestCommRejectsConflictingRepeatedOutputDelimiters(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf '1\\n3\\n' > /tmp/left.txt\nprintf '2\\n3\\n' > /tmp/right.txt\ncomm --output-delimiter=, --output-delimiter=+ /tmp/left.txt /tmp/right.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
+	}
+	if result.Stdout != "" {
+		t.Fatalf("Stdout = %q, want empty", result.Stdout)
+	}
+	if got, want := result.Stderr, "comm: multiple output delimiters specified\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
+func TestCommSupportsEmptyOutputDelimiter(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf '1\\n3\\n3\\n3' > /tmp/left.txt\nprintf '2\\n2\\n3\\n3\\n3' > /tmp/right.txt\ncomm --output-delimiter= /tmp/left.txt /tmp/right.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	want := []byte("1\n\x002\n\x002\n\x00\x003\n\x00\x003\n\x00\x003\n")
+	if got := []byte(result.Stdout); !bytes.Equal(got, want) {
+		t.Fatalf("Stdout bytes = %v, want %v", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+}
+
 func TestCommSupportsCheckOrderAndNoCheckOrder(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 

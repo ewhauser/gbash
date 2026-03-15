@@ -1479,6 +1479,40 @@ func TestChgrpAndChownQuietSuppressMissingFileDiagnostics(t *testing.T) {
 	}
 }
 
+func TestChownDereferenceRejectsDanglingSymlink(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "cd /home/agent\nln -s missing dangle\nchown --dereference 123 dangle\n")
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
+	}
+	if got, want := strings.TrimSpace(result.Stderr), "chown: cannot dereference 'dangle': No such file or directory"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
+func TestChownPreserveRootSkipsUntraversedChildSymlinkAndFormatsRootMessage(t *testing.T) {
+	session := newSession(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	result := mustExecSession(t, session, "mkdir /home/agent/d\nln -s / /home/agent/d/slink-to-root\ncd /home/agent\nchown -RHh --preserve-root 1000 d\nprintf 'first=%s\\n' \"$?\"\nchown -RLh --preserve-root 1000 d\nprintf 'second=%s\\n' \"$?\"\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "first=0\nsecond=1\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	wantErr := "chown: it is dangerous to operate recursively on 'd/slink-to-root' (same as '/')\nchown: use --no-preserve-root to override this failsafe\n"
+	if got := result.Stderr; got != wantErr {
+		t.Fatalf("Stderr = %q, want %q", got, wantErr)
+	}
+}
+
 func TestChgrpSupportsReferenceFromRecursiveAndTrailingReference(t *testing.T) {
 	session := newSession(t, &Config{})
 

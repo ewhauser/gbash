@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -706,6 +707,56 @@ func TestRunCLIHostUtilityPassesGBASHUmaskToRuntime(t *testing.T) {
 	}
 }
 
+func TestRunCLIHostUtilityChownNoOpOnExistingOwnership(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	if err := os.Mkdir(filepath.Join(tmp, "keep"), 0o755); err != nil {
+		t.Fatalf("Mkdir(keep) error = %v", err)
+	}
+
+	spec := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "chown", []string{"-R", spec, "keep"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRunCLIHostUtilityChownAcceptsCurrentUsername(t *testing.T) {
+	current, err := user.Current()
+	if err != nil || strings.TrimSpace(current.Username) == "" {
+		t.Skipf("user.Current() unavailable: %v", err)
+	}
+
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	if err := os.WriteFile(filepath.Join(tmp, "owned.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(owned.txt) error = %v", err)
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "chown", []string{current.Username, "owned.txt"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
 func TestRunCLIHostUtilityUnknownCommandReturns127(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)

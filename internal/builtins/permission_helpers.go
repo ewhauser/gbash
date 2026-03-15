@@ -135,10 +135,14 @@ func loadPermissionPasswd(ctx context.Context, inv *Invocation, db *permissionId
 		return
 	}
 	defer func() { _ = input.Close() }()
-	data, err := readAllReader(ctx, inv, input)
-	if err != nil {
+	data, readErr := readAllReader(ctx, inv, input)
+	if readErr != nil {
 		return
 	}
+	loadPermissionPasswdData(db, data)
+}
+
+func loadPermissionPasswdData(db *permissionIdentityDB, data []byte) {
 	for _, line := range textLines(data) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -164,10 +168,14 @@ func loadPermissionGroup(ctx context.Context, inv *Invocation, db *permissionIde
 		return
 	}
 	defer func() { _ = input.Close() }()
-	data, err := readAllReader(ctx, inv, input)
-	if err != nil {
+	data, readErr := readAllReader(ctx, inv, input)
+	if readErr != nil {
 		return
 	}
+	loadPermissionGroupData(db, data)
+}
+
+func loadPermissionGroupData(db *permissionIdentityDB, data []byte) {
 	for _, line := range textLines(data) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -343,13 +351,21 @@ func walkPermissionPath(ctx context.Context, inv *Invocation, abs string, opts p
 	if follow {
 		info, err = inv.FS.Stat(ctx, abs)
 		if err != nil {
+			if symlink && errors.Is(err, stdfs.ErrNotExist) {
+				return &ExitError{Code: 1, Err: fmt.Errorf("%s: cannot dereference '%s': No such file or directory", opts.commandName, permissionDisplayPath(inv, abs))}
+			}
 			return err
 		}
 	}
-	if opts.recursive && opts.preserveRoot {
+	if opts.recursive && opts.preserveRoot && (!symlink || follow) {
 		resolvedPath, err := inv.FS.Realpath(ctx, abs)
 		if err == nil && resolvedPath == "/" {
-			return fmt.Errorf("%s: it is dangerous to operate recursively on %q\n%s: use --no-preserve-root to override this failsafe", opts.commandName, abs, opts.commandName)
+			displayPath := permissionDisplayPath(inv, abs)
+			sameAsRoot := ""
+			if abs != "/" {
+				sameAsRoot = " (same as '/')"
+			}
+			return fmt.Errorf("%s: it is dangerous to operate recursively on '%s'%s\n%s: use --no-preserve-root to override this failsafe", opts.commandName, displayPath, sameAsRoot, opts.commandName)
 		}
 	}
 	if err := visit(permissionVisit{Abs: abs, Info: info, Follow: follow}); err != nil {
@@ -452,6 +468,12 @@ func runPermissionApply(ctx context.Context, inv *Invocation, db *permissionIden
 				after.gid = *opts.gid
 				after.group = db.groupsByID[after.gid]
 			}
+			if before.uid == after.uid && before.gid == after.gid {
+				if message := permissionSuccessMessage(visit.Abs, before, after, opts.verbosity); message != "" {
+					_, _ = fmt.Fprintln(inv.Stderr, message)
+				}
+				return nil
+			}
 
 			if err := inv.FS.Chown(ctx, visit.Abs, after.uid, after.gid, visit.Follow); err != nil {
 				hadError = true
@@ -508,6 +530,21 @@ func permissionTargetError(commandName, target string, err error) string {
 	default:
 		return fmt.Sprintf("%s: cannot access %q: %v", commandName, target, err)
 	}
+}
+
+func permissionDisplayPath(inv *Invocation, abs string) string {
+	if abs == "/" || inv == nil || inv.FS == nil {
+		return abs
+	}
+	cwd := inv.FS.Getwd()
+	if cwd == "" || cwd == "/" {
+		return abs
+	}
+	prefix := strings.TrimRight(cwd, "/") + "/"
+	if rel, ok := strings.CutPrefix(abs, prefix); ok {
+		return rel
+	}
+	return abs
 }
 
 func startsWithDigit(value string) bool {
