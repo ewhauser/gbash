@@ -2,7 +2,6 @@ package shell
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -49,61 +48,84 @@ func (m *MVdan) Interact(ctx context.Context, exec *Execution) (*InteractiveResu
 		return nil, err
 	}
 
-	parser := syntax.NewParser()
-	printer := syntax.NewPrinter()
 	exitCode := 0
+	var pending strings.Builder
 
 	_, _ = io.WriteString(exec.Stdout, interactivePrompt(interactiveEnv(exec, runner)))
-	for stmts, err := range parser.InteractiveSeq(input) {
+	for {
+		line, readErr := input.ReadString('\n')
+		if readErr != nil && readErr != io.EOF {
+			return &InteractiveResult{ExitCode: exitCode}, readErr
+		}
+		if line == "" && readErr == io.EOF {
+			break
+		}
+
+		pending.WriteString(line)
+		rawScript := pending.String()
+
+		file, err := m.parseUserProgram(exec.Name, rawScript)
 		if err != nil {
+			if syntax.IsIncomplete(err) && readErr != io.EOF {
+				_, _ = io.WriteString(exec.Stdout, continuationPrompt)
+				continue
+			}
 			exitCode = 1
 			_, _ = fmt.Fprintln(exec.Stderr, err)
+			pending.Reset()
+			if readErr == io.EOF {
+				break
+			}
 			_, _ = io.WriteString(exec.Stdout, interactivePrompt(interactiveEnv(exec, runner)))
 			continue
 		}
-		if parser.Incomplete() {
-			_, _ = io.WriteString(exec.Stdout, continuationPrompt)
-			continue
-		}
-		if len(stmts) == 0 {
+		if len(file.Stmts) == 0 {
+			pending.Reset()
+			if readErr == io.EOF {
+				break
+			}
 			_, _ = io.WriteString(exec.Stdout, interactivePrompt(interactiveEnv(exec, runner)))
 			continue
 		}
 
-		script, err := renderInteractiveStatements(printer, exec.Name, stmts)
+		executionFile, err := m.parseUserProgram(exec.Name, withInteractiveHistory(runner, rawScript))
 		if err != nil {
 			return &InteractiveResult{ExitCode: exitCode}, err
 		}
-		script = withInteractiveHistory(runner, script)
-		file, err := m.parseUserProgram(exec.Name, script)
-		if err != nil {
-			return &InteractiveResult{ExitCode: exitCode}, err
-		}
-		if err := rewriteLetClauses(file); err != nil {
-			return &InteractiveResult{ExitCode: exitCode}, err
-		}
-		if violation := validateExecutionBudgets(file, exec.Policy); violation != nil {
+		if violation := validateExecutionBudgets(executionFile, exec.Policy); violation != nil {
 			exitCode = 126
 			_, _ = fmt.Fprintln(exec.Stderr, violation.Error())
+			pending.Reset()
+			if readErr == io.EOF {
+				break
+			}
 			_, _ = io.WriteString(exec.Stdout, interactivePrompt(interactiveEnv(exec, runner)))
 			continue
 		}
-		if invalid := validateInterpreterSafety(file); invalid != nil {
+		if invalid := validateInterpreterSafety(executionFile); invalid != nil {
 			exitCode = 2
 			_, _ = fmt.Fprintln(exec.Stderr, invalid.Error())
+			pending.Reset()
+			if readErr == io.EOF {
+				break
+			}
 			_, _ = io.WriteString(exec.Stdout, interactivePrompt(interactiveEnv(exec, runner)))
 			continue
 		}
-		if err := instrumentLoopBudgets(file, exec.Policy); err != nil {
+		if err := instrumentLoopBudgets(executionFile, exec.Policy); err != nil {
 			return &InteractiveResult{ExitCode: exitCode}, err
 		}
-		runErr := runner.Run(ctx, file)
+		runErr := runner.Run(ctx, executionFile)
 		exitCode = ExitCode(runErr)
+		pending.Reset()
 		if runner.Exited() {
 			return &InteractiveResult{ExitCode: exitCode}, normalizeInteractiveRunError(runErr)
 		}
 		if err := normalizeInteractiveRunError(runErr); err != nil {
 			return &InteractiveResult{ExitCode: exitCode}, err
+		}
+		if readErr == io.EOF {
+			break
 		}
 		_, _ = io.WriteString(exec.Stdout, interactivePrompt(interactiveEnv(exec, runner)))
 	}
@@ -152,19 +174,4 @@ func normalizeInteractiveRunError(err error) error {
 		return nil
 	}
 	return err
-}
-
-func renderInteractiveStatements(printer *syntax.Printer, name string, stmts []*syntax.Stmt) (string, error) {
-	if printer == nil {
-		printer = syntax.NewPrinter()
-	}
-
-	var buf bytes.Buffer
-	if err := printer.Print(&buf, &syntax.File{
-		Name:  name,
-		Stmts: stmts,
-	}); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
 }

@@ -208,3 +208,44 @@ func TestSessionInteractTracksHistoryCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionInteractNormalizesLetBeforeParseAndKeepsRawHistory(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	result, err := session.Interact(context.Background(), &InteractiveRequest{
+		Stdin: strings.NewReader("" +
+			"a=b\n" +
+			"b=3\n" +
+			"let $a+=1\n" +
+			"echo $b\n" +
+			"history 3\n" +
+			"exit\n"),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("Interact() error = %v", err)
+	}
+	if result == nil {
+		t.Fatalf("Interact() result = nil")
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	for _, want := range []string{
+		"4\n",
+		"    3  let $a+=1\n",
+		"    4  echo $b\n",
+		"    5  history 3\n",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want substring %q", stdout.String(), want)
+		}
+	}
+}

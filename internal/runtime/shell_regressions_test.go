@@ -63,14 +63,48 @@ func TestLoopRegressionSupportsForControlFlow(t *testing.T) {
 	}
 }
 
-func TestLetRegressionSupportsQuotedAndExpandedArithmeticExpressions(t *testing.T) {
+func TestLetRegressionSupportsQuotedExpandedAndRuntimeExpandedArithmeticExpressions(t *testing.T) {
 	session := newSession(t, &Config{})
 
-	result := mustExecSession(t, session, "expr='x = 1 + 2'\nlet \"$expr\"\nlet 'y=4+5' z=6+7\nprintf '%s,%s,%s\\n' \"$x\" \"$y\" \"$z\"\n")
+	result := mustExecSession(t, session, ""+
+		"expr='x = 1 + 2'\n"+
+		"let \"$expr\"\n"+
+		"let 'y=4+5' z=6+7\n"+
+		"a=b\n"+
+		"b=3\n"+
+		"let $a+=1\n"+
+		"let ${a}+=1\n"+
+		"let $a++\n"+
+		"let ++$a\n"+
+		"printf '%s,%s,%s,%s\\n' \"$x\" \"$y\" \"$z\" \"$b\"\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "3,9,13\n"; got != want {
+	if got, want := result.Stdout, "3,9,13,7\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestLetRegressionSupportsExpandedAssignmentTargetExpression(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "a=b; b=3; let $a+=1; echo $b;\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "4\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestArithmeticRegressionDoesNotRewriteLetIdentifiersInsideArithmeticCommands(t *testing.T) {
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "let=5; if ((let<3)); then echo bad; else echo ok; fi\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "ok\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
