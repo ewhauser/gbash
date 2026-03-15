@@ -207,15 +207,16 @@ func TestHTMLToMarkdownMissingValuesDoNotConsumeFollowingFlags(t *testing.T) {
 	}
 }
 
-func TestHTMLToMarkdownIgnoresInvalidHeadingStyle(t *testing.T) {
+func TestHTMLToMarkdownRejectsInvalidHeadingStyle(t *testing.T) {
 	t.Parallel()
 
 	result := mustExecHTMLToMarkdown(t, "printf '<h1>Title</h1>' | html-to-markdown --heading-style=invalid\n")
-	if result.ExitCode != 0 {
-		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
 	}
-	if got, want := result.Stdout, "# Title\n"; got != want {
-		t.Fatalf("Stdout = %q, want %q", got, want)
+	want := "html-to-markdown: invalid value \"invalid\" for --heading-style (expected atx or setext)\nTry 'html-to-markdown --help' for more information.\n"
+	if got := result.Stderr; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }
 
@@ -241,6 +242,96 @@ func TestHTMLToMarkdownInvalidSplitHeadingStyleStillReportsUnknownOption(t *test
 	want := "html-to-markdown: unrecognized option '--invalid'\nTry 'html-to-markdown --help' for more information.\n"
 	if got := result.Stderr; got != want {
 		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
+func TestHTMLToMarkdownRejectsInvalidSplitOptionValues(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		script string
+		want   string
+	}{
+		{
+			name:   "bullet",
+			script: "printf '<ul><li>x</li></ul>' | html-to-markdown -b x\n",
+			want:   "html-to-markdown: invalid value \"x\" for --bullet (expected -, +, or *)\nTry 'html-to-markdown --help' for more information.\n",
+		},
+		{
+			name:   "code",
+			script: "printf '<pre><code>x</code></pre>' | html-to-markdown -c ~~~~\n",
+			want:   "html-to-markdown: invalid value \"~~~~\" for --code (expected ``` or ~~~)\nTry 'html-to-markdown --help' for more information.\n",
+		},
+		{
+			name:   "hr",
+			script: "printf '<hr>' | html-to-markdown -r xx\n",
+			want:   "html-to-markdown: invalid value \"xx\" for --hr (expected at least 3 of -, _, or *)\nTry 'html-to-markdown --help' for more information.\n",
+		},
+		{
+			name:   "heading-style",
+			script: "printf '<h1>x</h1>' | html-to-markdown --heading-style x\n",
+			want:   "html-to-markdown: invalid value \"x\" for --heading-style (expected atx or setext)\nTry 'html-to-markdown --help' for more information.\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := mustExecHTMLToMarkdown(t, tc.script)
+			if result.ExitCode != 1 {
+				t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
+			}
+			if got := result.Stderr; got != tc.want {
+				t.Fatalf("Stderr = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHTMLToMarkdownRejectsInvalidLongOptionValues(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		script string
+		want   string
+	}{
+		{
+			name:   "bullet",
+			script: "html-to-markdown --bullet=x\n",
+			want:   "html-to-markdown: invalid value \"x\" for --bullet (expected -, +, or *)\nTry 'html-to-markdown --help' for more information.\n",
+		},
+		{
+			name:   "code",
+			script: "html-to-markdown --code=~~~~\n",
+			want:   "html-to-markdown: invalid value \"~~~~\" for --code (expected ``` or ~~~)\nTry 'html-to-markdown --help' for more information.\n",
+		},
+		{
+			name:   "hr",
+			script: "html-to-markdown --hr=xx\n",
+			want:   "html-to-markdown: invalid value \"xx\" for --hr (expected at least 3 of -, _, or *)\nTry 'html-to-markdown --help' for more information.\n",
+		},
+		{
+			name:   "heading-style",
+			script: "html-to-markdown --heading-style=x\n",
+			want:   "html-to-markdown: invalid value \"x\" for --heading-style (expected atx or setext)\nTry 'html-to-markdown --help' for more information.\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := mustExecHTMLToMarkdown(t, tc.script)
+			if result.ExitCode != 1 {
+				t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
+			}
+			if got := result.Stderr; got != tc.want {
+				t.Fatalf("Stderr = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

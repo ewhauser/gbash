@@ -111,42 +111,91 @@ func parseHTMLToMarkdownArgs(inv *commands.Invocation) (htmlToMarkdownOptions, [
 		arg := args[i]
 		switch {
 		case arg == "-b" || arg == "--bullet":
-			if i+1 < len(args) && isHTMLToMarkdownBulletValue(args[i+1]) {
-				i++
-				opts.bullet = args[i]
-			} else {
+			if i+1 >= len(args) {
 				opts.bullet = "-"
+				continue
 			}
+			value := args[i+1]
+			if isHTMLToMarkdownBulletValue(value) {
+				i++
+				opts.bullet = value
+				continue
+			}
+			if looksLikeHTMLToMarkdownOption(value) {
+				opts.bullet = "-"
+				continue
+			}
+			return htmlToMarkdownOptions{}, nil, htmlToMarkdownUsageError(inv, "invalid value %q for --bullet (expected -, +, or *)", value)
 		case strings.HasPrefix(arg, "--bullet="):
-			opts.bullet = strings.TrimPrefix(arg, "--bullet=")
+			value := strings.TrimPrefix(arg, "--bullet=")
+			if !isHTMLToMarkdownBulletValue(value) {
+				return htmlToMarkdownOptions{}, nil, htmlToMarkdownUsageError(inv, "invalid value %q for --bullet (expected -, +, or *)", value)
+			}
+			opts.bullet = value
 		case arg == "-c" || arg == "--code":
-			if i+1 < len(args) && isHTMLToMarkdownCodeFenceValue(args[i+1]) {
-				i++
-				opts.codeFence = args[i]
-			} else {
+			if i+1 >= len(args) {
 				opts.codeFence = "```"
+				continue
 			}
+			value := args[i+1]
+			if isHTMLToMarkdownCodeFenceValue(value) {
+				i++
+				opts.codeFence = value
+				continue
+			}
+			if looksLikeHTMLToMarkdownOption(value) {
+				opts.codeFence = "```"
+				continue
+			}
+			return htmlToMarkdownOptions{}, nil, htmlToMarkdownUsageError(inv, "invalid value %q for --code (expected ``` or ~~~)", value)
 		case strings.HasPrefix(arg, "--code="):
-			opts.codeFence = strings.TrimPrefix(arg, "--code=")
+			value := strings.TrimPrefix(arg, "--code=")
+			if !isHTMLToMarkdownCodeFenceValue(value) {
+				return htmlToMarkdownOptions{}, nil, htmlToMarkdownUsageError(inv, "invalid value %q for --code (expected ``` or ~~~)", value)
+			}
+			opts.codeFence = value
 		case arg == "-r" || arg == "--hr":
-			if i+1 < len(args) && isHTMLToMarkdownHorizontalRuleValue(args[i+1]) {
-				i++
-				opts.horizontalRule = args[i]
-			} else {
+			if i+1 >= len(args) {
 				opts.horizontalRule = "---"
+				continue
 			}
-		case strings.HasPrefix(arg, "--hr="):
-			opts.horizontalRule = strings.TrimPrefix(arg, "--hr=")
-		case arg == "--heading-style":
-			if i+1 < len(args) && isHTMLToMarkdownHeadingStyleValue(args[i+1]) {
+			value := args[i+1]
+			if isHTMLToMarkdownHorizontalRuleValue(value) {
 				i++
-				opts.headingStyle = args[i]
+				opts.horizontalRule = value
+				continue
 			}
+			if looksLikeHTMLToMarkdownOption(value) {
+				opts.horizontalRule = "---"
+				continue
+			}
+			return htmlToMarkdownOptions{}, nil, htmlToMarkdownUsageError(inv, "invalid value %q for --hr (expected at least 3 of -, _, or *)", value)
+		case strings.HasPrefix(arg, "--hr="):
+			value := strings.TrimPrefix(arg, "--hr=")
+			if !isHTMLToMarkdownHorizontalRuleValue(value) {
+				return htmlToMarkdownOptions{}, nil, htmlToMarkdownUsageError(inv, "invalid value %q for --hr (expected at least 3 of -, _, or *)", value)
+			}
+			opts.horizontalRule = value
+		case arg == "--heading-style":
+			if i+1 >= len(args) {
+				continue
+			}
+			value := args[i+1]
+			if isHTMLToMarkdownHeadingStyleValue(value) {
+				i++
+				opts.headingStyle = value
+				continue
+			}
+			if looksLikeHTMLToMarkdownOption(value) {
+				continue
+			}
+			return htmlToMarkdownOptions{}, nil, htmlToMarkdownUsageError(inv, "invalid value %q for --heading-style (expected atx or setext)", value)
 		case strings.HasPrefix(arg, "--heading-style="):
 			style := strings.TrimPrefix(arg, "--heading-style=")
-			if isHTMLToMarkdownHeadingStyleValue(style) {
-				opts.headingStyle = style
+			if !isHTMLToMarkdownHeadingStyleValue(style) {
+				return htmlToMarkdownOptions{}, nil, htmlToMarkdownUsageError(inv, "invalid value %q for --heading-style (expected atx or setext)", style)
 			}
+			opts.headingStyle = style
 		case arg == "-":
 			files = append(files, arg)
 		case strings.HasPrefix(arg, "--"):
@@ -184,6 +233,10 @@ func isHTMLToMarkdownHorizontalRuleValue(value string) bool {
 
 func isHTMLToMarkdownHeadingStyleValue(value string) bool {
 	return value == "atx" || value == "setext"
+}
+
+func looksLikeHTMLToMarkdownOption(value string) bool {
+	return strings.HasPrefix(value, "-")
 }
 
 func htmlToMarkdownUsageError(inv *commands.Invocation, format string, args ...any) error {
