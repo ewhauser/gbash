@@ -9,6 +9,7 @@ import (
 	"path"
 
 	"github.com/ewhauser/gbash"
+	"github.com/ewhauser/gbash/examples/internal/ftsfs"
 	gbfs "github.com/ewhauser/gbash/fs"
 	"github.com/ewhauser/gbash/internal/searchadapter"
 )
@@ -22,7 +23,7 @@ func main() {
 
 func run(ctx context.Context, stdout io.Writer) error {
 	rt, err := gbash.New(gbash.WithFileSystem(gbash.CustomFileSystem(
-		gbfs.NewSearchableFactory(gbfs.Memory(), nil),
+		ftsfs.NewFactory(gbfs.Memory()),
 		"/workspace",
 	)))
 	if err != nil {
