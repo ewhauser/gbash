@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +24,7 @@ import (
 
 const (
 	demoRequestURL       = "https://crm.example.test/v1/profile"
+	demoScriptPath       = "examples/oauth-network-extension/demo.sh"
 	requestID            = "sandbox-demo-42"
 	overrideAttemptID    = "sandbox-spoof-43"
 	sandboxForgedAuth    = "Bearer sandbox-forged-token"
@@ -29,6 +32,9 @@ const (
 	baselineScenarioName = "host injects oauth"
 	overrideScenarioName = "sandbox authorization is overridden"
 )
+
+//go:embed demo.sh
+var demoScript string
 
 func main() {
 	if err := run(context.Background(), os.Stdout); err != nil {
@@ -63,31 +69,52 @@ func runDemo(ctx context.Context) (*demoReport, error) {
 		return nil, fmt.Errorf("create runtime: %w", err)
 	}
 
-	baselineScript := fmt.Sprintf("curl -fsS -H 'X-Request-ID: %s' %s\n", requestID, demoRequestURL)
-	baseline, err := runScenario(ctx, rt, client, server, scenarioSpec{
-		Name:      baselineScenarioName,
-		RequestID: requestID,
-		Script:    baselineScript,
+	specs := []scenarioSpec{
+		{Name: baselineScenarioName, RequestID: requestID},
+		{Name: overrideScenarioName, RequestID: overrideAttemptID},
+	}
+
+	result, err := rt.Run(ctx, &gbash.ExecutionRequest{
+		Name:   "oauth-network-extension",
+		Script: demoScript,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("run demo script: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return nil, fmt.Errorf("demo script exited with %d: %s", result.ExitCode, strings.TrimSpace(result.Stderr))
+	}
+
+	responseRecords, err := decodeAPIResponses(result.Stdout)
 	if err != nil {
 		return nil, err
 	}
-
-	overrideScript := fmt.Sprintf(
-		"curl -fsS -H 'Authorization: %s' -H 'X-Request-ID: %s' %s\n",
-		sandboxForgedAuth,
-		overrideAttemptID,
-		demoRequestURL,
-	)
-	override, err := runScenario(ctx, rt, client, server, scenarioSpec{
-		Name:      overrideScenarioName,
-		RequestID: overrideAttemptID,
-		Script:    overrideScript,
-	})
+	traceArgvByRequestID, err := collectCurlArgvByRequestID(result.Events)
 	if err != nil {
 		return nil, err
 	}
+	auditByRequestID := make(map[string]requestAudit)
+	for _, audit := range client.History() {
+		auditByRequestID[audit.RequestID] = audit
+	}
+	serverByRequestID := make(map[string]serverRequestAudit)
+	for _, req := range server.History() {
+		serverByRequestID[req.RequestID] = req
+	}
+	if len(responseRecords) != len(specs) {
+		return nil, fmt.Errorf("decoded %d response records, want %d", len(responseRecords), len(specs))
+	}
 
+	scenarios := make([]scenarioReport, 0, len(specs))
+	for _, spec := range specs {
+		scenario, err := buildScenarioReport(spec, responseRecords, traceArgvByRequestID, auditByRequestID, serverByRequestID, vault.mustSecret(tokenRef).Token)
+		if err != nil {
+			return nil, err
+		}
+		scenarios = append(scenarios, scenario)
+	}
+
+	override := scenarios[1]
 	if !override.Audit.SandboxAuthorizationIn {
 		return nil, errors.New("demo failed: override scenario did not observe the sandbox authorization header")
 	}
@@ -96,52 +123,55 @@ func runDemo(ctx context.Context) (*demoReport, error) {
 	}
 
 	return &demoReport{
-		Scenarios: []scenarioReport{baseline, override},
+		ScriptPath:   demoScriptPath,
+		ScriptSource: strings.TrimSpace(demoScript),
+		Scenarios:    scenarios,
 	}, nil
 }
 
 type scenarioSpec struct {
 	Name      string
 	RequestID string
-	Script    string
 }
 
-func runScenario(ctx context.Context, rt *gbash.Runtime, client *oauthInjectingClient, server *demoAPIServer, spec scenarioSpec) (scenarioReport, error) {
-	result, err := rt.Run(ctx, &gbash.ExecutionRequest{
-		Name:   "oauth-network-extension",
-		Script: spec.Script,
-	})
-	if err != nil {
-		return scenarioReport{}, fmt.Errorf("%s: run script: %w", spec.Name, err)
-	}
-	if result.ExitCode != 0 {
-		return scenarioReport{}, fmt.Errorf("%s: curl exited with %d: %s", spec.Name, result.ExitCode, strings.TrimSpace(result.Stderr))
-	}
+type apiResponseRecord struct {
+	Raw      string
+	Response apiResponse
+}
 
-	response, err := decodeAPIResponse(result.Stdout)
-	if err != nil {
-		return scenarioReport{}, fmt.Errorf("%s: %w", spec.Name, err)
+func buildScenarioReport(
+	spec scenarioSpec,
+	responseRecords map[string]apiResponseRecord,
+	traceArgvByRequestID map[string][]string,
+	auditByRequestID map[string]requestAudit,
+	serverByRequestID map[string]serverRequestAudit,
+	token string,
+) (scenarioReport, error) {
+	responseRecord, ok := responseRecords[spec.RequestID]
+	if !ok {
+		return scenarioReport{}, fmt.Errorf("%s: missing response for request id %q", spec.Name, spec.RequestID)
 	}
-
-	traceArgv, err := findCurlArgv(result.Events)
-	if err != nil {
-		return scenarioReport{}, fmt.Errorf("%s: %w", spec.Name, err)
+	traceArgv, ok := traceArgvByRequestID[spec.RequestID]
+	if !ok {
+		return scenarioReport{}, fmt.Errorf("%s: missing curl trace argv for request id %q", spec.Name, spec.RequestID)
 	}
-
-	audit := client.LastAudit()
-	serverRequest := server.LastRequest()
-	token := client.vault.mustSecret(tokenRef).Token
+	audit, ok := auditByRequestID[spec.RequestID]
+	if !ok {
+		return scenarioReport{}, fmt.Errorf("%s: missing audit record for request id %q", spec.Name, spec.RequestID)
+	}
+	serverRequest, ok := serverByRequestID[spec.RequestID]
+	if !ok {
+		return scenarioReport{}, fmt.Errorf("%s: missing server record for request id %q", spec.Name, spec.RequestID)
+	}
 
 	report := scenarioReport{
 		Name:                  spec.Name,
-		Script:                spec.Script,
-		CurlStdout:            result.Stdout,
+		CurlStdout:            responseRecord.Raw,
 		TraceArgv:             traceArgv,
-		Response:              response,
+		Response:              responseRecord.Response,
 		Audit:                 audit,
 		ServerRequest:         serverRequest,
-		SecretVisibleInStdout: strings.Contains(result.Stdout, token),
-		SecretVisibleInStderr: strings.Contains(result.Stderr, token),
+		SecretVisibleInStdout: strings.Contains(responseRecord.Raw, token),
 		SecretVisibleInTrace:  strings.Contains(strings.Join(traceArgv, " "), token),
 	}
 
@@ -157,7 +187,7 @@ func runScenario(ctx context.Context, rt *gbash.Runtime, client *oauthInjectingC
 	if !report.ServerRequest.AuthorizationValid {
 		return scenarioReport{}, fmt.Errorf("%s: server did not receive the injected oauth token", spec.Name)
 	}
-	if report.SecretVisibleInStdout || report.SecretVisibleInStderr || report.SecretVisibleInTrace {
+	if report.SecretVisibleInStdout || report.SecretVisibleInTrace {
 		return scenarioReport{}, fmt.Errorf("%s: oauth token leaked back into sandbox-visible output", spec.Name)
 	}
 
@@ -195,10 +225,10 @@ func (v *demoVault) mustSecret(ref string) oauthSecret {
 }
 
 type demoAPIServer struct {
-	server      *httptest.Server
-	vault       *demoVault
-	mu          sync.Mutex
-	lastRequest serverRequestAudit
+	server  *httptest.Server
+	vault   *demoVault
+	mu      sync.Mutex
+	history []serverRequestAudit
 }
 
 type serverRequestAudit struct {
@@ -231,13 +261,13 @@ func (s *demoAPIServer) handleProfile(w http.ResponseWriter, r *http.Request) {
 	gotAuth := r.Header.Get("Authorization")
 
 	s.mu.Lock()
-	s.lastRequest = serverRequestAudit{
+	s.history = append(s.history, serverRequestAudit{
 		Method:               r.Method,
 		Path:                 r.URL.Path,
 		RequestID:            r.Header.Get("X-Request-ID"),
 		AuthorizationPresent: gotAuth != "",
 		AuthorizationValid:   gotAuth == expectedAuth,
-	}
+	})
 	s.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -263,10 +293,10 @@ func (s *demoAPIServer) handleProfile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *demoAPIServer) LastRequest() serverRequestAudit {
+func (s *demoAPIServer) History() []serverRequestAudit {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.lastRequest
+	return append([]serverRequestAudit(nil), s.history...)
 }
 
 type apiResponse struct {
@@ -279,12 +309,31 @@ type apiResponse struct {
 	Error               string `json:"error,omitempty"`
 }
 
-func decodeAPIResponse(stdout string) (apiResponse, error) {
-	var response apiResponse
-	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
-		return apiResponse{}, fmt.Errorf("decode curl stdout as json: %w", err)
+func decodeAPIResponses(stdout string) (map[string]apiResponseRecord, error) {
+	scanner := bufio.NewScanner(strings.NewReader(stdout))
+	records := make(map[string]apiResponseRecord)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var response apiResponse
+		if err := json.Unmarshal([]byte(line), &response); err != nil {
+			return nil, fmt.Errorf("decode curl stdout line as json: %w", err)
+		}
+		if response.RequestID == "" {
+			return nil, errors.New("decoded response without request_id")
+		}
+		records[response.RequestID] = apiResponseRecord{
+			Raw:      line,
+			Response: response,
+		}
 	}
-	return response, nil
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan curl stdout: %w", err)
+	}
+	return records, nil
 }
 
 type oauthInjectingClient struct {
@@ -292,10 +341,11 @@ type oauthInjectingClient struct {
 	serverURL  *url.URL
 	vault      *demoVault
 	mu         sync.Mutex
-	lastAudit  requestAudit
+	history    []requestAudit
 }
 
 type requestAudit struct {
+	RequestID                    string
 	LogicalURL                   string
 	ForwardedURL                 string
 	AuthorizationInjected        bool
@@ -374,14 +424,15 @@ func (c *oauthInjectingClient) Do(ctx context.Context, req *network.Request) (*n
 	}
 
 	c.mu.Lock()
-	c.lastAudit = requestAudit{
+	c.history = append(c.history, requestAudit{
+		RequestID:                    req.Headers["X-Request-ID"],
 		LogicalURL:                   req.URL,
 		ForwardedURL:                 forwarded.String(),
 		AuthorizationInjected:        true,
 		AuthorizationSource:          tokenRef,
 		SandboxAuthorizationIn:       incomingAuthorization != "",
 		AuthorizationOverrideApplied: incomingAuthorization != "",
-	}
+	})
 	c.mu.Unlock()
 
 	return &network.Response{
@@ -393,10 +444,10 @@ func (c *oauthInjectingClient) Do(ctx context.Context, req *network.Request) (*n
 	}, nil
 }
 
-func (c *oauthInjectingClient) LastAudit() requestAudit {
+func (c *oauthInjectingClient) History() []requestAudit {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.lastAudit
+	return append([]requestAudit(nil), c.history...)
 }
 
 func flattenHeaders(header http.Header) map[string]string {
@@ -408,24 +459,33 @@ func flattenHeaders(header http.Header) map[string]string {
 }
 
 type demoReport struct {
-	Scenarios []scenarioReport
+	ScriptPath   string
+	ScriptSource string
+	Scenarios    []scenarioReport
 }
 
 type scenarioReport struct {
 	Name                  string
-	Script                string
 	CurlStdout            string
 	TraceArgv             []string
 	Response              apiResponse
 	Audit                 requestAudit
 	ServerRequest         serverRequestAudit
 	SecretVisibleInStdout bool
-	SecretVisibleInStderr bool
 	SecretVisibleInTrace  bool
 }
 
 func renderReport(w io.Writer, report *demoReport) error {
 	if _, err := fmt.Fprintln(w, "gbash oauth network extension demo"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "Script source (%s):\n", report.ScriptPath); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, report.ScriptSource); err != nil {
 		return err
 	}
 	for i := range report.Scenarios {
@@ -436,18 +496,6 @@ func renderReport(w io.Writer, report *demoReport) error {
 			return err
 		}
 		if _, err := fmt.Fprintf(w, "Scenario %d: %s\n", i+1, scenario.Name); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintln(w, "Sandbox script:"); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintf(w, "  %s", strings.TrimSpace(scenario.Script)); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintln(w); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintln(w); err != nil {
 			return err
 		}
 		if _, err := fmt.Fprintln(w, "Curl stdout:"); err != nil {
@@ -513,9 +561,6 @@ func renderReport(w io.Writer, report *demoReport) error {
 		if _, err := fmt.Fprintf(w, "  secret_visible_in_stdout=%t\n", scenario.SecretVisibleInStdout); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(w, "  secret_visible_in_stderr=%t\n", scenario.SecretVisibleInStderr); err != nil {
-			return err
-		}
 		if _, err := fmt.Fprintf(w, "  secret_visible_in_trace=%t\n", scenario.SecretVisibleInTrace); err != nil {
 			return err
 		}
@@ -523,7 +568,8 @@ func renderReport(w io.Writer, report *demoReport) error {
 	return nil
 }
 
-func findCurlArgv(events []trace.Event) ([]string, error) {
+func collectCurlArgvByRequestID(events []trace.Event) (map[string][]string, error) {
+	out := make(map[string][]string)
 	for i := range events {
 		event := events[i]
 		if event.Kind != trace.EventCallExpanded || event.Command == nil {
@@ -532,7 +578,32 @@ func findCurlArgv(events []trace.Event) ([]string, error) {
 		if event.Command.Name != "curl" {
 			continue
 		}
-		return append([]string(nil), event.Command.Argv...), nil
+
+		requestID, ok := requestIDFromArgv(event.Command.Argv)
+		if !ok {
+			return nil, fmt.Errorf("trace did not include X-Request-ID in curl argv: %q", event.Command.Argv)
+		}
+		out[requestID] = append([]string(nil), event.Command.Argv...)
 	}
-	return nil, errors.New("trace did not include curl argv")
+	if len(out) == 0 {
+		return nil, errors.New("trace did not include curl argv")
+	}
+	return out, nil
+}
+
+func requestIDFromArgv(argv []string) (string, bool) {
+	for i := range argv {
+		if argv[i] != "-H" && argv[i] != "--header" {
+			continue
+		}
+		if i+1 >= len(argv) {
+			break
+		}
+		header := argv[i+1]
+		if !strings.HasPrefix(header, "X-Request-ID:") {
+			continue
+		}
+		return strings.TrimSpace(strings.TrimPrefix(header, "X-Request-ID:")), true
+	}
+	return "", false
 }

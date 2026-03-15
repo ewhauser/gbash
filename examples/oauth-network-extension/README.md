@@ -2,13 +2,13 @@
 
 This example shows the intended extension pattern for secret-bearing HTTP auth in `gbash`:
 
-- the sandbox runs a normal `curl` command
+- the actual sandbox calls live in [`demo.sh`](./demo.sh)
 - the embedder injects a custom `NetworkClient`
 - that client looks up a bearer token from a host-side vault and adds `Authorization` before the request leaves the sandbox boundary
 - the token never appears in the shell script, `curl` argv, or response body
 - even if the sandbox tries to send its own `Authorization` header, the host extension overwrites it before forwarding the request
 
-To keep the demo self-contained, the example starts a local HTTP server and gives the client and server the same hard-coded "vault" entry. The point is not the fake vault itself. The point is the boundary: the secret lives in host-owned Go code, not in the sandbox.
+To keep the demo self-contained, the Go example starts a local HTTP server and gives the client and server the same hard-coded "vault" entry. The point is not the fake vault itself. The point is the boundary: the secret lives in host-owned Go code, not in the sandbox.
 
 ## Run
 
@@ -28,6 +28,7 @@ make run-oauth-network-extension
 ## What It Demonstrates
 
 - `gbash.WithNetworkClient(...)` as the escape hatch for host-controlled HTTP behavior
+- a readable shell script that performs the exact `curl` calls under test
 - mapping a sandbox-visible URL like `https://crm.example.test/v1/profile` onto a real transport destination
 - injecting OAuth bearer credentials from a host-side secret store
 - using `TraceRaw` to prove the real secret never entered sandbox argv in the first place

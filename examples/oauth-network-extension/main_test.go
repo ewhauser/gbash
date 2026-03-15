@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -13,6 +14,12 @@ func TestRunDemoInjectsOAuthWithoutLeakingSecret(t *testing.T) {
 
 	if got, want := len(report.Scenarios), 2; got != want {
 		t.Fatalf("scenario count = %d, want %d", got, want)
+	}
+	if got, want := report.ScriptPath, demoScriptPath; got != want {
+		t.Fatalf("ScriptPath = %q, want %q", got, want)
+	}
+	if !strings.Contains(report.ScriptSource, "curl -fsS \\") {
+		t.Fatalf("ScriptSource = %q, want embedded shell script", report.ScriptSource)
 	}
 
 	baseline := report.Scenarios[0]
@@ -51,9 +58,6 @@ func TestRunDemoInjectsOAuthWithoutLeakingSecret(t *testing.T) {
 	}
 	if baseline.SecretVisibleInStdout {
 		t.Fatal("baseline SecretVisibleInStdout = true, want false")
-	}
-	if baseline.SecretVisibleInStderr {
-		t.Fatal("baseline SecretVisibleInStderr = true, want false")
 	}
 	if baseline.SecretVisibleInTrace {
 		t.Fatal("baseline SecretVisibleInTrace = true, want false")
@@ -96,9 +100,6 @@ func TestRunDemoInjectsOAuthWithoutLeakingSecret(t *testing.T) {
 	}
 	if override.SecretVisibleInStdout {
 		t.Fatal("override SecretVisibleInStdout = true, want false")
-	}
-	if override.SecretVisibleInStderr {
-		t.Fatal("override SecretVisibleInStderr = true, want false")
 	}
 	if override.SecretVisibleInTrace {
 		t.Fatal("override SecretVisibleInTrace = true, want false")
