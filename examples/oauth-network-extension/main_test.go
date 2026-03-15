@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/ewhauser/gbash/network"
 )
 
 func TestRunDemoInjectsOAuthWithoutLeakingSecret(t *testing.T) {
@@ -105,6 +107,56 @@ func TestRunDemoInjectsOAuthWithoutLeakingSecret(t *testing.T) {
 		t.Fatal("override SecretVisibleInTrace = true, want false")
 	}
 	assertTraceArgv(t, override.TraceArgv, []string{"curl", "-fsS", "-H", "Authorization: " + sandboxForgedAuth, "-H", "X-Request-ID: " + overrideAttemptID, demoRequestURL})
+}
+
+func TestOAuthInjectingClientAuditsLowercaseAuthorizationHeader(t *testing.T) {
+	vault := newDemoVault()
+	server := newDemoAPIServer(vault)
+	defer server.Close()
+
+	client, err := newOAuthInjectingClient(server.URL(), vault)
+	if err != nil {
+		t.Fatalf("newOAuthInjectingClient() error = %v", err)
+	}
+
+	resp, err := client.Do(context.Background(), &network.Request{
+		URL: demoRequestURL,
+		Headers: map[string]string{
+			"authorization": "Bearer sandbox-lowercase-token",
+			"x-request-id":  "sandbox-lowercase-44",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	if got, want := resp.StatusCode, 200; got != want {
+		t.Fatalf("StatusCode = %d, want %d", got, want)
+	}
+
+	history := client.History()
+	if got, want := len(history), 1; got != want {
+		t.Fatalf("client audit history length = %d, want %d", got, want)
+	}
+	if !history[0].SandboxAuthorizationIn {
+		t.Fatal("SandboxAuthorizationIn = false, want true")
+	}
+	if !history[0].AuthorizationOverrideApplied {
+		t.Fatal("AuthorizationOverrideApplied = false, want true")
+	}
+	if got, want := history[0].RequestID, "sandbox-lowercase-44"; got != want {
+		t.Fatalf("RequestID = %q, want %q", got, want)
+	}
+
+	serverHistory := server.History()
+	if got, want := len(serverHistory), 1; got != want {
+		t.Fatalf("server history length = %d, want %d", got, want)
+	}
+	if !serverHistory[0].AuthorizationValid {
+		t.Fatal("AuthorizationValid = false, want true")
+	}
+	if got, want := serverHistory[0].RequestID, "sandbox-lowercase-44"; got != want {
+		t.Fatalf("server request id = %q, want %q", got, want)
+	}
 }
 
 func assertTraceArgv(t *testing.T, got, want []string) {

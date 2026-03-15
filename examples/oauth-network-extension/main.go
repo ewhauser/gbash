@@ -407,7 +407,8 @@ func (c *oauthInjectingClient) Do(ctx context.Context, req *network.Request) (*n
 	}
 
 	secret := c.vault.mustSecret(tokenRef)
-	incomingAuthorization := req.Headers["Authorization"]
+	incomingAuthorization := headerValue(req.Headers, "Authorization")
+	requestID := headerValue(req.Headers, "X-Request-ID")
 	httpReq.Header.Set("Authorization", "Bearer "+secret.Token)
 
 	resp, err := c.httpClient.Do(httpReq)
@@ -425,7 +426,7 @@ func (c *oauthInjectingClient) Do(ctx context.Context, req *network.Request) (*n
 
 	c.mu.Lock()
 	c.history = append(c.history, requestAudit{
-		RequestID:                    req.Headers["X-Request-ID"],
+		RequestID:                    requestID,
 		LogicalURL:                   req.URL,
 		ForwardedURL:                 forwarded.String(),
 		AuthorizationInjected:        true,
@@ -456,6 +457,15 @@ func flattenHeaders(header http.Header) map[string]string {
 		out[name] = strings.Join(values, ", ")
 	}
 	return out
+}
+
+func headerValue(headers map[string]string, name string) string {
+	for key, value := range headers {
+		if strings.EqualFold(key, name) {
+			return value
+		}
+	}
+	return ""
 }
 
 type demoReport struct {
@@ -600,10 +610,11 @@ func requestIDFromArgv(argv []string) (string, bool) {
 			break
 		}
 		header := argv[i+1]
-		if !strings.HasPrefix(header, "X-Request-ID:") {
+		name, value, ok := strings.Cut(header, ":")
+		if !ok || !strings.EqualFold(strings.TrimSpace(name), "X-Request-ID") {
 			continue
 		}
-		return strings.TrimSpace(strings.TrimPrefix(header, "X-Request-ID:")), true
+		return strings.TrimSpace(value), true
 	}
 	return "", false
 }
