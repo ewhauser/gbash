@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,29 @@ import (
 
 	"github.com/ewhauser/gbash"
 )
+
+type cliJSONTiming struct {
+	StartedAt  string  `json:"startedAt"`
+	FinishedAt string  `json:"finishedAt"`
+	DurationMs float64 `json:"durationMs"`
+}
+
+type cliJSONTrace struct {
+	Schema      string `json:"schema"`
+	SessionID   string `json:"sessionId"`
+	ExecutionID string `json:"executionId"`
+	EventCount  int    `json:"eventCount"`
+}
+
+type cliJSONResult struct {
+	Stdout          string         `json:"stdout"`
+	Stderr          string         `json:"stderr"`
+	ExitCode        int            `json:"exitCode"`
+	StdoutTruncated bool           `json:"stdoutTruncated"`
+	StderrTruncated bool           `json:"stderrTruncated"`
+	Timing          *cliJSONTiming `json:"timing"`
+	Trace           *cliJSONTrace  `json:"trace"`
+}
 
 func TestRunCLIPrintsVersion(t *testing.T) {
 	prevVersion, prevCommit, prevDate, prevBuiltBy := version, commit, date, builtBy
@@ -76,10 +100,113 @@ func TestRunCLIHelpRendersFilesystemFlags(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exitCode = %d, want 0", exitCode)
 	}
-	for _, want := range []string{"CLI filesystem options:", "--root DIR", "--cwd DIR", "--readwrite-root DIR"} {
+	for _, want := range []string{"CLI filesystem options:", "--root DIR", "--cwd DIR", "--readwrite-root DIR", "CLI output options:", "--json"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout = %q, want help to contain %q", stdout.String(), want)
 		}
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRunCLIJSONOutputEncodesExecutionResult(t *testing.T) {
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), "gbash", []string{"-c", "printf 'hello\\n'; printf 'warn\\n' >&2", "--json"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+
+	payload := mustParseCLIJSONResult(t, stdout.String())
+	if got, want := payload.Stdout, "hello\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got, want := payload.Stderr, "warn\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+	if got := payload.ExitCode; got != 0 {
+		t.Fatalf("payload exitCode = %d, want 0", got)
+	}
+	if payload.StdoutTruncated || payload.StderrTruncated {
+		t.Fatalf("truncated flags = stdout %t stderr %t, want both false", payload.StdoutTruncated, payload.StderrTruncated)
+	}
+	if payload.Timing == nil || payload.Timing.StartedAt == "" || payload.Timing.FinishedAt == "" {
+		t.Fatalf("timing = %#v, want populated timing fields", payload.Timing)
+	}
+	if payload.Trace != nil {
+		t.Fatalf("trace = %#v, want nil when tracing is disabled", payload.Trace)
+	}
+}
+
+func TestRunCLIJSONOutputEncodesCLIError(t *testing.T) {
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), "gbash", []string{"-c", "pwd", "--json", "--root", "/", "--readwrite-root", "/"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 1 {
+		t.Fatalf("exitCode = %d, want 1; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+
+	payload := mustParseCLIJSONResult(t, stdout.String())
+	if got := payload.Stdout; got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+	if !strings.Contains(payload.Stderr, "gbash: init runtime: --root and --readwrite-root are mutually exclusive") {
+		t.Fatalf("stderr = %q, want init-runtime JSON diagnostic", payload.Stderr)
+	}
+	if payload.Timing != nil {
+		t.Fatalf("timing = %#v, want nil when execution never started", payload.Timing)
+	}
+}
+
+func TestRunCLIJSONOutputRejectsInteractiveShell(t *testing.T) {
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), "gbash", []string{"--json"}, strings.NewReader(""), &stdout, &stderr, true)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+
+	payload := mustParseCLIJSONResult(t, stdout.String())
+	if !strings.Contains(payload.Stderr, "only supported for non-interactive executions") {
+		t.Fatalf("stderr = %q, want non-interactive rejection", payload.Stderr)
+	}
+}
+
+func TestRunCLISharedFlagsStopAfterFirstScriptPositional(t *testing.T) {
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), "gbash", []string{"-c", `printf '%s\n' "$1"`, "_", "--json"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got, want := stdout.String(), "--json\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 	if got := stderr.String(); got != "" {
 		t.Fatalf("stderr = %q, want empty", got)
@@ -128,6 +255,16 @@ func TestRunCLIReadWriteRootPersistsHostWritesAcrossExecutions(t *testing.T) {
 	if got := stderr.String(); got != "" {
 		t.Fatalf("read stderr = %q, want empty", got)
 	}
+}
+
+func mustParseCLIJSONResult(t *testing.T, raw string) cliJSONResult {
+	t.Helper()
+
+	var out cliJSONResult
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("Unmarshal(JSON output) error = %v; raw=%q", err, raw)
+	}
+	return out
 }
 
 func TestRunCLIRootMountReadsHostFilesWithoutPersistingWrites(t *testing.T) {

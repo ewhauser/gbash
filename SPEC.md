@@ -134,11 +134,12 @@ The normal CLI entrypoint also accepts filesystem selection flags before the she
 - `gbash --root <dir> ...` mounts `<dir>` read-only at `/home/agent/project` with an in-memory writable overlay
 - `gbash --cwd <dir> ...` sets the initial sandbox working directory
 - `gbash --readwrite-root <dir> ...` mounts `<dir>` as sandbox `/` so writes persist back to the host, but only when `<dir>` is inside the system temp directory
+- `gbash --json ...` emits one JSON object for a non-interactive execution with `stdout`, `stderr`, `exitCode`, truncation flags, timing metadata, and optional trace metadata when tracing is enabled
 - when `--cwd` is omitted, `--root` starts at `/home/agent/project` and `--readwrite-root` starts at `/`
 
 External test harnesses should use the normal CLI entrypoint together with the filesystem selection flags above. In particular, GNU-style wrapper scripts may invoke `gbash --readwrite-root <tempdir> --cwd <dir> -c 'exec "$@"' _ <utility> ...` so the harness exercises the same shell and runtime path as normal `gbash` execution.
 
-That frontend is also exposed as a public `cli` package so shipped binaries can reuse the same flag parsing, version rendering, interactive behavior, and runtime setup:
+That frontend is also exposed as a public `cli` package so shipped binaries can reuse the same flag parsing, version rendering, interactive behavior, JSON result rendering, and runtime setup:
 
 - `cmd/gbash` is a thin wrapper over `github.com/ewhauser/gbash/cli`
 - `contrib/extras/cmd/gbash-extras` is a thin wrapper over the same package with `contrib/extras` pre-registered into the runtime
