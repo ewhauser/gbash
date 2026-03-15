@@ -210,6 +210,14 @@ gbash --root /path/to/project --cwd /home/agent/project -c 'pwd; ls'
 
 `--root` mounts a host directory read-only at `/home/agent/project` under an in-memory writable overlay. `--cwd` sets the initial sandbox working directory.
 
+For programmatic wrappers and harnesses, non-interactive runs can emit one structured JSON object instead of streaming stdout and stderr directly:
+
+```bash
+gbash -c 'echo hello' --json
+```
+
+The JSON payload includes `stdout`, `stderr`, `exitCode`, truncation flags, timing metadata, and trace metadata when the wrapper enables tracing on the underlying runtime.
+
 Install `gbash-extras` when you want the same CLI surface with the stable official contrib commands (`awk`, `jq`, `sqlite3`, and `yq`) pre-registered:
 
 ```bash

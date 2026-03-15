@@ -16,48 +16,76 @@ type runtimeOptions struct {
 	root          string
 	readWriteRoot string
 	cwd           string
+	json          bool
 }
 
 func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
 	var opts runtimeOptions
-	rest := append([]string(nil), args...)
-	for len(rest) > 0 {
-		arg := rest[0]
+	rest := make([]string, 0, len(args))
+	pendingShellValues := 0
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if pendingShellValues > 0 {
+			rest = append(rest, arg)
+			pendingShellValues--
+			continue
+		}
+
 		switch {
 		case arg == "--root":
-			if len(rest) < 2 {
-				return runtimeOptions{}, nil, fmt.Errorf("--root requires a path")
+			if i+1 >= len(args) {
+				return opts, nil, fmt.Errorf("--root requires a path")
 			}
-			opts.root = rest[1]
-			rest = rest[2:]
+			i++
+			opts.root = args[i]
 		case strings.HasPrefix(arg, "--root="):
 			opts.root = strings.TrimPrefix(arg, "--root=")
-			rest = rest[1:]
 		case arg == "--readwrite-root":
-			if len(rest) < 2 {
-				return runtimeOptions{}, nil, fmt.Errorf("--readwrite-root requires a path")
+			if i+1 >= len(args) {
+				return opts, nil, fmt.Errorf("--readwrite-root requires a path")
 			}
-			opts.readWriteRoot = rest[1]
-			rest = rest[2:]
+			i++
+			opts.readWriteRoot = args[i]
 		case strings.HasPrefix(arg, "--readwrite-root="):
 			opts.readWriteRoot = strings.TrimPrefix(arg, "--readwrite-root=")
-			rest = rest[1:]
 		case arg == "--cwd":
-			if len(rest) < 2 {
-				return runtimeOptions{}, nil, fmt.Errorf("--cwd requires a path")
+			if i+1 >= len(args) {
+				return opts, nil, fmt.Errorf("--cwd requires a path")
 			}
-			opts.cwd = rest[1]
-			rest = rest[2:]
+			i++
+			opts.cwd = args[i]
 		case strings.HasPrefix(arg, "--cwd="):
 			opts.cwd = strings.TrimPrefix(arg, "--cwd=")
-			rest = rest[1:]
+		case arg == "--json":
+			opts.json = true
 		case arg == "--":
-			return opts, rest[1:], nil
-		default:
+			rest = append(rest, args[i:]...)
 			return opts, rest, nil
+		default:
+			rest = append(rest, arg)
+			if !strings.HasPrefix(arg, "-") || arg == "-" {
+				rest = append(rest, args[i+1:]...)
+				return opts, rest, nil
+			}
+			pendingShellValues += bashInvocationValueCount(arg)
 		}
 	}
-	return opts, nil, nil
+	return opts, rest, nil
+}
+
+func bashInvocationValueCount(arg string) int {
+	if len(arg) < 2 || !strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "--") {
+		return 0
+	}
+
+	count := 0
+	for _, ch := range arg[1:] {
+		switch ch {
+		case 'c', 'o':
+			count++
+		}
+	}
+	return count
 }
 
 func (opts runtimeOptions) gbashOptions() ([]gbash.Option, error) {
@@ -165,6 +193,8 @@ func renderHelp(w io.Writer, name string) error {
 	_, err := io.WriteString(w, "\nCLI filesystem options:\n"+
 		"  --root DIR            mount DIR read-only at /home/agent/project with a writable in-memory overlay\n"+
 		"  --cwd DIR             set the initial sandbox working directory\n"+
-		"  --readwrite-root DIR  mount DIR as sandbox / with writes persisted back to the host filesystem\n")
+		"  --readwrite-root DIR  mount DIR as sandbox / with writes persisted back to the host filesystem\n"+
+		"\nCLI output options:\n"+
+		"  --json                emit one JSON result object for a non-interactive execution\n")
 	return err
 }

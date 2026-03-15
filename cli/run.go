@@ -26,6 +26,12 @@ func run(ctx context.Context, cfg Config, argv0 string, args []string, stdin io.
 
 	runtimeOpts, args, err := parseRuntimeOptions(args)
 	if err != nil {
+		if runtimeOpts.json {
+			if jsonErr := writeJSONExecutionResult(stdout, buildJSONExecutionResult(2, nil, formatCLIError(cfg.Name, err))); jsonErr != nil {
+				return 1, jsonErr
+			}
+			return 2, nil
+		}
 		return 2, err
 	}
 
@@ -35,6 +41,12 @@ func run(ctx context.Context, cfg Config, argv0 string, args []string, stdin io.
 		LongInteractive:  true,
 	})
 	if err != nil {
+		if runtimeOpts.json {
+			if jsonErr := writeJSONExecutionResult(stdout, buildJSONExecutionResult(2, nil, formatCLIError(cfg.Name, err))); jsonErr != nil {
+				return 1, jsonErr
+			}
+			return 2, nil
+		}
 		return 2, err
 	}
 	switch parsed.Action {
@@ -47,14 +59,29 @@ func run(ctx context.Context, cfg Config, argv0 string, args []string, stdin io.
 		_, _ = io.WriteString(stdout, versionText(cfg))
 		return 0, nil
 	}
+	if runtimeOpts.json && parsed.Source == builtins.BashSourceStdin && (parsed.Interactive || stdinTTY) {
+		if jsonErr := writeJSONExecutionResult(stdout, buildJSONExecutionResult(2, nil, formatCLIError(cfg.Name, fmt.Errorf("--json is only supported for non-interactive executions")))); jsonErr != nil {
+			return 1, jsonErr
+		}
+		return 2, nil
+	}
 
 	rt, err := newRuntime(cfg, runtimeOpts)
 	if err != nil {
+		if runtimeOpts.json {
+			if jsonErr := writeJSONExecutionResult(stdout, buildJSONExecutionResult(1, nil, formatCLIError(cfg.Name, fmt.Errorf("init runtime: %w", err)))); jsonErr != nil {
+				return 1, jsonErr
+			}
+			return 1, nil
+		}
 		return 1, fmt.Errorf("init runtime: %w", err)
 	}
 
 	if parsed.Source == builtins.BashSourceStdin && (parsed.Interactive || stdinTTY) {
 		return runInteractiveShell(ctx, rt, parsed, stdin, stdout, stderr)
+	}
+	if runtimeOpts.json {
+		return runBashInvocationJSON(ctx, cfg.Name, rt, parsed, stdin, stdout)
 	}
 	return runBashInvocation(ctx, rt, parsed, stdin, stdout, stderr)
 }
@@ -63,37 +90,9 @@ func runBashInvocation(ctx context.Context, rt *gbash.Runtime, parsed *builtins.
 	if parsed == nil {
 		parsed = &builtins.BashInvocation{Name: "gbash", Source: builtins.BashSourceStdin}
 	}
-
-	var (
-		script      string
-		execStdin   = stdin
-		readErr     error
-		missingPath string
-	)
-	switch parsed.Source {
-	case builtins.BashSourceCommandString:
-		script = parsed.CommandString
-	case builtins.BashSourceFile:
-		data, err := os.ReadFile(parsed.ScriptPath)
-		if err != nil {
-			readErr = err
-			missingPath = parsed.ScriptPath
-			break
-		}
-		script = string(data)
-	default:
-		var data []byte
-		data, readErr = io.ReadAll(stdin)
-		if readErr == nil {
-			script = string(data)
-		}
-		execStdin = nil
-	}
-	if readErr != nil {
-		if missingPath != "" {
-			return 127, fmt.Errorf("%s: No such file or directory", missingPath)
-		}
-		return 1, fmt.Errorf("read script: %w", readErr)
+	script, execStdin, exitCode, err := loadBashInvocationScript(parsed, stdin)
+	if err != nil {
+		return exitCode, err
 	}
 
 	req := &gbash.ExecutionRequest{
@@ -128,6 +127,97 @@ func runBashInvocation(ctx context.Context, rt *gbash.Runtime, parsed *builtins.
 		return 1, fmt.Errorf("runtime returned no result")
 	}
 	return result.ExitCode, nil
+}
+
+func runBashInvocationJSON(ctx context.Context, name string, rt *gbash.Runtime, parsed *builtins.BashInvocation, stdin io.Reader, stdout io.Writer) (int, error) {
+	if parsed == nil {
+		parsed = &builtins.BashInvocation{Name: "gbash", Source: builtins.BashSourceStdin}
+	}
+	script, execStdin, exitCode, err := loadBashInvocationScript(parsed, stdin)
+	if err != nil {
+		if jsonErr := writeJSONExecutionResult(stdout, buildJSONExecutionResult(exitCode, nil, formatCLIError(name, err))); jsonErr != nil {
+			return 1, jsonErr
+		}
+		return exitCode, nil
+	}
+
+	req := &gbash.ExecutionRequest{
+		Name:            parsed.ExecutionName,
+		Interpreter:     parsed.Name,
+		PassthroughArgs: append([]string(nil), parsed.RawArgs...),
+		Script:          script,
+		Args:            append([]string(nil), parsed.Args...),
+		StartupOptions:  append([]string(nil), parsed.StartupOptions...),
+		Interactive:     parsed.Interactive,
+		Stdin:           execStdin,
+	}
+	if len(req.PassthroughArgs) == 0 {
+		req.PassthroughArgs = []string{"-s"}
+	}
+
+	session, err := rt.NewSession(ctx)
+	if err != nil {
+		if jsonErr := writeJSONExecutionResult(stdout, buildJSONExecutionResult(1, nil, formatCLIError(name, fmt.Errorf("new session: %w", err)))); jsonErr != nil {
+			return 1, jsonErr
+		}
+		return 1, nil
+	}
+
+	result, err := session.Exec(ctx, req)
+	if err != nil {
+		if jsonErr := writeJSONExecutionResult(stdout, buildJSONExecutionResult(1, result, formatCLIError(name, fmt.Errorf("runtime error: %w", err)))); jsonErr != nil {
+			return 1, jsonErr
+		}
+		return 1, nil
+	}
+	if result == nil {
+		if jsonErr := writeJSONExecutionResult(stdout, buildJSONExecutionResult(1, nil, formatCLIError(name, fmt.Errorf("runtime returned no result")))); jsonErr != nil {
+			return 1, jsonErr
+		}
+		return 1, nil
+	}
+	if jsonErr := writeJSONExecutionResult(stdout, buildJSONExecutionResult(result.ExitCode, result, "")); jsonErr != nil {
+		return 1, jsonErr
+	}
+	return result.ExitCode, nil
+}
+
+func loadBashInvocationScript(parsed *builtins.BashInvocation, stdin io.Reader) (script string, execStdin io.Reader, exitCode int, err error) {
+	if parsed == nil {
+		parsed = &builtins.BashInvocation{Name: "gbash", Source: builtins.BashSourceStdin}
+	}
+
+	var (
+		readErr     error
+		missingPath string
+	)
+	execStdin = stdin
+	switch parsed.Source {
+	case builtins.BashSourceCommandString:
+		script = parsed.CommandString
+	case builtins.BashSourceFile:
+		data, readFileErr := os.ReadFile(parsed.ScriptPath)
+		if readFileErr != nil {
+			readErr = readFileErr
+			missingPath = parsed.ScriptPath
+			break
+		}
+		script = string(data)
+	default:
+		var data []byte
+		data, readErr = io.ReadAll(stdin)
+		if readErr == nil {
+			script = string(data)
+		}
+		execStdin = nil
+	}
+	if readErr != nil {
+		if missingPath != "" {
+			return "", nil, 127, fmt.Errorf("%s: No such file or directory", missingPath)
+		}
+		return "", nil, 1, fmt.Errorf("read script: %w", readErr)
+	}
+	return script, execStdin, 0, nil
 }
 
 func stdinIsTTY(stdin io.Reader) bool {
