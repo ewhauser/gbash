@@ -234,7 +234,7 @@ Most callers should use one of these entry points:
 - `gbash.WithWorkspace(root)` — real host directory mounted read-only under an in-memory overlay
 - `gbash.WithFileSystem(gbash.MountableFileSystem(...))` — multi-mount namespace over a base filesystem plus sibling mounts
 - `gbash.WithFileSystem(gbash.ReadWriteDirectoryFileSystem(...))` — just-bash-style mutable host-backed root
-- `gbash.WithFileSystem(gbash.CustomFileSystem(...))` — seeded or custom backends
+- `gbash.WithFileSystem(gbash.CustomFileSystem(...))` — custom backends
 
 Preload an in-memory sandbox with eager or lazy files:
 

@@ -2,23 +2,100 @@ package runtime
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path"
 	"testing"
 
 	gbfs "github.com/ewhauser/gbash/fs"
 )
 
-func newSeededRuntime(tb testing.TB, files map[string]string) *Runtime {
+type benchmarkFSBackend struct {
+	name  string
+	new   func() gbfs.FileSystem
+	clone func(gbfs.FileSystem) (gbfs.FileSystem, error)
+}
+
+type benchmarkPreparedSessionFactory struct {
+	base  gbfs.FileSystem
+	clone func(gbfs.FileSystem) (gbfs.FileSystem, error)
+}
+
+func (f benchmarkPreparedSessionFactory) New(context.Context) (gbfs.FileSystem, error) {
+	return f.clone(f.base)
+}
+
+func (benchmarkPreparedSessionFactory) layoutReady() bool {
+	return true
+}
+
+func benchmarkFSBackends() []benchmarkFSBackend {
+	return []benchmarkFSBackend{
+		{
+			name: "memory",
+			new: func() gbfs.FileSystem {
+				return gbfs.NewMemory()
+			},
+			clone: func(fsys gbfs.FileSystem) (gbfs.FileSystem, error) {
+				base, ok := fsys.(*gbfs.MemoryFS)
+				if !ok {
+					return nil, fmt.Errorf("clone backend %T, want *fs.MemoryFS", fsys)
+				}
+				return base.Clone(), nil
+			},
+		},
+		{
+			name: "trie",
+			new: func() gbfs.FileSystem {
+				return gbfs.NewTrie()
+			},
+			clone: func(fsys gbfs.FileSystem) (gbfs.FileSystem, error) {
+				base, ok := fsys.(*gbfs.TrieFS)
+				if !ok {
+					return nil, fmt.Errorf("clone backend %T, want *fs.TrieFS", fsys)
+				}
+				return base.Clone(), nil
+			},
+		},
+	}
+}
+
+func newPreparedRuntime(tb testing.TB, backend benchmarkFSBackend, files map[string]string) *Runtime {
 	tb.Helper()
 
-	base := newSession(tb, nil)
-	seedSessionFiles(tb, base, files)
+	rt := newRuntime(tb, nil)
+	base := backend.new()
+	if err := initializeSandboxLayout(context.Background(), base, rt.cfg.BaseEnv, rt.cfg.FileSystem.WorkingDir, rt.cfg.Registry.Names()); err != nil {
+		tb.Fatalf("initializeSandboxLayout() error = %v", err)
+	}
+	seedBenchmarkFiles(tb, base, files)
 
-	return newRuntime(tb, &Config{
-		FileSystem: CustomFileSystem(
-			gbfs.Reusable(gbfs.Snapshot(base.FileSystem())),
-			defaultHomeDir,
-		),
-	})
+	rt.sessionFactory = benchmarkPreparedSessionFactory{
+		base:  base,
+		clone: backend.clone,
+	}
+	return rt
+}
+
+func seedBenchmarkFiles(tb testing.TB, fsys gbfs.FileSystem, files map[string]string) {
+	tb.Helper()
+
+	for name, contents := range files {
+		if err := fsys.MkdirAll(context.Background(), path.Dir(name), 0o755); err != nil {
+			tb.Fatalf("MkdirAll(%q) error = %v", path.Dir(name), err)
+		}
+		file, err := fsys.OpenFile(context.Background(), name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			tb.Fatalf("OpenFile(%q) error = %v", name, err)
+		}
+		if _, err := file.Write([]byte(contents)); err != nil {
+			_ = file.Close()
+			tb.Fatalf("Write(%q) error = %v", name, err)
+		}
+		if err := file.Close(); err != nil {
+			tb.Fatalf("Close(%q) error = %v", name, err)
+		}
+	}
 }
 
 func mustNewBenchmarkSession(tb testing.TB, rt *Runtime) *Session {

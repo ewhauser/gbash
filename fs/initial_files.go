@@ -38,6 +38,10 @@ func (f seededMemoryFactory) New(context.Context) (FileSystem, error) {
 // SeededMemory returns a factory that creates a fresh in-memory filesystem
 // preloaded with the provided initial files.
 func SeededMemory(files InitialFiles) Factory {
+	return seededMemoryFactory{files: copyInitialFiles(files)}
+}
+
+func copyInitialFiles(files InitialFiles) InitialFiles {
 	copied := make(InitialFiles, len(files))
 	for name, file := range files {
 		copied[name] = InitialFile{
@@ -47,5 +51,5 @@ func SeededMemory(files InitialFiles) Factory {
 			ModTime: file.ModTime,
 		}
 	}
-	return seededMemoryFactory{files: copied}
+	return copied
 }

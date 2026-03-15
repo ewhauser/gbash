@@ -590,6 +590,7 @@ Current and planned backends:
 
 - `MemoryFS`: default mutable sandbox
 - `SeededMemory`: in-memory factory seeded with eager or lazy per-path files for a fresh session
+- `TrieFS`: experimental read-optimized in-memory backend that stores a path-segment trie with separate dentries and inodes; intended for static or read-mostly trees, mounted datasets, and shared lower layers
 - `HostFS`: read-only host-backed directory view mounted at a configurable virtual root with sanitized errors and a backend-local regular-file read cap
 - `ReadWriteFS`: mutable host-backed directory view rooted at `/` with sanitized errors and a backend-local regular-file read cap for opt-in host-backed workflows
 - `OverlayFS`: copy-on-write backend with a read-only lower layer, writable in-memory upper layer, merged `readdir`, and tombstones for deletions
@@ -611,6 +612,9 @@ Backend boundary for the current implementation:
 
 - `gbash.Config.FileSystem` is the public setup boundary for session storage and starting directory; callers should not have to coordinate separate runtime knobs to mount a backend and choose the initial working directory
 - `SeededMemory` and `gbash.SeededInMemoryFileSystem(...)` are the productized seed path for eager or lazy per-file session bootstrap
+- `TrieFS` is an opt-in experimental backend exposed through `gbfs.Trie()` and `gbfs.SeededTrie(...)`
+- the preferred shared-lower composition for read-mostly trie data is `gbfs.Reusable(gbfs.SeededTrie(...))`, optionally wrapped by `gbfs.NewSearchableFactory(...)` when the mount should also expose a filesystem-local search provider
+- `TrieFS` is intended for static or read-mostly in-memory data and mounted datasets; it is not the default `runtime` session backend and is not the recommended path for `WithWorkspace`, `HostDirectoryFileSystem(...)`, or other live host-backed filesystem flows
 - `HostFS` is an opt-in lower-layer backend exposed through `gbfs.Host(...)`; it is intended to sit underneath `gbfs.Overlay(...)`, not to replace the default in-memory runtime path
 - `ReadWriteFS` is an opt-in mutable backend exposed through `gbfs.ReadWrite(...)`; it is intended for developer tooling, external test harnesses, and embedders that explicitly want host mutations
 - `OverlayFS` is intended for internal session use and is exposed through `gbfs.Overlay(...)`

@@ -33,6 +33,55 @@ rt, err := gbash.New(
 )
 ```
 
+## Experimental TrieFS (Read-Mostly)
+
+For static or read-mostly in-memory trees, `gbfs` also exposes the experimental
+`TrieFS` backend. It is opt-in only and is intended for mounted datasets,
+shared lower layers, and other compositions where reads dominate. It is not the
+default runtime backend and it is not the recommended path for live host
+workspace mounts.
+
+The preferred single-root pattern is to seed the trie once and wrap it with
+`Reusable(...)` so each session gets a fresh writable overlay above the shared
+lower layer:
+
+```go
+rt, err := gbash.New(
+    gbash.WithFileSystem(gbash.CustomFileSystem(
+        gbfs.Reusable(gbfs.SeededTrie(gbfs.InitialFiles{
+            "/data/catalog/manifest.txt": {Content: []byte("dataset\n")},
+            "/data/catalog/index.txt": {
+                Lazy: func(ctx context.Context) ([]byte, error) {
+                    return loadLargeFixture(ctx)
+                },
+            },
+        })),
+        "/data",
+    )),
+)
+```
+
+`MountableFileSystem` is the corresponding multi-mount composition point when
+you want the trie-backed dataset on one mount and mutable storage elsewhere:
+
+```go
+rt, err := gbash.New(
+    gbash.WithFileSystem(gbash.MountableFileSystem(gbash.MountableFileSystemOptions{
+        Base: gbfs.Memory(),
+        Mounts: []gbfs.MountConfig{
+            {
+                MountPoint: "/dataset",
+                Factory: gbfs.Reusable(gbfs.SeededTrie(gbfs.InitialFiles{
+                    "/docs/guide.txt": {Content: []byte("guide\n")},
+                })),
+            },
+            {MountPoint: "/scratch", Factory: gbfs.Memory()},
+        },
+        WorkingDir: "/scratch",
+    })),
+)
+```
+
 ## Host Directory (Read-Only Overlay)
 
 `WithWorkspace` mounts a real host directory into the sandbox at `/home/agent/project`. The host tree is read-only; all writes go to an in-memory overlay so the shell never mutates the host filesystem.

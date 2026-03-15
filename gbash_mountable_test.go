@@ -37,6 +37,32 @@ func TestSeededInMemoryFileSystemHelper(t *testing.T) {
 	}
 }
 
+func TestCustomFileSystemSupportsReusableTrieRoot(t *testing.T) {
+	t.Parallel()
+
+	rt, err := gbash.New(
+		gbash.WithFileSystem(gbash.CustomFileSystem(
+			gbfs.Reusable(gbfs.SeededTrie(gbfs.InitialFiles{
+				"/data/catalog/manifest.txt": {Content: []byte("dataset\n")},
+			})),
+			"/data",
+		)),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := rt.Run(context.Background(), &gbash.ExecutionRequest{
+		Script: "pwd\ncat /data/catalog/manifest.txt\nprintf 'scratch\\n' > /data/tmp.txt\ncat /data/tmp.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := result.Stdout, "/data\ndataset\nscratch\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestMountableFileSystemSupportsShellMvAcrossMounts(t *testing.T) {
 	t.Parallel()
 
@@ -62,6 +88,39 @@ func TestMountableFileSystemSupportsShellMvAcrossMounts(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want 0, stderr=%q", result.ExitCode, result.Stderr)
 	}
 	if got, want := result.Stdout, "a\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestMountableFileSystemSupportsTrieDatasetMount(t *testing.T) {
+	t.Parallel()
+
+	rt, err := gbash.New(
+		gbash.WithFileSystem(gbash.MountableFileSystem(gbash.MountableFileSystemOptions{
+			Base: gbfs.Memory(),
+			Mounts: []gbfs.MountConfig{
+				{
+					MountPoint: "/dataset",
+					Factory: gbfs.Reusable(gbfs.SeededTrie(gbfs.InitialFiles{
+						"/docs/guide.txt": {Content: []byte("guide\n")},
+					})),
+				},
+				{MountPoint: "/scratch", Factory: gbfs.Memory()},
+			},
+			WorkingDir: "/scratch",
+		})),
+	)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := rt.Run(context.Background(), &gbash.ExecutionRequest{
+		Script: "pwd\ncat /dataset/docs/guide.txt\nprintf 'note\\n' > /scratch/log.txt\ncat /scratch/log.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := result.Stdout, "/scratch\nguide\nnote\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }

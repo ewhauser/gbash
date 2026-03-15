@@ -8,140 +8,176 @@ import (
 )
 
 func BenchmarkNewSession(b *testing.B) {
-	rt := newRuntime(b, nil)
-	ctx := context.Background()
+	for _, backend := range benchmarkFSBackends() {
+		b.Run(backend.name, func(b *testing.B) {
+			rt := newPreparedRuntime(b, backend, nil)
+			ctx := context.Background()
 
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		session, err := rt.NewSession(ctx)
-		if err != nil {
-			b.Fatalf("NewSession() error = %v", err)
-		}
-		if _, err := session.FileSystem().Stat(ctx, "/bin/echo"); err != nil {
-			b.Fatalf("Stat(/bin/echo) error = %v", err)
-		}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				session, err := rt.NewSession(ctx)
+				if err != nil {
+					b.Fatalf("NewSession() error = %v", err)
+				}
+				if _, err := session.FileSystem().Stat(ctx, "/bin/echo"); err != nil {
+					b.Fatalf("Stat(/bin/echo) error = %v", err)
+				}
+			}
+		})
 	}
 }
 
 func BenchmarkRuntimeRunSimpleScript(b *testing.B) {
-	rt := newRuntime(b, nil)
+	for _, backend := range benchmarkFSBackends() {
+		b.Run(backend.name, func(b *testing.B) {
+			rt := newPreparedRuntime(b, backend, nil)
 
-	benchmarkRuntimeRun(b, rt, &ExecutionRequest{
-		Script: "echo hi\npwd\n",
-	}, "hi\n/home/agent\n")
+			benchmarkRuntimeRun(b, rt, &ExecutionRequest{
+				Script: "echo hi\npwd\n",
+			}, "hi\n/home/agent\n")
+		})
+	}
 }
 
 func BenchmarkSessionExecWarmSimpleScript(b *testing.B) {
-	rt := newRuntime(b, nil)
-	session := mustNewBenchmarkSession(b, rt)
+	for _, backend := range benchmarkFSBackends() {
+		b.Run(backend.name, func(b *testing.B) {
+			rt := newPreparedRuntime(b, backend, nil)
+			session := mustNewBenchmarkSession(b, rt)
 
-	benchmarkSessionExec(b, session, &ExecutionRequest{
-		Script: "echo hi\npwd\n",
-	}, "hi\n/home/agent\n")
+			benchmarkSessionExec(b, session, &ExecutionRequest{
+				Script: "echo hi\npwd\n",
+			}, "hi\n/home/agent\n")
+		})
+	}
 }
 
 func BenchmarkWorkflowCodebaseExploration(b *testing.B) {
 	files, totalBytes := codebaseExplorationBenchmarkFiles()
-	rt := newSeededRuntime(b, files)
-	b.SetBytes(totalBytes)
+	for _, backend := range benchmarkFSBackends() {
+		b.Run(backend.name, func(b *testing.B) {
+			rt := newPreparedRuntime(b, backend, files)
+			b.SetBytes(totalBytes)
 
-	benchmarkWorkflow(b, rt,
-		benchmarkWorkflowStep{
-			req: ExecutionRequest{
-				WorkDir: "/home/agent/project",
-				Script: "" +
-					"find src -type f > inventory.txt\n" +
-					"grep -r \"TODO\" src > todos.txt\n",
-			},
-			wantStdout: "",
-		},
-		benchmarkWorkflowStep{
-			req: ExecutionRequest{
-				WorkDir: "/home/agent/project",
-				Script: "" +
-					"grep -c \"\\\\.go\" inventory.txt\n" +
-					"grep -c \"TODO\" todos.txt\n",
-			},
-			wantStdout: "300\n30\n",
-		},
-	)
+			benchmarkWorkflow(b, rt,
+				benchmarkWorkflowStep{
+					req: ExecutionRequest{
+						WorkDir: "/home/agent/project",
+						Script: "" +
+							"find src -type f > inventory.txt\n" +
+							"grep -r \"TODO\" src > todos.txt\n",
+					},
+					wantStdout: "",
+				},
+				benchmarkWorkflowStep{
+					req: ExecutionRequest{
+						WorkDir: "/home/agent/project",
+						Script: "" +
+							"grep -c \"\\\\.go\" inventory.txt\n" +
+							"grep -c \"TODO\" todos.txt\n",
+					},
+					wantStdout: "300\n30\n",
+				},
+			)
+		})
+	}
 }
 
 func BenchmarkWorkflowRefactorPreparation(b *testing.B) {
 	files, totalBytes := refactorPreparationBenchmarkFiles()
-	rt := newSeededRuntime(b, files)
-	b.SetBytes(totalBytes)
+	for _, backend := range benchmarkFSBackends() {
+		b.Run(backend.name, func(b *testing.B) {
+			rt := newPreparedRuntime(b, backend, files)
+			b.SetBytes(totalBytes)
 
-	benchmarkWorkflow(b, rt,
-		benchmarkWorkflowStep{
-			req: ExecutionRequest{
-				WorkDir: "/home/agent/project",
-				Script: "" +
-					"cp -r src snapshot\n" +
-					"mv docs notes\n" +
-					"find snapshot -name '*.txt' -type f > snapshot.files\n" +
-					"grep -r \"TODO\" notes > notes.todo\n",
-			},
-			wantStdout: "",
-		},
-		benchmarkWorkflowStep{
-			req: ExecutionRequest{
-				WorkDir: "/home/agent/project",
-				Script: "" +
-					"grep -c '^' snapshot.files\n" +
-					"grep -c 'TODO' notes.todo\n",
-			},
-			wantStdout: "400\n40\n",
-		},
-	)
+			benchmarkWorkflow(b, rt,
+				benchmarkWorkflowStep{
+					req: ExecutionRequest{
+						WorkDir: "/home/agent/project",
+						Script: "" +
+							"cp -r src snapshot\n" +
+							"mv docs notes\n" +
+							"find snapshot -name '*.txt' -type f > snapshot.files\n" +
+							"grep -r \"TODO\" notes > notes.todo\n",
+					},
+					wantStdout: "",
+				},
+				benchmarkWorkflowStep{
+					req: ExecutionRequest{
+						WorkDir: "/home/agent/project",
+						Script: "" +
+							"grep -c '^' snapshot.files\n" +
+							"grep -c 'TODO' notes.todo\n",
+					},
+					wantStdout: "400\n40\n",
+				},
+			)
+		})
+	}
 }
 
 func BenchmarkCommandFindTree(b *testing.B) {
 	files, totalBytes := findBenchmarkFiles()
-	rt := newSeededRuntime(b, files)
-	session := mustNewBenchmarkSession(b, rt)
-	b.SetBytes(totalBytes)
+	for _, backend := range benchmarkFSBackends() {
+		b.Run(backend.name, func(b *testing.B) {
+			rt := newPreparedRuntime(b, backend, files)
+			session := mustNewBenchmarkSession(b, rt)
+			b.SetBytes(totalBytes)
 
-	benchmarkSessionExec(b, session, &ExecutionRequest{
-		Script: "find /bench/tree -name '*.txt' -type f | grep -c '^'\n",
-	}, "1000\n")
+			benchmarkSessionExec(b, session, &ExecutionRequest{
+				Script: "find /bench/tree -name '*.txt' -type f | grep -c '^'\n",
+			}, "1000\n")
+		})
+	}
 }
 
 func BenchmarkCommandRGRecursive(b *testing.B) {
 	files, totalBytes := rgBenchmarkFiles()
-	rt := newSeededRuntime(b, files)
-	session := mustNewBenchmarkSession(b, rt)
-	b.SetBytes(totalBytes)
+	for _, backend := range benchmarkFSBackends() {
+		b.Run(backend.name, func(b *testing.B) {
+			rt := newPreparedRuntime(b, backend, files)
+			session := mustNewBenchmarkSession(b, rt)
+			b.SetBytes(totalBytes)
 
-	benchmarkSessionExec(b, session, &ExecutionRequest{
-		Script: "rg -l needle /bench/search | grep -c '^'\n",
-	}, "40\n")
+			benchmarkSessionExec(b, session, &ExecutionRequest{
+				Script: "rg -l needle /bench/search | grep -c '^'\n",
+			}, "40\n")
+		})
+	}
 }
 
 func BenchmarkCommandSortUniq(b *testing.B) {
 	files, totalBytes := sortBenchmarkFiles()
-	rt := newSeededRuntime(b, files)
-	session := mustNewBenchmarkSession(b, rt)
-	b.SetBytes(totalBytes)
+	for _, backend := range benchmarkFSBackends() {
+		b.Run(backend.name, func(b *testing.B) {
+			rt := newPreparedRuntime(b, backend, files)
+			session := mustNewBenchmarkSession(b, rt)
+			b.SetBytes(totalBytes)
 
-	benchmarkSessionExec(b, session, &ExecutionRequest{
-		Script: "sort /bench/sort/input.txt | uniq | grep -c '^'\n",
-	}, "5000\n")
+			benchmarkSessionExec(b, session, &ExecutionRequest{
+				Script: "sort /bench/sort/input.txt | uniq | grep -c '^'\n",
+			}, "5000\n")
+		})
+	}
 }
 
 func BenchmarkCommandTarGzipRoundTrip(b *testing.B) {
 	files, totalBytes := archiveBenchmarkFiles()
-	rt := newSeededRuntime(b, files)
-	b.SetBytes(totalBytes)
+	for _, backend := range benchmarkFSBackends() {
+		b.Run(backend.name, func(b *testing.B) {
+			rt := newPreparedRuntime(b, backend, files)
+			b.SetBytes(totalBytes)
 
-	benchmarkFreshSessionExec(b, rt, &ExecutionRequest{
-		Script: "" +
-			"tar -czf /tmp/archive.tar.gz /workspace/archive\n" +
-			"mkdir -p /tmp/out\n" +
-			"tar -xzf /tmp/archive.tar.gz -C /tmp/out\n" +
-			"find /tmp/out/workspace/archive -type f | grep -c '^'\n",
-	}, "200\n")
+			benchmarkFreshSessionExec(b, rt, &ExecutionRequest{
+				Script: "" +
+					"tar -czf /tmp/archive.tar.gz /workspace/archive\n" +
+					"mkdir -p /tmp/out\n" +
+					"tar -xzf /tmp/archive.tar.gz -C /tmp/out\n" +
+					"find /tmp/out/workspace/archive -type f | grep -c '^'\n",
+			}, "200\n")
+		})
+	}
 }
 
 func codebaseExplorationBenchmarkFiles() (files map[string]string, totalBytes int64) {
