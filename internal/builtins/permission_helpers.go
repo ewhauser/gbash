@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	stdfs "io/fs"
-	"os"
 	osuser "os/user"
 	"path"
 	"strconv"
@@ -155,16 +154,12 @@ func seedPermissionIdentityDBFromEnv(db *permissionIdentityDB, inv *Invocation) 
 
 func loadPermissionPasswd(ctx context.Context, inv *Invocation, db *permissionIdentityDB) {
 	input, _, err := openRead(ctx, inv, "/etc/passwd")
-	if err == nil {
-		defer func() { _ = input.Close() }()
-		data, readErr := readAllReader(ctx, inv, input)
-		if readErr == nil {
-			loadPermissionPasswdData(db, data)
-			return
-		}
-	}
-	data, err := os.ReadFile("/etc/passwd")
 	if err != nil {
+		return
+	}
+	defer func() { _ = input.Close() }()
+	data, readErr := readAllReader(ctx, inv, input)
+	if readErr != nil {
 		return
 	}
 	loadPermissionPasswdData(db, data)
@@ -192,16 +187,12 @@ func loadPermissionPasswdData(db *permissionIdentityDB, data []byte) {
 
 func loadPermissionGroup(ctx context.Context, inv *Invocation, db *permissionIdentityDB) {
 	input, _, err := openRead(ctx, inv, "/etc/group")
-	if err == nil {
-		defer func() { _ = input.Close() }()
-		data, readErr := readAllReader(ctx, inv, input)
-		if readErr == nil {
-			loadPermissionGroupData(db, data)
-			return
-		}
-	}
-	data, err := os.ReadFile("/etc/group")
 	if err != nil {
+		return
+	}
+	defer func() { _ = input.Close() }()
+	data, readErr := readAllReader(ctx, inv, input)
+	if readErr != nil {
 		return
 	}
 	loadPermissionGroupData(db, data)

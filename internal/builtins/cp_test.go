@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/ewhauser/gbash/policy"
 )
 
 func TestCPSupportsParityFlagsIsolated(t *testing.T) {
@@ -65,6 +67,62 @@ func TestCPNoDereferencePreservesSourceSymlink(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
 	if got, want := result.Stdout, "target.txt\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestCPDereferenceCommandLineAppliesToAllSources(t *testing.T) {
+	rt := newRuntime(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "echo one > /tmp/target1.txt\n" +
+			"echo two > /tmp/target2.txt\n" +
+			"cd /tmp\n" +
+			"ln -s target1.txt link1\n" +
+			"ln -s target2.txt link2\n" +
+			"mkdir out\n" +
+			"cp -H /tmp/link1 /tmp/link2 /tmp/out\n" +
+			"test -L /tmp/out/link1 && echo link1-symlink || echo link1-regular\n" +
+			"cat /tmp/out/link1\n" +
+			"test -L /tmp/out/link2 && echo link2-symlink || echo link2-regular\n" +
+			"cat /tmp/out/link2\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "link1-regular\none\nlink2-regular\ntwo\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestCPSymlinkCopyOverwritesExistingDestinationByDefault(t *testing.T) {
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "echo payload > /tmp/target.txt\n" +
+			"cd /tmp\n" +
+			"ln -s target.txt src-link\n" +
+			"echo old > dst-link\n" +
+			"cp -P /tmp/src-link /tmp/dst-link\n" +
+			"test -L /tmp/dst-link && echo symlink || echo regular\n" +
+			"readlink /tmp/dst-link\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "symlink\ntarget.txt\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }

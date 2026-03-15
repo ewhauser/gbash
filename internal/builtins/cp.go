@@ -86,8 +86,8 @@ func (c *CP) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedComm
 	}
 	multipleSources := len(sources) > 1
 
-	for i, source := range sources {
-		srcInfo, srcAbs, srcLinkInfo, err := resolveCPSource(ctx, inv, source, opts, i == 0)
+	for _, source := range sources {
+		srcInfo, srcAbs, srcLinkInfo, err := resolveCPSource(ctx, inv, source, opts, true)
 		if err != nil {
 			return exitf(inv, 1, "cp: cannot stat %q: No such file or directory", source)
 		}
@@ -398,14 +398,12 @@ func copySymlink(ctx context.Context, inv *Invocation, srcAbs, dstAbs string, op
 		if info.IsDir() {
 			return exitf(inv, 1, "cp: cannot overwrite directory %q with non-directory", dstAbs)
 		}
-		if opts.removeDestination || opts.force {
-			if err := inv.FS.Remove(ctx, dstAbs, true); err != nil && !errors.Is(err, stdfs.ErrNotExist) {
-				return &ExitError{Code: 1, Err: err}
-			}
+		if err := inv.FS.Remove(ctx, dstAbs, true); err != nil && !errors.Is(err, stdfs.ErrNotExist) {
+			return &ExitError{Code: 1, Err: err}
 		}
 	}
 	if err := inv.FS.Symlink(ctx, target, dstAbs); err != nil {
-		if errors.Is(err, stdfs.ErrExist) && opts.force {
+		if errors.Is(err, stdfs.ErrExist) {
 			if rmErr := inv.FS.Remove(ctx, dstAbs, true); rmErr == nil {
 				err = inv.FS.Symlink(ctx, target, dstAbs)
 			}

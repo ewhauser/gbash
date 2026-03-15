@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	stdfs "io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -317,9 +318,17 @@ func (h *ReadWriteFS) Remove(_ context.Context, name string, recursive bool) err
 		return h.pathError("remove", abs, err)
 	}
 	if recursive {
-		return h.pathError("remove", abs, os.RemoveAll(target))
+		if err := os.RemoveAll(target); err != nil {
+			return h.pathError("remove", abs, err)
+		}
+		h.clearOwnershipSubtree(target)
+		return nil
 	}
-	return h.pathError("remove", abs, os.Remove(target))
+	if err := os.Remove(target); err != nil {
+		return h.pathError("remove", abs, err)
+	}
+	h.clearOwnershipTarget(target)
+	return nil
 }
 
 func (h *ReadWriteFS) Rename(_ context.Context, oldName, newName string) error {
@@ -340,6 +349,7 @@ func (h *ReadWriteFS) Rename(_ context.Context, oldName, newName string) error {
 	if err := os.Rename(oldTarget, newTarget); err != nil {
 		return h.pathError("rename", oldAbs, err)
 	}
+	h.moveOwnership(oldTarget, newTarget)
 	return nil
 }
 
@@ -393,6 +403,55 @@ func (h *ReadWriteFS) recordOwnership(target string, ownership FileOwnership) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.ownership[target] = ownership
+}
+
+func (h *ReadWriteFS) clearOwnershipTarget(target string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.ownership, filepath.Clean(target))
+}
+
+func (h *ReadWriteFS) clearOwnershipSubtree(target string) {
+	target = filepath.Clean(target)
+	prefix := target + string(os.PathSeparator)
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for key := range h.ownership {
+		if key == target || strings.HasPrefix(key, prefix) {
+			delete(h.ownership, key)
+		}
+	}
+}
+
+func (h *ReadWriteFS) moveOwnership(oldTarget, newTarget string) {
+	oldTarget = filepath.Clean(oldTarget)
+	newTarget = filepath.Clean(newTarget)
+	oldPrefix := oldTarget + string(os.PathSeparator)
+	newPrefix := newTarget + string(os.PathSeparator)
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	for key := range h.ownership {
+		if key == newTarget || strings.HasPrefix(key, newPrefix) {
+			delete(h.ownership, key)
+		}
+	}
+
+	moved := make(map[string]FileOwnership)
+	for key, ownership := range h.ownership {
+		switch {
+		case key == oldTarget:
+			moved[newTarget] = ownership
+			delete(h.ownership, key)
+		case strings.HasPrefix(key, oldPrefix):
+			suffix := strings.TrimPrefix(key, oldPrefix)
+			moved[filepath.Join(newTarget, suffix)] = ownership
+			delete(h.ownership, key)
+		}
+	}
+	maps.Copy(h.ownership, moved)
 }
 
 func (h *ReadWriteFS) resolve(name string) string {
