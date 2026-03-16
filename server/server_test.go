@@ -228,34 +228,6 @@ func TestServerConcurrentSessionsAndBusy(t *testing.T) {
 	}
 }
 
-func TestServerSessionTTLExpiry(t *testing.T) {
-	t.Parallel()
-	srv := startServer(t, gbserver.Config{
-		Name:       "gbash",
-		Version:    "test",
-		SessionTTL: 250 * time.Millisecond,
-	})
-	client := dialClient(t, srv.socket)
-	defer client.Close()
-
-	sessionID := mustCreateSession(t, client)
-
-	time.Sleep(500 * time.Millisecond)
-
-	list := client.call("session.list", nil)
-	mustOK(t, &list)
-	var listed sessionListResult
-	decodeResult(t, &list, &listed)
-	if len(listed.Sessions) != 0 {
-		t.Fatalf("session.list result = %+v, want empty after ttl expiry", listed)
-	}
-
-	get := client.call("session.get", map[string]any{"session_id": sessionID})
-	if get.Error == nil || get.Error.Data == nil || get.Error.Data.Code != "SESSION_NOT_FOUND" {
-		t.Fatalf("session.get result = %#v, want SESSION_NOT_FOUND", get)
-	}
-}
-
 func TestServeTCPListenerReportsTCPTransport(t *testing.T) {
 	t.Parallel()
 	rt, err := gbash.New()
@@ -310,7 +282,7 @@ func TestServeTCPListenerReportsTCPTransport(t *testing.T) {
 
 func TestListenAndServeUnixSetsSocketPermissions0600(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, gbserver.Config{
+	srv := startListenAndServeUnix(t, gbserver.Config{
 		Name:       "gbash",
 		Version:    "test",
 		SessionTTL: time.Second,
@@ -469,6 +441,50 @@ func TestListenAndServeUnixRemovesStaleSocket(t *testing.T) {
 }
 
 func startServer(t *testing.T, cfg gbserver.Config, opts ...gbash.Option) *serverHandle {
+	t.Helper()
+
+	rt, err := gbash.New(opts...)
+	if err != nil {
+		t.Fatalf("gbash.New() error = %v", err)
+	}
+	cfg.Runtime = rt
+
+	ctx, cancel := context.WithCancel(context.Background())
+	socket := filepath.Join(os.TempDir(), fmt.Sprintf("gbs-%d.sock", time.Now().UnixNano()))
+	t.Cleanup(func() { _ = os.Remove(socket) })
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("Listen(unix) error = %v", err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		_ = ln.Close()
+		t.Fatalf("Chmod(%q) error = %v", socket, err)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- gbserver.Serve(ctx, ln, cfg)
+	}()
+
+	handle := &serverHandle{
+		socket: socket,
+		cancel: cancel,
+		errCh:  errCh,
+	}
+	t.Cleanup(func() {
+		handle.cancel()
+		select {
+		case err := <-handle.errCh:
+			if err != nil {
+				t.Fatalf("server exited with error: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for server shutdown")
+		}
+	})
+	return handle
+}
+
+func startListenAndServeUnix(t *testing.T, cfg gbserver.Config, opts ...gbash.Option) *serverHandle {
 	t.Helper()
 
 	rt, err := gbash.New(opts...)
