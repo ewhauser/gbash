@@ -11,6 +11,7 @@ import (
 )
 
 func TestGzipRoundTripReplacesSourceByDefault(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, nil)
 	writeSessionFile(t, session, "/tmp/note.txt", []byte("hello from gzip\n"))
 
@@ -35,6 +36,7 @@ func TestGzipRoundTripReplacesSourceByDefault(t *testing.T) {
 }
 
 func TestGzipSupportsStdoutBinaryRoundTripAndZCat(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, nil)
 	input := []byte{0x00, 0x01, 0x02, 0xff, 'h', 'i', '\n'}
 	writeSessionFile(t, session, "/tmp/blob.bin", input)
@@ -54,6 +56,7 @@ func TestGzipSupportsStdoutBinaryRoundTripAndZCat(t *testing.T) {
 }
 
 func TestGzipKeepCustomSuffixAndTestMode(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, nil)
 	writeSessionFile(t, session, "/tmp/keep.txt", []byte("keep me\n"))
 
@@ -75,6 +78,7 @@ func TestGzipKeepCustomSuffixAndTestMode(t *testing.T) {
 }
 
 func TestGunzipRejectsInvalidInput(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, nil)
 	writeSessionFile(t, session, "/tmp/plain.gz", []byte("not actually gzip\n"))
 
@@ -88,6 +92,7 @@ func TestGunzipRejectsInvalidInput(t *testing.T) {
 }
 
 func TestGzipSupportsLongFlagsAndCustomHelp(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, nil)
 	writeSessionFile(t, session, "/tmp/long.txt", []byte("long flag data\n"))
 
@@ -120,6 +125,7 @@ func TestGzipSupportsLongFlagsAndCustomHelp(t *testing.T) {
 }
 
 func TestTarCreateListExtractAndRoundTripSymlink(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, nil)
 	writeSessionFile(t, session, "/tmp/src/file.txt", []byte("archive me\n"))
 	if err := session.FileSystem().Symlink(context.Background(), "file.txt", "/tmp/src/link.txt"); err != nil {
@@ -158,6 +164,7 @@ func TestTarCreateListExtractAndRoundTripSymlink(t *testing.T) {
 }
 
 func TestTarSupportsGzipAndStdoutExtraction(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, nil)
 	writeSessionFile(t, session, "/tmp/one.txt", []byte("hello tar gzip\n"))
 
@@ -176,6 +183,7 @@ func TestTarSupportsGzipAndStdoutExtraction(t *testing.T) {
 }
 
 func TestTarKeepOldFilesRejectsOverwrite(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, nil)
 	writeSessionFile(t, session, "/tmp/original.txt", []byte("new content\n"))
 	create := mustExecSession(t, session, "tar -cf /tmp/original.tar /tmp/original.txt\n")
@@ -194,6 +202,7 @@ func TestTarKeepOldFilesRejectsOverwrite(t *testing.T) {
 }
 
 func TestTarRejectsParentTraversalOnExtract(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, nil)
 	writeSessionFile(t, session, "/tmp/evil.tar", buildTarFixture(t, tarFixtureEntry{
 		Name: "safe/../../escape.txt",
@@ -210,6 +219,7 @@ func TestTarRejectsParentTraversalOnExtract(t *testing.T) {
 }
 
 func TestTarRejectsUnsafeSymlinkTargetsOnExtract(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, nil)
 	writeSessionFile(t, session, "/tmp/evil-link.tar", buildTarFixture(t, tarFixtureEntry{
 		Name:     "safe/link.txt",
@@ -311,6 +321,7 @@ func buildTarGzipFixture(t *testing.T, entries ...tarFixtureEntry) []byte {
 }
 
 func TestTarRejectsTraversalFromGzipArchiveToo(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, nil)
 	writeSessionFile(t, session, "/tmp/evil.tar.gz", buildTarGzipFixture(t, tarFixtureEntry{
 		Name: "/../../escape.txt",

@@ -10,6 +10,7 @@ import (
 )
 
 func TestDirectCommandRequestRespectsPATHAndWorkDir(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	if err := session.FileSystem().MkdirAll(context.Background(), "/tmp/work", 0o755); err != nil {
 		t.Fatalf("MkdirAll(/tmp/work) error = %v", err)
@@ -32,6 +33,7 @@ func TestDirectCommandRequestRespectsPATHAndWorkDir(t *testing.T) {
 }
 
 func TestDirectCommandRequestReturns127ForMissingCommand(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result, err := session.Exec(context.Background(), &ExecutionRequest{
@@ -49,6 +51,7 @@ func TestDirectCommandRequestReturns127ForMissingCommand(t *testing.T) {
 }
 
 func TestDirectCommandRequestCancellationReturns130(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -70,6 +73,7 @@ func TestDirectCommandRequestCancellationReturns130(t *testing.T) {
 }
 
 func TestDirectCommandRequestRejectsScriptAndCommand(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	if _, err := session.Exec(context.Background(), &ExecutionRequest{

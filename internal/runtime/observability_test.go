@@ -14,6 +14,7 @@ import (
 )
 
 func TestTraceOffDoesNotAllocateRecorder(t *testing.T) {
+	t.Parallel()
 	recorder, buffer := newExecutionTraceRecorder(context.Background(), "sess-1", "exec-1", TraceConfig{}, true)
 	if buffer != nil {
 		t.Fatalf("buffer = %#v, want nil", buffer)
@@ -24,6 +25,7 @@ func TestTraceOffDoesNotAllocateRecorder(t *testing.T) {
 }
 
 func TestExecutionResultsOmitTraceEventsByDefault(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{Script: "echo hi\n"})
@@ -36,6 +38,7 @@ func TestExecutionResultsOmitTraceEventsByDefault(t *testing.T) {
 }
 
 func TestTraceOffDoesNotInvokeCallbacks(t *testing.T) {
+	t.Parallel()
 	callbackCalled := false
 	rt := newRuntime(t, &Config{
 		Tracing: TraceConfig{
@@ -58,6 +61,7 @@ func TestTraceOffDoesNotInvokeCallbacks(t *testing.T) {
 }
 
 func TestTraceRedactedPopulatesEventsAndCallbacks(t *testing.T) {
+	t.Parallel()
 	var callbackEvents []trace.Event
 	session := newSession(t, &Config{
 		Tracing: TraceConfig{
@@ -107,6 +111,7 @@ func TestTraceRedactedPopulatesEventsAndCallbacks(t *testing.T) {
 }
 
 func TestTraceRawPreservesSensitiveArgv(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Tracing: TraceConfig{Mode: TraceRaw},
 	})
@@ -132,6 +137,7 @@ func TestTraceRawPreservesSensitiveArgv(t *testing.T) {
 }
 
 func TestNestedExecTracingInvokesInheritedCallbacks(t *testing.T) {
+	t.Parallel()
 	var executionIDs []string
 	rt := newRuntime(t, &Config{
 		Registry: registryWithSubexecProbe(t),
@@ -165,6 +171,7 @@ func TestNestedExecTracingInvokesInheritedCallbacks(t *testing.T) {
 }
 
 func TestInteractiveTracingUsesCallbacksOnly(t *testing.T) {
+	t.Parallel()
 	callbackCount := 0
 	session := newSession(t, &Config{
 		Tracing: TraceConfig{
@@ -192,6 +199,7 @@ func TestInteractiveTracingUsesCallbacksOnly(t *testing.T) {
 }
 
 func TestExecutionLoggerReportsLifecycleAndOutput(t *testing.T) {
+	t.Parallel()
 	var events []LogEvent
 	rt := newRuntime(t, &Config{
 		Logger: func(_ context.Context, event LogEvent) {
@@ -242,6 +250,7 @@ func TestExecutionLoggerReportsLifecycleAndOutput(t *testing.T) {
 }
 
 func TestExecutionLoggerReportsUnexpectedErrors(t *testing.T) {
+	t.Parallel()
 	var events []LogEvent
 	rt := newRuntime(t, &Config{
 		Engine: failingEngine{err: errors.New("engine boom")},
@@ -266,6 +275,7 @@ func TestExecutionLoggerReportsUnexpectedErrors(t *testing.T) {
 }
 
 func TestObservabilityCallbackPanicsAreRecovered(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		Tracing: TraceConfig{
 			Mode: TraceRaw,

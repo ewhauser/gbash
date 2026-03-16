@@ -9,6 +9,7 @@ import (
 )
 
 func TestGrepWorksInPipelineFromStdin(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -26,6 +27,7 @@ func TestGrepWorksInPipelineFromStdin(t *testing.T) {
 }
 
 func TestGrepRecursiveSearchPrefixesFilenames(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -45,6 +47,7 @@ func TestGrepRecursiveSearchPrefixesFilenames(t *testing.T) {
 }
 
 func TestGrepReturnsExitCodeOneWhenNoMatch(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -62,6 +65,7 @@ func TestGrepReturnsExitCodeOneWhenNoMatch(t *testing.T) {
 }
 
 func TestGrepReturnsExitCodeTwoOnMissingFile(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -79,6 +83,7 @@ func TestGrepReturnsExitCodeTwoOnMissingFile(t *testing.T) {
 }
 
 func TestHeadReadsFirstNLines(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -96,6 +101,7 @@ func TestHeadReadsFirstNLines(t *testing.T) {
 }
 
 func TestHeadStopsReadingInfinitePipelineAfterRequestedLines(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -115,6 +121,7 @@ func TestHeadStopsReadingInfinitePipelineAfterRequestedLines(t *testing.T) {
 }
 
 func TestHeadShowsHeadersForMultipleFiles(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -132,6 +139,7 @@ func TestHeadShowsHeadersForMultipleFiles(t *testing.T) {
 }
 
 func TestHeadAcceptsSuffixedLineCounts(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -149,6 +157,7 @@ func TestHeadAcceptsSuffixedLineCounts(t *testing.T) {
 }
 
 func TestHeadSupportsLegacyNumericCountAndSilentAlias(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -166,6 +175,7 @@ func TestHeadSupportsLegacyNumericCountAndSilentAlias(t *testing.T) {
 }
 
 func TestTailSupportsFromLineSyntax(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -183,6 +193,7 @@ func TestTailSupportsFromLineSyntax(t *testing.T) {
 }
 
 func TestTailSupportsFromByteSyntax(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -200,6 +211,7 @@ func TestTailSupportsFromByteSyntax(t *testing.T) {
 }
 
 func TestTailWorksInPipeline(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -217,6 +229,7 @@ func TestTailWorksInPipeline(t *testing.T) {
 }
 
 func TestHeadAndTailSupportLongByteAndHeaderFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -234,6 +247,7 @@ func TestHeadAndTailSupportLongByteAndHeaderFlags(t *testing.T) {
 }
 
 func TestTailLongLinesFlagDoesNotEnableFromLineMode(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -251,6 +265,7 @@ func TestTailLongLinesFlagDoesNotEnableFromLineMode(t *testing.T) {
 }
 
 func TestWCReportsTotalsForMultipleFiles(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -270,6 +285,7 @@ func TestWCReportsTotalsForMultipleFiles(t *testing.T) {
 }
 
 func TestWCCountsWordsFromStdin(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -287,6 +303,7 @@ func TestWCCountsWordsFromStdin(t *testing.T) {
 }
 
 func TestWCCountsBinaryBytes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/binary.bin", []byte{0x41, 0x00, 0x42, 0x00, 0x43})
 
@@ -300,6 +317,7 @@ func TestWCCountsBinaryBytes(t *testing.T) {
 }
 
 func TestWCCountsLinesFromExplicitStdinWithoutPadding(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -317,6 +335,7 @@ func TestWCCountsLinesFromExplicitStdinWithoutPadding(t *testing.T) {
 }
 
 func TestWCSupportsMaxLineLengthAndTotalModes(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -334,6 +353,7 @@ func TestWCSupportsMaxLineLengthAndTotalModes(t *testing.T) {
 }
 
 func TestWCSupportsFiles0From(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/a.txt", []byte("a\n"))
 	writeSessionFile(t, session, "/tmp/b.txt", []byte("bb\n"))
@@ -351,6 +371,7 @@ func TestWCSupportsFiles0From(t *testing.T) {
 }
 
 func TestWCRejectsFiles0FromConflictsAndBadNames(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	conflict, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -381,6 +402,7 @@ func TestWCRejectsFiles0FromConflictsAndBadNames(t *testing.T) {
 }
 
 func TestWCFiles0FromMatchesGNUEmptyInvalidAndQuotedNames(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "printf '' > /tmp/empty\nwc --files0-from=/tmp/empty > /tmp/empty.out\nprintf '\\0\\0' | wc --files0-from=- > /tmp/nul.out 2> /tmp/nul.err || true\ncd /tmp\ntouch '1\n2'\nprintf '%s\\0' '1\n2' | wc --files0-from=- > /tmp/nl.out\ncat /tmp/empty.out\nprintf '%s\\n' '---'\ncat /tmp/nul.out\nprintf '%s\\n' '---'\ncat /tmp/nul.err\nprintf '%s\\n' '---'\ncat /tmp/nl.out\n")
@@ -394,6 +416,7 @@ func TestWCFiles0FromMatchesGNUEmptyInvalidAndQuotedNames(t *testing.T) {
 }
 
 func TestWCMatchesGNUPaddingForMultipleFiles(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "cd /tmp\nprintf '%s\\n' '2' > 2b\nprintf '%s\\n' '2 words' > 2w\nwc --total=never 2b 2w\nwc --total=only 2b 2w\nwc -c 2b 2w\n")
@@ -407,6 +430,7 @@ func TestWCMatchesGNUPaddingForMultipleFiles(t *testing.T) {
 }
 
 func TestWCFiles0FromKeepsZeroCountOutputUnpadded(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "cd /tmp\ntouch g\nprintf 'g\\0g' | wc --files0-from=-\n")
@@ -420,6 +444,7 @@ func TestWCFiles0FromKeepsZeroCountOutputUnpadded(t *testing.T) {
 }
 
 func TestWCNonbreakingSpaceWordSeparators(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "export LC_ALL=en_US.iso8859-1\nprintf '=\\xA0=' | wc -w\n")
@@ -432,6 +457,7 @@ func TestWCNonbreakingSpaceWordSeparators(t *testing.T) {
 }
 
 func TestWCUTF8NonbreakingSeparators(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/nbsp.txt", []byte("=\u00A0="))
@@ -448,6 +474,7 @@ func TestWCUTF8NonbreakingSeparators(t *testing.T) {
 }
 
 func TestWCBytesOnlyUsesRegularFileSizeWithoutReadingWholeFile(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	const size = 8<<20 + 1
@@ -462,6 +489,7 @@ func TestWCBytesOnlyUsesRegularFileSizeWithoutReadingWholeFile(t *testing.T) {
 	}
 }
 func TestCatSupportsNumberFlag(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -479,6 +507,7 @@ func TestCatSupportsNumberFlag(t *testing.T) {
 }
 
 func TestColumnSupportsTableModeWithShortAndLongFlags(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		script string
@@ -498,6 +527,7 @@ func TestColumnSupportsTableModeWithShortAndLongFlags(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			session := newSession(t, &Config{})
 
 			result := mustExecSession(t, session, tc.script)
@@ -515,6 +545,7 @@ func TestColumnSupportsTableModeWithShortAndLongFlags(t *testing.T) {
 }
 
 func TestColumnSupportsSeparatorsOutputDelimitersAndNoMerge(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "printf 'a,,c\\nd,e,f\\n' | column -t -s, -n -o ' | '\n")
@@ -530,6 +561,7 @@ func TestColumnSupportsSeparatorsOutputDelimitersAndNoMerge(t *testing.T) {
 }
 
 func TestColumnFillModeSupportsWidthAndInvalidParseIntBehavior(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		script string
@@ -549,6 +581,7 @@ func TestColumnFillModeSupportsWidthAndInvalidParseIntBehavior(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			session := newSession(t, &Config{})
 
 			result := mustExecSession(t, session, tc.script)
@@ -566,6 +599,7 @@ func TestColumnFillModeSupportsWidthAndInvalidParseIntBehavior(t *testing.T) {
 }
 
 func TestColumnSupportsDashMultipleFilesAndWhitespaceOnlyInput(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/other.txt", []byte("c d\n"))
 
@@ -582,6 +616,7 @@ func TestColumnSupportsDashMultipleFilesAndWhitespaceOnlyInput(t *testing.T) {
 }
 
 func TestColumnMissingFileSuppressesPartialOutput(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/input.txt", []byte("a b\n"))
 
@@ -598,6 +633,7 @@ func TestColumnMissingFileSuppressesPartialOutput(t *testing.T) {
 }
 
 func TestColumnRejectsUnknownOptionsAndMissingArgs(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		script string
@@ -622,6 +658,7 @@ func TestColumnRejectsUnknownOptionsAndMissingArgs(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			session := newSession(t, &Config{})
 
 			result := mustExecSession(t, session, tc.script)
@@ -639,6 +676,7 @@ func TestColumnRejectsUnknownOptionsAndMissingArgs(t *testing.T) {
 }
 
 func TestColumnHelpWinsOverOtherArgs(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "column --help -z\n")

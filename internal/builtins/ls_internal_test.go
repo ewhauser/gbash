@@ -6,6 +6,7 @@ import (
 )
 
 func TestPrimeLSIdentityDBCachesPerInvocation(t *testing.T) {
+	t.Parallel()
 	original := lsIdentityDBLoader
 	t.Cleanup(func() {
 		lsIdentityDBLoader = original
@@ -35,6 +36,7 @@ func TestPrimeLSIdentityDBCachesPerInvocation(t *testing.T) {
 }
 
 func TestPrimeLSIdentityDBSkipsNumericIDs(t *testing.T) {
+	t.Parallel()
 	original := lsIdentityDBLoader
 	t.Cleanup(func() {
 		lsIdentityDBLoader = original

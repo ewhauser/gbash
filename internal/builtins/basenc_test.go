@@ -17,6 +17,7 @@ func runBasencScript(t *testing.T, script string) *ExecutionResult {
 }
 
 func TestBasencSupportsFileOperandBeforeOptions(t *testing.T) {
+	t.Parallel()
 	result := runBasencScript(t, "printf 'foo' >/tmp/input\nbasenc /tmp/input --base64 --wrap=0\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
@@ -27,6 +28,7 @@ func TestBasencSupportsFileOperandBeforeOptions(t *testing.T) {
 }
 
 func TestBasencSupportsWrap(t *testing.T) {
+	t.Parallel()
 	result := runBasencScript(t, "printf 'The quick brown fox jumps over the lazy dog.' | basenc --base64 -w 20\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
@@ -38,6 +40,7 @@ func TestBasencSupportsWrap(t *testing.T) {
 }
 
 func TestBasencBase64URLDecodeSupportsIgnoreGarbageInference(t *testing.T) {
+	t.Parallel()
 	result := runBasencScript(t, "printf '@dG8-YmU_\\n' | basenc --base64url -d --ignore\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
@@ -48,6 +51,7 @@ func TestBasencBase64URLDecodeSupportsIgnoreGarbageInference(t *testing.T) {
 }
 
 func TestBasencBase32AutopadsShortQuantum(t *testing.T) {
+	t.Parallel()
 	result := runBasencScript(t, "printf 'MFRGG' | basenc --base32 --decode\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
@@ -58,6 +62,7 @@ func TestBasencBase32AutopadsShortQuantum(t *testing.T) {
 }
 
 func TestBasencBase32KeepsDecodedPrefixOnInvalidTail(t *testing.T) {
+	t.Parallel()
 	result := runBasencScript(t, "printf 'MFRGGZDF=' | basenc --base32 --decode\n")
 	if result.ExitCode != 1 {
 		t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
@@ -71,6 +76,7 @@ func TestBasencBase32KeepsDecodedPrefixOnInvalidTail(t *testing.T) {
 }
 
 func TestBasencBase32HexSupportsEncodeAndTruncatedDecode(t *testing.T) {
+	t.Parallel()
 	result := runBasencScript(t, "printf 'nice>base?' | basenc --base32hex --wrap=0\nprintf '\\n'\nprintf 'CPNMUO' | basenc --base32hex -d\n")
 	if result.ExitCode != 1 {
 		t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
@@ -84,6 +90,7 @@ func TestBasencBase32HexSupportsEncodeAndTruncatedDecode(t *testing.T) {
 }
 
 func TestBasencBase16DecodeAcceptsLowercase(t *testing.T) {
+	t.Parallel()
 	result := runBasencScript(t, "printf '48656c6c6f2c20576f726c6421' | basenc --base16 -d\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
@@ -94,6 +101,7 @@ func TestBasencBase16DecodeAcceptsLowercase(t *testing.T) {
 }
 
 func TestBasencBase2Encodings(t *testing.T) {
+	t.Parallel()
 	script := "" +
 		"printf 'msbf' | basenc --base2msbf --wrap=0\n" +
 		"printf '\\n'\n" +
@@ -113,6 +121,7 @@ func TestBasencBase2Encodings(t *testing.T) {
 }
 
 func TestBasencZ85RoundTripAndLengthChecks(t *testing.T) {
+	t.Parallel()
 	result := runBasencScript(t, "printf 'Hello, World' | basenc --z85 --wrap=0\nprintf '\\n'\nprintf 'nm=QNz.92jz/PV8' | basenc --z85 -d\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
@@ -131,6 +140,7 @@ func TestBasencZ85RoundTripAndLengthChecks(t *testing.T) {
 }
 
 func TestBasencBase58AndLastEncodingWins(t *testing.T) {
+	t.Parallel()
 	script := "" +
 		"printf 'Hello!' | basenc --base64 --base32 --base16 --z85 --base58 --wrap=0\n" +
 		"printf '\\n'\n" +
@@ -145,6 +155,7 @@ func TestBasencBase58AndLastEncodingWins(t *testing.T) {
 }
 
 func TestBasencReportsDirectoryReadErrors(t *testing.T) {
+	t.Parallel()
 	result := runBasencScript(t, "basenc --base32 .\n")
 	if result.ExitCode != 1 {
 		t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
@@ -155,6 +166,7 @@ func TestBasencReportsDirectoryReadErrors(t *testing.T) {
 }
 
 func TestBasencRequiresAnEncoding(t *testing.T) {
+	t.Parallel()
 	result := runBasencScript(t, "printf 'foo' | basenc\n")
 	if result.ExitCode != 1 {
 		t.Fatalf("ExitCode = %d, want 1", result.ExitCode)

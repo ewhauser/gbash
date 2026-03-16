@@ -9,6 +9,7 @@ import (
 )
 
 func TestFindSupportsCaseInsensitivePathAndRegexFlagsIsolated(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/dir/README.md", []byte("readme"))
 	writeSessionFile(t, session, "/dir/readme.txt", []byte("lower"))
@@ -32,6 +33,7 @@ func TestFindSupportsCaseInsensitivePathAndRegexFlagsIsolated(t *testing.T) {
 }
 
 func TestFindSupportsEmptyMTimeAndNewerFlagsIsolated(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/empty/empty.txt", nil)
 	writeSessionFile(t, session, "/empty/notempty/file.txt", []byte("content"))
@@ -83,6 +85,7 @@ func TestFindSupportsEmptyMTimeAndNewerFlagsIsolated(t *testing.T) {
 }
 
 func TestFindSupportsSizeFlagsIsolated(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/size/large.txt", bytes.Repeat([]byte("x"), 2048))
 	writeSessionFile(t, session, "/size/exact.txt", []byte("12345"))
@@ -102,6 +105,7 @@ func TestFindSupportsSizeFlagsIsolated(t *testing.T) {
 }
 
 func TestFindSupportsPermMindepthDepthAndPrune(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/perm/exact.sh", []byte("#!/bin/sh\n"))
@@ -161,6 +165,7 @@ func TestFindSupportsPermMindepthDepthAndPrune(t *testing.T) {
 }
 
 func TestFindSupportsExecPrint0PrintfAndDelete(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/exec/a.txt", []byte("a\n"))

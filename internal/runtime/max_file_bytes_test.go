@@ -9,6 +9,7 @@ import (
 )
 
 func TestMaxFileBytesEnforcedForHelperStdinReads(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxFileBytes: 3})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -27,6 +28,7 @@ func TestMaxFileBytesEnforcedForHelperStdinReads(t *testing.T) {
 }
 
 func TestMaxFileBytesEnforcedForCatFileReads(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxFileBytes: 3})
 	session, err := rt.NewSession(context.Background())
 	if err != nil {
@@ -49,6 +51,7 @@ func TestMaxFileBytesEnforcedForCatFileReads(t *testing.T) {
 }
 
 func TestMaxFileBytesEnforcedForBashStdinReads(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxFileBytes: 3})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -67,6 +70,7 @@ func TestMaxFileBytesEnforcedForBashStdinReads(t *testing.T) {
 }
 
 func TestMaxFileBytesEnforcedForBashScriptFiles(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxFileBytes: 3})
 	session, err := rt.NewSession(context.Background())
 	if err != nil {

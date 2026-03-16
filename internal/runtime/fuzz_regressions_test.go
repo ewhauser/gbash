@@ -7,6 +7,7 @@ import (
 )
 
 func TestMalformedRedirectionDoesNotPanic(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	cases := []string{
@@ -19,6 +20,7 @@ func TestMalformedRedirectionDoesNotPanic(t *testing.T) {
 	}
 	for _, script := range cases {
 		t.Run(strings.TrimSpace(script), func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{
 				Script: script,
 			})
@@ -39,6 +41,7 @@ func TestMalformedRedirectionDoesNotPanic(t *testing.T) {
 }
 
 func TestMalformedFunctionDeclarationDoesNotPanic(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -59,6 +62,7 @@ func TestMalformedFunctionDeclarationDoesNotPanic(t *testing.T) {
 }
 
 func TestCommandPathBelowFileDoesNotEscapeAsInternalError(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

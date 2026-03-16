@@ -3,6 +3,7 @@ package builtins_test
 import "testing"
 
 func TestODHexByteDumpMatchesEchoHelperShape(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.bin", []byte{0x07, 0x08, 0x1b, 0x0c, 0x0a, 0x0d, 0x09, 0x0b})
 
@@ -16,6 +17,7 @@ func TestODHexByteDumpMatchesEchoHelperShape(t *testing.T) {
 }
 
 func TestODSupportsSkipReadAndNoAddress(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.bin", []byte{0x01, 0x02, 0x03, 0x04})
 
@@ -29,6 +31,7 @@ func TestODSupportsSkipReadAndNoAddress(t *testing.T) {
 }
 
 func TestODSuppressesDuplicateLinesUnlessVIsSet(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.bin", []byte("ABCDEFGHABCDEFGHijklmnop"))
 
@@ -42,6 +45,7 @@ func TestODSuppressesDuplicateLinesUnlessVIsSet(t *testing.T) {
 }
 
 func TestODSupportsEndianWordFormatting(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.bin", []byte{0x01, 0x02, 0x03, 0x04})
 
@@ -55,6 +59,7 @@ func TestODSupportsEndianWordFormatting(t *testing.T) {
 }
 
 func TestODRespectsReadLimitOnSharedStdin(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.txt", []byte("abcdefg\n"))
 
@@ -68,6 +73,7 @@ func TestODRespectsReadLimitOnSharedStdin(t *testing.T) {
 }
 
 func TestODAcceptsInferredEndianLongOption(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.bin", []byte{0x01, 0x02, 0x03, 0x04})
 
@@ -81,6 +87,7 @@ func TestODAcceptsInferredEndianLongOption(t *testing.T) {
 }
 
 func TestODRejectsUnsupportedIntegerTypeSizes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "printf '' | od -An -tx16\n")
@@ -93,6 +100,7 @@ func TestODRejectsUnsupportedIntegerTypeSizes(t *testing.T) {
 }
 
 func TestODReportsMissingOffsetLikeFilename(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "od ++0\n")

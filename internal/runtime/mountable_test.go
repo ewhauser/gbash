@@ -8,6 +8,7 @@ import (
 )
 
 func TestMountableFileSystemHelperSupportsCrossMountMove(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		FileSystem: MountableFileSystem(MountableFileSystemOptions{
 			Mounts: []gbfs.MountConfig{

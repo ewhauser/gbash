@@ -7,6 +7,7 @@ import (
 )
 
 func TestXArgsLongFlagsIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -28,6 +29,7 @@ func TestXArgsLongFlagsIsolated(t *testing.T) {
 }
 
 func TestXArgsUsesCommandSpecHelp(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{Script: "xargs --help\n"})
@@ -46,6 +48,7 @@ func TestXArgsUsesCommandSpecHelp(t *testing.T) {
 }
 
 func TestXArgsParsesQuotesAndEscapes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/xargs-quotes.txt", []byte("   this is\n\"quoted \tstuff\"  \nand \\\nan embedded   newline\nwith 'single\tquotes' as well.\n"))
 
@@ -64,6 +67,7 @@ func TestXArgsParsesQuotesAndEscapes(t *testing.T) {
 }
 
 func TestXArgsRunsCompletedInputBeforeReportingUnmatchedQuotes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/xargs-unmatched.txt", []byte("one\n\"two\nthree\n"))
 
@@ -85,6 +89,7 @@ func TestXArgsRunsCompletedInputBeforeReportingUnmatchedQuotes(t *testing.T) {
 }
 
 func TestXArgsStopsAtLogicalEOF(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -102,6 +107,7 @@ func TestXArgsStopsAtLogicalEOF(t *testing.T) {
 }
 
 func TestXArgsRespectsMaxLinesWithTrailingBlankContinuation(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/xargs-lines.txt", []byte("one \ntwo\nthree\n"))
 
@@ -120,6 +126,7 @@ func TestXArgsRespectsMaxLinesWithTrailingBlankContinuation(t *testing.T) {
 }
 
 func TestXArgsDelimiterModePreservesEmptyItems(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -137,6 +144,7 @@ func TestXArgsDelimiterModePreservesEmptyItems(t *testing.T) {
 }
 
 func TestXArgsArgFileLeavesChildStdinAvailable(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/xargs-args.txt", []byte("left right\n"))
 
@@ -155,6 +163,7 @@ func TestXArgsArgFileLeavesChildStdinAvailable(t *testing.T) {
 }
 
 func TestXArgsWarnsForConflictingBatchOptions(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -175,6 +184,7 @@ func TestXArgsWarnsForConflictingBatchOptions(t *testing.T) {
 }
 
 func TestXArgsIgnoresN1AfterReplaceWithoutWarning(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -195,6 +205,7 @@ func TestXArgsIgnoresN1AfterReplaceWithoutWarning(t *testing.T) {
 }
 
 func TestXArgsMapsChildFailuresToGNUExitCodes(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	nonzero, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -241,6 +252,7 @@ func TestXArgsMapsChildFailuresToGNUExitCodes(t *testing.T) {
 }
 
 func TestXArgsAcceptsMaxProcsFlag(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -261,6 +273,7 @@ func TestXArgsAcceptsMaxProcsFlag(t *testing.T) {
 }
 
 func TestXArgsRunsShebangScriptViaDirectExec(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/xargs-script.sh", []byte("#!/bin/sh\nprintf '%s:%s\\n' \"$1\" \"$2\"\n"))
 

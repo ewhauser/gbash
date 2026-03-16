@@ -9,6 +9,7 @@ import (
 )
 
 func TestParseOptions(t *testing.T) {
+	t.Parallel()
 	opts, err := parseOptions([]string{
 		"--workspace", "/tmp/workspace",
 		"--cwd", "/home/agent/project",
@@ -29,12 +30,14 @@ func TestParseOptions(t *testing.T) {
 }
 
 func TestParseOptionsRequiresCommand(t *testing.T) {
+	t.Parallel()
 	if _, err := parseOptions([]string{"--workspace", "/tmp/workspace"}); err == nil {
 		t.Fatalf("parseOptions() error = nil, want error")
 	}
 }
 
 func TestGbashRunnerSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot, err := findModuleRoot(".")
 	if err != nil {
 		t.Fatalf("findModuleRoot() error = %v", err)

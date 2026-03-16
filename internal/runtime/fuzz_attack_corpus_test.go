@@ -34,11 +34,13 @@ func loadKnownAttacks(tb testing.TB) []knownAttack {
 }
 
 func TestKnownAttackCorpus(t *testing.T) {
+	t.Parallel()
 	rt := newFuzzRuntime(t)
 	attacks := loadKnownAttacks(t)
 
 	for _, attack := range attacks {
 		t.Run(attack.Name, func(t *testing.T) {
+			t.Parallel()
 			result, err := runFuzzScript(t, rt, []byte(attack.Script))
 			assertSecureFuzzOutcomeAllowExecutionTimeout(t, []byte(attack.Script), result, err)
 		})

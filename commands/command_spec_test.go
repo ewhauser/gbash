@@ -3,6 +3,7 @@ package commands
 import "testing"
 
 func TestParseCommandSpecGroupedShortAndAttachedValues(t *testing.T) {
+	t.Parallel()
 	spec := CommandSpec{
 		Name: "probe",
 		Options: []OptionSpec{
@@ -35,6 +36,7 @@ func TestParseCommandSpecGroupedShortAndAttachedValues(t *testing.T) {
 }
 
 func TestParseCommandSpecSupportsLongInferenceAndDoubleDash(t *testing.T) {
+	t.Parallel()
 	spec := CommandSpec{
 		Name: "probe",
 		Options: []OptionSpec{
@@ -74,6 +76,7 @@ func TestParseCommandSpecSupportsLongInferenceAndDoubleDash(t *testing.T) {
 }
 
 func TestParseCommandSpecOptionalValueEqualsOnly(t *testing.T) {
+	t.Parallel()
 	spec := CommandSpec{
 		Name: "tee",
 		Options: []OptionSpec{
@@ -104,6 +107,7 @@ func TestParseCommandSpecOptionalValueEqualsOnly(t *testing.T) {
 }
 
 func TestParseCommandSpecGroupedOptionalValueEqualsOnlyContinuesParsing(t *testing.T) {
+	t.Parallel()
 	spec := CommandSpec{
 		Name: "ls",
 		Options: []OptionSpec{
@@ -136,6 +140,7 @@ func TestParseCommandSpecGroupedOptionalValueEqualsOnlyContinuesParsing(t *testi
 }
 
 func TestParseCommandSpecNegativeNumbersAsPositionals(t *testing.T) {
+	t.Parallel()
 	spec := CommandSpec{
 		Name: "seq",
 		Args: []ArgSpec{{Name: "number", Repeatable: true, Required: true}},
@@ -157,6 +162,7 @@ func TestParseCommandSpecNegativeNumbersAsPositionals(t *testing.T) {
 }
 
 func TestParseCommandSpecContinueShortGroupValuesConsumesLaterArgs(t *testing.T) {
+	t.Parallel()
 	spec := CommandSpec{
 		Name: "probe",
 		Options: []OptionSpec{
@@ -189,6 +195,7 @@ func TestParseCommandSpecContinueShortGroupValuesConsumesLaterArgs(t *testing.T)
 }
 
 func TestParseCommandSpecContinueShortGroupValuesSupportsMultiplePendingOptions(t *testing.T) {
+	t.Parallel()
 	spec := CommandSpec{
 		Name: "probe",
 		Options: []OptionSpec{

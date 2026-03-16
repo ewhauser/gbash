@@ -20,6 +20,7 @@ func parseChgrpSpec(t *testing.T, args ...string) (parsed *ParsedCommand, action
 }
 
 func TestParseChgrpSpecInfersLongOptionsAfterPositionals(t *testing.T) {
+	t.Parallel()
 	matches, action, err := parseChgrpSpec(t, "--verb", "target.txt", "--ref=ref.txt")
 	if err != nil {
 		t.Fatalf("ParseCommandSpec() error = %v", err)
@@ -39,6 +40,7 @@ func TestParseChgrpSpecInfersLongOptionsAfterPositionals(t *testing.T) {
 }
 
 func TestParseChgrpSpecTreatsShortHAsNoDereference(t *testing.T) {
+	t.Parallel()
 	matches, action, err := parseChgrpSpec(t, "-h", "group", "file")
 	if err != nil {
 		t.Fatalf("ParseCommandSpec() error = %v", err)
@@ -55,6 +57,7 @@ func TestParseChgrpSpecTreatsShortHAsNoDereference(t *testing.T) {
 }
 
 func TestParseChgrpSpecParsesGroupedShortTraversalFlags(t *testing.T) {
+	t.Parallel()
 	matches, action, err := parseChgrpSpec(t, "-HR", "group", "file")
 	if err != nil {
 		t.Fatalf("ParseCommandSpec() error = %v", err)
@@ -71,6 +74,7 @@ func TestParseChgrpSpecParsesGroupedShortTraversalFlags(t *testing.T) {
 }
 
 func TestParseChgrpSpecInfersQuietAlias(t *testing.T) {
+	t.Parallel()
 	matches, action, err := parseChgrpSpec(t, "--qui", "group", "file")
 	if err != nil {
 		t.Fatalf("ParseCommandSpec() error = %v", err)
@@ -84,6 +88,7 @@ func TestParseChgrpSpecInfersQuietAlias(t *testing.T) {
 }
 
 func TestParseChgrpSpecParsesManualHelpAndAutoVersion(t *testing.T) {
+	t.Parallel()
 	helpMatches, action, err := parseChgrpSpec(t, "--help")
 	if err != nil {
 		t.Fatalf("ParseCommandSpec(--help) error = %v", err)

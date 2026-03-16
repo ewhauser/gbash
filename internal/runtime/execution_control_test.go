@@ -43,6 +43,7 @@ func (c *timeoutProbe) Run(ctx context.Context, inv *commands.Invocation) error 
 }
 
 func TestExecutionTimeoutReturns124(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -61,6 +62,7 @@ func TestExecutionTimeoutReturns124(t *testing.T) {
 }
 
 func TestExecutionCancellationReturns130(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -82,6 +84,7 @@ func TestExecutionCancellationReturns130(t *testing.T) {
 }
 
 func TestInvocationExecTimeoutIsScopedToSubexecution(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		Registry: registryWithCommands(t, &timeoutProbe{}),
 		Policy: policy.NewStatic(&policy.Config{
@@ -109,6 +112,7 @@ func TestInvocationExecTimeoutIsScopedToSubexecution(t *testing.T) {
 }
 
 func TestRedirectPolicyDenialReturns126(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:  []string{defaultHomeDir},
@@ -131,6 +135,7 @@ func TestRedirectPolicyDenialReturns126(t *testing.T) {
 }
 
 func TestCommandResolutionPolicyDenialReturns126(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:  []string{defaultHomeDir},

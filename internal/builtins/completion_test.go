@@ -13,6 +13,7 @@ import (
 )
 
 func TestCompoptPersistsAcrossCommandsInScript(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "complete -W 'foo bar' mycommand\ncompopt -o nospace mycommand\ncomplete -p mycommand\n")
@@ -28,6 +29,7 @@ func TestCompoptPersistsAcrossCommandsInScript(t *testing.T) {
 }
 
 func TestCompoptErrorsWithoutActiveCompletionContext(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "compopt -o filenames +o nospace\n")
@@ -40,6 +42,7 @@ func TestCompoptErrorsWithoutActiveCompletionContext(t *testing.T) {
 }
 
 func TestCompoptInvalidOptionReturnsExitCodeTwo(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "compopt -o invalid cmd\n")
@@ -52,6 +55,7 @@ func TestCompoptInvalidOptionReturnsExitCodeTwo(t *testing.T) {
 }
 
 func TestCompoptModifiesDefaultAndEmptyCompletionScopes(t *testing.T) {
+	t.Parallel()
 	state := shellstate.NewCompletionState()
 	ctx := shellstate.WithCompletionState(context.Background(), state)
 
@@ -88,6 +92,7 @@ func TestCompoptModifiesDefaultAndEmptyCompletionScopes(t *testing.T) {
 }
 
 func TestCompoptPreservesExistingSpecWhileDisablingOptions(t *testing.T) {
+	t.Parallel()
 	state := shellstate.NewCompletionState()
 	ctx := shellstate.WithCompletionState(context.Background(), state)
 
@@ -111,6 +116,7 @@ func TestCompoptPreservesExistingSpecWhileDisablingOptions(t *testing.T) {
 }
 
 func TestCompoptPersistsAcrossInteractiveEntries(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	var stdout strings.Builder

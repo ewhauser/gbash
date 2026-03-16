@@ -6,6 +6,7 @@ import (
 )
 
 func TestClearOutputsANSISequence(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -23,6 +24,7 @@ func TestClearOutputsANSISequence(t *testing.T) {
 }
 
 func TestStringsSupportsLengthsOffsetsAndStdin(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -44,6 +46,7 @@ func TestStringsSupportsLengthsOffsetsAndStdin(t *testing.T) {
 }
 
 func TestStringsHonorsEightBitEncodingMode(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -63,6 +66,7 @@ func TestStringsHonorsEightBitEncodingMode(t *testing.T) {
 }
 
 func TestHistoryReadsEnvAndClearsWithinOneExecution(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -83,6 +87,7 @@ func TestHistoryReadsEnvAndClearsWithinOneExecution(t *testing.T) {
 }
 
 func TestHistoryRejectsInvalidCountArguments(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	tests := []struct {
@@ -106,6 +111,7 @@ func TestHistoryRejectsInvalidCountArguments(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
 			if err != nil {
 				t.Fatalf("Run() error = %v", err)

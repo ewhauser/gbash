@@ -3,6 +3,7 @@ package runtime
 import "testing"
 
 func TestRedirectRegressionSupportsOverwriteAppendAndInputRedirection(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo first > log.txt\n echo second >> log.txt\n cat < log.txt\n")
@@ -15,6 +16,7 @@ func TestRedirectRegressionSupportsOverwriteAppendAndInputRedirection(t *testing
 }
 
 func TestPipelineRegressionChainsShellAndRegistryCommands(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "printf 'alpha\nbeta\nbeta\n' > words.txt\n cat words.txt | grep beta | head -n 1\n")
@@ -27,6 +29,7 @@ func TestPipelineRegressionChainsShellAndRegistryCommands(t *testing.T) {
 }
 
 func TestPipelineRegressionDoesNotLeakPipedLoopVariableMutations(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, ""+
@@ -47,6 +50,7 @@ func TestPipelineRegressionDoesNotLeakPipedLoopVariableMutations(t *testing.T) {
 }
 
 func TestPipelineRegressionDoesNotPersistFinalStageReadVariable(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, ""+
@@ -62,6 +66,7 @@ func TestPipelineRegressionDoesNotPersistFinalStageReadVariable(t *testing.T) {
 }
 
 func TestCommandSubstitutionRegressionFeedsExpandedArgs(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/home/agent/note.txt", []byte("sandbox\n"))
 
@@ -75,6 +80,7 @@ func TestCommandSubstitutionRegressionFeedsExpandedArgs(t *testing.T) {
 }
 
 func TestConditionalRegressionSupportsBuiltinStringPredicates(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "status=ready\n if test \"$status\" = ready; then echo exists; else echo missing; fi\n")
@@ -87,6 +93,7 @@ func TestConditionalRegressionSupportsBuiltinStringPredicates(t *testing.T) {
 }
 
 func TestLoopRegressionSupportsForControlFlow(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "for name in alpha beta; do echo \"item:$name\"; done\n")
@@ -99,6 +106,7 @@ func TestLoopRegressionSupportsForControlFlow(t *testing.T) {
 }
 
 func TestLetRegressionSupportsLiteralArithmeticExpressions(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, ""+

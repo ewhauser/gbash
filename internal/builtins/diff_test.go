@@ -7,6 +7,7 @@ import (
 )
 
 func TestDiffSupportsLongFlagAliases(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -24,6 +25,7 @@ func TestDiffSupportsLongFlagAliases(t *testing.T) {
 }
 
 func TestDiffSupportsLongBriefAndUnifiedFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	briefResult, err := rt.Run(context.Background(), &ExecutionRequest{

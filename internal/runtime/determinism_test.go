@@ -6,6 +6,7 @@ import (
 )
 
 func TestCompatibilityCorpusIsDeterministicAcrossFreshSessions(t *testing.T) {
+	t.Parallel()
 	fixtures := loadExecutionFixtures(t, "compatibility/*.json")
 
 	for _, fixture := range fixtures {
@@ -23,6 +24,7 @@ func TestCompatibilityCorpusIsDeterministicAcrossFreshSessions(t *testing.T) {
 }
 
 func TestWorkflowScenariosAreDeterministicAcrossFreshSessions(t *testing.T) {
+	t.Parallel()
 	testCases := []struct {
 		name string
 		run  func(*testing.T) []normalizedExecutionResult
@@ -39,6 +41,7 @@ func TestWorkflowScenariosAreDeterministicAcrossFreshSessions(t *testing.T) {
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			first := tt.run(t)
 			second := tt.run(t)
 			for i := range first {

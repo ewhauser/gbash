@@ -822,6 +822,7 @@ func fuzzVariant(stdinHint, features string, tokens ...string) fuzzCommandVarian
 }
 
 func TestFuzzMetadataSeedCoverage(t *testing.T) {
+	t.Parallel()
 	specs := mustFuzzCommandMetadata(t)
 
 	session := newFuzzSession(t, newFuzzRuntime(t))

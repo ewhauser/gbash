@@ -8,6 +8,7 @@ import (
 )
 
 func TestWriteReportWritesIndexAndBadge(t *testing.T) {
+	t.Parallel()
 	outputDir := t.TempDir()
 	summary := runSummary{
 		GNUVersion:  "9.10",
@@ -141,6 +142,7 @@ func TestWriteReportWritesIndexAndBadge(t *testing.T) {
 }
 
 func TestLoadSummaryReadsHarnessJSON(t *testing.T) {
+	t.Parallel()
 	summaryPath := filepath.Join(t.TempDir(), "summary.json")
 	if err := os.WriteFile(summaryPath, []byte(`{
   "gnu_version": "9.10",
@@ -176,6 +178,7 @@ func TestLoadSummaryReadsHarnessJSON(t *testing.T) {
 }
 
 func TestLoadSummaryRejectsUnknownFields(t *testing.T) {
+	t.Parallel()
 	summaryPath := filepath.Join(t.TempDir(), "summary.json")
 	if err := os.WriteFile(summaryPath, []byte(`{
   "gnu_version": "9.10",

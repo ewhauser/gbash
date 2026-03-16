@@ -6,6 +6,7 @@ import (
 )
 
 func TestWorkflowCodebaseExploration(t *testing.T) {
+	t.Parallel()
 	results := runCodebaseExplorationWorkflow(t)
 
 	assertExecutionOutcome(t, results[0], 0, "", "")
@@ -19,6 +20,7 @@ func TestWorkflowCodebaseExploration(t *testing.T) {
 }
 
 func TestWorkflowRefactorPreparation(t *testing.T) {
+	t.Parallel()
 	results := runRefactorPreparationWorkflow(t)
 
 	assertExecutionOutcome(t, results[0], 0, "", "")

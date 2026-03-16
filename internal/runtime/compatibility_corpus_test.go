@@ -3,6 +3,7 @@ package runtime
 import "testing"
 
 func TestCompatibilityCorpus(t *testing.T) {
+	t.Parallel()
 	fixtures := loadExecutionFixtures(t, "compatibility/*.json")
 
 	for _, fixture := range fixtures {

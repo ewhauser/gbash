@@ -9,6 +9,7 @@ import (
 )
 
 func TestRegistryRegisterOverridesExistingCommand(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry()
 	first := DefineCommand("probe", nil)
 	second := DefineCommand("probe", nil)
@@ -30,6 +31,7 @@ func TestRegistryRegisterOverridesExistingCommand(t *testing.T) {
 }
 
 func TestRegistryLazyCommandLoadsOnce(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry()
 	loads := 0
 

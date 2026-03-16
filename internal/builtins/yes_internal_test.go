@@ -31,6 +31,7 @@ func TestPrepareYesBufferMatchesUutilsBoundaries(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("len=%d", tc.lineLen), func(t *testing.T) {
+			t.Parallel()
 			buffer := make([]byte, tc.lineLen)
 			for i := range buffer {
 				buffer[i] = 'a'
@@ -58,6 +59,7 @@ func TestYesArgsIntoBuffer(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := string(yesArgsIntoBuffer(tc.operands)); got != tc.want {
 				t.Fatalf("yesArgsIntoBuffer(%q) = %q, want %q", tc.operands, got, tc.want)
 			}

@@ -6,6 +6,7 @@ import (
 )
 
 func TestSumBSDModesAndStdin(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/input.txt", []byte("abc\n"))
 
@@ -50,6 +51,7 @@ func TestSumBSDModesAndStdin(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := mustExecSession(t, session, tc.script)
 			if result.ExitCode != tc.exitCode {
 				t.Fatalf("ExitCode = %d, want %d; stderr=%q", result.ExitCode, tc.exitCode, result.Stderr)
@@ -65,6 +67,7 @@ func TestSumBSDModesAndStdin(t *testing.T) {
 }
 
 func TestSumSysVModes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/input.txt", []byte("abc\n"))
 
@@ -97,6 +100,7 @@ func TestSumSysVModes(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := mustExecSession(t, session, tc.script)
 			if result.ExitCode != 0 {
 				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
@@ -112,6 +116,7 @@ func TestSumSysVModes(t *testing.T) {
 }
 
 func TestSumErrorsAndPartialSuccess(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/present.txt", []byte("abc\n"))
 	if err := session.FileSystem().MkdirAll(t.Context(), "/tmp/dir", 0o755); err != nil {
@@ -154,6 +159,7 @@ func TestSumErrorsAndPartialSuccess(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := mustExecSession(t, session, tc.script)
 			if result.ExitCode != tc.exitCode {
 				t.Fatalf("ExitCode = %d, want %d; stderr=%q", result.ExitCode, tc.exitCode, result.Stderr)
@@ -169,6 +175,7 @@ func TestSumErrorsAndPartialSuccess(t *testing.T) {
 }
 
 func TestSumHelpAndVersion(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	help := mustExecSession(t, session, "sum --help\n")

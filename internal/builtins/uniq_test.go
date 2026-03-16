@@ -7,6 +7,7 @@ import (
 )
 
 func TestUniqSupportsIgnoreCaseIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -24,6 +25,7 @@ func TestUniqSupportsIgnoreCaseIsolated(t *testing.T) {
 }
 
 func TestUniqSupportsGroupingAndAllRepeatedModes(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -41,6 +43,7 @@ func TestUniqSupportsGroupingAndAllRepeatedModes(t *testing.T) {
 }
 
 func TestUniqSupportsSkipFieldsSkipCharsAndOutputFile(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -58,6 +61,7 @@ func TestUniqSupportsSkipFieldsSkipCharsAndOutputFile(t *testing.T) {
 }
 
 func TestUniqSupportsZeroTerminatedAndLegacySyntax(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -75,6 +79,7 @@ func TestUniqSupportsZeroTerminatedAndLegacySyntax(t *testing.T) {
 }
 
 func TestUniqRejectsInvalidGroupCombinations(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

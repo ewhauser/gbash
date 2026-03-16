@@ -6,6 +6,7 @@ import (
 )
 
 func TestSortSupportsLongOrderingFlagsIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -34,6 +35,7 @@ func TestSortSupportsLongOrderingFlagsIsolated(t *testing.T) {
 }
 
 func TestSortSupportsCheckStableAndOutputFlagsIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -55,6 +57,7 @@ func TestSortSupportsCheckStableAndOutputFlagsIsolated(t *testing.T) {
 }
 
 func TestSortCheckReportsDisorderIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -72,6 +75,7 @@ func TestSortCheckReportsDisorderIsolated(t *testing.T) {
 }
 
 func TestSortSupportsPostOperandOutputFlag(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -89,6 +93,7 @@ func TestSortSupportsPostOperandOutputFlag(t *testing.T) {
 }
 
 func TestSortSupportsCheckEqualsSilent(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -106,6 +111,7 @@ func TestSortSupportsCheckEqualsSilent(t *testing.T) {
 }
 
 func TestSortSupportsLegacyPlusKeySyntax(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

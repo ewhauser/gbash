@@ -7,6 +7,7 @@ import (
 )
 
 func TestTSortSupportsStdinInput(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -24,6 +25,7 @@ func TestTSortSupportsStdinInput(t *testing.T) {
 }
 
 func TestTSortSupportsFileInputAndHiddenWarnFlag(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -41,6 +43,7 @@ func TestTSortSupportsFileInputAndHiddenWarnFlag(t *testing.T) {
 }
 
 func TestTSortRejectsExtraOperand(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -58,6 +61,7 @@ func TestTSortRejectsExtraOperand(t *testing.T) {
 }
 
 func TestTSortReportsOddTokenCount(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -75,6 +79,7 @@ func TestTSortReportsOddTokenCount(t *testing.T) {
 }
 
 func TestTSortIgnoresSelfLoops(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -92,6 +97,7 @@ func TestTSortIgnoresSelfLoops(t *testing.T) {
 }
 
 func TestTSortReportsCyclesAndReturnsPartialOrder(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -119,6 +125,7 @@ func TestTSortReportsCyclesAndReturnsPartialOrder(t *testing.T) {
 }
 
 func TestTSortReportsDirectoryInput(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -136,6 +143,7 @@ func TestTSortReportsDirectoryInput(t *testing.T) {
 }
 
 func TestTSortSupportsHelpAndVersion(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	helpResult, err := rt.Run(context.Background(), &ExecutionRequest{

@@ -10,6 +10,7 @@ import (
 )
 
 func TestSessionExecSkipsLayoutReinitializationWhenUnchanged(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var tracked *statCountingFS
 
@@ -39,6 +40,7 @@ func TestSessionExecSkipsLayoutReinitializationWhenUnchanged(t *testing.T) {
 }
 
 func TestSessionExecRebuildsLayoutAfterCommandStubMutation(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, nil)
 
 	result := mustExecSession(t, session, "rm /bin/echo\n")

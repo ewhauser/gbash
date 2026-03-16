@@ -9,6 +9,7 @@ import (
 )
 
 func TestCPSupportsParityFlagsIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -31,6 +32,7 @@ func TestCPSupportsParityFlagsIsolated(t *testing.T) {
 }
 
 func TestCPAcceptsForceFlagForOverwrite(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -51,6 +53,7 @@ func TestCPAcceptsForceFlagForOverwrite(t *testing.T) {
 }
 
 func TestCPNoDereferencePreservesSourceSymlink(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -72,6 +75,7 @@ func TestCPNoDereferencePreservesSourceSymlink(t *testing.T) {
 }
 
 func TestCPDereferenceCommandLineAppliesToAllSources(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -105,6 +109,7 @@ func TestCPDereferenceCommandLineAppliesToAllSources(t *testing.T) {
 }
 
 func TestCPSymlinkCopyOverwritesExistingDestinationByDefault(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -128,6 +133,7 @@ func TestCPSymlinkCopyOverwritesExistingDestinationByDefault(t *testing.T) {
 }
 
 func TestCPRejectsUnsupportedLinkModes(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

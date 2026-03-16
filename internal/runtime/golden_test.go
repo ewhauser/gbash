@@ -3,6 +3,7 @@ package runtime
 import "testing"
 
 func TestExecutionGoldens(t *testing.T) {
+	t.Parallel()
 	fixtures := loadExecutionFixtures(t, "golden/*.json")
 
 	for _, fixture := range fixtures {

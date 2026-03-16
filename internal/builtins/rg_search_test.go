@@ -9,6 +9,7 @@ import (
 )
 
 func TestRGUsesIndexedPrefilterOnSearchableFS(t *testing.T) {
+	t.Parallel()
 	fsys, provider := newCountedSearchableFS(t, map[string]string{
 		"/workspace/hit.txt":  "needle\n",
 		"/workspace/miss.txt": "other\n",
@@ -36,6 +37,7 @@ func TestRGUsesIndexedPrefilterOnSearchableFS(t *testing.T) {
 }
 
 func TestRGSingleExplicitFileKeepsNoFilenameOnIndexedPath(t *testing.T) {
+	t.Parallel()
 	fsys, provider := newCountedSearchableFS(t, map[string]string{
 		"/workspace/hit.txt": "needle\n",
 	})
@@ -56,6 +58,7 @@ func TestRGSingleExplicitFileKeepsNoFilenameOnIndexedPath(t *testing.T) {
 }
 
 func TestRGInlineIgnoreCaseFlagUsesIndexedPrefilter(t *testing.T) {
+	t.Parallel()
 	fsys, provider := newCountedSearchableFS(t, map[string]string{
 		"/workspace/hit.txt": "needle\n",
 	})
@@ -79,6 +82,7 @@ func TestRGInlineIgnoreCaseFlagUsesIndexedPrefilter(t *testing.T) {
 }
 
 func TestRGUsesIndexPerRootOnMountableFS(t *testing.T) {
+	t.Parallel()
 	indexedFS, indexedProvider := newCountedSearchableFS(t, map[string]string{
 		"/hit.txt":  "needle\n",
 		"/miss.txt": "other\n",
@@ -124,6 +128,7 @@ func TestRGUsesIndexPerRootOnMountableFS(t *testing.T) {
 }
 
 func TestRGFallsBackWhenProviderIsUnsupported(t *testing.T) {
+	t.Parallel()
 	provider := &grepUnsupportedProvider{}
 	fsys := newCountedSearchCapableFS(t, map[string]string{
 		"/workspace/miss.txt": "other\n",
@@ -145,6 +150,7 @@ func TestRGFallsBackWhenProviderIsUnsupported(t *testing.T) {
 }
 
 func TestRGFallsBackWhenProviderIsMissing(t *testing.T) {
+	t.Parallel()
 	fsys := newCountingOpenFS(seededMemoryFS(t, map[string]string{
 		"/workspace/miss.txt": "other\n",
 	}))
@@ -162,6 +168,7 @@ func TestRGFallsBackWhenProviderIsMissing(t *testing.T) {
 }
 
 func TestRGInvertMatchSkipsIndexedPrefilter(t *testing.T) {
+	t.Parallel()
 	fsys, provider := newCountedSearchableFS(t, map[string]string{
 		"/workspace/miss.txt": "other\n",
 	})
@@ -185,6 +192,7 @@ func TestRGInvertMatchSkipsIndexedPrefilter(t *testing.T) {
 }
 
 func TestRGPatternWithoutSafeLiteralFallsBack(t *testing.T) {
+	t.Parallel()
 	fsys, provider := newCountedSearchableFS(t, map[string]string{
 		"/workspace/miss.txt": "other\n",
 	})
@@ -205,6 +213,7 @@ func TestRGPatternWithoutSafeLiteralFallsBack(t *testing.T) {
 }
 
 func TestRGFollowedSymlinkDirectoryFallsBackToDirectReads(t *testing.T) {
+	t.Parallel()
 	fsys, _ := newCountedSearchableFS(t, map[string]string{
 		"/workspace/real/miss.txt": "other\n",
 	})
@@ -228,6 +237,7 @@ func TestRGFollowedSymlinkDirectoryFallsBackToDirectReads(t *testing.T) {
 }
 
 func TestRGBinaryGuaranteedMissModesPreserveParity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		script     string
@@ -267,6 +277,7 @@ func TestRGBinaryGuaranteedMissModesPreserveParity(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fsys, provider := newCountedSearchableFS(t, map[string]string{
 				"/workspace/miss.bin": "other\x00world\n",
 			})
@@ -292,6 +303,7 @@ func TestRGBinaryGuaranteedMissModesPreserveParity(t *testing.T) {
 }
 
 func TestRGQuietUsesIndexedPrefilterOnHit(t *testing.T) {
+	t.Parallel()
 	fsys, provider := newCountedSearchableFS(t, map[string]string{
 		"/workspace/hit.txt": "needle\n",
 	})

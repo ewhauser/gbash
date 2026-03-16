@@ -7,6 +7,7 @@ import (
 )
 
 func TestDircolorsParsesStdinAndEscapesShellOutput(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -27,9 +28,11 @@ func TestDircolorsParsesStdinAndEscapesShellOutput(t *testing.T) {
 }
 
 func TestDircolorsSupportsShellDetectionDatabaseAndDisplayModes(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	t.Run("shell detection", func(t *testing.T) {
+		t.Parallel()
 		result, err := rt.Run(context.Background(), &ExecutionRequest{
 			Script: "dircolors\n",
 			Env:    map[string]string{"SHELL": "/bin/tcsh"},
@@ -46,6 +49,7 @@ func TestDircolorsSupportsShellDetectionDatabaseAndDisplayModes(t *testing.T) {
 	})
 
 	t.Run("print database", func(t *testing.T) {
+		t.Parallel()
 		result, err := rt.Run(context.Background(), &ExecutionRequest{
 			Script: "dircolors --print-database\n",
 		})
@@ -69,6 +73,7 @@ func TestDircolorsSupportsShellDetectionDatabaseAndDisplayModes(t *testing.T) {
 	})
 
 	t.Run("print ls colors", func(t *testing.T) {
+		t.Parallel()
 		result, err := rt.Run(context.Background(), &ExecutionRequest{
 			Script: "dircolors --print-ls-colors | head -n 2\n",
 		})
@@ -85,6 +90,7 @@ func TestDircolorsSupportsShellDetectionDatabaseAndDisplayModes(t *testing.T) {
 }
 
 func TestDircolorsTermAndColortermFiltering(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	termMatch, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -117,6 +123,7 @@ func TestDircolorsTermAndColortermFiltering(t *testing.T) {
 }
 
 func TestDircolorsHelpVersionAndErrors(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	tests := []struct {
@@ -181,6 +188,7 @@ func TestDircolorsHelpVersionAndErrors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{
 				Script: tc.script,
 				Env:    tc.env,

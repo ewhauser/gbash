@@ -10,6 +10,7 @@ import (
 )
 
 func TestRunSimpleScript(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -27,6 +28,7 @@ func TestRunSimpleScript(t *testing.T) {
 }
 
 func TestRunRedirectAndCat(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -44,6 +46,7 @@ func TestRunRedirectAndCat(t *testing.T) {
 }
 
 func TestUnknownCommand(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -61,6 +64,7 @@ func TestUnknownCommand(t *testing.T) {
 }
 
 func TestNewAcceptsOptions(t *testing.T) {
+	t.Parallel()
 	registry := commands.NewRegistry(builtins.NewEcho())
 
 	rt, err := New(WithRegistry(registry))
@@ -78,6 +82,7 @@ func TestNewAcceptsOptions(t *testing.T) {
 }
 
 func TestNewAcceptsWithConfig(t *testing.T) {
+	t.Parallel()
 	registry := commands.NewRegistry(builtins.NewEcho())
 
 	rt, err := New(WithConfig(&Config{Registry: registry}))

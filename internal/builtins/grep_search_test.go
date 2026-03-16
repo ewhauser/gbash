@@ -14,6 +14,7 @@ import (
 )
 
 func TestGrepUsesIndexedPrefilterOnSearchableFS(t *testing.T) {
+	t.Parallel()
 	fsys, provider := newCountedSearchableFS(t, map[string]string{
 		"/workspace/hit.txt":  "needle\n",
 		"/workspace/miss.txt": "other\n",
@@ -41,6 +42,7 @@ func TestGrepUsesIndexedPrefilterOnSearchableFS(t *testing.T) {
 }
 
 func TestGrepFallsBackWhenProviderIsStale(t *testing.T) {
+	t.Parallel()
 	fsys := newCountedSearchCapableFS(t, map[string]string{
 		"/workspace/miss.txt": "other\n",
 	}, grepStaleProvider{})
@@ -58,6 +60,7 @@ func TestGrepFallsBackWhenProviderIsStale(t *testing.T) {
 }
 
 func TestGrepFallsBackWhenProviderIsUnsupported(t *testing.T) {
+	t.Parallel()
 	provider := &grepUnsupportedProvider{}
 	fsys := newCountedSearchCapableFS(t, map[string]string{
 		"/workspace/miss.txt": "other\n",
@@ -79,6 +82,7 @@ func TestGrepFallsBackWhenProviderIsUnsupported(t *testing.T) {
 }
 
 func TestGrepUsesIndexPerRootOnMountableFS(t *testing.T) {
+	t.Parallel()
 	indexedFS, indexedProvider := newCountedSearchableFS(t, map[string]string{
 		"/hit.txt":  "needle\n",
 		"/miss.txt": "other\n",
@@ -124,6 +128,7 @@ func TestGrepUsesIndexPerRootOnMountableFS(t *testing.T) {
 }
 
 func TestGrepGuaranteedMissModesUseIndexWithoutReadingFile(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		script     string
@@ -158,6 +163,7 @@ func TestGrepGuaranteedMissModesUseIndexWithoutReadingFile(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fsys, _ := newCountedSearchableFS(t, map[string]string{
 				"/workspace/miss.txt": "other\n",
 			})
@@ -180,6 +186,7 @@ func TestGrepGuaranteedMissModesUseIndexWithoutReadingFile(t *testing.T) {
 }
 
 func TestGrepInvertMatchSkipsIndexedPrefilter(t *testing.T) {
+	t.Parallel()
 	fsys, _ := newCountedSearchableFS(t, map[string]string{
 		"/workspace/miss.txt": "other\n",
 	})
@@ -200,6 +207,7 @@ func TestGrepInvertMatchSkipsIndexedPrefilter(t *testing.T) {
 }
 
 func TestGrepRecursiveSymlinkDirectoryFallsBackToDirectReads(t *testing.T) {
+	t.Parallel()
 	fsys, _ := newCountedSearchableFS(t, map[string]string{
 		"/workspace/real/miss.txt": "other\n",
 	})
@@ -223,6 +231,7 @@ func TestGrepRecursiveSymlinkDirectoryFallsBackToDirectReads(t *testing.T) {
 }
 
 func TestGrepQuietStopsBeforeLaterOperands(t *testing.T) {
+	t.Parallel()
 	fsys, _ := newCountedSearchableFS(t, map[string]string{
 		"/workspace/hit.txt": "needle\n",
 	})

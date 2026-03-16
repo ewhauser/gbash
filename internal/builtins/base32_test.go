@@ -6,6 +6,7 @@ import (
 )
 
 func TestBase32EncodesWithoutWrapping(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -23,6 +24,7 @@ func TestBase32EncodesWithoutWrapping(t *testing.T) {
 }
 
 func TestBase32DecodesIgnoringGarbageWithCombinedShortFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -40,6 +42,7 @@ func TestBase32DecodesIgnoringGarbageWithCombinedShortFlags(t *testing.T) {
 }
 
 func TestBase32OmitsTrailingNewlineForEmptyInput(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -57,6 +60,7 @@ func TestBase32OmitsTrailingNewlineForEmptyInput(t *testing.T) {
 }
 
 func TestBase32SupportsShortAliasAndInferredLongOptions(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -74,6 +78,7 @@ func TestBase32SupportsShortAliasAndInferredLongOptions(t *testing.T) {
 }
 
 func TestBase32SupportsFileInputAndInferredWrapFlag(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

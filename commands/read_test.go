@@ -11,6 +11,7 @@ import (
 )
 
 func TestReadAllEnforcesMaxFileBytes(t *testing.T) {
+	t.Parallel()
 	inv := &Invocation{
 		Limits: policy.Limits{MaxFileBytes: 3},
 	}
@@ -28,6 +29,7 @@ func TestReadAllEnforcesMaxFileBytes(t *testing.T) {
 }
 
 func TestReadAllStdinUsesInvocationStdin(t *testing.T) {
+	t.Parallel()
 	inv := &Invocation{
 		Stdin:  strings.NewReader("abc"),
 		Limits: policy.Limits{MaxFileBytes: 3},
@@ -43,6 +45,7 @@ func TestReadAllStdinUsesInvocationStdin(t *testing.T) {
 }
 
 func TestCommandFSReadFileEnforcesMaxFileBytes(t *testing.T) {
+	t.Parallel()
 	mem := gbfs.NewMemory()
 	file, err := mem.OpenFile(context.Background(), "/input.txt", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {

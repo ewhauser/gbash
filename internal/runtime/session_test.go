@@ -9,6 +9,7 @@ import (
 )
 
 func TestSessionPersistsFilesystemAcrossExecs(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeResult, err := session.Exec(context.Background(), &ExecutionRequest{
@@ -33,6 +34,7 @@ func TestSessionPersistsFilesystemAcrossExecs(t *testing.T) {
 }
 
 func TestSessionDoesNotPersistShellVarsAcrossExecs(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	if _, err := session.Exec(context.Background(), &ExecutionRequest{
@@ -53,6 +55,7 @@ func TestSessionDoesNotPersistShellVarsAcrossExecs(t *testing.T) {
 }
 
 func TestSessionDoesNotPersistCDAcrossExecs(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	first, err := session.Exec(context.Background(), &ExecutionRequest{
@@ -77,6 +80,7 @@ func TestSessionDoesNotPersistCDAcrossExecs(t *testing.T) {
 }
 
 func TestExecPreservesInheritedStdoutFileMetadata(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
 		t.Fatalf("Mkdir(sub) error = %v", err)
@@ -115,6 +119,7 @@ func TestExecPreservesInheritedStdoutFileMetadata(t *testing.T) {
 }
 
 func TestSessionsAreFilesystemIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	session1, err := rt.NewSession(context.Background())
@@ -144,6 +149,7 @@ func TestSessionsAreFilesystemIsolated(t *testing.T) {
 }
 
 func TestExecReturnsFinalEnv(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{BaseEnv: map[string]string{"INITIAL": "value"}})
 
 	result, err := session.Exec(context.Background(), &ExecutionRequest{
@@ -161,6 +167,7 @@ func TestExecReturnsFinalEnv(t *testing.T) {
 }
 
 func TestReplaceEnvDoesNotUseSessionBaseEnv(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{BaseEnv: map[string]string{"FOO": "base"}})
 
 	result, err := session.Exec(context.Background(), &ExecutionRequest{
@@ -183,6 +190,7 @@ func TestReplaceEnvDoesNotUseSessionBaseEnv(t *testing.T) {
 }
 
 func TestSessionInteractPersistsStateAcrossEntries(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	var stdout strings.Builder
@@ -214,6 +222,7 @@ func TestSessionInteractPersistsStateAcrossEntries(t *testing.T) {
 }
 
 func TestSessionInteractTracksHistoryCommand(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	var stdout strings.Builder
@@ -250,6 +259,7 @@ func TestSessionInteractTracksHistoryCommand(t *testing.T) {
 }
 
 func TestSessionInteractUsesPipelineSubshellSemantics(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	var stdout strings.Builder
@@ -282,6 +292,7 @@ func TestSessionInteractUsesPipelineSubshellSemantics(t *testing.T) {
 }
 
 func TestSessionInteractSupportsLetAndKeepsRawHistory(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	var stdout strings.Builder

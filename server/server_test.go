@@ -94,6 +94,7 @@ type testClient struct {
 }
 
 func TestServerSessionLifecycleAndExec(t *testing.T) {
+	t.Parallel()
 	srv := startServer(t, gbserver.Config{
 		Name:       "gbash",
 		Version:    "test",
@@ -174,6 +175,7 @@ func TestServerSessionLifecycleAndExec(t *testing.T) {
 }
 
 func TestServerConcurrentSessionsAndBusy(t *testing.T) {
+	t.Parallel()
 	srv := startServer(t, gbserver.Config{
 		Name:       "gbash",
 		Version:    "test",
@@ -226,6 +228,7 @@ func TestServerConcurrentSessionsAndBusy(t *testing.T) {
 }
 
 func TestServerSessionTTLExpiry(t *testing.T) {
+	t.Parallel()
 	srv := startServer(t, gbserver.Config{
 		Name:       "gbash",
 		Version:    "test",
@@ -253,6 +256,7 @@ func TestServerSessionTTLExpiry(t *testing.T) {
 }
 
 func TestServeTCPListenerReportsTCPTransport(t *testing.T) {
+	t.Parallel()
 	rt, err := gbash.New()
 	if err != nil {
 		t.Fatalf("gbash.New() error = %v", err)
@@ -459,6 +463,7 @@ func decodeResult[T any](t *testing.T, resp *rpcResponse, out *T) {
 }
 
 func TestServerParallelStress(t *testing.T) {
+	t.Parallel()
 	srv := startServer(t, gbserver.Config{
 		Name:       "gbash",
 		Version:    "test",
@@ -518,6 +523,7 @@ func TestServerParallelStress(t *testing.T) {
 }
 
 func TestServerParallelExecOnSharedSession(t *testing.T) {
+	t.Parallel()
 	srv := startServer(t, gbserver.Config{
 		Name:       "gbash",
 		Version:    "test",
@@ -581,6 +587,7 @@ func TestServerParallelExecOnSharedSession(t *testing.T) {
 }
 
 func TestServerParallelCreateDestroy(t *testing.T) {
+	t.Parallel()
 	srv := startServer(t, gbserver.Config{
 		Name:       "gbash",
 		Version:    "test",
@@ -620,9 +627,12 @@ func TestServerParallelCreateDestroy(t *testing.T) {
 }
 
 func TestServerParallelFileIO(t *testing.T) {
+	t.Parallel(
 	// Seed a temp directory with files that every session can read through
 	// the overlay FS, then hammer the server with concurrent sessions doing
 	// file reads, writes, tails, and pipes.
+	)
+
 	hostDir := t.TempDir()
 	for i := range 5 {
 		name := filepath.Join(hostDir, fmt.Sprintf("data-%d.txt", i))
@@ -719,6 +729,7 @@ func TestServerParallelFileIO(t *testing.T) {
 }
 
 func TestServerRejectsInvalidMethod(t *testing.T) {
+	t.Parallel()
 	srv := startServer(t, gbserver.Config{
 		Name:       "gbash",
 		Version:    "test",
@@ -734,6 +745,7 @@ func TestServerRejectsInvalidMethod(t *testing.T) {
 }
 
 func TestServerExecCarriesSessionStateInResult(t *testing.T) {
+	t.Parallel()
 	srv := startServer(t, gbserver.Config{
 		Name:       "gbash",
 		Version:    "test",

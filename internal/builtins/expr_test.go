@@ -6,6 +6,7 @@ import (
 )
 
 func TestExprSupportsArithmeticAndRegexCapture(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -23,6 +24,7 @@ func TestExprSupportsArithmeticAndRegexCapture(t *testing.T) {
 }
 
 func TestExprSupportsComparisonsAndFalseyExitCode(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

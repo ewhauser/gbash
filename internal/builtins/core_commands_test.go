@@ -11,6 +11,7 @@ import (
 )
 
 func TestEnvAndPrintEnvScopeNestedEnvironment(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -28,6 +29,7 @@ func TestEnvAndPrintEnvScopeNestedEnvironment(t *testing.T) {
 }
 
 func TestEnvSupportsLongIgnoreEnvironment(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -45,6 +47,7 @@ func TestEnvSupportsLongIgnoreEnvironment(t *testing.T) {
 }
 
 func TestTeeAppendsAndWritesMultipleFiles(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -62,6 +65,7 @@ func TestTeeAppendsAndWritesMultipleFiles(t *testing.T) {
 }
 
 func TestTeeSupportsGNUFlagsAndLiteralDashFiles(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	tests := []struct {
@@ -105,6 +109,7 @@ func TestTeeSupportsGNUFlagsAndLiteralDashFiles(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
 			if err != nil {
 				t.Fatalf("Run() error = %v", err)
@@ -123,6 +128,7 @@ func TestTeeSupportsGNUFlagsAndLiteralDashFiles(t *testing.T) {
 }
 
 func TestTeeOutputErrorModes(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	tests := []struct {
@@ -149,6 +155,7 @@ func TestTeeOutputErrorModes(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
 			if err != nil {
 				t.Fatalf("Run() error = %v", err)
@@ -167,6 +174,7 @@ func TestTeeOutputErrorModes(t *testing.T) {
 }
 
 func TestTrueAndFalseCommandsByPath(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -184,6 +192,7 @@ func TestTrueAndFalseCommandsByPath(t *testing.T) {
 }
 
 func TestWhichFindsRegisteredCommandsOnPath(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -201,6 +210,7 @@ func TestWhichFindsRegisteredCommandsOnPath(t *testing.T) {
 }
 
 func TestWhichSupportsAllSilentAndHelp(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -224,6 +234,7 @@ func TestWhichSupportsAllSilentAndHelp(t *testing.T) {
 }
 
 func TestHelpShowsBuiltinSynopsis(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -241,6 +252,7 @@ func TestHelpShowsBuiltinSynopsis(t *testing.T) {
 }
 
 func TestDateFormatsFixedUTCInstant(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -258,6 +270,7 @@ func TestDateFormatsFixedUTCInstant(t *testing.T) {
 }
 
 func TestDateSupportsLongFlagAliases(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	tests := []struct {
@@ -289,6 +302,7 @@ func TestDateSupportsLongFlagAliases(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{
 				Script: tc.script,
 			})
@@ -306,6 +320,7 @@ func TestDateSupportsLongFlagAliases(t *testing.T) {
 }
 
 func TestWhoamiReportsDeterministicSandboxIdentity(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -323,6 +338,7 @@ func TestWhoamiReportsDeterministicSandboxIdentity(t *testing.T) {
 }
 
 func TestWhoamiFallsBackFromUSERToLOGNAME(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -340,6 +356,7 @@ func TestWhoamiFallsBackFromUSERToLOGNAME(t *testing.T) {
 }
 
 func TestWhoamiHelpVersionAndErrors(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	tests := []struct {
@@ -383,6 +400,7 @@ func TestWhoamiHelpVersionAndErrors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{
 				Script: tc.script,
 			})
@@ -403,6 +421,7 @@ func TestWhoamiHelpVersionAndErrors(t *testing.T) {
 }
 
 func TestWhoHelpVersionAndErrors(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	tests := []struct {
@@ -453,6 +472,7 @@ func TestWhoHelpVersionAndErrors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{
 				Script: tc.script,
 			})
@@ -479,6 +499,7 @@ func TestWhoHelpVersionAndErrors(t *testing.T) {
 }
 
 func TestWhoSupportsSelectionFlagsAgainstFixture(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		script          string
@@ -609,6 +630,7 @@ func TestWhoSupportsSelectionFlagsAgainstFixture(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			session := newWhoFixtureSession(t)
 			result := mustExecSession(t, session, tc.script)
 			if result.ExitCode != tc.wantCode {
@@ -640,6 +662,7 @@ func TestWhoSupportsSelectionFlagsAgainstFixture(t *testing.T) {
 }
 
 func TestWhoMesgAliasesAndMyLineOnly(t *testing.T) {
+	t.Parallel()
 	base := mustExecSession(t, newWhoFixtureSession(t), "who -T /tmp/who.utmp\n")
 	if base.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", base.ExitCode, base.Stderr)
@@ -683,6 +706,7 @@ func TestWhoMesgAliasesAndMyLineOnly(t *testing.T) {
 }
 
 func TestWhoAllMatchesExpandedFlagsAndMissingFilesAreSilent(t *testing.T) {
+	t.Parallel()
 	allResult := mustExecSession(t, newWhoFixtureSession(t), "who -a /tmp/who.utmp\n")
 	if allResult.ExitCode != 0 {
 		t.Fatalf("-a ExitCode = %d, want 0; stderr=%q", allResult.ExitCode, allResult.Stderr)
@@ -706,6 +730,7 @@ func TestWhoAllMatchesExpandedFlagsAndMissingFilesAreSilent(t *testing.T) {
 }
 
 func TestArchReportsMachineArchitecture(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -723,6 +748,7 @@ func TestArchReportsMachineArchitecture(t *testing.T) {
 }
 
 func TestArchHelpVersionAndErrors(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	tests := []struct {
@@ -797,6 +823,7 @@ func TestArchHelpVersionAndErrors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{
 				Script: tc.script,
 			})
@@ -823,6 +850,7 @@ func TestArchHelpVersionAndErrors(t *testing.T) {
 }
 
 func TestUnameReportsSelectedSystemInformation(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 	expected := expectedUname(t)
 
@@ -915,6 +943,7 @@ func TestUnameReportsSelectedSystemInformation(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
 			if err != nil {
 				t.Fatalf("Run() error = %v", err)
@@ -933,6 +962,7 @@ func TestUnameReportsSelectedSystemInformation(t *testing.T) {
 }
 
 func TestUnameHelpVersionAndErrors(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	tests := []struct {
@@ -1024,6 +1054,7 @@ func TestUnameHelpVersionAndErrors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
 			if err != nil {
 				t.Fatalf("Run() error = %v", err)
@@ -1053,6 +1084,7 @@ func TestUnameHelpVersionAndErrors(t *testing.T) {
 }
 
 func TestTtyReportsNotATTYAndSupportsQuietAliases(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	tests := []struct {
@@ -1092,6 +1124,7 @@ func TestTtyReportsNotATTYAndSupportsQuietAliases(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{
 				Script: tc.script,
 			})
@@ -1112,6 +1145,7 @@ func TestTtyReportsNotATTYAndSupportsQuietAliases(t *testing.T) {
 }
 
 func TestTtyUsesSandboxTTYEnvironment(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1132,6 +1166,7 @@ func TestTtyUsesSandboxTTYEnvironment(t *testing.T) {
 }
 
 func TestTtyHelpVersionAndErrors(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	const wantHelp = "Print the file name of the terminal connected to standard input.\n\nUsage: tty [OPTION]...\n\nOptions:\n  -s, --silent   print nothing, only return an exit status [aliases: --quiet]\n  -h, --help     Print help\n  -V, --version  Print version\n"
@@ -1201,6 +1236,7 @@ func TestTtyHelpVersionAndErrors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{
 				Script: tc.script,
 			})
@@ -1221,6 +1257,7 @@ func TestTtyHelpVersionAndErrors(t *testing.T) {
 }
 
 func TestUptimeDefaultSincePrettyAndVersion(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	defaultResult, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1297,6 +1334,7 @@ func TestUptimeDefaultSincePrettyAndVersion(t *testing.T) {
 }
 
 func TestUptimeReadsBootTimeAndUsersFromUtmpFile(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/utmpx", uptimeTestUtmpFixture(1716371201, 2))
 
@@ -1320,6 +1358,7 @@ func TestUptimeReadsBootTimeAndUsersFromUtmpFile(t *testing.T) {
 }
 
 func TestUptimeReportsFallbackForBadFileOperands(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/no-boot", []byte("hello"))
 
@@ -1352,6 +1391,7 @@ func TestUptimeReportsFallbackForBadFileOperands(t *testing.T) {
 }
 
 func TestUptimeRejectsInvalidOptionsAndExtraOperands(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	invalidResult, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1478,6 +1518,7 @@ func whoFixtureTimeString(seconds int64, cLocale bool) string {
 }
 
 func TestSleepHonorsShortDuration(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	start := time.Now()
@@ -1500,6 +1541,7 @@ func TestSleepHonorsShortDuration(t *testing.T) {
 }
 
 func TestTimeoutStopsNestedCommand(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1520,6 +1562,7 @@ func TestTimeoutStopsNestedCommand(t *testing.T) {
 }
 
 func TestTimeoutSupportsLongKillAfterAndSignalOptions(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1540,6 +1583,7 @@ func TestTimeoutSupportsLongKillAfterAndSignalOptions(t *testing.T) {
 }
 
 func TestBashRunsNestedCommandString(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1557,6 +1601,7 @@ func TestBashRunsNestedCommandString(t *testing.T) {
 }
 
 func TestBashCommandStringDefaultsArg0ToInvocationName(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1574,6 +1619,7 @@ func TestBashCommandStringDefaultsArg0ToInvocationName(t *testing.T) {
 }
 
 func TestShRunsScriptFromStdin(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1591,6 +1637,7 @@ func TestShRunsScriptFromStdin(t *testing.T) {
 }
 
 func TestBashHelpUsesSpecParser(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1612,6 +1659,7 @@ func TestBashHelpUsesSpecParser(t *testing.T) {
 }
 
 func TestBashRunsScriptFileAndPassesArgs(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1629,6 +1677,7 @@ func TestBashRunsScriptFileAndPassesArgs(t *testing.T) {
 }
 
 func TestBashMissingScriptFileReturns127(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1646,6 +1695,7 @@ func TestBashMissingScriptFileReturns127(t *testing.T) {
 }
 
 func TestShDashSReadsScriptFromStdinAndUsesArgs(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1663,6 +1713,7 @@ func TestShDashSReadsScriptFromStdinAndUsesArgs(t *testing.T) {
 }
 
 func TestBashGroupedShortFlagsSetShellOptionsForCommandString(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1683,6 +1734,7 @@ func TestBashGroupedShortFlagsSetShellOptionsForCommandString(t *testing.T) {
 }
 
 func TestBashDashOpipefailAffectsCommandString(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1700,6 +1752,7 @@ func TestBashDashOpipefailAffectsCommandString(t *testing.T) {
 }
 
 func TestBashStartupOptionsAffectExecution(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	tests := []struct {
@@ -1733,6 +1786,7 @@ func TestBashStartupOptionsAffectExecution(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
 			if err != nil {
 				t.Fatalf("Run() error = %v", err)
@@ -1751,6 +1805,7 @@ func TestBashStartupOptionsAffectExecution(t *testing.T) {
 }
 
 func TestBashInteractiveStdinPersistsStateAndStartupOptions(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1778,6 +1833,7 @@ func TestBashInteractiveStdinPersistsStateAndStartupOptions(t *testing.T) {
 }
 
 func TestBashInteractiveCommandStringUsesInteractiveSemantics(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1798,6 +1854,7 @@ func TestBashInteractiveCommandStringUsesInteractiveSemantics(t *testing.T) {
 }
 
 func TestBashInteractiveScriptUsesInteractiveSemantics(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1818,6 +1875,7 @@ func TestBashInteractiveScriptUsesInteractiveSemantics(t *testing.T) {
 }
 
 func TestShInteractiveCommandStringUsesInteractiveSemantics(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1838,6 +1896,7 @@ func TestShInteractiveCommandStringUsesInteractiveSemantics(t *testing.T) {
 }
 
 func TestXArgsSupportsBatchingAndReplacement(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1855,6 +1914,7 @@ func TestXArgsSupportsBatchingAndReplacement(t *testing.T) {
 }
 
 func TestXArgsSupportsLongFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

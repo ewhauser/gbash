@@ -14,6 +14,7 @@ import (
 )
 
 func TestChecksumSumHashesFilesAndStdin(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		cmd string
 		sum func([]byte) string
@@ -32,6 +33,7 @@ func TestChecksumSumHashesFilesAndStdin(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.cmd, func(t *testing.T) {
+			t.Parallel()
 			session := newSession(t, &Config{})
 			writeSessionFile(t, session, "/tmp/a.txt", alpha)
 			writeSessionFile(t, session, "/tmp/bin.dat", binary)
@@ -64,6 +66,7 @@ func TestChecksumSumHashesFilesAndStdin(t *testing.T) {
 
 			for _, testCase := range cases {
 				t.Run(testCase.name, func(t *testing.T) {
+					t.Parallel()
 					result := mustExecSession(t, session, testCase.script)
 					if result.ExitCode != 0 {
 						t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
@@ -81,6 +84,7 @@ func TestChecksumSumHashesFilesAndStdin(t *testing.T) {
 }
 
 func TestChecksumSumOutputModes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	data := []byte("mode-data")
 	writeSessionFile(t, session, "/tmp/input.txt", data)
@@ -110,6 +114,7 @@ func TestChecksumSumOutputModes(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := mustExecSession(t, session, tc.script)
 			if result.ExitCode != 0 {
 				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
@@ -125,6 +130,7 @@ func TestChecksumSumOutputModes(t *testing.T) {
 }
 
 func TestB2SumLengthModes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	data := []byte("foobar\n")
 	writeSessionFile(t, session, "/tmp/input.txt", data)
@@ -158,6 +164,7 @@ func TestB2SumLengthModes(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := mustExecSession(t, session, tc.script)
 			if result.ExitCode != 0 {
 				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
@@ -173,12 +180,14 @@ func TestB2SumLengthModes(t *testing.T) {
 }
 
 func TestChecksumSumCheckModeSupportsShortAndLongFlags(t *testing.T) {
+	t.Parallel()
 	data := []byte("verify-me")
 	sum := strings.ToUpper(md5Hex(data))
 	checksums := fmt.Sprintf("%s */tmp/input.txt\n", sum)
 
 	for _, flag := range []string{"-c", "--check"} {
 		t.Run(flag, func(t *testing.T) {
+			t.Parallel()
 			session := newSession(t, &Config{})
 			writeSessionFile(t, session, "/tmp/input.txt", data)
 			writeSessionFile(t, session, "/tmp/checksums.txt", []byte(checksums))
@@ -198,6 +207,7 @@ func TestChecksumSumCheckModeSupportsShortAndLongFlags(t *testing.T) {
 }
 
 func TestChecksumSumCheckModeParsesTaggedAndSingleSpaceFormats(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	data := []byte("format-data")
 	writeSessionFile(t, session, "/tmp/file.txt", data)
@@ -218,6 +228,7 @@ func TestChecksumSumCheckModeParsesTaggedAndSingleSpaceFormats(t *testing.T) {
 
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			writeSessionFile(t, session, "/tmp/checksums.txt", []byte(tc.content))
 			result := mustExecSession(t, session, "md5sum --check /tmp/checksums.txt\n")
 			if result.ExitCode != 0 {
@@ -234,6 +245,7 @@ func TestChecksumSumCheckModeParsesTaggedAndSingleSpaceFormats(t *testing.T) {
 }
 
 func TestChecksumSumCheckModeHandlesCRLFAndEscapedFilenames(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/.\rfoo", nil)
 	sum := md5Hex(nil)
@@ -251,6 +263,7 @@ func TestChecksumSumCheckModeHandlesCRLFAndEscapedFilenames(t *testing.T) {
 	}
 }
 func TestB2SumCheckModeSupportsVariableLengths(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	data := []byte("format-data")
 	writeSessionFile(t, session, "/tmp/file.txt", data)
@@ -275,6 +288,7 @@ func TestB2SumCheckModeSupportsVariableLengths(t *testing.T) {
 
 	for _, tc := range checks {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			writeSessionFile(t, session, "/tmp/checksums.txt", []byte(tc.content))
 			result := mustExecSession(t, session, "b2sum --check /tmp/checksums.txt\n")
 			if result.ExitCode != 0 {
@@ -291,6 +305,7 @@ func TestB2SumCheckModeSupportsVariableLengths(t *testing.T) {
 }
 
 func TestB2SumStrictCheckAcceptsOpenSSLTaggedLengthLines(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	files := []string{"/tmp/a", "/tmp/ b", "/tmp/*c", "/tmp/44", "/tmp/ "}
@@ -315,6 +330,7 @@ func TestB2SumStrictCheckAcceptsOpenSSLTaggedLengthLines(t *testing.T) {
 	}
 }
 func TestChecksumSumCheckModeResolvesTargetsAgainstWorkingDirectory(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	data := []byte("cwd-target")
 	writeSessionFile(t, session, "/tmp/input.txt", data)
@@ -339,6 +355,7 @@ func TestChecksumSumCheckModeResolvesTargetsAgainstWorkingDirectory(t *testing.T
 }
 
 func TestChecksumSumCheckModeVerbosityAndStrictFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/f.txt", []byte{})
 	writeSessionFile(t, session, "/tmp/ok.md5", []byte("d41d8cd98f00b204e9800998ecf8427e  /tmp/f.txt\n"))
@@ -385,6 +402,7 @@ func TestChecksumSumCheckModeVerbosityAndStrictFlags(t *testing.T) {
 }
 
 func TestChecksumSumCheckModeIgnoreMissing(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/f.txt", []byte("foobar\n"))
 	writeSessionFile(t, session, "/tmp/checksums.txt", []byte(strings.Join([]string{
@@ -418,6 +436,7 @@ func TestChecksumSumCheckModeIgnoreMissing(t *testing.T) {
 }
 
 func TestChecksumSumReportsMissingInputsToStderrAndContinues(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	data := []byte("present")
 	writeSessionFile(t, session, "/tmp/present.txt", data)
@@ -435,6 +454,7 @@ func TestChecksumSumReportsMissingInputsToStderrAndContinues(t *testing.T) {
 }
 
 func TestChecksumSumMissingChecksumListFailsOnStderr(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "md5sum -c /tmp/missing.txt\n")
@@ -450,6 +470,7 @@ func TestChecksumSumMissingChecksumListFailsOnStderr(t *testing.T) {
 }
 
 func TestChecksumSumRejectsMeaninglessAndUnknownOptions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		script string
@@ -494,6 +515,7 @@ func TestChecksumSumRejectsMeaninglessAndUnknownOptions(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			session := newSession(t, &Config{})
 			writeSessionFile(t, session, "/tmp/file.txt", []byte("x"))
 			result := mustExecSession(t, session, tc.script)
@@ -511,6 +533,7 @@ func TestChecksumSumRejectsMeaninglessAndUnknownOptions(t *testing.T) {
 }
 
 func TestB2SumRejectsInvalidLengths(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/file.txt", []byte("foobar\n"))
 
@@ -533,6 +556,7 @@ func TestB2SumRejectsInvalidLengths(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := mustExecSession(t, session, tc.script)
 			if result.ExitCode != 1 {
 				t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
@@ -548,6 +572,7 @@ func TestB2SumRejectsInvalidLengths(t *testing.T) {
 }
 
 func TestChecksumSumHelpAndVersion(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	help := mustExecSession(t, session, "sha1sum --help\n")

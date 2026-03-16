@@ -43,10 +43,12 @@ func (r *endlessClosableReader) Close() error {
 }
 
 func TestTimeoutCancelsSplitStdinReadWhenReaderIsClosable(t *testing.T) {
+	t.Parallel()
 	assertTimedSplit(t, &endlessClosableReader{})
 }
 
 func TestTimeoutCancelsSplitStdinReadWhenReaderIsNotClosable(t *testing.T) {
+	t.Parallel()
 	assertTimedSplit(t, &endlessReader{})
 }
 

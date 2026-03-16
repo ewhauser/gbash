@@ -7,6 +7,7 @@ import (
 )
 
 func TestNLSupportsNumberFormatsAndBlankLines(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -26,6 +27,7 @@ func TestNLSupportsNumberFormatsAndBlankLines(t *testing.T) {
 }
 
 func TestNLSupportsSectionsAndRenumbering(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/sections.txt", []byte("\\:\\:\\:\na\n\\:\\:\nb\n\\:\nc\n"))
 
@@ -46,6 +48,7 @@ func TestNLSupportsSectionsAndRenumbering(t *testing.T) {
 }
 
 func TestNLSupportsDelimiterExtensions(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/disabled.txt", []byte("a\n\\:\\:\nc\n"))
 	writeSessionFile(t, session, "/tmp/x.txt", []byte("a\nx:x:\nc\n"))
@@ -69,6 +72,7 @@ func TestNLSupportsDelimiterExtensions(t *testing.T) {
 }
 
 func TestNLHandlesNegativeIncrementAndOverflow(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -105,6 +109,7 @@ func TestNLHandlesNegativeIncrementAndOverflow(t *testing.T) {
 }
 
 func TestNLContinuesPastDirectoryOperands(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/file.txt", []byte("aaa"))
 	if err := session.FileSystem().MkdirAll(context.Background(), "/tmp/dir", 0o755); err != nil {
@@ -129,6 +134,7 @@ func TestNLContinuesPastDirectoryOperands(t *testing.T) {
 }
 
 func TestNLRejectsInvalidStylesAndWidth(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

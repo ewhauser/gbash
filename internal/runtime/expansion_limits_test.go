@@ -9,6 +9,7 @@ import (
 )
 
 func TestMaxSubstitutionDepthEnforced(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxSubstitutionDepth: 2})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -26,6 +27,7 @@ func TestMaxSubstitutionDepthEnforced(t *testing.T) {
 }
 
 func TestMaxSubstitutionDepthAllowsNestedCommandSubstitutionWithinLimit(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxSubstitutionDepth: 2})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -43,6 +45,7 @@ func TestMaxSubstitutionDepthAllowsNestedCommandSubstitutionWithinLimit(t *testi
 }
 
 func TestMaxGlobOperationsEnforced(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:  []string{"/"},
@@ -74,6 +77,7 @@ func TestMaxGlobOperationsEnforced(t *testing.T) {
 }
 
 func TestMaxGlobOperationsAllowsExpansionWithinLimit(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:  []string{"/"},

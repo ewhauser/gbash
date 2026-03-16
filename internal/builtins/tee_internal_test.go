@@ -44,6 +44,7 @@ func (w *teeTestFlusher) Flush() error {
 }
 
 func TestParseTeeArgsSupportsLongFlagsAndOperands(t *testing.T) {
+	t.Parallel()
 	inv := &Invocation{Args: []string{"--append", "--ignore-interrupts", "--output-error=warn-", "-", "out.txt"}}
 
 	got, err := parseTeeArgs(inv)
@@ -65,6 +66,7 @@ func TestParseTeeArgsSupportsLongFlagsAndOperands(t *testing.T) {
 }
 
 func TestParseTeeArgsExplicitOutputErrorOverridesPipeMode(t *testing.T) {
+	t.Parallel()
 	inv := &Invocation{Args: []string{"-p", "--output-error=exit", "out.txt"}}
 
 	got, err := parseTeeArgs(inv)
@@ -77,6 +79,7 @@ func TestParseTeeArgsExplicitOutputErrorOverridesPipeMode(t *testing.T) {
 }
 
 func TestParseTeeArgsShortHelpAndVersion(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		args        []string
 		wantHelp    bool
@@ -99,6 +102,7 @@ func TestParseTeeArgsShortHelpAndVersion(t *testing.T) {
 }
 
 func TestParseTeeArgsRejectsInvalidOutputErrorValue(t *testing.T) {
+	t.Parallel()
 	inv := &Invocation{
 		Args:   []string{"--output-error=nope"},
 		Stderr: &bytes.Buffer{},
@@ -111,6 +115,7 @@ func TestParseTeeArgsRejectsInvalidOutputErrorValue(t *testing.T) {
 }
 
 func TestParseTeeArgsRejectsUnknownLongOption(t *testing.T) {
+	t.Parallel()
 	inv := &Invocation{
 		Args:   []string{"--definitely-invalid"},
 		Stderr: &bytes.Buffer{},
@@ -123,6 +128,7 @@ func TestParseTeeArgsRejectsUnknownLongOption(t *testing.T) {
 }
 
 func TestTeeMultiWriterDefaultBrokenPipeAbortsQuietly(t *testing.T) {
+	t.Parallel()
 	stdout := &teeTestWriter{err: syscall.EPIPE}
 	fileOut := &teeTestWriter{}
 	stderr := &bytes.Buffer{}
@@ -144,6 +150,7 @@ func TestTeeMultiWriterDefaultBrokenPipeAbortsQuietly(t *testing.T) {
 }
 
 func TestTeeMultiWriterWarnNoPipeContinuesPastBrokenPipe(t *testing.T) {
+	t.Parallel()
 	mode := teeOutputErrorWarnNoPipe
 	stdout := &teeTestWriter{err: syscall.EPIPE}
 	fileOut := &teeTestWriter{}
@@ -166,6 +173,7 @@ func TestTeeMultiWriterWarnNoPipeContinuesPastBrokenPipe(t *testing.T) {
 }
 
 func TestTeeMultiWriterWarnReportsWriteErrors(t *testing.T) {
+	t.Parallel()
 	mode := teeOutputErrorWarn
 	stdout := &teeTestWriter{err: io.ErrClosedPipe}
 	fileOut := &teeTestWriter{}
@@ -188,6 +196,7 @@ func TestTeeMultiWriterWarnReportsWriteErrors(t *testing.T) {
 }
 
 func TestTeeMultiWriterExitAbortsOnWriteError(t *testing.T) {
+	t.Parallel()
 	mode := teeOutputErrorExit
 	stdout := &teeTestWriter{err: io.ErrClosedPipe}
 	fileOut := &teeTestWriter{}
@@ -207,6 +216,7 @@ func TestTeeMultiWriterExitAbortsOnWriteError(t *testing.T) {
 }
 
 func TestTeeMultiWriterFlushesPerChunk(t *testing.T) {
+	t.Parallel()
 	stdout := &teeTestFlusher{}
 	stderr := &bytes.Buffer{}
 	multi := newTeeMultiWriter([]*teeWriter{
@@ -222,6 +232,7 @@ func TestTeeMultiWriterFlushesPerChunk(t *testing.T) {
 }
 
 func TestTeeMultiWriterClosesDroppedWriters(t *testing.T) {
+	t.Parallel()
 	closer := &teeTestCloser{}
 	stdout := &teeTestWriter{err: syscall.EPIPE}
 	fileOut := &teeTestWriter{}

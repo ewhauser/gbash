@@ -7,6 +7,7 @@ import (
 )
 
 func TestBasenameSupportsSeparateLongSuffixArgument(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -24,6 +25,7 @@ func TestBasenameSupportsSeparateLongSuffixArgument(t *testing.T) {
 }
 
 func TestBasenameGNUCompatibilityCases(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -41,6 +43,7 @@ func TestBasenameGNUCompatibilityCases(t *testing.T) {
 }
 
 func TestBasenameGNUOperandErrors(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -59,6 +62,7 @@ func TestBasenameGNUOperandErrors(t *testing.T) {
 }
 
 func TestBasenameSupportsHelpVersionAndInferredLongOptions(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -93,6 +97,7 @@ func TestBasenameSupportsHelpVersionAndInferredLongOptions(t *testing.T) {
 }
 
 func TestBasenamePreservesSimpleFormatAndSpecialPaths(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
