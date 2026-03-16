@@ -20,7 +20,9 @@
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json && bash scripts/build-wasm.sh",
     "build:ts": "tsc -p tsconfig.build.json",
-    "build:wasm": "bash scripts/build-wasm.sh"
+    "build:wasm": "bash scripts/build-wasm.sh",
+    "pretest": "tsc -p tsconfig.build.json",
+    "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.3"
