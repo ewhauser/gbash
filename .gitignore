@@ -30,21 +30,6 @@ website/out/
 .vscode/
 .claude
 
-# Go fuzz generated artifacts
-**/testdata/fuzz/Fuzz*/
-!contrib/sqlite3/testdata/
-!contrib/sqlite3/testdata/fuzz/
-!contrib/sqlite3/testdata/fuzz/FuzzSQLiteCommands/
-!contrib/sqlite3/testdata/fuzz/FuzzSQLiteCommands/aa698c6aa0a203f1
-!contrib/jq/testdata/
-!contrib/jq/testdata/fuzz/
-!contrib/jq/testdata/fuzz/FuzzJQCommands/
-!contrib/jq/testdata/fuzz/FuzzJQCommands/09acab89b2271fbf
-!network/testdata/
-!network/testdata/fuzz/
-!network/testdata/fuzz/FuzzHTTPClientPolicy/
-!network/testdata/fuzz/FuzzHTTPClientPolicy/0a263ae04f513c1c
-
 /gbash-gnu
 CONTINUITY.md
 .next
