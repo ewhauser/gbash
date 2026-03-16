@@ -220,7 +220,10 @@ func (m *MemoryFS) Symlink(_ context.Context, target, linkName string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	abs := Resolve(m.cwd, linkName)
+	abs, err := m.resolveCreatePathLocked(Resolve(m.cwd, linkName), 0)
+	if err != nil {
+		return &os.PathError{Op: "symlink", Path: Resolve(m.cwd, linkName), Err: err}
+	}
 	if _, exists := m.nodes[abs]; exists {
 		return &os.PathError{Op: "symlink", Path: abs, Err: stdfs.ErrExist}
 	}

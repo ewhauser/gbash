@@ -432,8 +432,11 @@ func (f *TrieFS) Symlink(_ context.Context, target, linkName string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	abs := Resolve(f.cwd, linkName)
-	if _, exists := f.lookupAbsNoFollowLocked(abs); exists {
+	abs, err := f.resolveCreatePathLocked(Resolve(f.cwd, linkName), 0)
+	if err != nil {
+		return &os.PathError{Op: "symlink", Path: Resolve(f.cwd, linkName), Err: err}
+	}
+	if entry, _ := f.lookupAbsNoFollowLocked(abs); entry != nil {
 		return &os.PathError{Op: "symlink", Path: abs, Err: stdfs.ErrExist}
 	}
 	if err := f.mkdirAllLocked(parentDir(abs), 0o755); err != nil {

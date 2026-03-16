@@ -197,6 +197,53 @@ func TestBenchmarkBackendsRenameIntoSymlinkedDirectoryAllowsMissingLeaf(t *testi
 	}
 }
 
+func TestBenchmarkBackendsSymlinkCreationInSymlinkedDirectory(t *testing.T) {
+	t.Parallel()
+
+	for _, backend := range benchmarkBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			t.Run("missing leaf", func(t *testing.T) {
+				fsys := backend.new(t)
+				writeFile(t, fsys, "/real/existing.txt", "existing\n")
+				if err := fsys.Symlink(context.Background(), "/real", "/link"); err != nil {
+					t.Fatalf("Symlink(/link) error = %v", err)
+				}
+
+				if err := fsys.Symlink(context.Background(), "existing.txt", "/link/new.txt"); err != nil {
+					t.Fatalf("Symlink(/link/new.txt) error = %v", err)
+				}
+
+				target, err := fsys.Readlink(context.Background(), "/real/new.txt")
+				if err != nil {
+					t.Fatalf("Readlink(/real/new.txt) error = %v", err)
+				}
+				if got, want := target, "existing.txt"; got != want {
+					t.Fatalf("Readlink(/real/new.txt) = %q, want %q", got, want)
+				}
+				if got, want := readFile(t, fsys, "/link/new.txt"), "existing\n"; got != want {
+					t.Fatalf("read through symlink = %q, want %q", got, want)
+				}
+			})
+
+			t.Run("existing leaf", func(t *testing.T) {
+				fsys := backend.new(t)
+				writeFile(t, fsys, "/real/new.txt", "original\n")
+				if err := fsys.Symlink(context.Background(), "/real", "/link"); err != nil {
+					t.Fatalf("Symlink(/link) error = %v", err)
+				}
+
+				err := fsys.Symlink(context.Background(), "target.txt", "/link/new.txt")
+				if !errors.Is(err, stdfs.ErrExist) {
+					t.Fatalf("Symlink(/link/new.txt) error = %v, want exist", err)
+				}
+				if got, want := readFile(t, fsys, "/real/new.txt"), "original\n"; got != want {
+					t.Fatalf("read existing target = %q, want %q", got, want)
+				}
+			})
+		})
+	}
+}
+
 func TestBenchmarkBackendsSnapshotAndOverlay(t *testing.T) {
 	t.Parallel()
 
