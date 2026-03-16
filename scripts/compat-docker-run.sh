@@ -10,6 +10,21 @@ PLATFORM=${COMPAT_DOCKER_PLATFORM:-}
 PULL_MODE=${COMPAT_DOCKER_PULL:-0}
 GNU_CACHE_DIR=${GNU_CACHE_DIR:-.cache/gnu}
 GNU_RESULTS_DIR=${GNU_RESULTS_DIR:-.cache/gnu/results/docker-latest}
+GBASH_COMPAT_TRACE=${GBASH_COMPAT_TRACE:-0}
+
+trace_enabled() {
+  case "${GBASH_COMPAT_TRACE:-0}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+  esac
+  return 1
+}
+
+enable_trace() {
+  local label=$1
+  PS4="+ $label: "
+  export PS4
+  set -x
+}
 
 abs_repo_path() {
   local path=$1
@@ -94,6 +109,10 @@ mkdir -p \
   "$REPO_ROOT/.cache/go-build" \
   "$REPO_ROOT/.cache/go-mod"
 
+if trace_enabled; then
+  enable_trace "compat-docker-run.sh"
+fi
+
 ensure_image
 
 docker run --rm ${PLATFORM:+--platform "$PLATFORM"} \
@@ -106,11 +125,19 @@ docker run --rm ${PLATFORM:+--platform "$PLATFORM"} \
   -e GNU_UTILS="${GNU_UTILS:-}" \
   -e GNU_TESTS="${GNU_TESTS:-}" \
   -e GNU_KEEP_WORKDIR="${GNU_KEEP_WORKDIR:-}" \
+  -e GBASH_COMPAT_TRACE="${GBASH_COMPAT_TRACE:-0}" \
   -v "$REPO_ROOT:/workspace" \
   -w /workspace \
   "$IMAGE_NAME" \
   bash -lc '
     set -euo pipefail
+    case "${GBASH_COMPAT_TRACE:-0}" in
+      1|true|TRUE|yes|YES|on|ON)
+        PS4="+ compat-container: "
+        export PS4
+        set -x
+        ;;
+    esac
     mkdir -p "$HOME" "$GOCACHE" "$GOMODCACHE"
     ./scripts/gnu-test.sh
   '

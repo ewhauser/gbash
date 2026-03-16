@@ -8,6 +8,21 @@ GNU_CACHE_DIR=${GNU_CACHE_DIR:-"$REPO_ROOT/.cache/gnu"}
 GNU_RESULTS_DIR=${GNU_RESULTS_DIR:-"$REPO_ROOT/.cache/gnu/results/docker-latest"}
 GNU_GBASH_BIN=${GNU_GBASH_BIN:-"$GNU_CACHE_DIR/bin/gbash"}
 GNU_SOURCE_DIR=${GNU_SOURCE_DIR:-/opt/gnu/coreutils-9.10}
+GBASH_COMPAT_TRACE=${GBASH_COMPAT_TRACE:-0}
+
+trace_enabled() {
+  case "${GBASH_COMPAT_TRACE:-0}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+  esac
+  return 1
+}
+
+enable_trace() {
+  local label=$1
+  PS4="+ $label: "
+  export PS4
+  set -x
+}
 
 resolve_repo_path() {
   local path=$1
@@ -29,6 +44,19 @@ shell_quote() {
   local value=${1-}
   value=${value//\'/\'\"\'\"\'}
   printf "'%s'" "$value"
+}
+
+timestamp_utc() {
+  date -u '+%Y-%m-%dT%H:%M:%SZ'
+}
+
+log_progress() {
+  local log_path=$1
+  shift
+  local line
+  line="$(timestamp_utc) $*"
+  printf '%s\n' "$line"
+  printf '%s\n' "$line" >> "$log_path"
 }
 
 prepare_workdir() {
@@ -301,6 +329,14 @@ if test "${abs_top_builddir+set}" = set; then
   export PATH
 fi
 
+case ${GBASH_COMPAT_TRACE:-0} in
+  1|true|TRUE|yes|YES|on|ON)
+    PS4='+ tests/init.sh: '
+    export PS4
+    set -x
+    ;;
+esac
+
 setup_ "$@"
 PATH=$jbgo_path_before_setup_
 export PATH
@@ -367,16 +403,21 @@ run_make_check() {
   local overall_status=0
 
   : > "$log_path"
+  log_progress "$log_path" "starting GNU make check for ${#tests[@]} tests"
   for test_path in "${tests[@]}"; do
     local test_base log_target trs_path make_status status
     test_base=$(test_base_from_path "$test_path")
     log_target="$test_base.log"
     trs_path="$workdir/$test_base.trs"
     rm -f "$workdir/$log_target" "$trs_path"
+    log_progress "$log_path" "BEGIN $test_path"
 
     make_status=0
     if (
       cd "$workdir"
+      if trace_enabled; then
+        enable_trace "gnu-test.make"
+      fi
       if command -v setsid >/dev/null 2>&1; then
         env CONFIG_SHELL="$config_shell" setsid make "$log_target" VERBOSE=no RUN_EXPENSIVE_TESTS=yes "srcdir=$workdir"
       else
@@ -393,6 +434,7 @@ run_make_check() {
       status=ERROR
     fi
     printf '%s: %s\n' "$status" "$test_path" >> "$log_path"
+    log_progress "$log_path" "END $test_path status=$status make_exit=$make_status"
 
     if [[ $make_status -ne 0 ]]; then
       overall_status=$make_status
@@ -410,6 +452,10 @@ run_make_check() {
 GNU_CACHE_DIR=$(resolve_repo_path "$GNU_CACHE_DIR")
 GNU_RESULTS_DIR=$(resolve_repo_path "$GNU_RESULTS_DIR")
 GNU_GBASH_BIN=$(resolve_repo_path "$GNU_GBASH_BIN")
+
+if trace_enabled; then
+  enable_trace "gnu-test.sh"
+fi
 
 require_tool go
 require_tool make

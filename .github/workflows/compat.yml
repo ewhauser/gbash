@@ -52,13 +52,16 @@ jobs:
 
       - name: Run GNU compatibility harness
         id: run-compat
+        shell: bash
         env:
           RESULTS_DIR: .cache/gnu/results/ci-latest
+          GBASH_COMPAT_TRACE: 1
         run: |
           set +e
+          set -x
           rm -rf "$RESULTS_DIR"
           mkdir -p "$RESULTS_DIR"
-          GNU_RESULTS_DIR="$RESULTS_DIR" make gnu-test
+          GNU_RESULTS_DIR="$RESULTS_DIR" GBASH_COMPAT_TRACE="$GBASH_COMPAT_TRACE" make gnu-test
           rc=$?
           echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
           exit 0
