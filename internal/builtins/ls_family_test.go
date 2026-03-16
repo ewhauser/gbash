@@ -15,6 +15,7 @@ import (
 )
 
 func TestLSSupportsHelpDirectoryAndHumanReadableFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/home/agent/local.txt", []byte("should not appear\n"))
@@ -61,6 +62,7 @@ func TestLSSupportsHelpDirectoryAndHumanReadableFlags(t *testing.T) {
 }
 
 func TestLSShortHRemainsHumanReadableAfterSpecMigration(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-short-h/big.bin", bytes.Repeat([]byte("x"), 2048))
@@ -78,6 +80,7 @@ func TestLSShortHRemainsHumanReadableAfterSpecMigration(t *testing.T) {
 }
 
 func TestLSSupportsHiddenAndClassifyFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/classify/.hidden", []byte("secret\n"))
@@ -135,6 +138,7 @@ func TestLSSupportsHiddenAndClassifyFlags(t *testing.T) {
 }
 
 func TestLSSupportsSortingAndRecursiveFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/sortsize/a.txt", []byte("a"))
@@ -192,6 +196,7 @@ func TestLSSupportsSortingAndRecursiveFlags(t *testing.T) {
 }
 
 func TestLSReturnsMissingPathExitCode(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "ls /tmp/missing\n")
@@ -204,6 +209,7 @@ func TestLSReturnsMissingPathExitCode(t *testing.T) {
 }
 
 func TestLSAlmostAllOverridesAllAndRecursiveDotKeepsPrefixedHeaders(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	if err := session.FileSystem().MkdirAll(context.Background(), "/tmp/ls-aA/dir/subdir", 0o755); err != nil {
@@ -236,6 +242,7 @@ func TestLSAlmostAllOverridesAllAndRecursiveDotKeepsPrefixedHeaders(t *testing.T
 }
 
 func TestLSLongFormatListsDanglingSymlinkWithoutDereferencing(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -257,6 +264,7 @@ func TestLSLongFormatListsDanglingSymlinkWithoutDereferencing(t *testing.T) {
 }
 
 func TestLSDereferenceKeepsDanglingDirectoryEntriesForInodeAndBlockPrefixes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -294,6 +302,7 @@ func TestLSDereferenceKeepsDanglingDirectoryEntriesForInodeAndBlockPrefixes(t *t
 }
 
 func TestDirUsesDirUsageAndNonLongDefaultOutput(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/dir-view/alpha.txt", []byte("alpha\n"))
@@ -328,6 +337,7 @@ func TestDirUsesDirUsageAndNonLongDefaultOutput(t *testing.T) {
 }
 
 func TestDirSupportsLongFormatViaLSFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/dir-long/item.txt", []byte("payload\n"))
@@ -342,6 +352,7 @@ func TestDirSupportsLongFormatViaLSFlags(t *testing.T) {
 }
 
 func TestVdirUsesVdirUsageAndLongEscapedDefaultOutput(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/vdir-view/plain.txt", []byte("plain\n"))
@@ -375,6 +386,7 @@ func TestVdirUsesVdirUsageAndLongEscapedDefaultOutput(t *testing.T) {
 }
 
 func TestVdirSupportsColumnOutputViaLSFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/vdir-columns/alpha.txt", []byte("alpha\n"))
@@ -394,6 +406,7 @@ func TestVdirSupportsColumnOutputViaLSFlags(t *testing.T) {
 }
 
 func TestVdirBatchesCommandLineFilesForExplicitGridOutput(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/vdir-grid/a", []byte("a"))
@@ -409,6 +422,7 @@ func TestVdirBatchesCommandLineFilesForExplicitGridOutput(t *testing.T) {
 }
 
 func TestVdirSupportsDiredAndRecursiveHeaders(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/vdir-dired/dir/subdir/file.txt", []byte("x"))
@@ -436,6 +450,7 @@ func TestVdirSupportsDiredAndRecursiveHeaders(t *testing.T) {
 }
 
 func TestVdirInvalidOptionUsesVdirPrefixAndExitCode(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "vdir -/\n")
@@ -448,6 +463,7 @@ func TestVdirInvalidOptionUsesVdirPrefixAndExitCode(t *testing.T) {
 }
 
 func TestLSColorFlagsAndLSColorsOverride(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-color/plain.txt", []byte("plain\n"))
@@ -484,6 +500,7 @@ func TestLSColorFlagsAndLSColorsOverride(t *testing.T) {
 }
 
 func TestLSColorsRespectOrderedCaseSensitiveExtensions(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-color-ext/img1.jpg", []byte("x"))
@@ -506,6 +523,7 @@ func TestLSColorsRespectOrderedCaseSensitiveExtensions(t *testing.T) {
 }
 
 func TestLSColorsUseWritableAndStickyDirectoryClasses(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-color-dir/default/file", []byte("x"))
@@ -541,6 +559,7 @@ func TestLSColorsUseWritableAndStickyDirectoryClasses(t *testing.T) {
 }
 
 func TestDirVersionAndColorSupport(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/dir-color/note.txt", []byte("note\n"))
@@ -563,6 +582,7 @@ func TestDirVersionAndColorSupport(t *testing.T) {
 }
 
 func TestLSFormatFilteringGroupingAndZeroModes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-modes/.hidden", []byte("hidden\n"))
@@ -617,6 +637,7 @@ func TestLSFormatFilteringGroupingAndZeroModes(t *testing.T) {
 }
 
 func TestLSQuotingModes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-quote/line\nbreak", []byte("x"))
@@ -648,6 +669,7 @@ func TestLSQuotingModes(t *testing.T) {
 }
 
 func TestLSLongFormatMetadataFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-long/data.txt", bytes.Repeat([]byte("x"), 2048))
@@ -716,6 +738,7 @@ func TestLSLongFormatMetadataFlags(t *testing.T) {
 }
 
 func TestLSHyperlinkMode(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-link/item.txt", []byte("x"))
@@ -730,6 +753,7 @@ func TestLSHyperlinkMode(t *testing.T) {
 }
 
 func TestLSHyperlinkRecursiveHeadersAndLowercaseEscaping(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-hyperlink/sub/col:on", []byte("x"))
@@ -755,6 +779,7 @@ func TestLSHyperlinkRecursiveHeadersAndLowercaseEscaping(t *testing.T) {
 }
 
 func TestLSSupportsFormatSortingAndFilteringParityFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-parity/a1.txt", []byte("a"))
@@ -806,6 +831,7 @@ func TestLSSupportsFormatSortingAndFilteringParityFlags(t *testing.T) {
 }
 
 func TestLSSupportsQuotingHideControlAndZeroOutput(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-quote/plain.txt", []byte("p"))
@@ -843,6 +869,7 @@ func TestLSSupportsQuotingHideControlAndZeroOutput(t *testing.T) {
 }
 
 func TestLSSupportsQuotingAliasAndWidthZeroWithTabsize(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-width/a", []byte("a"))
@@ -875,6 +902,7 @@ func TestLSSupportsQuotingAliasAndWidthZeroWithTabsize(t *testing.T) {
 }
 
 func TestLSLongShellEscapeSpacingRespectsTimeStyleEnv(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-quote-align/a b", []byte("a"))
@@ -906,6 +934,7 @@ func TestLSLongShellEscapeSpacingRespectsTimeStyleEnv(t *testing.T) {
 }
 
 func TestLSInvalidWidthValuesUseGNUUsageExitCode(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	for _, script := range []string{"ls -w-1\n", "ls -w08\n"} {
@@ -920,6 +949,7 @@ func TestLSInvalidWidthValuesUseGNUUsageExitCode(t *testing.T) {
 }
 
 func TestLSInvalidTimeStyleMatchesGNUDiagnostic(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "ls -l --time-style=XX\n")
@@ -943,6 +973,7 @@ func TestLSInvalidTimeStyleMatchesGNUDiagnostic(t *testing.T) {
 }
 
 func TestLSGroupDirectoriesFirstTreatsSymlinkedDirectoriesAsDirectories(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -982,6 +1013,7 @@ func TestLSGroupDirectoriesFirstTreatsSymlinkedDirectoriesAsDirectories(t *testi
 }
 
 func TestLSZeroKeepsLongFormatAndDisablesFormattingOverrides(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-zero/dir/a", []byte("a"))
@@ -1006,6 +1038,7 @@ func TestLSZeroKeepsLongFormatAndDisablesFormattingOverrides(t *testing.T) {
 }
 
 func TestLSDereferenceListsImplicitBrokenSymlinksAndRecursesIntoSymlinkDirs(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -1050,6 +1083,7 @@ func TestLSDereferenceListsImplicitBrokenSymlinksAndRecursesIntoSymlinkDirs(t *t
 }
 
 func TestLSDereferenceExplicitBrokenSymlinkStillFails(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -1077,6 +1111,7 @@ func TestLSDereferenceExplicitBrokenSymlinkStillFails(t *testing.T) {
 }
 
 func TestLSRecursiveListsCommandLineFilesBeforeDirectories(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	if err := session.FileSystem().MkdirAll(context.Background(), "/tmp/ls-mixed/x", 0o755); err != nil {
@@ -1097,6 +1132,7 @@ func TestLSRecursiveListsCommandLineFilesBeforeDirectories(t *testing.T) {
 }
 
 func TestLSTrailingSlashDereferencesCommandLineSymlinkToDir(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -1122,6 +1158,7 @@ func TestLSTrailingSlashDereferencesCommandLineSymlinkToDir(t *testing.T) {
 }
 
 func TestDirDefaultsToColumnsAndRespectsExplicitFormats(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/dir-format/alpha.txt", []byte("alpha"))
@@ -1150,6 +1187,7 @@ func TestDirDefaultsToColumnsAndRespectsExplicitFormats(t *testing.T) {
 }
 
 func TestLSDiredParityModes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-dired/dir/a", []byte("a"))
@@ -1184,6 +1222,7 @@ func TestLSDiredParityModes(t *testing.T) {
 }
 
 func TestLSDiredRejectsZeroAndTracksSymlinkFields(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-dired-link/target", []byte("x"))
@@ -1212,6 +1251,7 @@ func TestLSDiredRejectsZeroAndTracksSymlinkFields(t *testing.T) {
 }
 
 func TestLSDiredMatchesGNUByteRangesForLongListings(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/ls-dired-ranges/dir/1a", []byte("a"))

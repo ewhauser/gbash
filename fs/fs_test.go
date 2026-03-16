@@ -13,6 +13,7 @@ import (
 )
 
 func TestMemoryFSPathIntrospection(t *testing.T) {
+	t.Parallel()
 	mem := NewMemory()
 	writeTestFile(t, mem, "/data/file.txt", "hello\n")
 
@@ -38,6 +39,7 @@ func TestMemoryFSPathIntrospection(t *testing.T) {
 }
 
 func TestMemoryFSSymlinkIntrospectionAndTraversal(t *testing.T) {
+	t.Parallel()
 	mem := NewMemory()
 	writeTestFile(t, mem, "/safe/target.txt", "hello\n")
 	if err := mem.Symlink(context.Background(), "target.txt", "/safe/link.txt"); err != nil {
@@ -74,6 +76,7 @@ func TestMemoryFSSymlinkIntrospectionAndTraversal(t *testing.T) {
 }
 
 func TestMemoryFSSymlinkLoopFails(t *testing.T) {
+	t.Parallel()
 	mem := NewMemory()
 	if err := mem.Symlink(context.Background(), "b", "/a"); err != nil {
 		t.Fatalf("Symlink(a) error = %v", err)
@@ -92,6 +95,7 @@ func TestMemoryFSSymlinkLoopFails(t *testing.T) {
 }
 
 func TestMemoryFSReadlinkRejectsNonSymlink(t *testing.T) {
+	t.Parallel()
 	mem := NewMemory()
 	writeTestFile(t, mem, "/data/file.txt", "hello\n")
 
@@ -105,6 +109,7 @@ func TestMemoryFSReadlinkRejectsNonSymlink(t *testing.T) {
 }
 
 func TestMemoryFSRenameRejectsRoot(t *testing.T) {
+	t.Parallel()
 	mem := NewMemory()
 
 	err := mem.Rename(context.Background(), "/", "/tmp/root")
@@ -125,6 +130,7 @@ func TestMemoryFSRenameRejectsRoot(t *testing.T) {
 }
 
 func TestOverlayFSReadsFromLowerAndWritesToUpper(t *testing.T) {
+	t.Parallel()
 	lower := seededMemory(t, map[string]string{
 		"/base.txt":       "base\n",
 		"/shared/old.txt": "old\n",
@@ -160,6 +166,7 @@ func TestOverlayFSReadsFromLowerAndWritesToUpper(t *testing.T) {
 }
 
 func TestOverlayFSReadDirMergesAndHidesDeletedEntries(t *testing.T) {
+	t.Parallel()
 	lower := seededMemory(t, map[string]string{
 		"/dir/lower.txt": "lower\n",
 		"/dir/keep.txt":  "keep\n",
@@ -189,6 +196,7 @@ func TestOverlayFSReadDirMergesAndHidesDeletedEntries(t *testing.T) {
 }
 
 func TestOverlayFSRenameCopiesUpAndTombstonesSource(t *testing.T) {
+	t.Parallel()
 	lower := seededMemory(t, map[string]string{
 		"/dir/file.txt": "move-me\n",
 	})
@@ -210,6 +218,7 @@ func TestOverlayFSRenameCopiesUpAndTombstonesSource(t *testing.T) {
 }
 
 func TestOverlayFSRealpathResolvesLowerSymlinks(t *testing.T) {
+	t.Parallel()
 	lower := seededMemory(t, map[string]string{
 		"/safe/target.txt": "hello\n",
 	})
@@ -228,6 +237,7 @@ func TestOverlayFSRealpathResolvesLowerSymlinks(t *testing.T) {
 }
 
 func TestSnapshotFSPreservesSourceViewAndRejectsWrites(t *testing.T) {
+	t.Parallel()
 	source := seededMemory(t, map[string]string{
 		"/data.txt": "before\n",
 	})
@@ -253,6 +263,7 @@ func TestSnapshotFSPreservesSourceViewAndRejectsWrites(t *testing.T) {
 }
 
 func TestReusableFactoryReusesBaseAndKeepsSessionsIsolated(t *testing.T) {
+	t.Parallel()
 	var created atomic.Int32
 	factory := Reusable(FactoryFunc(func(context.Context) (FileSystem, error) {
 		created.Add(1)
@@ -288,6 +299,7 @@ func TestReusableFactoryReusesBaseAndKeepsSessionsIsolated(t *testing.T) {
 }
 
 func TestMemoryFSCloneIsolated(t *testing.T) {
+	t.Parallel()
 	base := seededMemory(t, map[string]string{
 		"/data.txt": "base\n",
 	})

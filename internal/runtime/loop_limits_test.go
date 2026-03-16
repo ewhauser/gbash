@@ -9,6 +9,7 @@ import (
 )
 
 func TestMaxLoopIterationsEnforcedInWhile(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxLoopIterations: 10})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -26,6 +27,7 @@ func TestMaxLoopIterationsEnforcedInWhile(t *testing.T) {
 }
 
 func TestMaxLoopIterationsEnforcedInFor(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxLoopIterations: 5})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -43,6 +45,7 @@ func TestMaxLoopIterationsEnforcedInFor(t *testing.T) {
 }
 
 func TestMaxLoopIterationsEnforcedInUntil(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxLoopIterations: 5})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -60,6 +63,7 @@ func TestMaxLoopIterationsEnforcedInUntil(t *testing.T) {
 }
 
 func TestMaxLoopIterationsEnforcedInNestedLoops(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxLoopIterations: 5})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -77,6 +81,7 @@ func TestMaxLoopIterationsEnforcedInNestedLoops(t *testing.T) {
 }
 
 func TestMaxLoopIterationsEnforcedInCStyleFor(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxLoopIterations: 5})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -94,6 +99,7 @@ func TestMaxLoopIterationsEnforcedInCStyleFor(t *testing.T) {
 }
 
 func TestMaxLoopIterationsAllowsLoopsWithinLimit(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxLoopIterations: 100})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

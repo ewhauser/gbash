@@ -14,6 +14,7 @@ import (
 )
 
 func TestSearchProviderQueries(t *testing.T) {
+	t.Parallel()
 	base := seededMemory(t, map[string]string{
 		"/workspace/docs/readme.txt": "alpha needle omega\n",
 		"/workspace/src/main.go":     "package main\nconst greeting = \"Hello\"\n",
@@ -111,6 +112,7 @@ func TestSearchProviderQueries(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := provider.Search(context.Background(), &tc.query)
 			if err != nil {
 				t.Fatalf("Search() error = %v", err)
@@ -150,6 +152,7 @@ func TestSearchProviderQueries(t *testing.T) {
 }
 
 func TestSearchProviderHonorsContextCancellation(t *testing.T) {
+	t.Parallel()
 	base := seededMemory(t, map[string]string{
 		"/workspace/a.txt": "needle one\n",
 		"/workspace/b.txt": "needle two\n",
@@ -173,6 +176,7 @@ func TestSearchProviderHonorsContextCancellation(t *testing.T) {
 }
 
 func TestSearchableFSMutations(t *testing.T) {
+	t.Parallel()
 	fsys, err := NewSearchableFileSystem(context.Background(), NewMemory(), nil)
 	if err != nil {
 		t.Fatalf("NewSearchableFileSystem() error = %v", err)
@@ -216,6 +220,7 @@ func TestSearchableFSMutations(t *testing.T) {
 }
 
 func TestSearchableFSIndexesNewLinks(t *testing.T) {
+	t.Parallel()
 	fsys, err := NewSearchableFileSystem(context.Background(), NewMemory(), nil)
 	if err != nil {
 		t.Fatalf("NewSearchableFileSystem() error = %v", err)
@@ -256,6 +261,7 @@ func TestSearchableFSIndexesNewLinks(t *testing.T) {
 }
 
 func TestSearchableFSTracksDanglingSymlinkUntilTargetExists(t *testing.T) {
+	t.Parallel()
 	fsys, err := NewSearchableFileSystem(context.Background(), NewMemory(), nil)
 	if err != nil {
 		t.Fatalf("NewSearchableFileSystem() error = %v", err)
@@ -278,6 +284,7 @@ func TestSearchableFSTracksDanglingSymlinkUntilTargetExists(t *testing.T) {
 }
 
 func TestSearchableFSReindexesDanglingSymlinkChains(t *testing.T) {
+	t.Parallel()
 	fsys, err := NewSearchableFileSystem(context.Background(), NewMemory(), nil)
 	if err != nil {
 		t.Fatalf("NewSearchableFileSystem() error = %v", err)
@@ -308,6 +315,7 @@ func TestSearchableFSReindexesDanglingSymlinkChains(t *testing.T) {
 }
 
 func TestSearchableFSBootstrapsExistingSymlinkTracking(t *testing.T) {
+	t.Parallel()
 	base := NewMemory()
 	writeSearchFile(t, base, "/docs/target.txt", "needle before\n")
 	if err := base.Symlink(context.Background(), "target.txt", "/docs/link.txt"); err != nil {
@@ -334,6 +342,7 @@ func TestSearchableFSBootstrapsExistingSymlinkTracking(t *testing.T) {
 }
 
 func TestSearchableFSBootstrapsExistingHardLinkTracking(t *testing.T) {
+	t.Parallel()
 	base := NewMemory()
 	writeSearchFile(t, base, "/docs/target.txt", "needle before\n")
 	if err := base.Link(context.Background(), "/docs/target.txt", "/docs/link.txt"); err != nil {
@@ -360,6 +369,7 @@ func TestSearchableFSBootstrapsExistingHardLinkTracking(t *testing.T) {
 }
 
 func TestSearchableFSSkipsSpecialFilesDuringSnapshot(t *testing.T) {
+	t.Parallel()
 	fsys, err := NewSearchableFileSystem(context.Background(), snapshotFixtureFS{}, nil)
 	if err != nil {
 		t.Fatalf("NewSearchableFileSystem() error = %v", err)
@@ -369,6 +379,7 @@ func TestSearchableFSSkipsSpecialFilesDuringSnapshot(t *testing.T) {
 }
 
 func TestSearchableFSOpenFileTracksCreateWithoutWrite(t *testing.T) {
+	t.Parallel()
 	fsys, err := NewSearchableFileSystem(context.Background(), NewMemory(), nil)
 	if err != nil {
 		t.Fatalf("NewSearchableFileSystem() error = %v", err)
@@ -399,6 +410,7 @@ func TestSearchableFSOpenFileTracksCreateWithoutWrite(t *testing.T) {
 }
 
 func TestMountableFSSearchProviderForPath(t *testing.T) {
+	t.Parallel()
 	base, err := NewSearchableFileSystem(context.Background(), seededMemory(t, map[string]string{
 		"/base.txt": "base needle\n",
 	}), nil)
@@ -454,6 +466,7 @@ func TestMountableFSSearchProviderForPath(t *testing.T) {
 }
 
 func TestUnsupportedSearchProvider(t *testing.T) {
+	t.Parallel()
 	provider := NewUnsupportedSearchProvider()
 	_, err := provider.Search(context.Background(), &SearchQuery{Literal: "needle"})
 	if !errors.Is(err, ErrSearchUnsupported) {

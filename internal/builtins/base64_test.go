@@ -6,6 +6,7 @@ import (
 )
 
 func TestBase64SupportsSeparateLongWrapArgument(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -23,6 +24,7 @@ func TestBase64SupportsSeparateLongWrapArgument(t *testing.T) {
 }
 
 func TestBase64SupportsCombinedDecodeIgnoreGarbageFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -40,6 +42,7 @@ func TestBase64SupportsCombinedDecodeIgnoreGarbageFlags(t *testing.T) {
 }
 
 func TestBase64DecodeAcceptsUnpaddedAndConcatenatedInput(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -57,6 +60,7 @@ func TestBase64DecodeAcceptsUnpaddedAndConcatenatedInput(t *testing.T) {
 }
 
 func TestBase64DecodePreservesRecoveredBytesOnInvalidTail(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -77,6 +81,7 @@ func TestBase64DecodePreservesRecoveredBytesOnInvalidTail(t *testing.T) {
 }
 
 func TestBase64DecodeRepairsShortPaddedTailBeforeFailing(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -97,6 +102,7 @@ func TestBase64DecodeRepairsShortPaddedTailBeforeFailing(t *testing.T) {
 }
 
 func TestBase64SupportsShortAliasAndInferredLongOptions(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -114,6 +120,7 @@ func TestBase64SupportsShortAliasAndInferredLongOptions(t *testing.T) {
 }
 
 func TestBase64SupportsFileInputAndInferredWrapFlag(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

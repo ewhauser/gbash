@@ -60,7 +60,9 @@ func requireStderr(t *testing.T, result *ExecutionResult, want string) {
 }
 
 func TestXanBasicCommands(t *testing.T) {
+	t.Parallel()
 	t.Run("count", func(t *testing.T) {
+		t.Parallel()
 		cases := []struct {
 			name    string
 			files   map[string]string
@@ -101,6 +103,7 @@ func TestXanBasicCommands(t *testing.T) {
 
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
 				result := runXan(t, tc.files, "", tc.script)
 				requireExitCode(t, result, 0)
 				requireStdout(t, result, tc.wantOut)
@@ -109,6 +112,7 @@ func TestXanBasicCommands(t *testing.T) {
 	})
 
 	t.Run("headers head tail slice reverse enum behead", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{
 			"/users.csv":   xanUsersCSV,
 			"/numbers.csv": xanNumbersCSV,
@@ -198,6 +202,7 @@ func TestXanBasicCommands(t *testing.T) {
 
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
 				result := runXan(t, files, "", tc.script)
 				requireExitCode(t, result, 0)
 				requireStdout(t, result, tc.wantOut)
@@ -206,6 +211,7 @@ func TestXanBasicCommands(t *testing.T) {
 	})
 
 	t.Run("sample help and errors", func(t *testing.T) {
+		t.Parallel()
 		result := runXan(t, map[string]string{"/data.csv": "n\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n"}, "", "xan sample 3 --seed 42 /data.csv")
 		requireExitCode(t, result, 0)
 		lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
@@ -240,6 +246,7 @@ func TestXanBasicCommands(t *testing.T) {
 }
 
 func TestXanColumnOperations(t *testing.T) {
+	t.Parallel()
 	files := map[string]string{
 		"/users.csv":   xanUsersCSV,
 		"/numbers.csv": xanNumbersCSV,
@@ -411,6 +418,7 @@ func TestXanColumnOperations(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := runXan(t, tc.files, tc.cwd, tc.script)
 			requireExitCode(t, result, 0)
 			requireStdout(t, result, tc.wantOut)
@@ -419,6 +427,7 @@ func TestXanColumnOperations(t *testing.T) {
 }
 
 func TestXanFilterSortSearch(t *testing.T) {
+	t.Parallel()
 	files := map[string]string{
 		"/users.csv":    xanUsersCSV,
 		"/products.csv": xanProductsCSV,
@@ -563,6 +572,7 @@ func TestXanFilterSortSearch(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := runXan(t, tc.files, "", tc.script)
 			requireExitCode(t, result, tc.wantCode)
 			if tc.wantOut != "" {
@@ -576,7 +586,9 @@ func TestXanFilterSortSearch(t *testing.T) {
 }
 
 func TestXanMapTransformAggAndGroupby(t *testing.T) {
+	t.Parallel()
 	t.Run("map", func(t *testing.T) {
+		t.Parallel()
 		cases := []struct {
 			name    string
 			files   map[string]string
@@ -665,6 +677,7 @@ func TestXanMapTransformAggAndGroupby(t *testing.T) {
 
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
 				result := runXan(t, tc.files, "", tc.script)
 				requireExitCode(t, result, 0)
 				requireStdout(t, result, tc.wantOut)
@@ -673,6 +686,7 @@ func TestXanMapTransformAggAndGroupby(t *testing.T) {
 	})
 
 	t.Run("transform", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{"/data.csv": "a,b,c\n1,2,3\n4,5,6\n"}
 		cases := []struct {
 			name     string
@@ -742,6 +756,7 @@ func TestXanMapTransformAggAndGroupby(t *testing.T) {
 
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
 				result := runXan(t, tc.files, "", tc.script)
 				requireExitCode(t, result, tc.wantCode)
 				if tc.wantOut != "" {
@@ -755,6 +770,7 @@ func TestXanMapTransformAggAndGroupby(t *testing.T) {
 	})
 
 	t.Run("agg and groupby", func(t *testing.T) {
+		t.Parallel()
 		cases := []struct {
 			name     string
 			files    map[string]string
@@ -830,6 +846,7 @@ func TestXanMapTransformAggAndGroupby(t *testing.T) {
 
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
 				result := runXan(t, tc.files, "", tc.script)
 				requireExitCode(t, result, tc.wantCode)
 				if tc.wantOut != "" {
@@ -844,7 +861,9 @@ func TestXanMapTransformAggAndGroupby(t *testing.T) {
 }
 
 func TestXanFrequencyReshapeMultifileAndData(t *testing.T) {
+	t.Parallel()
 	t.Run("frequency", func(t *testing.T) {
+		t.Parallel()
 		result := runXan(t, map[string]string{"/in.csv": "h1,h2\na,z\na,y\na,y\nb,z\n,z\n"}, "", "xan frequency --no-extra -l 0 /in.csv")
 		requireExitCode(t, result, 0)
 		if !strings.HasPrefix(result.Stdout, "field,value,count\n") {
@@ -879,6 +898,7 @@ func TestXanFrequencyReshapeMultifileAndData(t *testing.T) {
 	})
 
 	t.Run("reshape", func(t *testing.T) {
+		t.Parallel()
 		cases := []struct {
 			name     string
 			files    map[string]string
@@ -1010,6 +1030,7 @@ func TestXanFrequencyReshapeMultifileAndData(t *testing.T) {
 
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
 				result := runXan(t, tc.files, "", tc.script)
 				requireExitCode(t, result, tc.wantCode)
 				if tc.wantOut != "" {
@@ -1023,6 +1044,7 @@ func TestXanFrequencyReshapeMultifileAndData(t *testing.T) {
 	})
 
 	t.Run("multi file and data conversion", func(t *testing.T) {
+		t.Parallel()
 		cases := []struct {
 			name     string
 			files    map[string]string
@@ -1231,6 +1253,7 @@ func TestXanFrequencyReshapeMultifileAndData(t *testing.T) {
 
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
 				result := runXan(t, tc.files, "", tc.script)
 				requireExitCode(t, result, tc.wantCode)
 				if tc.wantOut != "" {
@@ -1243,6 +1266,7 @@ func TestXanFrequencyReshapeMultifileAndData(t *testing.T) {
 		}
 
 		t.Run("shuffle", func(t *testing.T) {
+			t.Parallel()
 			result := runXan(t, map[string]string{"/data.csv": "n\n1\n2\n3\n4\n5\n"}, "", "xan shuffle --seed 42 /data.csv")
 			requireExitCode(t, result, 0)
 			lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
@@ -1260,6 +1284,7 @@ func TestXanFrequencyReshapeMultifileAndData(t *testing.T) {
 		})
 
 		t.Run("split and partition write files", func(t *testing.T) {
+			t.Parallel()
 			session := runXanSession(t, map[string]string{"/data.csv": "n\n1\n2\n3\n4\n5\n6\n", "/region.csv": "region,value\nnorth,10\nsouth,20\nnorth,30\n"}, "/")
 
 			result := mustExecSession(t, session, "xan split -c 3 -o /parts /data.csv")
@@ -1305,6 +1330,7 @@ func TestXanFrequencyReshapeMultifileAndData(t *testing.T) {
 }
 
 func TestXanDangerousHeaders(t *testing.T) {
+	t.Parallel()
 	keywords := []string{
 		"constructor",
 		"prototype",
@@ -1318,6 +1344,7 @@ func TestXanDangerousHeaders(t *testing.T) {
 
 	for _, keyword := range keywords {
 		t.Run("select "+keyword, func(t *testing.T) {
+			t.Parallel()
 			result := runXan(t, nil, "", "printf '"+keyword+",value\ntest,data\n' | xan select "+keyword)
 			requireExitCode(t, result, 0)
 			if !strings.Contains(result.Stdout, keyword) || !strings.Contains(result.Stdout, "test") {
@@ -1328,6 +1355,7 @@ func TestXanDangerousHeaders(t *testing.T) {
 
 	for _, keyword := range keywords[:4] {
 		t.Run("drop "+keyword, func(t *testing.T) {
+			t.Parallel()
 			result := runXan(t, nil, "", "printf '"+keyword+",value,normal\ntest,data,keep\n' | xan drop "+keyword)
 			requireExitCode(t, result, 0)
 			if !strings.Contains(result.Stdout, "value,normal") {
@@ -1336,6 +1364,7 @@ func TestXanDangerousHeaders(t *testing.T) {
 		})
 
 		t.Run("sort "+keyword, func(t *testing.T) {
+			t.Parallel()
 			result := runXan(t, nil, "", "printf '"+keyword+",data\nz,1\na,2\n' | xan sort -s "+keyword)
 			requireExitCode(t, result, 0)
 			lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")

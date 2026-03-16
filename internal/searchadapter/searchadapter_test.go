@@ -17,6 +17,7 @@ import (
 )
 
 func TestSearchUsesIndexWhenSupportedAndFresh(t *testing.T) {
+	t.Parallel()
 	fsys, err := gbfs.NewSearchableFileSystem(context.Background(), seededMemory(t, map[string]string{
 		"/workspace/a.txt": "needle\n",
 		"/workspace/b.txt": "other\n",
@@ -49,6 +50,7 @@ func TestSearchUsesIndexWhenSupportedAndFresh(t *testing.T) {
 }
 
 func TestSearchResolvesRelativeRootsFromFilesystemCWD(t *testing.T) {
+	t.Parallel()
 	fsys, err := gbfs.NewSearchableFileSystem(context.Background(), seededMemory(t, map[string]string{
 		"/workspace/docs/a.txt": "needle\n",
 		"/docs/b.txt":           "needle\n",
@@ -77,6 +79,7 @@ func TestSearchResolvesRelativeRootsFromFilesystemCWD(t *testing.T) {
 }
 
 func TestSearchFallbackWhenUnsupported(t *testing.T) {
+	t.Parallel()
 	fsys := seededMemory(t, map[string]string{
 		"/workspace/a.txt":      "needle\n",
 		"/workspace/skip/b.txt": "needle\n",
@@ -102,6 +105,7 @@ func TestSearchFallbackWhenUnsupported(t *testing.T) {
 }
 
 func TestSearchFallbackSkipsSpecialFiles(t *testing.T) {
+	t.Parallel()
 	fsys := fallbackFixtureFS{}
 
 	result, err := Search(context.Background(), fsys, &Query{
@@ -121,6 +125,7 @@ func TestSearchFallbackSkipsSpecialFiles(t *testing.T) {
 }
 
 func TestSearchFallbackWhenIneligible(t *testing.T) {
+	t.Parallel()
 	fsys, err := gbfs.NewSearchableFileSystem(context.Background(), seededMemory(t, map[string]string{
 		"/workspace/a.txt": "needle\n",
 	}), nil)
@@ -145,6 +150,7 @@ func TestSearchFallbackWhenIneligible(t *testing.T) {
 }
 
 func TestSearchFallbackWhenProviderLacksRequestedCapabilities(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		files     map[string]string
@@ -209,6 +215,7 @@ func TestSearchFallbackWhenProviderLacksRequestedCapabilities(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fsys := searchCapableFS{
 				FileSystem: seededMemory(t, tc.files),
 				provider: limitedCapabilitiesProvider{
@@ -231,6 +238,7 @@ func TestSearchFallbackWhenProviderLacksRequestedCapabilities(t *testing.T) {
 }
 
 func TestSearchFallbackWhenProviderIsStale(t *testing.T) {
+	t.Parallel()
 	mem := seededMemory(t, map[string]string{
 		"/workspace/live.txt": "needle\n",
 	})
@@ -258,6 +266,7 @@ func TestSearchFallbackWhenProviderIsStale(t *testing.T) {
 }
 
 func TestSearchFallbackWhenProviderBecomesStaleAfterSearch(t *testing.T) {
+	t.Parallel()
 	mem := seededMemory(t, map[string]string{
 		"/workspace/live.txt": "needle\n",
 	})
@@ -285,6 +294,7 @@ func TestSearchFallbackWhenProviderBecomesStaleAfterSearch(t *testing.T) {
 }
 
 func TestSearchVerifierFiltersIndexedCandidates(t *testing.T) {
+	t.Parallel()
 	fsys, err := gbfs.NewSearchableFileSystem(context.Background(), seededMemory(t, map[string]string{
 		"/workspace/a.txt": "needle\n",
 		"/workspace/b.txt": "needle\n",
@@ -312,6 +322,7 @@ func TestSearchVerifierFiltersIndexedCandidates(t *testing.T) {
 }
 
 func TestSearchVerifierAppliesLimitAfterFiltering(t *testing.T) {
+	t.Parallel()
 	fsys := searchCapableFS{
 		FileSystem: seededMemory(t, map[string]string{
 			"/workspace/a.txt": "needle\n",
@@ -345,6 +356,7 @@ func TestSearchVerifierAppliesLimitAfterFiltering(t *testing.T) {
 }
 
 func TestSearchFallbackWhenProviderWrapsUnsupported(t *testing.T) {
+	t.Parallel()
 	fsys := searchCapableFS{
 		FileSystem: seededMemory(t, map[string]string{
 			"/workspace/a.txt": "needle\n",
@@ -369,6 +381,7 @@ func TestSearchFallbackWhenProviderWrapsUnsupported(t *testing.T) {
 }
 
 func TestRegexpPrefilterLiterals(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		pattern    string
@@ -409,6 +422,7 @@ func TestRegexpPrefilterLiterals(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			re := regexp.MustCompile(tc.pattern)
 			got, ok := RegexpPrefilterLiterals(re)
 			if ok != tc.wantUsable {
@@ -422,6 +436,7 @@ func TestRegexpPrefilterLiterals(t *testing.T) {
 }
 
 func TestRegexpPrefilterLiteralsRejectsBroadAlternations(t *testing.T) {
+	t.Parallel()
 	re := regexp.MustCompile("aa|bb|cc|dd|ee|ff|gg|hh|ii")
 
 	got, ok := RegexpPrefilterLiterals(re)
@@ -434,6 +449,7 @@ func TestRegexpPrefilterLiteralsRejectsBroadAlternations(t *testing.T) {
 }
 
 func TestPrefilterCandidatesUsesLiteralUnionAndEligibleIntersection(t *testing.T) {
+	t.Parallel()
 	provider := &literalHitsProvider{
 		hitsByLiteral: map[string][]gbfs.SearchHit{
 			"bar": {
@@ -468,6 +484,7 @@ func TestPrefilterCandidatesUsesLiteralUnionAndEligibleIntersection(t *testing.T
 }
 
 func TestPrefilterCandidatesFallsBackWhenProviderIsStale(t *testing.T) {
+	t.Parallel()
 	result, err := PrefilterCandidates(context.Background(), staleProvider{}, "/workspace", []string{"/workspace/a.txt"}, regexp.MustCompile("needle"), false)
 	if err != nil {
 		t.Fatalf("PrefilterCandidates() error = %v", err)
@@ -478,6 +495,7 @@ func TestPrefilterCandidatesFallsBackWhenProviderIsStale(t *testing.T) {
 }
 
 func TestPrefilterCandidatesUsesIgnoreCaseWhenRegexpContainsInlineFlag(t *testing.T) {
+	t.Parallel()
 	provider := &caseAwareLiteralProvider{}
 
 	result, err := PrefilterCandidates(context.Background(), provider, "/workspace", []string{

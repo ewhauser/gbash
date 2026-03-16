@@ -71,6 +71,7 @@ func cloneStringMap(src map[string]string) map[string]string {
 }
 
 func TestCurlSupportsAuthCookiesRemoteNameAndWriteOut(t *testing.T) {
+	t.Parallel()
 	client := &curlStubClient{
 		do: func(_ context.Context, req *network.Request) (*network.Response, error) {
 			return &network.Response{
@@ -127,6 +128,7 @@ func TestCurlSupportsAuthCookiesRemoteNameAndWriteOut(t *testing.T) {
 }
 
 func TestCurlSupportsHelpWithoutNetworkClient(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{NetworkClient: &curlStubClient{}})
 
 	result := mustExecSession(t, session, "curl --help\n")
@@ -139,6 +141,7 @@ func TestCurlSupportsHelpWithoutNetworkClient(t *testing.T) {
 }
 
 func TestCurlSupportsLegacyAttachedShortValues(t *testing.T) {
+	t.Parallel()
 	client := &curlStubClient{}
 	session := newSession(t, &Config{NetworkClient: client})
 
@@ -172,6 +175,7 @@ func TestCurlSupportsLegacyAttachedShortValues(t *testing.T) {
 }
 
 func TestCurlSupportsURLEncodedDataAndForgivingHeaders(t *testing.T) {
+	t.Parallel()
 	client := &curlStubClient{}
 	session := newSession(t, &Config{NetworkClient: client})
 
@@ -208,6 +212,7 @@ func TestCurlSupportsURLEncodedDataAndForgivingHeaders(t *testing.T) {
 }
 
 func TestCurlSupportsMultipartAndUploadFile(t *testing.T) {
+	t.Parallel()
 	client := &curlStubClient{}
 	session := newSession(t, &Config{NetworkClient: client})
 	writeSessionFile(t, session, "/tmp/upload.bin", []byte("file\x00data"))
@@ -263,6 +268,7 @@ func TestCurlSupportsMultipartAndUploadFile(t *testing.T) {
 }
 
 func TestCurlVerboseAndHeadOutputMatchUpstreamShape(t *testing.T) {
+	t.Parallel()
 	client := &curlStubClient{
 		do: func(_ context.Context, req *network.Request) (*network.Response, error) {
 			return &network.Response{
@@ -312,6 +318,7 @@ func TestCurlVerboseAndHeadOutputMatchUpstreamShape(t *testing.T) {
 }
 
 func TestCurlUsesUpstreamExitCodes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		script     string
@@ -374,6 +381,7 @@ func TestCurlUsesUpstreamExitCodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			rt := newRuntime(t, &Config{NetworkClient: tt.client})
 			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tt.script})
 			if err != nil {

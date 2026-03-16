@@ -10,6 +10,7 @@ import (
 )
 
 func TestCksumDefaultCRCMatchesKnownValues(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/empty.txt", nil)
 	writeSessionFile(t, session, "/tmp/chars.txt", []byte("123456789"))
@@ -35,6 +36,7 @@ func TestCksumDefaultCRCMatchesKnownValues(t *testing.T) {
 }
 
 func TestCksumModernOutputModesAndLengths(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	data := []byte("mode-data")
 	writeSessionFile(t, session, "/tmp/input.txt", data)
@@ -60,6 +62,7 @@ func TestCksumModernOutputModesAndLengths(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := mustExecSession(t, session, tc.script)
 			if result.ExitCode != 0 {
 				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
@@ -72,6 +75,7 @@ func TestCksumModernOutputModesAndLengths(t *testing.T) {
 }
 
 func TestCksumCheckModeAndValidation(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	data := []byte("verify-me")
 	writeSessionFile(t, session, "/tmp/input.txt", data)
@@ -109,6 +113,7 @@ func TestCksumCheckModeAndValidation(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result := mustExecSession(t, session, tc.script)
 			if tc.ok && result.ExitCode != 0 {
 				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
@@ -127,6 +132,7 @@ func TestCksumCheckModeAndValidation(t *testing.T) {
 }
 
 func TestCksumZeroAndRawModes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	data := []byte("zero-raw")
 	writeSessionFile(t, session, "/tmp/input.txt", data)

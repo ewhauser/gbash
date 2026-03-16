@@ -20,6 +20,7 @@ func TestBenchmarkBackendsSymlinkSemantics(t *testing.T) {
 
 	for _, backend := range benchmarkBackends() {
 		t.Run(backend.name, func(t *testing.T) {
+			t.Parallel()
 			fsys := backend.new(t)
 			writeFile(t, fsys, "/safe/target.txt", "hello\n")
 			if err := fsys.Symlink(context.Background(), "target.txt", "/safe/link.txt"); err != nil {
@@ -62,6 +63,7 @@ func TestBenchmarkBackendsSymlinkLoopFails(t *testing.T) {
 
 	for _, backend := range benchmarkBackends() {
 		t.Run(backend.name, func(t *testing.T) {
+			t.Parallel()
 			fsys := backend.new(t)
 			if err := fsys.Symlink(context.Background(), "b", "/a"); err != nil {
 				t.Fatalf("Symlink(a) error = %v", err)
@@ -86,6 +88,7 @@ func TestBenchmarkBackendsLazyHardLinksShareProvider(t *testing.T) {
 
 	for _, backend := range benchmarkBackends() {
 		t.Run(backend.name, func(t *testing.T) {
+			t.Parallel()
 			var calls atomic.Int32
 			fsys := backend.seeded(t, gbfs.InitialFiles{
 				"/lazy.txt": {
@@ -114,6 +117,7 @@ func TestBenchmarkBackendsCloneIsolation(t *testing.T) {
 
 	for _, backend := range benchmarkBackends() {
 		t.Run(backend.name, func(t *testing.T) {
+			t.Parallel()
 			base := backend.seeded(t, gbfs.InitialFiles{
 				"/data.txt": {Content: []byte("base\n")},
 			})
@@ -142,6 +146,7 @@ func TestBenchmarkBackendsChownPreservesModTime(t *testing.T) {
 
 	for _, backend := range benchmarkBackends() {
 		t.Run(backend.name, func(t *testing.T) {
+			t.Parallel()
 			fsys := backend.seeded(t, gbfs.InitialFiles{
 				"/data.txt": {Content: []byte("data\n")},
 			})
@@ -176,6 +181,7 @@ func TestBenchmarkBackendsRenameIntoSymlinkedDirectoryAllowsMissingLeaf(t *testi
 
 	for _, backend := range benchmarkBackends() {
 		t.Run(backend.name, func(t *testing.T) {
+			t.Parallel()
 			fsys := backend.new(t)
 			writeFile(t, fsys, "/from.txt", "payload\n")
 			writeFile(t, fsys, "/real/existing.txt", "existing\n")
@@ -204,7 +210,9 @@ func TestBenchmarkBackendsSymlinkCreationInSymlinkedDirectory(t *testing.T) {
 
 	for _, backend := range benchmarkBackends() {
 		t.Run(backend.name, func(t *testing.T) {
+			t.Parallel()
 			t.Run("missing leaf", func(t *testing.T) {
+				t.Parallel()
 				fsys := backend.new(t)
 				writeFile(t, fsys, "/real/existing.txt", "existing\n")
 				if err := fsys.Symlink(context.Background(), "/real", "/link"); err != nil {
@@ -228,6 +236,7 @@ func TestBenchmarkBackendsSymlinkCreationInSymlinkedDirectory(t *testing.T) {
 			})
 
 			t.Run("existing leaf", func(t *testing.T) {
+				t.Parallel()
 				fsys := backend.new(t)
 				writeFile(t, fsys, "/real/new.txt", "original\n")
 				if err := fsys.Symlink(context.Background(), "/real", "/link"); err != nil {
@@ -244,6 +253,7 @@ func TestBenchmarkBackendsSymlinkCreationInSymlinkedDirectory(t *testing.T) {
 			})
 
 			t.Run("final symlink literal path", func(t *testing.T) {
+				t.Parallel()
 				fsys := backend.new(t)
 				if err := fsys.Symlink(context.Background(), "/real/missing.txt", "/link"); err != nil {
 					t.Fatalf("Symlink(/link) error = %v", err)
@@ -273,6 +283,7 @@ func TestBenchmarkBackendsConcurrentReadDirOnDirtyDirectory(t *testing.T) {
 
 	for _, backend := range benchmarkBackends() {
 		t.Run(backend.name, func(t *testing.T) {
+			t.Parallel()
 			fsys := backend.new(t)
 			for i := range 64 {
 				writeFile(t, fsys, fmt.Sprintf("/dir/file%03d.txt", i), "x\n")
@@ -308,6 +319,7 @@ func TestBenchmarkBackendsSnapshotAndOverlay(t *testing.T) {
 
 	for _, backend := range benchmarkBackends() {
 		t.Run(backend.name, func(t *testing.T) {
+			t.Parallel()
 			base := backend.seeded(t, gbfs.InitialFiles{
 				"/base.txt":       {Content: []byte("base\n")},
 				"/shared/old.txt": {Content: []byte("old\n")},

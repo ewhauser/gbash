@@ -100,6 +100,7 @@ func registryWithSubexecProbe(t *testing.T) *commands.Registry {
 }
 
 func TestInvocationExecInheritsEnvDirAndSessionState(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{Registry: registryWithSubexecProbe(t)})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -117,6 +118,7 @@ func TestInvocationExecInheritsEnvDirAndSessionState(t *testing.T) {
 }
 
 func TestInvocationExecUsesSameSessionFilesystem(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{Registry: registryWithSubexecProbe(t)})
 
 	result := mustExecSession(t, session, "echo nested > note.txt\nsubexecprobe write\ncat nested.txt\n")
@@ -129,6 +131,7 @@ func TestInvocationExecUsesSameSessionFilesystem(t *testing.T) {
 }
 
 func TestInvocationExecStaysWithinSessionPolicyBoundary(t *testing.T) {
+	t.Parallel()
 	registry := registryWithSubexecProbe(t)
 	rt := newRuntime(t, &Config{
 		Registry: registry,
@@ -162,6 +165,7 @@ func TestInvocationExecStaysWithinSessionPolicyBoundary(t *testing.T) {
 }
 
 func TestInvocationExecReturns127ForMissingDirectCommand(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{Registry: registryWithSubexecProbe(t)})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -179,6 +183,7 @@ func TestInvocationExecReturns127ForMissingDirectCommand(t *testing.T) {
 }
 
 func TestInvocationExecRunsShebangBackedCommand(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{Registry: registryWithSubexecProbe(t)})
 	writeSessionFile(t, session, "/tmp/subexec-script.sh", []byte("#!/bin/sh\nprintf 'script:%s\\n' \"$1\"\n"))
 

@@ -8,6 +8,7 @@ import (
 )
 
 func TestPrintfReusesFormatAndHonorsStop(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -25,6 +26,7 @@ func TestPrintfReusesFormatAndHonorsStop(t *testing.T) {
 }
 
 func TestPrintfSupportsBareOctalEscapes(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -42,6 +44,7 @@ func TestPrintfSupportsBareOctalEscapes(t *testing.T) {
 }
 
 func TestCommSupportsStdinAndColumnSuppression(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -59,6 +62,7 @@ func TestCommSupportsStdinAndColumnSuppression(t *testing.T) {
 }
 
 func TestCommSupportsExplicitColumnFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -76,6 +80,7 @@ func TestCommSupportsExplicitColumnFlags(t *testing.T) {
 }
 
 func TestCommSupportsTotalDelimiterAndZeroTerminated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -94,6 +99,7 @@ func TestCommSupportsTotalDelimiterAndZeroTerminated(t *testing.T) {
 }
 
 func TestCommRejectsConflictingRepeatedOutputDelimiters(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -114,6 +120,7 @@ func TestCommRejectsConflictingRepeatedOutputDelimiters(t *testing.T) {
 }
 
 func TestCommSupportsEmptyOutputDelimiter(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -135,6 +142,7 @@ func TestCommSupportsEmptyOutputDelimiter(t *testing.T) {
 }
 
 func TestCommSupportsCheckOrderAndNoCheckOrder(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	defaultResult, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -187,6 +195,7 @@ func TestCommSupportsCheckOrderAndNoCheckOrder(t *testing.T) {
 }
 
 func TestCommReportsGNUOperandErrors(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	missingAfter, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -217,6 +226,7 @@ func TestCommReportsGNUOperandErrors(t *testing.T) {
 }
 
 func TestPasteSupportsRepeatedStdin(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -234,6 +244,7 @@ func TestPasteSupportsRepeatedStdin(t *testing.T) {
 }
 
 func TestPasteSerialSupportsCustomDelimiter(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -251,6 +262,7 @@ func TestPasteSerialSupportsCustomDelimiter(t *testing.T) {
 }
 
 func TestPasteSupportsLongFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -268,6 +280,7 @@ func TestPasteSupportsLongFlags(t *testing.T) {
 }
 
 func TestTRTranslatesRanges(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -285,6 +298,7 @@ func TestTRTranslatesRanges(t *testing.T) {
 }
 
 func TestTRSupportsComplementDelete(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -302,6 +316,7 @@ func TestTRSupportsComplementDelete(t *testing.T) {
 }
 
 func TestTRSupportsLongDeleteAndSqueezeFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -319,6 +334,7 @@ func TestTRSupportsLongDeleteAndSqueezeFlags(t *testing.T) {
 }
 
 func TestRevHandlesUnicode(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -336,6 +352,7 @@ func TestRevHandlesUnicode(t *testing.T) {
 }
 
 func TestNLSupportsFormattingControls(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -353,6 +370,7 @@ func TestNLSupportsFormattingControls(t *testing.T) {
 }
 
 func TestNLSupportsNumberFormats(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -370,6 +388,7 @@ func TestNLSupportsNumberFormats(t *testing.T) {
 }
 
 func TestJoinSupportsCustomOutputAndUnpairedLines(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -387,6 +406,7 @@ func TestJoinSupportsCustomOutputAndUnpairedLines(t *testing.T) {
 }
 
 func TestSplitWritesNumberedChunks(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.txt", []byte("one\ntwo\nthree\nfour\nfive\n"))
 
@@ -412,6 +432,7 @@ func TestSplitWritesNumberedChunks(t *testing.T) {
 }
 
 func TestSplitSupportsChunkingAndAdditionalSuffix(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.txt", []byte("abcdef"))
 
@@ -434,6 +455,7 @@ func TestSplitSupportsChunkingAndAdditionalSuffix(t *testing.T) {
 }
 
 func TestTacReversesLineOrder(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -451,6 +473,7 @@ func TestTacReversesLineOrder(t *testing.T) {
 }
 
 func TestTacSupportsSeparatorAndBeforeFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -468,6 +491,7 @@ func TestTacSupportsSeparatorAndBeforeFlags(t *testing.T) {
 }
 
 func TestTacSupportsRegexSeparator(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -485,6 +509,7 @@ func TestTacSupportsRegexSeparator(t *testing.T) {
 }
 
 func TestDiffEmitsUnifiedDiff(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -504,6 +529,7 @@ func TestDiffEmitsUnifiedDiff(t *testing.T) {
 }
 
 func TestDiffReportsIdenticalFiles(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -521,6 +547,7 @@ func TestDiffReportsIdenticalFiles(t *testing.T) {
 }
 
 func TestDiffSupportsLongFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -538,6 +565,7 @@ func TestDiffSupportsLongFlags(t *testing.T) {
 }
 
 func TestBase64RoundTripsThroughPipelines(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -555,6 +583,7 @@ func TestBase64RoundTripsThroughPipelines(t *testing.T) {
 }
 
 func TestBase64SupportsLongWrapFlag(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -572,6 +601,7 @@ func TestBase64SupportsLongWrapFlag(t *testing.T) {
 }
 
 func TestBase64DecodeIgnoresWhitespace(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

@@ -7,6 +7,7 @@ import (
 )
 
 func TestFactorHelp(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -35,6 +36,7 @@ func TestFactorHelp(t *testing.T) {
 }
 
 func TestFactorVersion(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -55,6 +57,7 @@ func TestFactorVersion(t *testing.T) {
 }
 
 func TestFactorSupportsArgumentsExponentFormsAndLongInference(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -85,6 +88,7 @@ func TestFactorSupportsArgumentsExponentFormsAndLongInference(t *testing.T) {
 }
 
 func TestFactorKeepsGoingAfterInvalidNumbers(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -107,6 +111,7 @@ func TestFactorKeepsGoingAfterInvalidNumbers(t *testing.T) {
 }
 
 func TestFactorMatchesUpstreamStdinTokenizationForBinaryInput(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	input := []byte("\x00 \xff\x00\xff\xaa\x00\xaa\x44 a&#2\n6 9\x003\xc024\t2\t\t4\x000+4\xff \xf7\xc1")
 	writeSessionFile(t, session, "/tmp/factor-input.bin", input)
@@ -136,6 +141,7 @@ func TestFactorMatchesUpstreamStdinTokenizationForBinaryInput(t *testing.T) {
 }
 
 func TestFactorHandlesLargeNumbersBeyondUint64AndUint128(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -167,6 +173,7 @@ func TestFactorHandlesLargeNumbersBeyondUint64AndUint128(t *testing.T) {
 }
 
 func TestFactorRejectsNegativeOptionLikeGNUFactor(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

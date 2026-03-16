@@ -25,6 +25,7 @@ func (stubNetworkClient) Do(_ context.Context, req *network.Request) (*network.R
 }
 
 func TestCustomCommandInvocationCapabilities(t *testing.T) {
+	t.Parallel()
 	registry := builtins.DefaultRegistry()
 	if err := registry.Register(commands.DefineCommand("capsprobe", func(ctx context.Context, inv *commands.Invocation) error {
 		if inv.Cwd == "" {

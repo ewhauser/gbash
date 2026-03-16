@@ -7,6 +7,7 @@ import (
 )
 
 func TestTimeoutSupportsLongKillAfterAndSignalFlagsIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -27,6 +28,7 @@ func TestTimeoutSupportsLongKillAfterAndSignalFlagsIsolated(t *testing.T) {
 }
 
 func TestTimeoutSupportsForegroundPreserveStatusAndVerboseFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -53,6 +55,7 @@ func TestTimeoutSupportsForegroundPreserveStatusAndVerboseFlags(t *testing.T) {
 }
 
 func TestTimeoutPreserveStatusReturnsSignalExitCodeOnTimeout(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -67,6 +70,7 @@ func TestTimeoutPreserveStatusReturnsSignalExitCodeOnTimeout(t *testing.T) {
 }
 
 func TestTimeoutRejectsInvalidDurationAndSignalWith125(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -87,6 +91,7 @@ func TestTimeoutRejectsInvalidDurationAndSignalWith125(t *testing.T) {
 }
 
 func TestTimeoutStopsOptionParsingAtDuration(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -104,6 +109,7 @@ func TestTimeoutStopsOptionParsingAtDuration(t *testing.T) {
 }
 
 func TestTimeoutShortNestedCommandAvoidsShellTrampolineOverhead(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	const script = "if true; then timeout 0.01 sleep 0.001; else sed -n '1,3p' /tmp/text.txt; fi\n"

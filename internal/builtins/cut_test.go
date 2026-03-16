@@ -6,6 +6,7 @@ import (
 )
 
 func TestCutSupportsLongOnlyDelimitedFlagIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -23,6 +24,7 @@ func TestCutSupportsLongOnlyDelimitedFlagIsolated(t *testing.T) {
 }
 
 func TestCutSupportsByteSelectionOnBinaryInput(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.bin", []byte{0xc3, '|', 'x'})
 
@@ -41,6 +43,7 @@ func TestCutSupportsByteSelectionOnBinaryInput(t *testing.T) {
 }
 
 func TestCutSupportsOutputDelimiterAndComplement(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -60,6 +63,7 @@ func TestCutSupportsOutputDelimiterAndComplement(t *testing.T) {
 }
 
 func TestCutSupportsNewlineDelimiterAndZeroTerminatedRecords(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

@@ -15,6 +15,7 @@ import (
 const hostOverlayVirtualRoot = "/home/agent/project"
 
 func TestOverlayFactoryWithHostLowerSupportsCopyOnWrite(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "seed.txt"), []byte("seed\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -49,6 +50,7 @@ func TestOverlayFactoryWithHostLowerSupportsCopyOnWrite(t *testing.T) {
 }
 
 func TestOverlayHostLowerTombstonesDoNotDeleteHostFiles(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "seed.txt"), []byte("seed\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -84,6 +86,7 @@ func TestOverlayHostLowerTombstonesDoNotDeleteHostFiles(t *testing.T) {
 }
 
 func TestOverlayHostLowerDefaultPolicyDeniesSymlinkTraversal(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "target.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -113,6 +116,7 @@ func TestOverlayHostLowerDefaultPolicyDeniesSymlinkTraversal(t *testing.T) {
 }
 
 func TestOverlayHostLowerFollowModeAllowsInRootSymlinkReads(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "target.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)

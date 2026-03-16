@@ -14,6 +14,7 @@ import (
 )
 
 func TestTouchCreatesFilesAndPreservesExistingContent(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/home/agent/existing.txt", []byte("keep\n"))
@@ -44,6 +45,7 @@ func TestTouchCreatesFilesAndPreservesExistingContent(t *testing.T) {
 }
 
 func TestTouchSupportsNoCreateAndDateParsing(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "touch -c missing.txt\ntouch -d 2024-01-02 dated.txt\n")
@@ -63,6 +65,7 @@ func TestTouchSupportsNoCreateAndDateParsing(t *testing.T) {
 }
 
 func TestTruncateCreatesAndResizesFiles(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/home/agent/target.txt", []byte("1234567890"))
 
@@ -83,6 +86,7 @@ func TestTruncateCreatesAndResizesFiles(t *testing.T) {
 }
 
 func TestTruncateRelativeModes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	for _, name := range []string{"at-most.txt", "at-least.txt", "round-down.txt", "round-up.txt"} {
 		writeSessionFile(t, session, "/home/agent/"+name, []byte("1234567890"))
@@ -98,6 +102,7 @@ func TestTruncateRelativeModes(t *testing.T) {
 }
 
 func TestTruncateReferenceAndNoCreate(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/home/agent/ref.txt", []byte("1234567890"))
 
@@ -115,7 +120,9 @@ func TestTruncateReferenceAndNoCreate(t *testing.T) {
 }
 
 func TestTruncateReportsErrors(t *testing.T) {
+	t.Parallel()
 	t.Run("missing file operand", func(t *testing.T) {
+		t.Parallel()
 		session := newSession(t, &Config{})
 		result := mustExecSession(t, session, "truncate -s 1\n")
 		if result.ExitCode == 0 {
@@ -127,6 +134,7 @@ func TestTruncateReportsErrors(t *testing.T) {
 	})
 
 	t.Run("missing size or reference", func(t *testing.T) {
+		t.Parallel()
 		session := newSession(t, &Config{})
 		writeSessionFile(t, session, "/home/agent/file.txt", []byte("1234"))
 
@@ -140,6 +148,7 @@ func TestTruncateReportsErrors(t *testing.T) {
 	})
 
 	t.Run("invalid size", func(t *testing.T) {
+		t.Parallel()
 		session := newSession(t, &Config{})
 		result := mustExecSession(t, session, "truncate -s 0B /home/agent/file.txt\n")
 		if result.ExitCode == 0 {
@@ -151,6 +160,7 @@ func TestTruncateReportsErrors(t *testing.T) {
 	})
 
 	t.Run("division by zero", func(t *testing.T) {
+		t.Parallel()
 		session := newSession(t, &Config{})
 		writeSessionFile(t, session, "/home/agent/file.txt", []byte("1234"))
 
@@ -164,6 +174,7 @@ func TestTruncateReportsErrors(t *testing.T) {
 	})
 
 	t.Run("missing reference file", func(t *testing.T) {
+		t.Parallel()
 		session := newSession(t, &Config{})
 		result := mustExecSession(t, session, "truncate -r /home/agent/missing.ref /home/agent/file.txt\n")
 		if result.ExitCode == 0 {
@@ -175,6 +186,7 @@ func TestTruncateReportsErrors(t *testing.T) {
 	})
 
 	t.Run("missing parent directory", func(t *testing.T) {
+		t.Parallel()
 		session := newSession(t, &Config{})
 		result := mustExecSession(t, session, "truncate -s 0 /home/agent/missing/child.txt\n")
 		if result.ExitCode == 0 {
@@ -187,6 +199,7 @@ func TestTruncateReportsErrors(t *testing.T) {
 }
 
 func TestTruncateNoCreateIgnoresMissingTargets(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "truncate -c -s 8 /home/agent/missing/child.txt\n")
@@ -202,6 +215,7 @@ func TestTruncateNoCreateIgnoresMissingTargets(t *testing.T) {
 }
 
 func TestRmdirRemovesEmptyDirectoriesAndParents(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "mkdir -p /home/agent/a/b/c\nrmdir -p /home/agent/a/b/c\n")
@@ -216,6 +230,7 @@ func TestRmdirRemovesEmptyDirectoriesAndParents(t *testing.T) {
 }
 
 func TestRmdirRejectsNonEmptyDirectories(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "mkdir -p /home/agent/dir\necho hi > /home/agent/dir/file.txt\nrmdir /home/agent/dir\n")
@@ -228,6 +243,7 @@ func TestRmdirRejectsNonEmptyDirectories(t *testing.T) {
 }
 
 func TestRmdirIgnoresFailOnNonEmptyParents(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "mkdir -p a/b/c a/x\nrmdir -p --ignore-fail-on-non-empty a/b/c\n")
@@ -248,6 +264,7 @@ func TestRmdirIgnoresFailOnNonEmptyParents(t *testing.T) {
 }
 
 func TestRmdirReportsSymlinkSlashErrors(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -287,6 +304,7 @@ func TestRmdirReportsSymlinkSlashErrors(t *testing.T) {
 }
 
 func TestRmdirParentsKeepRelativeSymlinkDiagnostics(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -313,6 +331,7 @@ func TestRmdirParentsKeepRelativeSymlinkDiagnostics(t *testing.T) {
 }
 
 func TestLNCreatesSymlinkAndReadlinkPrintsTarget(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -335,6 +354,7 @@ func TestLNCreatesSymlinkAndReadlinkPrintsTarget(t *testing.T) {
 }
 
 func TestReadlinkCanonicalizeModes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -367,6 +387,7 @@ func TestReadlinkCanonicalizeModes(t *testing.T) {
 }
 
 func TestReadlinkZeroAndNoNewlineWithMultipleArgs(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "readlink -n -m --zero /1 /1\n")
@@ -379,6 +400,7 @@ func TestReadlinkZeroAndNoNewlineWithMultipleArgs(t *testing.T) {
 }
 
 func TestReadlinkPosixAndVerboseErrors(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -413,6 +435,7 @@ func TestReadlinkPosixAndVerboseErrors(t *testing.T) {
 }
 
 func TestRealpathModesAndFormatting(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -457,6 +480,7 @@ func TestRealpathModesAndFormatting(t *testing.T) {
 }
 
 func TestRealpathCanonicalizeAndRelativeOptions(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -510,6 +534,7 @@ func TestRealpathCanonicalizeAndRelativeOptions(t *testing.T) {
 }
 
 func TestRealpathErrorsContinueAndQuiet(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -554,6 +579,7 @@ func TestRealpathErrorsContinueAndQuiet(t *testing.T) {
 }
 
 func TestRealpathTrailingSlashAndRelativeDirectoryChecks(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -624,6 +650,7 @@ func TestRealpathTrailingSlashAndRelativeDirectoryChecks(t *testing.T) {
 }
 
 func TestRealpathRejectsEmptyOperandsAndSupportsVersion(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	emptyOperand := mustExecSession(t, session, "realpath ''\n")
@@ -652,6 +679,7 @@ func TestRealpathRejectsEmptyOperandsAndSupportsVersion(t *testing.T) {
 }
 
 func TestMktempCreatesFilesAndDirectories(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	setup := mustExecSession(t, session, "mkdir -p nested\n")
@@ -702,6 +730,7 @@ func TestMktempCreatesFilesAndDirectories(t *testing.T) {
 }
 
 func TestMktempSupportsDryRunSuffixAndQuiet(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "mktemp -u --suffix=.txt dry.XXXX\nmktemp --suffix=.log keep.XXXX\n")
@@ -736,6 +765,7 @@ func TestMktempSupportsDryRunSuffixAndQuiet(t *testing.T) {
 }
 
 func TestMktempTmpdirAndDeprecatedTHandling(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	setup := mustExecSession(t, session, "mkdir -p a\n")
@@ -802,6 +832,7 @@ func TestMktempTmpdirAndDeprecatedTHandling(t *testing.T) {
 }
 
 func TestMktempTreatsEmptyTmpdirValuesAsFallback(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "TMPDIR=. mktemp -p ''\nTMPDIR=. mktemp --tmpdir=\n")
@@ -824,6 +855,7 @@ func TestMktempTreatsEmptyTmpdirValuesAsFallback(t *testing.T) {
 }
 
 func TestMktempRejectsInvalidTemplates(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		script     string
@@ -868,6 +900,7 @@ func TestMktempRejectsInvalidTemplates(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			session := newSession(t, &Config{})
 			result := mustExecSession(t, session, tt.script)
 			if result.ExitCode == 0 {
@@ -888,6 +921,7 @@ func mktempRuntimePath(name string) string {
 }
 
 func TestReadlinkExistingFailsForRemovedWorkingDirectory(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -906,6 +940,7 @@ func TestReadlinkExistingFailsForRemovedWorkingDirectory(t *testing.T) {
 }
 
 func TestLNHardLinkSharesContent(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo original > /home/agent/src.txt\nln /home/agent/src.txt /home/agent/dst.txt\necho updated > /home/agent/dst.txt\ncat /home/agent/src.txt\n")
@@ -918,6 +953,7 @@ func TestLNHardLinkSharesContent(t *testing.T) {
 }
 
 func TestLNAcceptsGroupedShortSymlinkFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "ln -s target1 /home/agent/link\nln -nsf target2 /home/agent/link\nreadlink /home/agent/link\n")
@@ -930,6 +966,7 @@ func TestLNAcceptsGroupedShortSymlinkFlags(t *testing.T) {
 }
 
 func TestLinkHardLinkSharesContent(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo original > /home/agent/src.txt\nlink /home/agent/src.txt /home/agent/dst.txt\necho updated > /home/agent/dst.txt\ncat /home/agent/src.txt\n")
@@ -942,6 +979,7 @@ func TestLinkHardLinkSharesContent(t *testing.T) {
 }
 
 func TestLinkReportsMissingSource(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "link /home/agent/missing.txt /home/agent/dst.txt\n")
@@ -954,6 +992,7 @@ func TestLinkReportsMissingSource(t *testing.T) {
 }
 
 func TestUnlinkRemovesFile(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/home/agent/file.txt", []byte("data\n"))
@@ -971,6 +1010,7 @@ func TestUnlinkRemovesFile(t *testing.T) {
 }
 
 func TestUnlinkRemovesSymlinkOnly(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo target > /home/agent/target.txt\nln -s /home/agent/target.txt /home/agent/link.txt\nunlink /home/agent/link.txt\n")
@@ -986,6 +1026,7 @@ func TestUnlinkRemovesSymlinkOnly(t *testing.T) {
 }
 
 func TestUnlinkSupportsDashedPaths(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo data > /home/agent/--dash\nunlink -- --dash\n")
@@ -998,6 +1039,7 @@ func TestUnlinkSupportsDashedPaths(t *testing.T) {
 }
 
 func TestUnlinkHelpAndVersion(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		script     string
@@ -1027,6 +1069,7 @@ func TestUnlinkHelpAndVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			session := newSession(t, &Config{})
 
 			result := mustExecSession(t, session, tt.script)
@@ -1044,6 +1087,7 @@ func TestUnlinkHelpAndVersion(t *testing.T) {
 }
 
 func TestUnlinkUsageErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		script     string
@@ -1073,6 +1117,7 @@ func TestUnlinkUsageErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			session := newSession(t, &Config{})
 
 			result := mustExecSession(t, session, tt.script)
@@ -1090,6 +1135,7 @@ func TestUnlinkUsageErrors(t *testing.T) {
 }
 
 func TestUnlinkReportsPathErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		setup      string
@@ -1111,6 +1157,7 @@ func TestUnlinkReportsPathErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			session := newSession(t, &Config{})
 
 			if tt.setup != "" {
@@ -1135,6 +1182,7 @@ func TestUnlinkReportsPathErrors(t *testing.T) {
 }
 
 func TestChmodSupportsOctalAndSymbolicModes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo hi > /home/agent/file.txt\nchmod 755 /home/agent/file.txt\nstat -c '%a %A' /home/agent/file.txt\nchmod g-w,u+x /home/agent/file.txt\nstat -c '%a %A' /home/agent/file.txt\n")
@@ -1154,6 +1202,7 @@ func TestChmodSupportsOctalAndSymbolicModes(t *testing.T) {
 }
 
 func TestChmodSymbolicModeUsesSandboxUmask(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo hi > /home/agent/file.txt\nchmod 444 /home/agent/file.txt\nchmod +w /home/agent/file.txt\nstat -c '%a %A' /home/agent/file.txt\n")
@@ -1166,6 +1215,7 @@ func TestChmodSymbolicModeUsesSandboxUmask(t *testing.T) {
 }
 
 func TestChmodSymbolicEqualsHonorsShellUmask(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "umask 005\necho hi > /home/agent/file.txt\nchmod 644 /home/agent/file.txt\nchmod a=r,=x /home/agent/file.txt\nstat -c '%a %A' /home/agent/file.txt\n")
@@ -1178,6 +1228,7 @@ func TestChmodSymbolicEqualsHonorsShellUmask(t *testing.T) {
 }
 
 func TestChmodSupportsNegativeModeOperands(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo hi > /home/agent/file.txt\nchmod 644 /home/agent/file.txt\nchmod -w /home/agent/file.txt\nstat -c '%a' /home/agent/file.txt\nchmod -w -w /home/agent/file.txt\nstat -c '%a' /home/agent/file.txt\necho hi > /home/agent/later.txt\nchmod 644 /home/agent/later.txt\nchmod /home/agent/later.txt -w\nstat -c '%a' /home/agent/later.txt\n")
@@ -1200,6 +1251,7 @@ func TestChmodSupportsNegativeModeOperands(t *testing.T) {
 }
 
 func TestChmodReportsPartialImplicitWhoApplication(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo hi > /home/agent/file.txt\nchmod 755 /home/agent/file.txt\numask 077\nchmod -x /home/agent/file.txt\nprintf 'status=%s\\n' \"$?\"\nstat -c '%a %A' /home/agent/file.txt\n")
@@ -1222,6 +1274,7 @@ func TestChmodReportsPartialImplicitWhoApplication(t *testing.T) {
 }
 
 func TestChmodQuietSuppressesMissingFileDiagnostics(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "chmod -f 0 /home/agent/missing\n")
@@ -1234,6 +1287,7 @@ func TestChmodQuietSuppressesMissingFileDiagnostics(t *testing.T) {
 }
 
 func TestChmodDanglingSymlinkMatchesGNUDiagnostic(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "ln -s missing /home/agent/dangle\nchmod 644 /home/agent/dangle\n")
@@ -1246,6 +1300,7 @@ func TestChmodDanglingSymlinkMatchesGNUDiagnostic(t *testing.T) {
 }
 
 func TestChmodRecursiveDefaultsToTraverseFirstOnCLIArgs(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -1271,6 +1326,7 @@ func TestChmodRecursiveDefaultsToTraverseFirstOnCLIArgs(t *testing.T) {
 }
 
 func TestChmodSupportsRecursiveMode(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "mkdir -p /home/agent/dir/sub\necho hi > /home/agent/dir/sub/file.txt\nchmod -R 700 /home/agent/dir\nstat -c '%a' /home/agent/dir/sub/file.txt\n")
@@ -1283,6 +1339,7 @@ func TestChmodSupportsRecursiveMode(t *testing.T) {
 }
 
 func TestChmodAcceptsRecursiveOptionAfterMode(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "mkdir -p /home/agent/dir/sub\necho hi > /home/agent/dir/sub/file.txt\nchmod 444 /home/agent/dir/sub/file.txt\nchmod u+w -R /home/agent/dir\nstat -c '%a' /home/agent/dir/sub/file.txt\n")
@@ -1295,6 +1352,7 @@ func TestChmodAcceptsRecursiveOptionAfterMode(t *testing.T) {
 }
 
 func TestChmodSupportsDoubleDashModeAndFiles(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo one > /home/agent/--\necho two > /home/agent/file.txt\nchmod -- -- /home/agent/file.txt\nstat -c '%a' /home/agent/--\nstat -c '%a' /home/agent/file.txt\nchmod -w -- /home/agent/-- /home/agent/file.txt\nstat -c '%a' /home/agent/--\nstat -c '%a' /home/agent/file.txt\n")
@@ -1320,6 +1378,7 @@ func TestChmodSupportsDoubleDashModeAndFiles(t *testing.T) {
 }
 
 func TestChmodRejectsMixedCopyAndLiteralPermissions(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo hi > /home/agent/file.txt\nchmod u+gr /home/agent/file.txt\n")
@@ -1332,6 +1391,7 @@ func TestChmodRejectsMixedCopyAndLiteralPermissions(t *testing.T) {
 }
 
 func TestChownSupportsNamedAndNumericOwners(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo hi > /home/agent/file.txt\nstat -c '%u:%g:%U:%G' /home/agent/file.txt\nchown 123:456 /home/agent/file.txt\nstat -c '%u:%g:%U:%G' /home/agent/file.txt\nchown agent:agent /home/agent/file.txt\nstat -c '%u:%g:%U:%G' /home/agent/file.txt\n")
@@ -1354,6 +1414,7 @@ func TestChownSupportsNamedAndNumericOwners(t *testing.T) {
 }
 
 func TestChownSupportsZeroOwnerIDs(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo hi > /home/agent/root.txt\nchown 0:0 /home/agent/root.txt\nstat -c '%u:%g:%U:%G' /home/agent/root.txt\n")
@@ -1366,6 +1427,7 @@ func TestChownSupportsZeroOwnerIDs(t *testing.T) {
 }
 
 func TestChownSupportsReferenceFromAndRecursiveFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "mkdir -p /home/agent/tree/sub\necho ref > /home/agent/ref.txt\necho one > /home/agent/tree/file.txt\necho two > /home/agent/tree/sub/file.txt\nchown 41:42 /home/agent/ref.txt\nchown --from=1000:1000 --reference=/home/agent/ref.txt /home/agent/tree/file.txt\nchown --from=7:8 99:100 /home/agent/tree/file.txt\nchown -R 51:52 /home/agent/tree\nstat -c '%u:%g' /home/agent/tree/file.txt\nstat -c '%u:%g' /home/agent/tree/sub/file.txt\n")
@@ -1384,6 +1446,7 @@ func TestChownSupportsReferenceFromAndRecursiveFlags(t *testing.T) {
 }
 
 func TestChownNoDereferenceTargetsTheSymlink(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -1419,6 +1482,7 @@ func TestChownNoDereferenceTargetsTheSymlink(t *testing.T) {
 }
 
 func TestChownDoesNotChangeModTime(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/home/agent/mtime.txt", []byte("hello\n"))
 
@@ -1443,6 +1507,7 @@ func TestChownDoesNotChangeModTime(t *testing.T) {
 }
 
 func TestChgrpSupportsNamedNumericAndColonGroups(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo hi > /home/agent/file.txt\nstat -c '%g:%G' /home/agent/file.txt\nchgrp 456 /home/agent/file.txt\nstat -c '%g:%G' /home/agent/file.txt\nchgrp agent /home/agent/file.txt\nstat -c '%g:%G' /home/agent/file.txt\nchgrp :789 /home/agent/file.txt\nstat -c '%g:%G' /home/agent/file.txt\n")
@@ -1468,6 +1533,7 @@ func TestChgrpSupportsNamedNumericAndColonGroups(t *testing.T) {
 }
 
 func TestChgrpAndChownQuietSuppressMissingFileDiagnostics(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "chgrp -f 0 /home/agent/missing\nchown -f 0:0 /home/agent/missing\n")
@@ -1480,6 +1546,7 @@ func TestChgrpAndChownQuietSuppressMissingFileDiagnostics(t *testing.T) {
 }
 
 func TestChownDereferenceRejectsDanglingSymlink(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "cd /home/agent\nln -s missing dangle\nchown --dereference 123 dangle\n")
@@ -1492,6 +1559,7 @@ func TestChownDereferenceRejectsDanglingSymlink(t *testing.T) {
 }
 
 func TestChownPreserveRootSkipsUntraversedChildSymlinkAndFormatsRootMessage(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -1513,6 +1581,7 @@ func TestChownPreserveRootSkipsUntraversedChildSymlinkAndFormatsRootMessage(t *t
 	}
 }
 func TestChgrpSupportsReferenceFromRecursiveAndTrailingReference(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "mkdir -p /home/agent/tree/sub\necho ref > /home/agent/ref.txt\necho one > /home/agent/tree/file1.txt\necho two > /home/agent/tree/file2.txt\necho three > /home/agent/tree/sub/file3.txt\nchgrp 41 /home/agent/ref.txt\nchgrp /home/agent/tree/file1.txt /home/agent/tree/file2.txt --reference /home/agent/ref.txt\nchgrp --from=41 52 /home/agent/tree/file1.txt\nchgrp --from=:41 :53 /home/agent/tree/file2.txt\nchgrp -R 61 /home/agent/tree/sub\nstat -c '%g' /home/agent/tree/file1.txt\nstat -c '%g' /home/agent/tree/file2.txt\nstat -c '%g' /home/agent/tree/sub/file3.txt\n")
@@ -1535,6 +1604,7 @@ func TestChgrpSupportsReferenceFromRecursiveAndTrailingReference(t *testing.T) {
 }
 
 func TestChgrpNoDereferenceTargetsTheSymlink(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -1570,6 +1640,7 @@ func TestChgrpNoDereferenceTargetsTheSymlink(t *testing.T) {
 }
 
 func TestChgrpInfersLongOptionsAfterPositionals(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "echo ref > /home/agent/ref.txt\necho target > /home/agent/target.txt\nchgrp 41 /home/agent/ref.txt\nchgrp --verb /home/agent/target.txt --ref=/home/agent/ref.txt\nstat -c '%g' /home/agent/target.txt\n")
@@ -1585,6 +1656,7 @@ func TestChgrpInfersLongOptionsAfterPositionals(t *testing.T) {
 }
 
 func TestChgrpPreserveRootUsesCommandName(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "chgrp --preserve-root -R 123 /\n")
@@ -1600,6 +1672,7 @@ func TestChgrpPreserveRootUsesCommandName(t *testing.T) {
 }
 
 func TestStatFormatsMultipleFilesAndContinuesOnError(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/home/agent/one.txt", []byte("hello"))
 
@@ -1616,6 +1689,7 @@ func TestStatFormatsMultipleFilesAndContinuesOnError(t *testing.T) {
 }
 
 func TestStatFormatsDeviceAndInodePlaceholders(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/home/agent/one.txt", []byte("hello"))
 
@@ -1629,6 +1703,7 @@ func TestStatFormatsDeviceAndInodePlaceholders(t *testing.T) {
 }
 
 func TestStatSupportsPrintfFormat(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/home/agent/target.txt", []byte("hello"))
 
@@ -1642,6 +1717,7 @@ func TestStatSupportsPrintfFormat(t *testing.T) {
 }
 
 func TestBasenameAndDirnameHandleSuffixesAndMultipleOperands(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
 		Script: "basename -a -s .txt /tmp/a.txt /tmp/b.txt\ndirname /tmp/a.txt plain /root/\n",
@@ -1658,6 +1734,7 @@ func TestBasenameAndDirnameHandleSuffixesAndMultipleOperands(t *testing.T) {
 }
 
 func TestDirnameMatchesGNUStringSemanticsAndZeroTerminator(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
 		Script: "dirname '///a///b' '///a//b/' 'foo/.'\ndirname -z '///a///b' ''\n",
@@ -1674,6 +1751,7 @@ func TestDirnameMatchesGNUStringSemanticsAndZeroTerminator(t *testing.T) {
 }
 
 func TestDirnameMissingOperandIncludesHelpHint(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
 		Script: "dirname\n",
@@ -1690,6 +1768,7 @@ func TestDirnameMissingOperandIncludesHelpHint(t *testing.T) {
 }
 
 func TestBasenameSupportsLongSuffixFlag(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -1707,6 +1786,7 @@ func TestBasenameSupportsLongSuffixFlag(t *testing.T) {
 }
 
 func TestTreeShowsHiddenFilesAndDepthLimits(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "mkdir -p /home/agent/dir/sub\necho hi > /home/agent/dir/file.txt\necho hidden > /home/agent/dir/.secret\necho nested > /home/agent/dir/sub/nested.txt\ntree -L 1 /home/agent/dir\necho ---\ntree -a -L 1 /home/agent/dir\n")
@@ -1726,6 +1806,7 @@ func TestTreeShowsHiddenFilesAndDepthLimits(t *testing.T) {
 }
 
 func TestDUReportsSummaryAllEntriesAndTotals(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "mkdir -p /home/agent/dir/sub\necho -n hello > /home/agent/dir/a.txt\necho -n world!! > /home/agent/dir/sub/b.txt\ndu -a /home/agent/dir\ndu -s -c /home/agent/dir /home/agent/dir/sub\n")
@@ -1741,6 +1822,7 @@ func TestDUReportsSummaryAllEntriesAndTotals(t *testing.T) {
 }
 
 func TestFileDetectsMagicTextAndDirectories(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/home/agent/image.png", []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0x00})
 	writeSessionFile(t, session, "/home/agent/script.sh", []byte("#!/bin/sh\necho hi\n"))
@@ -1768,6 +1850,7 @@ func TestFileDetectsMagicTextAndDirectories(t *testing.T) {
 }
 
 func TestFileMissingPathReportsErrorOnStdout(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 	result, err := rt.Run(context.Background(), &ExecutionRequest{Script: "file /missing\n"})
 	if err != nil {
@@ -1782,6 +1865,7 @@ func TestFileMissingPathReportsErrorOnStdout(t *testing.T) {
 }
 
 func TestFileSupportsLongBriefAndMimeFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/home/agent/note.txt", []byte("hello\n"))
 
@@ -1795,6 +1879,7 @@ func TestFileSupportsLongBriefAndMimeFlags(t *testing.T) {
 }
 
 func TestOverlayFactorySupportsHardLinksAndMetadataCopyUp(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		FileSystem: CustomFileSystem(
 			gbfs.Overlay(seededFSFactory{files: map[string]string{
@@ -1838,6 +1923,7 @@ func readTestFSFile(t *testing.T, fsys gbfs.FileSystem, name string) string {
 }
 
 func TestTouchDateParsingUsesStableTimestamp(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "touch --date=2024/03/04 /home/agent/date.txt\n")

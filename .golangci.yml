@@ -17,6 +17,7 @@ linters:
     - revive
     - misspell
     - modernize
+    - paralleltest
 
   settings:
     revive:

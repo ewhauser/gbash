@@ -6,6 +6,7 @@ import (
 )
 
 func TestRuntimeRunUsesFreshSessionEachTime(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	first, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -30,6 +31,7 @@ func TestRuntimeRunUsesFreshSessionEachTime(t *testing.T) {
 }
 
 func TestSessionWorkDirAppliesPerExecWithoutLeaking(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	first, err := session.Exec(context.Background(), &ExecutionRequest{

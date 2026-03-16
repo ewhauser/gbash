@@ -16,6 +16,7 @@ import (
 )
 
 func TestCreateWorkspaceFixture(t *testing.T) {
+	t.Parallel()
 	root := filepath.Join(t.TempDir(), "workspace")
 	summary, err := createWorkspaceFixture(root)
 	if err != nil {
@@ -28,6 +29,7 @@ func TestCreateWorkspaceFixture(t *testing.T) {
 }
 
 func TestCreateAgenticSearchFixture(t *testing.T) {
+	t.Parallel()
 	root := filepath.Join(t.TempDir(), "workspace")
 	summary, err := createAgenticSearchFixture(root)
 	if err != nil {
@@ -130,6 +132,7 @@ func TestCreateAgenticSearchFixture(t *testing.T) {
 }
 
 func TestSummarizeDurations(t *testing.T) {
+	t.Parallel()
 	stats, ok := summarizeDurations([]time.Duration{
 		7 * time.Millisecond,
 		1 * time.Millisecond,
@@ -152,6 +155,7 @@ func TestSummarizeDurations(t *testing.T) {
 }
 
 func TestBenchmarkScenarios(t *testing.T) {
+	t.Parallel()
 	workspaceFixture := fixtureSummary{
 		Root:       filepath.Join(string(filepath.Separator), "tmp", "workspace"),
 		FileCount:  300,
@@ -219,6 +223,7 @@ func TestBenchmarkScenarios(t *testing.T) {
 }
 
 func TestRenderTextReportAndJSON(t *testing.T) {
+	t.Parallel()
 	report := benchmarkReport{
 		GeneratedAt:  "2026-03-13T00:00:00Z",
 		Runs:         2,
@@ -301,6 +306,7 @@ func TestRenderTextReportAndJSON(t *testing.T) {
 }
 
 func TestRunTrialsSkipsRuntime(t *testing.T) {
+	t.Parallel()
 	called := false
 	report := runTrials(context.Background(), runtimeConfig{
 		Name:              "gbash",
@@ -331,6 +337,7 @@ func TestRunTrialsSkipsRuntime(t *testing.T) {
 }
 
 func TestHasFailuresIgnoresSkippedResults(t *testing.T) {
+	t.Parallel()
 	report := benchmarkReport{
 		Scenarios: []scenarioReport{
 			{
@@ -360,6 +367,7 @@ func TestHasFailuresIgnoresSkippedResults(t *testing.T) {
 }
 
 func TestGbashNodeWasmRuntime(t *testing.T) {
+	t.Parallel()
 	repoRoot := filepath.Join(string(filepath.Separator), "repo")
 	assetDir := filepath.Join(string(filepath.Separator), "tmp", "gbash-wasm")
 	runtime := gbashNodeWasmRuntime(repoRoot, assetDir, 1234)
@@ -389,6 +397,7 @@ func TestGbashNodeWasmRuntime(t *testing.T) {
 }
 
 func TestGNUBashRuntime(t *testing.T) {
+	t.Parallel()
 	repoRoot := filepath.Join(string(filepath.Separator), "repo")
 	bashPath := filepath.Join(string(filepath.Separator), "bin", "bash")
 	runtime := gnuBashRuntime(repoRoot, bashPath, 4321)
@@ -418,6 +427,7 @@ func TestGNUBashRuntime(t *testing.T) {
 }
 
 func TestGNUBashRuntimeWorkspace(t *testing.T) {
+	t.Parallel()
 	repoRoot := filepath.Join(string(filepath.Separator), "repo")
 	bashPath := filepath.Join(string(filepath.Separator), "bin", "bash")
 	runtime := gnuBashRuntime(repoRoot, bashPath, 4321)
@@ -436,6 +446,7 @@ func TestGNUBashRuntimeWorkspace(t *testing.T) {
 }
 
 func TestGbashExtrasRuntime(t *testing.T) {
+	t.Parallel()
 	helperPath := filepath.Join(string(filepath.Separator), "tmp", "gbash-extras")
 	runtime := gbashExtrasRuntime(helperPath, 5678)
 
@@ -458,6 +469,7 @@ func TestGbashExtrasRuntime(t *testing.T) {
 }
 
 func TestGbashExtrasRuntimeWorkspace(t *testing.T) {
+	t.Parallel()
 	helperPath := filepath.Join(string(filepath.Separator), "tmp", "gbash-extras")
 	runtime := gbashExtrasRuntime(helperPath, 5678)
 
@@ -480,6 +492,7 @@ func TestGbashExtrasRuntimeWorkspace(t *testing.T) {
 }
 
 func TestGbashNodeWasmRuntimeWorkspace(t *testing.T) {
+	t.Parallel()
 	repoRoot := filepath.Join(string(filepath.Separator), "repo")
 	assetDir := filepath.Join(string(filepath.Separator), "tmp", "gbash-wasm")
 	runtime := gbashNodeWasmRuntime(repoRoot, assetDir, 1234)
@@ -506,6 +519,7 @@ func TestGbashNodeWasmRuntimeWorkspace(t *testing.T) {
 }
 
 func TestFormatArtifactSize(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		value int64
 		want  string
@@ -523,6 +537,7 @@ func TestFormatArtifactSize(t *testing.T) {
 }
 
 func TestDirectorySize(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("abc"), 0o644); err != nil {
 		t.Fatalf("WriteFile(a.txt) error = %v", err)

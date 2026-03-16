@@ -10,6 +10,7 @@ import (
 )
 
 func TestParseReportedTestResultsNormalizesAliasesAndDeduplicates(t *testing.T) {
+	t.Parallel()
 	selected := []string{
 		"tests/misc/dirname.pl",
 		"tests/wc/wc-cpu.sh",
@@ -50,6 +51,7 @@ FAIL: tests/wc/wc-files0-from
 }
 
 func TestSummariesComputePercentagesAndRollups(t *testing.T) {
+	t.Parallel()
 	first := utilityResult{
 		Name: "cat",
 		Summary: summarizeTestResults([]testResult{
@@ -89,6 +91,7 @@ func TestSummariesComputePercentagesAndRollups(t *testing.T) {
 }
 
 func TestLoadManifestIncludesExpandedCompatibilityCoverage(t *testing.T) {
+	t.Parallel()
 	mf, err := loadManifest()
 	if err != nil {
 		t.Fatalf("loadManifest() error = %v", err)
@@ -106,6 +109,7 @@ func TestLoadManifestIncludesExpandedCompatibilityCoverage(t *testing.T) {
 }
 
 func TestBuildBatchedUtilityResultsSharesLogAndSynthesizesExitCodes(t *testing.T) {
+	t.Parallel()
 	runs := []utilityRun{
 		{
 			Utility: attributedUtility{Name: "basename", Patterns: []string{"tests/misc/basename*"}},
@@ -140,6 +144,7 @@ FAIL: tests/misc/dirname.pl
 }
 
 func TestBuildRunPlanFiltersUtilitySelection(t *testing.T) {
+	t.Parallel()
 	workDir := makeMinimalGNUWorkdir(t)
 	mf, err := loadManifest()
 	if err != nil {
@@ -163,6 +168,7 @@ func TestBuildRunPlanFiltersUtilitySelection(t *testing.T) {
 }
 
 func TestRunWritesSummaryFromSharedLog(t *testing.T) {
+	t.Parallel()
 	workDir := makeMinimalGNUWorkdir(t)
 	resultsDir := filepath.Join(t.TempDir(), "results")
 	if err := os.MkdirAll(resultsDir, 0o755); err != nil {

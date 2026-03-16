@@ -10,6 +10,7 @@ import (
 )
 
 func TestCurlIsUnavailableByDefault(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -27,6 +28,7 @@ func TestCurlIsUnavailableByDefault(t *testing.T) {
 }
 
 func TestCurlAllowsConfiguredOrigin(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("hello from network"))
 	}))
@@ -54,6 +56,7 @@ func TestCurlAllowsConfiguredOrigin(t *testing.T) {
 }
 
 func TestCurlBlocksDisallowedOrigin(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		Network: &NetworkConfig{
 			AllowedURLPrefixes: []string{"https://api.example.com"},
@@ -75,6 +78,7 @@ func TestCurlBlocksDisallowedOrigin(t *testing.T) {
 }
 
 func TestCurlBlocksDisallowedMethodByDefault(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(r.Method))
 	}))
@@ -102,6 +106,7 @@ func TestCurlBlocksDisallowedMethodByDefault(t *testing.T) {
 }
 
 func TestCurlAllowsConfiguredPostMethod(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		_, _ = w.Write([]byte(r.Method + ":" + string(body)))
@@ -131,6 +136,7 @@ func TestCurlAllowsConfiguredPostMethod(t *testing.T) {
 }
 
 func TestCurlRevalidatesRedirectTargets(t *testing.T) {
+	t.Parallel()
 	redirectTarget := "https://other.example.com/blocked"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, redirectTarget, http.StatusFound)
@@ -159,6 +165,7 @@ func TestCurlRevalidatesRedirectTargets(t *testing.T) {
 }
 
 func TestCurlEnforcesResponseSizeLimit(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(strings.Repeat("a", 64)))
 	}))
@@ -187,6 +194,7 @@ func TestCurlEnforcesResponseSizeLimit(t *testing.T) {
 }
 
 func TestCurlCanWriteResponseToSandboxFile(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("saved"))
 	}))

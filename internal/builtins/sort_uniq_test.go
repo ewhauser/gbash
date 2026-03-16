@@ -7,6 +7,7 @@ import (
 )
 
 func TestSortSupportsKeySortingWithCustomDelimiter(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -24,6 +25,7 @@ func TestSortSupportsKeySortingWithCustomDelimiter(t *testing.T) {
 }
 
 func TestSortSupportsNumericReverseUniquePipeline(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -41,6 +43,7 @@ func TestSortSupportsNumericReverseUniquePipeline(t *testing.T) {
 }
 
 func TestSortSupportsCaseInsensitiveUnique(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -58,6 +61,7 @@ func TestSortSupportsCaseInsensitiveUnique(t *testing.T) {
 }
 
 func TestSortReturnsErrorForMissingFile(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -75,6 +79,7 @@ func TestSortReturnsErrorForMissingFile(t *testing.T) {
 }
 
 func TestSortSupportsCompactKeyAndGeneralNumericFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -92,6 +97,7 @@ func TestSortSupportsCompactKeyAndGeneralNumericFlags(t *testing.T) {
 }
 
 func TestSortSupportsQuietCheckFlag(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -109,6 +115,7 @@ func TestSortSupportsQuietCheckFlag(t *testing.T) {
 }
 
 func TestSortSupportsZeroTerminatedRecords(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -126,6 +133,7 @@ func TestSortSupportsZeroTerminatedRecords(t *testing.T) {
 }
 
 func TestSortSupportsFiles0FromStdin(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -143,6 +151,7 @@ func TestSortSupportsFiles0FromStdin(t *testing.T) {
 }
 
 func TestSortSupportsMergeVersionAndResourceFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -160,6 +169,7 @@ func TestSortSupportsMergeVersionAndResourceFlags(t *testing.T) {
 }
 
 func TestSortSupportsDebugAndCompressProgramFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -180,6 +190,7 @@ func TestSortSupportsDebugAndCompressProgramFlags(t *testing.T) {
 }
 
 func TestSortAcceptsRandomFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -197,6 +208,7 @@ func TestSortAcceptsRandomFlags(t *testing.T) {
 }
 
 func TestSortSupportsIgnoreNonprintingFlag(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -214,6 +226,7 @@ func TestSortSupportsIgnoreNonprintingFlag(t *testing.T) {
 }
 
 func TestSortSupportsVersionFlag(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -231,6 +244,7 @@ func TestSortSupportsVersionFlag(t *testing.T) {
 }
 
 func TestUniqSupportsCountsAndAdjacentRuns(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -248,6 +262,7 @@ func TestUniqSupportsCountsAndAdjacentRuns(t *testing.T) {
 }
 
 func TestUniqWorksWithSortForFullDeduping(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -265,6 +280,7 @@ func TestUniqWorksWithSortForFullDeduping(t *testing.T) {
 }
 
 func TestUniqReturnsErrorForMissingFile(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -282,6 +298,7 @@ func TestUniqReturnsErrorForMissingFile(t *testing.T) {
 }
 
 func TestUniqSupportsIgnoreCase(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -299,6 +316,7 @@ func TestUniqSupportsIgnoreCase(t *testing.T) {
 }
 
 func TestUniqSupportsCheckChars(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

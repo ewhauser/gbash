@@ -9,6 +9,7 @@ import (
 )
 
 func TestRGBasicSearchMatchesUpstreamDefaults(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -26,6 +27,7 @@ func TestRGBasicSearchMatchesUpstreamDefaults(t *testing.T) {
 }
 
 func TestRGSingleExplicitFileSuppressesPrefixesByDefault(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -43,6 +45,7 @@ func TestRGSingleExplicitFileSuppressesPrefixesByDefault(t *testing.T) {
 }
 
 func TestRGSupportsSmartCaseAndCaseFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	mustExecSession(t, session, "printf 'Hello\\nhello\\n' > file.txt\n")
 
@@ -63,6 +66,7 @@ func TestRGSupportsSmartCaseAndCaseFlags(t *testing.T) {
 }
 
 func TestRGHiddenIgnoreAndUnrestrictedModes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	mustExecSession(t, session, ""+
 		"printf '*.log\\n' > .gitignore\n"+
@@ -87,6 +91,7 @@ func TestRGHiddenIgnoreAndUnrestrictedModes(t *testing.T) {
 }
 
 func TestRGSupportsGlobFilteringAndFilesMode(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -122,6 +127,7 @@ func TestRGSupportsGlobFilteringAndFilesMode(t *testing.T) {
 }
 
 func TestRGSupportsMaxDepth(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -144,6 +150,7 @@ func TestRGSupportsMaxDepth(t *testing.T) {
 }
 
 func TestRGSupportsOutputModesAndContext(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	mustExecSession(t, session, ""+
 		"printf 'alpha\\nhello\\nbravo\\n' > a.txt\n"+
@@ -177,6 +184,7 @@ func TestRGSupportsOutputModesAndContext(t *testing.T) {
 }
 
 func TestRGSupportsMatchModeFlagsAndMaxCount(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	mustExecSession(t, session, ""+
 		"printf 'a.c\\nabc\\n' > fixed.txt\n"+
@@ -212,6 +220,7 @@ func TestRGSupportsMatchModeFlagsAndMaxCount(t *testing.T) {
 }
 
 func TestRGSupportsPatternFilesFilenameFlagsAndIglob(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	mustExecSession(t, session, ""+
 		"printf 'foo\\nbar\\n' > patterns.txt\n"+
@@ -236,6 +245,7 @@ func TestRGSupportsPatternFilesFilenameFlagsAndIglob(t *testing.T) {
 }
 
 func TestRGSupportsTypeFilteringAndTypeList(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	mustExecSession(t, session, ""+
 		"printf 'foo\\n' > app.ts\n"+
@@ -263,6 +273,7 @@ func TestRGSupportsTypeFilteringAndTypeList(t *testing.T) {
 }
 
 func TestRGSupportsBinaryFilesAndFollowLinks(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	mustExecSession(t, session, ""+
 		"printf 'hello\\000world\\n' > binary.bin\n"+
@@ -280,6 +291,7 @@ func TestRGSupportsBinaryFilesAndFollowLinks(t *testing.T) {
 }
 
 func TestRGFollowLinksHonorsFollowEnabledPolicy(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			SymlinkMode: policy.SymlinkFollow,

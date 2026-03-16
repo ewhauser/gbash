@@ -8,6 +8,7 @@ import (
 )
 
 func TestEchoSupportsGNUEscapeDecoding(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -28,6 +29,7 @@ func TestEchoSupportsGNUEscapeDecoding(t *testing.T) {
 }
 
 func TestEchoTreatsDoubleHyphenAsLiteralAndHonorsBackslashC(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -49,6 +51,7 @@ func TestEchoTreatsDoubleHyphenAsLiteralAndHonorsBackslashC(t *testing.T) {
 }
 
 func TestEchoSupportsPOSIXLYCorrectMode(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -71,6 +74,7 @@ func TestEchoSupportsPOSIXLYCorrectMode(t *testing.T) {
 }
 
 func TestEchoRecognizesExactHelpVersionAndOptionPrecedence(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -95,6 +99,7 @@ func TestEchoRecognizesExactHelpVersionAndOptionPrecedence(t *testing.T) {
 }
 
 func TestEchoSupportsGNUOctalWrapping(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -114,6 +119,7 @@ func TestEchoSupportsGNUOctalWrapping(t *testing.T) {
 }
 
 func TestEchoHelpIsAvailableAsSoleLongOption(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

@@ -9,6 +9,7 @@ import (
 )
 
 func TestTraceEventsIncludeSchemaSessionAndExecutionIDs(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Tracing: TraceConfig{Mode: TraceRaw},
 	})
@@ -25,6 +26,7 @@ func TestTraceEventsIncludeSchemaSessionAndExecutionIDs(t *testing.T) {
 }
 
 func TestTraceRecordsCommandResolutionSources(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Tracing: TraceConfig{Mode: TraceRaw},
 	})
@@ -60,6 +62,7 @@ func TestTraceRecordsCommandResolutionSources(t *testing.T) {
 }
 
 func TestTraceRecordsCommandAndPathPolicyDenials(t *testing.T) {
+	t.Parallel()
 	commandDenied := newRuntime(t, &Config{
 		Tracing: TraceConfig{Mode: TraceRaw},
 		Policy: policy.NewStatic(&policy.Config{
@@ -121,6 +124,7 @@ func TestTraceRecordsCommandAndPathPolicyDenials(t *testing.T) {
 }
 
 func TestTraceRecordsFileMutationEvents(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{
 		Tracing: TraceConfig{Mode: TraceRaw},
 	})

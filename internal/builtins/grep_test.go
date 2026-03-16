@@ -6,6 +6,7 @@ import (
 )
 
 func TestGrepSupportsMatchModeFlagsIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -35,6 +36,7 @@ func TestGrepSupportsMatchModeFlagsIsolated(t *testing.T) {
 }
 
 func TestGrepSupportsContextFlagsIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -56,6 +58,7 @@ func TestGrepSupportsContextFlagsIsolated(t *testing.T) {
 }
 
 func TestGrepSupportsFilesWithoutMatchQuietAndMaxCountIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -78,6 +81,7 @@ func TestGrepSupportsFilesWithoutMatchQuietAndMaxCountIsolated(t *testing.T) {
 }
 
 func TestGrepQuietSuppressesOutputIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -95,6 +99,7 @@ func TestGrepQuietSuppressesOutputIsolated(t *testing.T) {
 }
 
 func TestGrepQuietNoMatchReturnsOneIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -112,6 +117,7 @@ func TestGrepQuietNoMatchReturnsOneIsolated(t *testing.T) {
 }
 
 func TestGrepAliasCommandsUseExtendedAndFixedModes(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

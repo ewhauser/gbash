@@ -6,6 +6,7 @@ import (
 )
 
 func TestEnvSupportsLongIgnoreEnvironmentIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -23,6 +24,7 @@ func TestEnvSupportsLongIgnoreEnvironmentIsolated(t *testing.T) {
 }
 
 func TestEnvSupportsBareDoubleDashCommandSeparator(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -40,6 +42,7 @@ func TestEnvSupportsBareDoubleDashCommandSeparator(t *testing.T) {
 }
 
 func TestEnvSupportsAssignmentsAfterBareDoubleDash(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -57,6 +60,7 @@ func TestEnvSupportsAssignmentsAfterBareDoubleDash(t *testing.T) {
 }
 
 func TestEnvPreservesInvalidBytesForNestedCommands(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -75,6 +79,7 @@ func TestEnvPreservesInvalidBytesForNestedCommands(t *testing.T) {
 }
 
 func TestEnvSupportsUnsetShortAndLongAttachedForms(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -92,6 +97,7 @@ func TestEnvSupportsUnsetShortAndLongAttachedForms(t *testing.T) {
 }
 
 func TestEnvReportsMissingUnsetArgument(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -109,6 +115,7 @@ func TestEnvReportsMissingUnsetArgument(t *testing.T) {
 }
 
 func TestPrintEnvReturnsOneWhenAnyNameIsMissing(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -126,6 +133,7 @@ func TestPrintEnvReturnsOneWhenAnyNameIsMissing(t *testing.T) {
 }
 
 func TestEnvSupportsChdirWithCommand(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -143,6 +151,7 @@ func TestEnvSupportsChdirWithCommand(t *testing.T) {
 }
 
 func TestEnvReportsMissingCommandForChdir(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -160,6 +169,7 @@ func TestEnvReportsMissingCommandForChdir(t *testing.T) {
 }
 
 func TestEnvDebugReportsArgv0Override(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -178,6 +188,7 @@ func TestEnvDebugReportsArgv0Override(t *testing.T) {
 }
 
 func TestEnvNestedShellResolvesEqualsCommandThroughEmptyPathEntry(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

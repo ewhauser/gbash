@@ -10,6 +10,7 @@ import (
 )
 
 func TestMaxCommandCountEnforced(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxCommandCount: 5})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -27,6 +28,7 @@ func TestMaxCommandCountEnforced(t *testing.T) {
 }
 
 func TestMaxCommandCountResetsBetweenExecs(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxCommandCount: 3})
 	session, err := rt.NewSession(context.Background())
 	if err != nil {
@@ -58,6 +60,7 @@ func TestMaxCommandCountResetsBetweenExecs(t *testing.T) {
 }
 
 func TestMaxCommandCountCountsCommandsInSubshells(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxCommandCount: 5})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -75,6 +78,7 @@ func TestMaxCommandCountCountsCommandsInSubshells(t *testing.T) {
 }
 
 func TestMaxCommandCountCountsPipelineStages(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxCommandCount: 2})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -92,6 +96,7 @@ func TestMaxCommandCountCountsPipelineStages(t *testing.T) {
 }
 
 func TestMaxCommandCountAllowsCommandsWithinLimit(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxCommandCount: 10})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -109,6 +114,7 @@ func TestMaxCommandCountAllowsCommandsWithinLimit(t *testing.T) {
 }
 
 func TestMaxCommandCountDoesNotChargeRuntimePrelude(t *testing.T) {
+	t.Parallel()
 	rt := newRuntimeWithLimits(t, policy.Limits{MaxCommandCount: 2})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -126,6 +132,7 @@ func TestMaxCommandCountDoesNotChargeRuntimePrelude(t *testing.T) {
 }
 
 func TestMaxCommandCountCountsUserCommandsWithInternalPrefix(t *testing.T) {
+	t.Parallel()
 	const commandName = "__jb_user"
 
 	registry := registryWithCommands(t, commands.DefineCommand(commandName, func(context.Context, *commands.Invocation) error {

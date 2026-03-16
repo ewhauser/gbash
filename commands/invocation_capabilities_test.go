@@ -9,6 +9,7 @@ import (
 )
 
 func TestCommandFSSearchProviderForPathScopesResults(t *testing.T) {
+	t.Parallel()
 	fsys := commandSearchCapableFS{
 		FileSystem: gbfs.NewMemory(),
 		provider: commandFixedHitsProvider{
@@ -52,6 +53,7 @@ func TestCommandFSSearchProviderForPathScopesResults(t *testing.T) {
 }
 
 func TestCommandFSSearchProviderForPathRejectsOutOfScopeQuery(t *testing.T) {
+	t.Parallel()
 	fsys := commandSearchCapableFS{
 		FileSystem: gbfs.NewMemory(),
 		provider:   commandFixedHitsProvider{},
@@ -79,6 +81,7 @@ func TestCommandFSSearchProviderForPathRejectsOutOfScopeQuery(t *testing.T) {
 }
 
 func TestCommandFSSearchProviderForPathHonorsPolicy(t *testing.T) {
+	t.Parallel()
 	fsys := commandSearchCapableFS{
 		FileSystem: gbfs.NewMemory(),
 		provider:   commandFixedHitsProvider{},

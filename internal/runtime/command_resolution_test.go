@@ -7,6 +7,7 @@ import (
 )
 
 func TestPathBasedCommandResolution(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -24,6 +25,7 @@ func TestPathBasedCommandResolution(t *testing.T) {
 }
 
 func TestBareCommandResolutionRespectsPATH(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -43,6 +45,7 @@ func TestBareCommandResolutionRespectsPATH(t *testing.T) {
 }
 
 func TestBareCommandResolutionFailsWhenPATHHasNoCommandDirs(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -60,6 +63,7 @@ func TestBareCommandResolutionFailsWhenPATHHasNoCommandDirs(t *testing.T) {
 }
 
 func TestEmptyPATHDisablesBareCommandResolution(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -77,6 +81,7 @@ func TestEmptyPATHDisablesBareCommandResolution(t *testing.T) {
 }
 
 func TestExplicitPathResolutionBypassesPATH(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -96,6 +101,7 @@ func TestExplicitPathResolutionBypassesPATH(t *testing.T) {
 }
 
 func TestUnknownCommandPathReturnsCommandNotFound(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

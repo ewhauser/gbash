@@ -11,6 +11,7 @@ import (
 )
 
 func TestAssertSecureFuzzOutcomeRejectsRawDeadlineExceeded(t *testing.T) {
+	t.Parallel()
 	err := runFatalHelper(t, "raw-deadline")
 	if err == nil {
 		t.Fatalf("AssertSecureFuzzOutcome() unexpectedly accepted raw context deadline exceeded")
@@ -18,6 +19,7 @@ func TestAssertSecureFuzzOutcomeRejectsRawDeadlineExceeded(t *testing.T) {
 }
 
 func TestAssertExecutionTimeoutFuzzOutcomeAcceptsNormalizedTimeout(t *testing.T) {
+	t.Parallel()
 	AssertExecutionTimeoutFuzzOutcome(t, []byte("sleep 1\n"), &gbash.ExecutionResult{
 		ExitCode:      124,
 		Stderr:        "execution timed out after 500ms\n",
@@ -27,6 +29,7 @@ func TestAssertExecutionTimeoutFuzzOutcomeAcceptsNormalizedTimeout(t *testing.T)
 }
 
 func TestAssertSecureFuzzOutcomeRejectsNormalizedTimeoutByDefault(t *testing.T) {
+	t.Parallel()
 	err := runFatalHelper(t, "normalized-timeout")
 	if err == nil {
 		t.Fatalf("AssertSecureFuzzOutcome() unexpectedly accepted normalized timeout output")
@@ -34,6 +37,7 @@ func TestAssertSecureFuzzOutcomeRejectsNormalizedTimeoutByDefault(t *testing.T) 
 }
 
 func TestAssertHelperProcess(t *testing.T) {
+	t.Parallel()
 	mode := os.Getenv("GBASH_FUZZTEST_HELPER")
 	if mode == "" {
 		t.Skip("helper process only")

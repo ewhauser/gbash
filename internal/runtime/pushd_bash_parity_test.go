@@ -18,6 +18,7 @@ var bashLinePrefixPattern = regexp.MustCompile(`(?m)^(?:[^:\n]+/)?bash: line \d+
 // harness also normalizes older Bash 3.2 usage text/status for invalid-usage
 // cases to the newer Bash form used in CI.
 func TestDirectoryStackMatchesBashBehavior(t *testing.T) {
+	t.Parallel()
 	bashPath, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("bash not available")

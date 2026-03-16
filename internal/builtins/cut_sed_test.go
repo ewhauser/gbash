@@ -7,6 +7,7 @@ import (
 )
 
 func TestCutSupportsFieldRangesAndDefaultDelimiter(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -24,6 +25,7 @@ func TestCutSupportsFieldRangesAndDefaultDelimiter(t *testing.T) {
 }
 
 func TestCutSupportsCharactersAndSuppressNoDelimiter(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -41,6 +43,7 @@ func TestCutSupportsCharactersAndSuppressNoDelimiter(t *testing.T) {
 }
 
 func TestCutSupportsLongOnlyDelimitedFlag(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -58,6 +61,7 @@ func TestCutSupportsLongOnlyDelimitedFlag(t *testing.T) {
 }
 
 func TestCutRequiresFieldOrCharacterSelector(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -75,6 +79,7 @@ func TestCutRequiresFieldOrCharacterSelector(t *testing.T) {
 }
 
 func TestSedSupportsSubstituteDeleteAndAddressPrinting(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -92,6 +97,7 @@ func TestSedSupportsSubstituteDeleteAndAddressPrinting(t *testing.T) {
 }
 
 func TestSedSupportsMultipleExpressionsInPlaceAndQuit(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -109,6 +115,7 @@ func TestSedSupportsMultipleExpressionsInPlaceAndQuit(t *testing.T) {
 }
 
 func TestSedSupportsRangeGlobalAndIgnoreCaseSubstitution(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -126,6 +133,7 @@ func TestSedSupportsRangeGlobalAndIgnoreCaseSubstitution(t *testing.T) {
 }
 
 func TestSedReturnsMissingFileError(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -143,6 +151,7 @@ func TestSedReturnsMissingFileError(t *testing.T) {
 }
 
 func TestSedSupportsScriptFileFlag(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

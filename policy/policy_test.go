@@ -3,6 +3,7 @@ package policy
 import "testing"
 
 func TestNewStaticDefaultsToSymlinkDeny(t *testing.T) {
+	t.Parallel()
 	pol := NewStatic(nil)
 
 	if got, want := pol.SymlinkMode(), SymlinkDeny; got != want {

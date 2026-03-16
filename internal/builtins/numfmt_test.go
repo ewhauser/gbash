@@ -8,6 +8,7 @@ import (
 )
 
 func TestNumfmtSupportsScalingAndUnitSizes(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -34,6 +35,7 @@ func TestNumfmtSupportsScalingAndUnitSizes(t *testing.T) {
 }
 
 func TestNumfmtSupportsHeaderDelimiterFieldsPaddingAndSuffixes(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -59,6 +61,7 @@ func TestNumfmtSupportsHeaderDelimiterFieldsPaddingAndSuffixes(t *testing.T) {
 }
 
 func TestNumfmtSupportsFormatAndRoundingModes(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -84,6 +87,7 @@ func TestNumfmtSupportsFormatAndRoundingModes(t *testing.T) {
 }
 
 func TestNumfmtInvalidModesAndArgumentErrors(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	tests := []struct {
@@ -131,6 +135,7 @@ func TestNumfmtInvalidModesAndArgumentErrors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
 			if err != nil {
 				t.Fatalf("Run() error = %v", err)
@@ -156,6 +161,7 @@ func TestNumfmtInvalidModesAndArgumentErrors(t *testing.T) {
 }
 
 func TestNumfmtSupportsZeroTerminatedInputAndEmbeddedNewlines(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -179,6 +185,7 @@ func TestNumfmtSupportsZeroTerminatedInputAndEmbeddedNewlines(t *testing.T) {
 }
 
 func TestNumfmtSupportsEmptyDelimiterAndNullByteHandling(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -199,6 +206,7 @@ func TestNumfmtSupportsEmptyDelimiterAndNullByteHandling(t *testing.T) {
 }
 
 func TestNumfmtDebugWarnings(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

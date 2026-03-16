@@ -6,6 +6,7 @@ import (
 )
 
 func TestCatSupportsLongAndShortNumberFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -23,6 +24,7 @@ func TestCatSupportsLongAndShortNumberFlags(t *testing.T) {
 }
 
 func TestCatShowEndsHandlesCarriageReturnsAcrossFiles(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -40,6 +42,7 @@ func TestCatShowEndsHandlesCarriageReturnsAcrossFiles(t *testing.T) {
 }
 
 func TestCatShowEndsLeavesStandaloneCarriageReturnLiteral(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -57,6 +60,7 @@ func TestCatShowEndsLeavesStandaloneCarriageReturnLiteral(t *testing.T) {
 }
 
 func TestCatRejectsShellAppendToSelf(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -77,6 +81,7 @@ func TestCatRejectsShellAppendToSelf(t *testing.T) {
 }
 
 func TestCatParsesFlagsAfterOperandsLikeGNU(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

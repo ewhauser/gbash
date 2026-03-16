@@ -8,6 +8,7 @@ import (
 )
 
 func TestCPCopiesRecursiveDirectoryTree(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	setup := mustExecSession(t, session, "mkdir -p /src/nested\n echo root > /src/root.txt\n echo leaf > /src/nested/leaf.txt\n")
@@ -27,6 +28,7 @@ func TestCPCopiesRecursiveDirectoryTree(t *testing.T) {
 }
 
 func TestCPCopiesBinaryFileBytes(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/src.bin", []byte{0x00, 0xff, 0x41, 0x42, 0x00})
 
@@ -40,6 +42,7 @@ func TestCPCopiesBinaryFileBytes(t *testing.T) {
 }
 
 func TestCPRejectsDirectoryWithoutRecursiveFlag(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	setup := mustExecSession(t, session, "mkdir -p /src\n echo hi > /src/file.txt\n")
@@ -57,6 +60,7 @@ func TestCPRejectsDirectoryWithoutRecursiveFlag(t *testing.T) {
 }
 
 func TestRMSupportsGroupedForceDirFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "mkdir -p /tmp/empty\necho x > /tmp/out\nrm -fd /tmp/empty /tmp/out\n")
@@ -72,6 +76,7 @@ func TestRMSupportsGroupedForceDirFlags(t *testing.T) {
 }
 
 func TestCPSupportsNoClobberPreserveAndVerbose(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	setup := mustExecSession(t, session, "echo new > /src.txt\necho old > /dst.txt\n")
@@ -89,6 +94,7 @@ func TestCPSupportsNoClobberPreserveAndVerbose(t *testing.T) {
 }
 
 func TestMVCanMoveDirectoryIntoExistingDirectory(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	setup := mustExecSession(t, session, "mkdir -p /src/sub /dst\n echo hi > /src/sub/file.txt\n")
@@ -106,6 +112,7 @@ func TestMVCanMoveDirectoryIntoExistingDirectory(t *testing.T) {
 }
 
 func TestMVOverwritesExistingDestinationFile(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	setup := mustExecSession(t, session, "echo new > /src.txt\n echo old > /dst.txt\n")
@@ -123,6 +130,7 @@ func TestMVOverwritesExistingDestinationFile(t *testing.T) {
 }
 
 func TestMVPreservesTraversalForLaterFindCommands(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	setup := mustExecSession(t, session, "mkdir -p /src/sub /dst\n echo hi > /src/sub/file.txt\n")
@@ -140,6 +148,7 @@ func TestMVPreservesTraversalForLaterFindCommands(t *testing.T) {
 }
 
 func TestMVRejectsMissingSource(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -157,6 +166,7 @@ func TestMVRejectsMissingSource(t *testing.T) {
 }
 
 func TestMVSupportsNoClobberVerboseAndMovingFileIntoDirectory(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	setup := mustExecSession(t, session, "mkdir -p /dst\necho src > /src.txt\necho keep > /dst/src.txt\necho move > /move.txt\n")
@@ -174,6 +184,7 @@ func TestMVSupportsNoClobberVerboseAndMovingFileIntoDirectory(t *testing.T) {
 }
 
 func TestFindSupportsRelativeRootAndNameFilter(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -191,6 +202,7 @@ func TestFindSupportsRelativeRootAndNameFilter(t *testing.T) {
 }
 
 func TestFindSupportsTypeAndMaxDepth(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -208,6 +220,7 @@ func TestFindSupportsTypeAndMaxDepth(t *testing.T) {
 }
 
 func TestFindTypeFilterTraversesNestedFiles(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -228,6 +241,7 @@ func TestFindTypeFilterTraversesNestedFiles(t *testing.T) {
 }
 
 func TestFindReturnsPartialResultsWhenOneRootIsMissing(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

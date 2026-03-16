@@ -8,6 +8,7 @@ import (
 )
 
 func TestIDReportsDeterministicSandboxIdentity(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -25,6 +26,7 @@ func TestIDReportsDeterministicSandboxIdentity(t *testing.T) {
 }
 
 func TestIDSupportsCompatibilityFlags(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -52,6 +54,7 @@ func TestIDSupportsCompatibilityFlags(t *testing.T) {
 }
 
 func TestIDRejectsUnsupportedContextAndContinuesPastMissingUsers(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	contextResult := mustExecSession(t, session, "id -Z\n")
@@ -75,6 +78,7 @@ func TestIDRejectsUnsupportedContextAndContinuesPastMissingUsers(t *testing.T) {
 }
 
 func TestYesRepeatsDefaultAndCustomOperandsUntilTimeout(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	defaultResult := mustExecSession(t, session, "timeout 0.02 yes > /tmp/yes-default.out || true\nhead -n 3 /tmp/yes-default.out\n")
@@ -95,10 +99,12 @@ func TestYesRepeatsDefaultAndCustomOperandsUntilTimeout(t *testing.T) {
 }
 
 func TestYesPreservesWholeRecordsAtGNUBoundaries(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	for _, size := range []int{1, 1999, 4095, 4096, 8191, 8192, 16383, 16384} {
 		t.Run(fmt.Sprintf("size=%d", size), func(t *testing.T) {
+			t.Parallel()
 			script := fmt.Sprintf(
 				"yes \"$(printf '%%%ds' '')\" | head -n2 | uniq > /tmp/yes.out\nwc -l < /tmp/yes.out\nhead -n1 /tmp/yes.out | wc -c\n",
 				size,
@@ -116,6 +122,7 @@ func TestYesPreservesWholeRecordsAtGNUBoundaries(t *testing.T) {
 }
 
 func TestYesRejectsUnknownOptionsAndSupportsHelpVersion(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	helpResult, err := rt.Run(context.Background(), &ExecutionRequest{Script: "yes --help\n"})

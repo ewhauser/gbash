@@ -16,6 +16,7 @@ import (
 )
 
 func TestHostFSMountsHostTreeAtVirtualRootAndSynthesizesAncestors(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
@@ -61,6 +62,7 @@ func TestHostFSMountsHostTreeAtVirtualRootAndSynthesizesAncestors(t *testing.T) 
 }
 
 func TestHostFSReadOnlyAndSanitizesErrors(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -95,6 +97,7 @@ func TestHostFSReadOnlyAndSanitizesErrors(t *testing.T) {
 }
 
 func TestHostFSStatPreservesRawSysStat(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -115,6 +118,7 @@ func TestHostFSStatPreservesRawSysStat(t *testing.T) {
 }
 
 func TestHostFSReadCapRejectsLargeFiles(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -144,6 +148,7 @@ func TestHostFSReadCapRejectsLargeFiles(t *testing.T) {
 }
 
 func TestHostFSSymlinkResolutionAndReadlinkSanitization(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	outsideRoot := t.TempDir()
 

@@ -21,6 +21,7 @@ func (i tailTestFileInfo) IsDir() bool        { return i.mode.IsDir() }
 func (i tailTestFileInfo) Sys() any           { return nil }
 
 func TestTailSameFileInfoDetectsRenameOverExistingFile(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 
 	aPath := filepath.Join(tmp, "a")
@@ -58,6 +59,7 @@ func TestTailSameFileInfoDetectsRenameOverExistingFile(t *testing.T) {
 }
 
 func TestTailSameFileInfoReturnsUnknownWithoutComparableIdentity(t *testing.T) {
+	t.Parallel()
 	info := tailTestFileInfo{name: "virtual", mode: 0o644}
 	if same, known := tailSameFileInfo(info, info); known || same {
 		t.Fatalf("tailSameFileInfo(virtual, virtual) = (%v, %v), want (false, false)", same, known)

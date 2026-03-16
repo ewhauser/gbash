@@ -13,6 +13,7 @@ import (
 )
 
 func TestDefaultSandboxLayout(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -55,6 +56,7 @@ func TestDefaultSandboxLayout(t *testing.T) {
 }
 
 func TestNewSessionHasPreparedDefaultLayout(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	session, err := rt.NewSession(context.Background())
@@ -70,6 +72,7 @@ func TestNewSessionHasPreparedDefaultLayout(t *testing.T) {
 }
 
 func TestWorkDirUpdatesPWD(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -88,6 +91,7 @@ func TestWorkDirUpdatesPWD(t *testing.T) {
 }
 
 func TestInvalidVisiblePWDDoesNotOverrideSandboxWorkDir(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -109,6 +113,7 @@ func TestInvalidVisiblePWDDoesNotOverrideSandboxWorkDir(t *testing.T) {
 }
 
 func TestCommandsResolveAgainstInternalPWDWhenVisiblePWDCorrupted(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -132,6 +137,7 @@ func TestCommandsResolveAgainstInternalPWDWhenVisiblePWDCorrupted(t *testing.T) 
 }
 
 func TestRelativePathsUseVirtualWorkDir(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -149,6 +155,7 @@ func TestRelativePathsUseVirtualWorkDir(t *testing.T) {
 }
 
 func TestVirtualCDUpdatesPWD(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -166,6 +173,7 @@ func TestVirtualCDUpdatesPWD(t *testing.T) {
 }
 
 func TestDirectoryStackBuiltinsManageVirtualPWD(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -208,6 +216,7 @@ func TestDirectoryStackBuiltinsManageVirtualPWD(t *testing.T) {
 }
 
 func TestDirectoryStackBuiltinsResolveDeferredEntries(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -248,6 +257,7 @@ func TestDirectoryStackBuiltinsResolveDeferredEntries(t *testing.T) {
 }
 
 func TestDirectoryStackBuiltinsReportErrors(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -286,6 +296,7 @@ func TestDirectoryStackBuiltinsReportErrors(t *testing.T) {
 }
 
 func TestPwdHonorsLogicalAndPhysicalModes(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -330,6 +341,7 @@ func TestPwdHonorsLogicalAndPhysicalModes(t *testing.T) {
 }
 
 func TestEnsureCommandStubDoesNotCloneExistingLowerStub(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	lower := gbfs.NewMemory()
 	file, err := lower.OpenFile(ctx, "/bin/echo", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)

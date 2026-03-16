@@ -7,6 +7,7 @@ import (
 )
 
 func TestPasteSupportsLongFlagsAndVersion(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -26,6 +27,7 @@ func TestPasteSupportsLongFlagsAndVersion(t *testing.T) {
 }
 
 func TestPasteSupportsZeroTerminatedRecords(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/left.bin", []byte("a\x00b"))
 	writeSessionFile(t, session, "/tmp/right.bin", []byte("1\x002\x00"))
@@ -45,6 +47,7 @@ func TestPasteSupportsZeroTerminatedRecords(t *testing.T) {
 }
 
 func TestPasteParsesEscapedAndEmptyDelimiters(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -67,6 +70,7 @@ func TestPasteParsesEscapedAndEmptyDelimiters(t *testing.T) {
 }
 
 func TestPasteSupportsMultibyteDelimiters(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -87,6 +91,7 @@ func TestPasteSupportsMultibyteDelimiters(t *testing.T) {
 }
 
 func TestPasteRejectsTrailingBackslashDelimiter(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -104,6 +109,7 @@ func TestPasteRejectsTrailingBackslashDelimiter(t *testing.T) {
 }
 
 func TestPastePreservesInvalidUTF8DelimiterWidth(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -124,6 +130,7 @@ func TestPastePreservesInvalidUTF8DelimiterWidth(t *testing.T) {
 }
 
 func TestPasteSupportsGB18030DelimiterWidth(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

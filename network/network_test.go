@@ -17,6 +17,7 @@ func (fn resolverFunc) LookupIPAddr(ctx context.Context, host string) ([]net.IPA
 }
 
 func TestNewRejectsInvalidAllowList(t *testing.T) {
+	t.Parallel()
 	_, err := New(&Config{
 		AllowedURLPrefixes: []string{"example.com"},
 	})
@@ -26,6 +27,7 @@ func TestNewRejectsInvalidAllowList(t *testing.T) {
 }
 
 func TestClientAllowsMatchingOriginAndPathPrefix(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -51,6 +53,7 @@ func TestClientAllowsMatchingOriginAndPathPrefix(t *testing.T) {
 }
 
 func TestClientBlocksPathOutsideAllowListPrefix(t *testing.T) {
+	t.Parallel()
 	client, err := New(&Config{
 		AllowedURLPrefixes: []string{"https://api.example.com/v1/"},
 	})
@@ -67,6 +70,7 @@ func TestClientBlocksPathOutsideAllowListPrefix(t *testing.T) {
 }
 
 func TestClientBlocksDisallowedMethod(t *testing.T) {
+	t.Parallel()
 	client, err := New(&Config{
 		AllowedURLPrefixes: []string{"https://api.example.com"},
 	})
@@ -85,6 +89,7 @@ func TestClientBlocksDisallowedMethod(t *testing.T) {
 }
 
 func TestClientRevalidatesRedirectTargets(t *testing.T) {
+	t.Parallel()
 	deniedURL := "https://other.example.com/blocked"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, deniedURL, http.StatusFound)
@@ -110,6 +115,7 @@ func TestClientRevalidatesRedirectTargets(t *testing.T) {
 }
 
 func TestClientEnforcesResponseSizeLimit(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(strings.Repeat("a", 32)))
 	}))
@@ -132,6 +138,7 @@ func TestClientEnforcesResponseSizeLimit(t *testing.T) {
 }
 
 func TestClientBlocksPrivateRangesLexically(t *testing.T) {
+	t.Parallel()
 	client, err := New(&Config{
 		AllowedURLPrefixes: []string{"http://127.0.0.1"},
 		DenyPrivateRanges:  true,
@@ -147,6 +154,7 @@ func TestClientBlocksPrivateRangesLexically(t *testing.T) {
 }
 
 func TestClientBlocksPrivateRangesAfterDNSResolution(t *testing.T) {
+	t.Parallel()
 	client, err := New(&Config{
 		AllowedURLPrefixes: []string{"https://api.example.com"},
 		DenyPrivateRanges:  true,

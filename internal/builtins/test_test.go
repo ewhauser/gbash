@@ -7,6 +7,7 @@ import (
 )
 
 func TestTestSupportsStringIntegerAndBooleanExpressions(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session,
@@ -25,6 +26,7 @@ func TestTestSupportsStringIntegerAndBooleanExpressions(t *testing.T) {
 }
 
 func TestTestSupportsFilePredicatesAndBracketAlias(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	writeSessionFile(t, session, "/tmp/file.txt", []byte("payload\n"))
@@ -50,6 +52,7 @@ func TestTestSupportsFilePredicatesAndBracketAlias(t *testing.T) {
 }
 
 func TestTestOwnerPredicatesUseSandboxOwnership(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session,
@@ -69,6 +72,7 @@ func TestTestOwnerPredicatesUseSandboxOwnership(t *testing.T) {
 }
 
 func TestTestReportsParseErrorsAndBracketMismatch(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "test value =\n")

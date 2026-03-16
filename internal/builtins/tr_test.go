@@ -6,6 +6,7 @@ import (
 )
 
 func TestTRSupportsLongDeleteAndSqueezeFlagsIsolated(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{

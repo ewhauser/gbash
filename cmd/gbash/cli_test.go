@@ -42,6 +42,7 @@ type cliJSONResult struct {
 }
 
 func TestRunCLIPrintsVersion(t *testing.T) {
+	t.Parallel()
 	prevVersion, prevCommit, prevDate, prevBuiltBy := version, commit, date, builtBy
 	version, commit, date, builtBy = "v1.2.3", "abc123", "2026-03-10T20:00:00Z", "test"
 	t.Cleanup(func() {
@@ -69,6 +70,7 @@ func TestRunCLIPrintsVersion(t *testing.T) {
 }
 
 func TestRunCLIHelpRendersBashInvocationFlags(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -92,6 +94,7 @@ func TestRunCLIHelpRendersBashInvocationFlags(t *testing.T) {
 }
 
 func TestRunCLIHelpRendersFilesystemFlags(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -113,6 +116,7 @@ func TestRunCLIHelpRendersFilesystemFlags(t *testing.T) {
 }
 
 func TestRunCLIHelpRendersServerFlags(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -134,6 +138,7 @@ func TestRunCLIHelpRendersServerFlags(t *testing.T) {
 }
 
 func TestRunCLIJSONOutputEncodesExecutionResult(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -170,6 +175,7 @@ func TestRunCLIJSONOutputEncodesExecutionResult(t *testing.T) {
 }
 
 func TestRunCLIJSONOutputEncodesCLIError(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -197,6 +203,7 @@ func TestRunCLIJSONOutputEncodesCLIError(t *testing.T) {
 }
 
 func TestRunCLIJSONOutputRejectsInteractiveShell(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -218,6 +225,7 @@ func TestRunCLIJSONOutputRejectsInteractiveShell(t *testing.T) {
 }
 
 func TestRunCLIServerRequiresTransport(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -234,6 +242,7 @@ func TestRunCLIServerRequiresTransport(t *testing.T) {
 }
 
 func TestRunCLIServerRejectsMultipleTransportFlags(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -254,6 +263,7 @@ func TestRunCLIServerRejectsMultipleTransportFlags(t *testing.T) {
 }
 
 func TestRunCLIServerRejectsNonLoopbackListen(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -270,6 +280,7 @@ func TestRunCLIServerRejectsNonLoopbackListen(t *testing.T) {
 }
 
 func TestRunCLIServerRejectsScriptExecutionFlags(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -286,6 +297,7 @@ func TestRunCLIServerRejectsScriptExecutionFlags(t *testing.T) {
 }
 
 func TestRunCLIServerRejectsJSONMode(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -306,6 +318,7 @@ func TestRunCLIServerRejectsJSONMode(t *testing.T) {
 }
 
 func TestRunCLIServerListensOnTCP(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
@@ -387,6 +400,7 @@ func TestRunCLIServerListensOnTCP(t *testing.T) {
 }
 
 func TestRunCLISharedFlagsStopAfterFirstScriptPositional(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -406,6 +420,7 @@ func TestRunCLISharedFlagsStopAfterFirstScriptPositional(t *testing.T) {
 }
 
 func TestRunCLIReadWriteRootPersistsHostWritesAcrossExecutions(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 
 	var stdout strings.Builder
@@ -474,6 +489,7 @@ func reserveLoopbackTCPAddress(t *testing.T) string {
 }
 
 func TestRunCLIRootMountReadsHostFilesWithoutPersistingWrites(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	subdir := filepath.Join(root, "subdir")
 	if err := os.MkdirAll(subdir, 0o755); err != nil {
@@ -506,6 +522,7 @@ func TestRunCLIRootMountReadsHostFilesWithoutPersistingWrites(t *testing.T) {
 }
 
 func TestRunCLIFilesystemFlagsRejectConflictingModes(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -522,6 +539,7 @@ func TestRunCLIFilesystemFlagsRejectConflictingModes(t *testing.T) {
 }
 
 func TestRunCLIReadWriteRootRejectsNonTempDirectories(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -539,6 +557,7 @@ func TestRunCLIReadWriteRootRejectsNonTempDirectories(t *testing.T) {
 }
 
 func TestRunCLICommandStringSupportsGroupedShortFlags(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -558,6 +577,7 @@ func TestRunCLICommandStringSupportsGroupedShortFlags(t *testing.T) {
 }
 
 func TestRunCLICommandStringUsesBashArg0Semantics(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		args     []string
@@ -580,6 +600,7 @@ func TestRunCLICommandStringUsesBashArg0Semantics(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			var stdout strings.Builder
 			var stderr strings.Builder
 
@@ -601,6 +622,7 @@ func TestRunCLICommandStringUsesBashArg0Semantics(t *testing.T) {
 }
 
 func TestRunCLISupportsScriptFileArgs(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	scriptPath := filepath.Join(tmp, "script.sh")
 	if err := os.WriteFile(scriptPath, []byte("printf '%s|%s|%s\\n' \"$0\" \"$1\" \"$2\"\n"), 0o644); err != nil {
@@ -626,6 +648,7 @@ func TestRunCLISupportsScriptFileArgs(t *testing.T) {
 }
 
 func TestRunCLIDashSReadsScriptFromStdinAndUsesArgs(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -645,6 +668,7 @@ func TestRunCLIDashSReadsScriptFromStdinAndUsesArgs(t *testing.T) {
 }
 
 func TestRunCLIImplicitStdinUsesInvocationNameAsArg0(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -664,6 +688,7 @@ func TestRunCLIImplicitStdinUsesInvocationNameAsArg0(t *testing.T) {
 }
 
 func TestRunCLISupportsDashOPipefail(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -680,6 +705,7 @@ func TestRunCLISupportsDashOPipefail(t *testing.T) {
 }
 
 func TestRunCLIStartupOptionsAffectExecution(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -714,6 +740,7 @@ func TestRunCLIStartupOptionsAffectExecution(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			var stdout strings.Builder
 			var stderr strings.Builder
 
@@ -735,6 +762,7 @@ func TestRunCLIStartupOptionsAffectExecution(t *testing.T) {
 }
 
 func TestRunCLIInteractiveCommandStringUsesInteractiveShellSemantics(t *testing.T) {
+	t.Parallel()
 	var stdout strings.Builder
 	var stderr strings.Builder
 
@@ -754,6 +782,7 @@ func TestRunCLIInteractiveCommandStringUsesInteractiveShellSemantics(t *testing.
 }
 
 func TestRunCLIInteractiveScriptUsesInteractiveShellSemantics(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	scriptPath := filepath.Join(tmp, "script.sh")
 	if err := os.WriteFile(scriptPath, []byte("alias hi='echo alias-ok'\nhi\n"), 0o644); err != nil {
@@ -779,6 +808,7 @@ func TestRunCLIInteractiveScriptUsesInteractiveShellSemantics(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityPassesStdin(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -800,6 +830,7 @@ func TestRunCLIHostUtilityPassesStdin(t *testing.T) {
 	}
 }
 func TestRunCLIHostUtilityCatRejectsAppendToSelf(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -834,6 +865,7 @@ func TestRunCLIHostUtilityCatRejectsAppendToSelf(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityCatCanCopyThroughSharedReadWriteTarget(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -877,6 +909,7 @@ func TestRunCLIHostUtilityCatCanCopyThroughSharedReadWriteTarget(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityPassesGBASHUmaskToRuntime(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -912,6 +945,7 @@ func TestRunCLIHostUtilityPassesGBASHUmaskToRuntime(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityChownNoOpOnExistingOwnership(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -936,6 +970,7 @@ func TestRunCLIHostUtilityChownNoOpOnExistingOwnership(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityChownAcceptsCurrentUsername(t *testing.T) {
+	t.Parallel()
 	current, err := user.Current()
 	if err != nil || strings.TrimSpace(current.Username) == "" {
 		t.Skipf("user.Current() unavailable: %v", err)
@@ -962,6 +997,7 @@ func TestRunCLIHostUtilityChownAcceptsCurrentUsername(t *testing.T) {
 	}
 }
 func TestRunCLIHostUtilityUnknownCommandReturns127(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -981,6 +1017,7 @@ func TestRunCLIHostUtilityUnknownCommandReturns127(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityYesReportsSingleWriteErrorOnDevFull(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1009,6 +1046,7 @@ func TestRunCLIHostUtilityYesReportsSingleWriteErrorOnDevFull(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityEnvSupportsDoubleDashCommandSeparator(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1031,6 +1069,7 @@ func TestRunCLIHostUtilityEnvSupportsDoubleDashCommandSeparator(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityEnvSupportsAssignmentsAfterDoubleDash(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 
 	physicalDir := filepath.Join(tmp, "a", "b")
@@ -1063,6 +1102,7 @@ func TestRunCLIHostUtilityEnvSupportsAssignmentsAfterDoubleDash(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityStreamsOutputBeforeExit(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1101,6 +1141,7 @@ func TestRunCLIHostUtilityStreamsOutputBeforeExit(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityTailFollowMissingFileByName(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1151,6 +1192,7 @@ func TestRunCLIHostUtilityTailFollowMissingFileByName(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityTailFollowMissingFlatFileByName(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1198,6 +1240,7 @@ func TestRunCLIHostUtilityTailFollowMissingFlatFileByName(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityTailFollowUntailableByNameUntilFileAppears(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1259,6 +1302,7 @@ func TestRunCLIHostUtilityTailFollowUntailableByNameUntilFileAppears(t *testing.
 }
 
 func TestRunCLIHostUtilityTailFollowDescriptorSurvivesRename(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1321,6 +1365,7 @@ func TestRunCLIHostUtilityTailFollowDescriptorSurvivesRename(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityTailFollowByNameHandlesRenameAndReplacement(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1427,6 +1472,7 @@ func TestRunCLIHostUtilityTailFollowByNameHandlesRenameAndReplacement(t *testing
 }
 
 func TestRunCLIHostUtilityTailGroupedQuietFollowFlags(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1480,6 +1526,7 @@ func TestRunCLIHostUtilityTailGroupedQuietFollowFlags(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityTailFollowByNameWithoutRetryFailsWhenMissingInitially(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1505,6 +1552,7 @@ func TestRunCLIHostUtilityTailFollowByNameWithoutRetryFailsWhenMissingInitially(
 }
 
 func TestRunCLIHostUtilityTailFollowByNameWithoutRetryStopsWhenFileDisappears(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1558,6 +1606,7 @@ func TestRunCLIHostUtilityTailFollowByNameWithoutRetryStopsWhenFileDisappears(t 
 }
 
 func TestRunCLIHostUtilityTailFollowByNameWithoutRetryTracksReappearingFileWhileOthersRemain(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1626,6 +1675,7 @@ func TestRunCLIHostUtilityTailFollowByNameWithoutRetryTracksReappearingFileWhile
 }
 
 func TestRunCLIHostUtilityTailFollowPidIsUnsupported(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1652,6 +1702,7 @@ func TestRunCLIHostUtilityTailFollowPidIsUnsupported(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityTailFollowPidIsUnsupportedForDeadPidToo(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1678,6 +1729,7 @@ func TestRunCLIHostUtilityTailFollowPidIsUnsupportedForDeadPidToo(t *testing.T) 
 }
 
 func TestRunCLIHostUtilityTailRetryWarnsWithoutFollow(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1704,6 +1756,7 @@ func TestRunCLIHostUtilityTailRetryWarnsWithoutFollow(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityTailRetryDescriptorReportsAppearanceAndTruncation(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1763,6 +1816,7 @@ func TestRunCLIHostUtilityTailRetryDescriptorReportsAppearanceAndTruncation(t *t
 }
 
 func TestRunCLIHostUtilityTailRetryDescriptorGivesUpOnUntailableReplacement(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1807,6 +1861,7 @@ func TestRunCLIHostUtilityTailRetryDescriptorGivesUpOnUntailableReplacement(t *t
 }
 
 func TestRunCLIHostUtilityTailFollowDashReadsStandardInput(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1829,6 +1884,7 @@ func TestRunCLIHostUtilityTailFollowDashReadsStandardInput(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityTailFollowDashReportsClosedStdin(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1866,6 +1922,7 @@ func TestRunCLIHostUtilityTailFollowDashReportsClosedStdin(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityTailFollowNameRejectsDash(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1888,6 +1945,7 @@ func TestRunCLIHostUtilityTailFollowNameRejectsDash(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityTailDebugReportsPollingMode(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	t.Chdir(tmp)
 
@@ -1930,6 +1988,7 @@ func TestRunCLIHostUtilityTailDebugReportsPollingMode(t *testing.T) {
 }
 
 func TestRunCLIHostUtilityPwdHonorsLogicalAndPhysicalModes(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 
 	physicalDir := filepath.Join(tmp, "a", "b")

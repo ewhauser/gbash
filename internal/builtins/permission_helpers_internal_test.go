@@ -80,6 +80,7 @@ func (permissionDeniedIdentityFS) Chdir(string) error {
 }
 
 func TestLoadPermissionIdentityDBDoesNotFallbackToHostFiles(t *testing.T) {
+	t.Parallel()
 	inv := NewInvocation(&InvocationOptions{
 		Cwd:        "/",
 		FileSystem: permissionDeniedIdentityFS{},
@@ -100,6 +101,7 @@ func TestLoadPermissionIdentityDBDoesNotFallbackToHostFiles(t *testing.T) {
 }
 
 func TestSeedPermissionIdentityDBFromEnvDoesNotInjectHostIdentity(t *testing.T) {
+	t.Parallel()
 	db := &permissionIdentityDB{
 		usersByName:  make(map[string]uint32),
 		usersByID:    make(map[uint32]string),

@@ -7,6 +7,7 @@ import (
 )
 
 func TestMkdirSupportsModeFlags(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "mkdir -m 0700 /home/agent/secure\nmkdir --mode=u=rwx,go= /home/agent/symbolic\nstat -c '%a' /home/agent/secure /home/agent/symbolic\n")
@@ -19,6 +20,7 @@ func TestMkdirSupportsModeFlags(t *testing.T) {
 }
 
 func TestMkdirWithoutParentsRequiresExistingParent(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "mkdir /home/agent/missing/child\n")

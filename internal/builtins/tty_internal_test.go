@@ -9,6 +9,7 @@ import (
 )
 
 func TestTtyReportsRedirectedTTYPathAndSilentMode(t *testing.T) {
+	t.Parallel()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
@@ -49,6 +50,7 @@ func TestTtyReportsRedirectedTTYPathAndSilentMode(t *testing.T) {
 }
 
 func TestTtyVersionWriteFailureReturnsExit3WithoutStderr(t *testing.T) {
+	t.Parallel()
 	var stderr bytes.Buffer
 	inv := &Invocation{
 		Args:   []string{"--version"},

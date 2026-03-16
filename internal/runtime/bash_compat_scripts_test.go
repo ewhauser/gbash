@@ -13,6 +13,7 @@ import (
 )
 
 func TestShellScriptsMatchBashBehavior(t *testing.T) {
+	t.Parallel()
 	bashPath, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("bash not available")

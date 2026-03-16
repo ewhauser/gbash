@@ -15,6 +15,7 @@ import (
 )
 
 func TestReadWriteFSReadsWritesAndResolvesSymlinks(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 
 	fsys, err := NewReadWrite(ReadWriteOptions{Root: root})
@@ -92,6 +93,7 @@ func TestReadWriteFSReadsWritesAndResolvesSymlinks(t *testing.T) {
 }
 
 func TestReadWriteFSMkdirAllCreatesNestedMissingParents(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 
 	fsys, err := NewReadWrite(ReadWriteOptions{Root: root})
@@ -113,6 +115,7 @@ func TestReadWriteFSMkdirAllCreatesNestedMissingParents(t *testing.T) {
 }
 
 func TestReadWriteFSStatPreservesRawSysStat(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -133,6 +136,7 @@ func TestReadWriteFSStatPreservesRawSysStat(t *testing.T) {
 }
 
 func TestReadWriteFSChownOverridesOwnershipWithoutHostMutation(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -180,6 +184,7 @@ func TestReadWriteFSChownOverridesOwnershipWithoutHostMutation(t *testing.T) {
 }
 
 func TestReadWriteFSRenameMovesOwnershipOverride(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -234,6 +239,7 @@ func TestReadWriteFSRenameMovesOwnershipOverride(t *testing.T) {
 }
 
 func TestReadWriteFSRemoveClearsOwnershipOverride(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -275,6 +281,7 @@ func TestReadWriteFSRemoveClearsOwnershipOverride(t *testing.T) {
 	}
 }
 func TestReadWriteFSReadCapRejectsLargeFiles(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte("hello"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -301,6 +308,7 @@ func TestReadWriteFSReadCapRejectsLargeFiles(t *testing.T) {
 }
 
 func TestReadWriteFSDeniesEscapeViaSymlink(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	outsideRoot := t.TempDir()
 
@@ -342,6 +350,7 @@ func TestReadWriteFSDeniesEscapeViaSymlink(t *testing.T) {
 }
 
 func TestReadWriteFSChdirPreservesLogicalCWD(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	physicalDir := filepath.Join(root, "a", "b")
 	if err := os.MkdirAll(physicalDir, 0o755); err != nil {
@@ -374,6 +383,7 @@ func TestReadWriteFSChdirPreservesLogicalCWD(t *testing.T) {
 }
 
 func TestReadWriteFSChdirAllowsCurrentLongPathAtHostRoot(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	previous, err := os.Getwd()
 	if err != nil {

@@ -306,6 +306,7 @@ func TestLazyInitialFilesWriteRemoveRenameAndHardLinkInteractions(t *testing.T) 
 	t.Parallel()
 
 	t.Run("write before read bypasses provider", func(t *testing.T) {
+		t.Parallel()
 		var calls atomic.Int32
 		fsys, err := SeededMemory(InitialFiles{
 			"/lazy.txt": {
@@ -329,6 +330,7 @@ func TestLazyInitialFilesWriteRemoveRenameAndHardLinkInteractions(t *testing.T) 
 	})
 
 	t.Run("remove before read bypasses provider", func(t *testing.T) {
+		t.Parallel()
 		var calls atomic.Int32
 		fsys, err := SeededMemory(InitialFiles{
 			"/lazy.txt": {
@@ -351,6 +353,7 @@ func TestLazyInitialFilesWriteRemoveRenameAndHardLinkInteractions(t *testing.T) 
 	})
 
 	t.Run("rename preserves laziness until new path is read", func(t *testing.T) {
+		t.Parallel()
 		var calls atomic.Int32
 		fsys, err := SeededMemory(InitialFiles{
 			"/lazy.txt": {
@@ -379,6 +382,7 @@ func TestLazyInitialFilesWriteRemoveRenameAndHardLinkInteractions(t *testing.T) 
 	})
 
 	t.Run("hard links share one provider-backed node", func(t *testing.T) {
+		t.Parallel()
 		var calls atomic.Int32
 		fsys, err := SeededMemory(InitialFiles{
 			"/lazy.txt": {

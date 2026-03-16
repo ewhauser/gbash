@@ -8,6 +8,7 @@ import (
 )
 
 func TestSplitFilterStreamsRoundRobinOutput(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -30,6 +31,7 @@ func TestSplitFilterStreamsRoundRobinOutput(t *testing.T) {
 }
 
 func TestCsplitSplitsStdinByLineNumber(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "printf '1\\n2\\n3\\n4\\n5\\n' | csplit - 3\n")
@@ -48,6 +50,7 @@ func TestCsplitSplitsStdinByLineNumber(t *testing.T) {
 }
 
 func TestCsplitHandlesInputWithoutTrailingNewline(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "printf 'a\\nb\\nc\\nd' | csplit - 2\n")
@@ -60,6 +63,7 @@ func TestCsplitHandlesInputWithoutTrailingNewline(t *testing.T) {
 }
 
 func TestCsplitSupportsSuffixFormattingAndGroupedAliases(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.txt", []byte("1\n2\n3\n4\n5\n"))
 
@@ -79,6 +83,7 @@ func TestCsplitSupportsSuffixFormattingAndGroupedAliases(t *testing.T) {
 }
 
 func TestCsplitSupportsPrecisionSuffixFormat(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.txt", []byte(csplitNumbers(1, 5)))
 
@@ -98,6 +103,7 @@ func TestCsplitSupportsPrecisionSuffixFormat(t *testing.T) {
 }
 
 func TestCsplitSuppressMatchedElidesFinalEmptyFile(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "printf '1\\n2\\n3\\n4\\n' | csplit --suppress-matched -z - 2 4\n")
@@ -120,6 +126,7 @@ func TestCsplitSuppressMatchedElidesFinalEmptyFile(t *testing.T) {
 }
 
 func TestCsplitSuppressMatchedRegexNegativeOffset(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.txt", []byte(csplitNumbers(1, 13)))
 
@@ -139,6 +146,7 @@ func TestCsplitSuppressMatchedRegexNegativeOffset(t *testing.T) {
 }
 
 func TestCsplitKeepsFilesOnErrorWithKeepFiles(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.txt", []byte(csplitNumbers(1, 6)))
 
@@ -161,6 +169,7 @@ func TestCsplitKeepsFilesOnErrorWithKeepFiles(t *testing.T) {
 }
 
 func TestCsplitRemovesFilesOnErrorByDefault(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/in.txt", []byte(csplitNumbers(1, 6)))
 

@@ -7,6 +7,7 @@ import (
 )
 
 func TestSeqBasicCountingAndWidth(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -24,6 +25,7 @@ func TestSeqBasicCountingAndWidth(t *testing.T) {
 }
 
 func TestSeqSupportsSeparatorsFormatsAndHexInput(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -41,6 +43,7 @@ func TestSeqSupportsSeparatorsFormatsAndHexInput(t *testing.T) {
 }
 
 func TestSeqPreservesPrecisionAndNegativeZero(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -58,6 +61,7 @@ func TestSeqPreservesPrecisionAndNegativeZero(t *testing.T) {
 }
 
 func TestSeqParsesFractionalValuesWithLeadingZeroes(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
@@ -75,6 +79,7 @@ func TestSeqParsesFractionalValuesWithLeadingZeroes(t *testing.T) {
 }
 
 func TestSeqErrorsOnMissingOperandZeroIncrementAndInvalidNumbers(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
 	tests := []struct {
@@ -111,6 +116,7 @@ func TestSeqErrorsOnMissingOperandZeroIncrementAndInvalidNumbers(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
 			if err != nil {
 				t.Fatalf("Run() error = %v", err)
@@ -126,6 +132,7 @@ func TestSeqErrorsOnMissingOperandZeroIncrementAndInvalidNumbers(t *testing.T) {
 }
 
 func TestSeqInfiniteOutputCanBeBoundedByTimeout(t *testing.T) {
+	t.Parallel()
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "timeout 0.02 seq inf > /tmp/seq.out || true\nhead -n 3 /tmp/seq.out\n")

@@ -39,6 +39,7 @@ func (f symlinkFSFactory) New(ctx context.Context) (gbfs.FileSystem, error) {
 }
 
 func TestDefaultPolicyDeniesSymlinkTraversal(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		FileSystem: CustomFileSystem(symlinkFSFactory{
 			files: map[string]string{
@@ -65,6 +66,7 @@ func TestDefaultPolicyDeniesSymlinkTraversal(t *testing.T) {
 }
 
 func TestFollowModeChecksResolvedReadTargetAgainstAllowedRoots(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		FileSystem: CustomFileSystem(symlinkFSFactory{
 			files: map[string]string{
@@ -96,6 +98,7 @@ func TestFollowModeChecksResolvedReadTargetAgainstAllowedRoots(t *testing.T) {
 }
 
 func TestFollowModeAllowsSymlinkTraversalWithinAllowedRoots(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		FileSystem: CustomFileSystem(symlinkFSFactory{
 			files: map[string]string{
@@ -127,6 +130,7 @@ func TestFollowModeAllowsSymlinkTraversalWithinAllowedRoots(t *testing.T) {
 }
 
 func TestFollowModeChecksResolvedWriteTargetAgainstAllowedRoots(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		FileSystem: CustomFileSystem(symlinkFSFactory{
 			files: map[string]string{

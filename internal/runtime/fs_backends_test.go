@@ -32,6 +32,7 @@ func (f seededFSFactory) New(ctx context.Context) (gbfs.FileSystem, error) {
 }
 
 func TestOverlayFactorySupportsShellReadsAndCopyOnWrite(t *testing.T) {
+	t.Parallel()
 	rt := newRuntime(t, &Config{
 		FileSystem: CustomFileSystem(
 			gbfs.Overlay(seededFSFactory{files: map[string]string{
