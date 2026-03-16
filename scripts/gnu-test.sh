@@ -59,6 +59,33 @@ log_progress() {
   printf '%s\n' "$line" >> "$log_path"
 }
 
+run_single_test_make() {
+  local workdir=$1
+  local config_shell=$2
+  local log_target=$3
+
+  (
+    cd "$workdir"
+    if trace_enabled; then
+      enable_trace "gnu-test.make"
+    fi
+    if command -v setsid >/dev/null 2>&1; then
+      env CONFIG_SHELL="$config_shell" setsid make "$log_target" VERBOSE=no RUN_EXPENSIVE_TESTS=yes "srcdir=$workdir"
+    else
+      env CONFIG_SHELL="$config_shell" make "$log_target" VERBOSE=no RUN_EXPENSIVE_TESTS=yes "srcdir=$workdir"
+    fi
+  )
+}
+
+stop_tail() {
+  local tail_pid=${1-}
+  if [[ -z "$tail_pid" ]]; then
+    return 0
+  fi
+  kill "$tail_pid" 2>/dev/null || true
+  wait "$tail_pid" 2>/dev/null || true
+}
+
 prepare_workdir() {
   local workdir
   workdir=$(mktemp -d "${TMPDIR:-/tmp}/gbash-gnu-work-XXXXXX")
@@ -405,28 +432,32 @@ run_make_check() {
   : > "$log_path"
   log_progress "$log_path" "starting GNU make check for ${#tests[@]} tests"
   for test_path in "${tests[@]}"; do
-    local test_base log_target trs_path make_status status
+    local test_base log_target test_log_path trs_path make_status status tail_pid
     test_base=$(test_base_from_path "$test_path")
     log_target="$test_base.log"
+    test_log_path="$workdir/$log_target"
     trs_path="$workdir/$test_base.trs"
-    rm -f "$workdir/$log_target" "$trs_path"
+    rm -f "$test_log_path" "$trs_path"
     log_progress "$log_path" "BEGIN $test_path"
 
     make_status=0
-    if (
-      cd "$workdir"
-      if trace_enabled; then
-        enable_trace "gnu-test.make"
-      fi
-      if command -v setsid >/dev/null 2>&1; then
-        env CONFIG_SHELL="$config_shell" setsid make "$log_target" VERBOSE=no RUN_EXPENSIVE_TESTS=yes "srcdir=$workdir"
+    tail_pid=
+    if trace_enabled; then
+      : > "$test_log_path"
+      tail -n +1 -F "$test_log_path" &
+      tail_pid=$!
+      if run_single_test_make "$workdir" "$config_shell" "$log_target" >>"$log_path" 2>&1; then
+        make_status=0
       else
-        env CONFIG_SHELL="$config_shell" make "$log_target" VERBOSE=no RUN_EXPENSIVE_TESTS=yes "srcdir=$workdir"
+        make_status=$?
       fi
-    ) >>"$log_path" 2>&1; then
-      make_status=0
+      stop_tail "$tail_pid"
     else
-      make_status=$?
+      if run_single_test_make "$workdir" "$config_shell" "$log_target" >>"$log_path" 2>&1; then
+        make_status=0
+      else
+        make_status=$?
+      fi
     fi
 
     status=$(status_from_trs "$trs_path" || true)
