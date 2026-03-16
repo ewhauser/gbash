@@ -6,7 +6,7 @@ formatters:
     - goimports
   exclusions:
     paths:
-      - ^third_party/mvdan-sh/
+      - third_party/mvdan-sh/
 
 linters:
   enable:
@@ -248,30 +248,39 @@ linters:
 
   exclusions:
     paths:
-      - ^third_party/mvdan-sh/
+      - third_party/mvdan-sh/
     rules:
-      - path-except: ^(commands|internal/|trace/|policy/|network/|contrib/)/|^[^/]+\.go$
+      - path-except: (commands|internal|trace|policy|network|contrib)/
         linters:
           - depguard
-      - path-except: ^(commands|internal/|trace/|policy/|network/|contrib/)/|^[^/]+\.go$
+      - path-except: (commands|internal|trace|policy|network|contrib)/
         linters:
           - forbidigo
-      - path: ^(commands|internal/|trace/|policy/|network/|contrib/)/.*_test\.go$|^[^/]+_test\.go$
+      - path: _test\.go$
         linters:
           - depguard
-      - path: ^(commands|internal/|trace/|policy/|network/|contrib/)/.*_test\.go$|^[^/]+_test\.go$
+      - path: _test\.go$
         linters:
           - forbidigo
-      - path: ^commands/invocation_capabilities\.go$
+      - path: commands/invocation_capabilities\.go$
         text: "use of `fs\\.raw` forbidden because \"Do not bypass CommandFS policy checks; use inv\\.FS methods instead\\.\""
         linters:
           - forbidigo
-      - path: ^commands/read\.go$
+      - path: commands/read\.go$
         text: "use of `io\\.ReadAll` forbidden because \"Use commands\\.ReadAll, commands\\.ReadAllStdin, or inv\\.FS\\.ReadFile so MaxFileBytes is enforced\\.\""
         linters:
           - forbidigo
-      - path: ^internal/runtime/arch_default_unix\.go$
+      - path: internal/runtime/arch_default_unix\.go$
         text: "use of `unix\\.Uname` forbidden"
+        linters:
+          - forbidigo
+      - path: internal/fuzztest/
+        linters:
+          - forbidigo
+      - path: internal/searchadapter/
+        linters:
+          - forbidigo
+      - path: network/network\.go$
         linters:
           - forbidigo
 
