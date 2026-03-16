@@ -21,10 +21,10 @@ import (
 	"github.com/ewhauser/gbash/internal/shellstate"
 	"github.com/ewhauser/gbash/network"
 	"github.com/ewhauser/gbash/policy"
+	"github.com/ewhauser/gbash/trace"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/interp"
 	"mvdan.cc/sh/v3/syntax"
-	"github.com/ewhauser/gbash/trace"
 )
 
 type Engine interface {

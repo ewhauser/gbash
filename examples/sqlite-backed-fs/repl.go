@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/ewhauser/gbash"
-	"mvdan.cc/sh/v3/syntax"
 	"golang.org/x/term"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 const sqliteContinuationPrompt = "> "

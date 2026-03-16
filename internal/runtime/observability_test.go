@@ -9,8 +9,8 @@ import (
 
 	"github.com/ewhauser/gbash/internal/shell"
 	"github.com/ewhauser/gbash/policy"
-	"mvdan.cc/sh/v3/syntax"
 	"github.com/ewhauser/gbash/trace"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 func TestTraceOffDoesNotAllocateRecorder(t *testing.T) {
