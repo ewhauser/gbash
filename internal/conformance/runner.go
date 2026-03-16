@@ -1,0 +1,408 @@
+package conformance
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"slices"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"github.com/ewhauser/gbash"
+)
+
+var bashLinePrefixPattern = regexp.MustCompile(`(?m)^(?:[^:\n]+/)?bash: line \d+: `)
+
+func resolvedSuiteConfig(cfg *SuiteConfig) SuiteConfig {
+	resolved := *cfg
+	resolved.SpecDir = packageRelativePath(resolved.SpecDir)
+	resolved.BinDir = packageRelativePath(resolved.BinDir)
+	resolved.ManifestPath = packageRelativePath(resolved.ManifestPath)
+	if len(resolved.FixtureDirs) > 0 {
+		fixtures := make([]string, 0, len(resolved.FixtureDirs))
+		for _, dir := range resolved.FixtureDirs {
+			fixtures = append(fixtures, packageRelativePath(dir))
+		}
+		resolved.FixtureDirs = fixtures
+	}
+	return resolved
+}
+
+func packageRelativePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return path
+	}
+	return filepath.Join(filepath.Dir(file), path)
+}
+
+func RunSuite(t *testing.T, cfg *SuiteConfig) {
+	t.Helper()
+	resolvedCfg := resolvedSuiteConfig(cfg)
+	cfg = &resolvedCfg
+
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+
+	manifest, err := LoadManifest(cfg.ManifestPath)
+	if err != nil {
+		t.Fatalf("LoadManifest(%q) error = %v", cfg.ManifestPath, err)
+	}
+	specFiles, err := LoadSpecFiles(cfg.SpecDir, cfg.SpecFiles)
+	if err != nil {
+		t.Fatalf("LoadSpecFiles(%q) error = %v", cfg.SpecDir, err)
+	}
+
+	for _, specFile := range specFiles {
+		t.Run(specFile.Path, func(t *testing.T) {
+			t.Parallel()
+
+			fileEntry, hasFileEntry := manifest.LookupFile(cfg.Name, specFile.Path)
+			if hasFileEntry && fileEntry.Mode == EntryModeSkip {
+				t.Skipf("manifest skip: %s", fileEntry.Reason)
+			}
+
+			var fileXFailed atomic.Bool
+			if hasFileEntry && fileEntry.Mode == EntryModeXFail {
+				t.Cleanup(func() {
+					if !fileXFailed.Load() {
+						t.Fatalf("unexpected pass for manifest xfail file: %s", fileEntry.Reason)
+					}
+				})
+			}
+			for _, specCase := range specFile.Cases {
+				t.Run(specCase.Name, func(t *testing.T) {
+					t.Parallel()
+
+					caseEntry, hasCaseEntry := manifest.LookupCase(cfg.Name, specFile.Path, specCase.Name)
+					if hasCaseEntry && caseEntry.Mode == EntryModeSkip {
+						t.Skipf("manifest skip: %s", caseEntry.Reason)
+					}
+
+					result, err := RunCase(t.Context(), cfg, bashPath, specCase)
+					if err != nil {
+						t.Fatalf("RunCase() error = %v", err)
+					}
+					matched := result.GBash == result.Bash
+
+					switch DetermineCaseOutcome(fileEntry, hasFileEntry, caseEntry, hasCaseEntry, matched) {
+					case CaseOutcomePass:
+						return
+					case CaseOutcomeSkip:
+						t.Skip("manifest skip")
+					case CaseOutcomeExpectedFailure:
+						fileXFailed.Store(true)
+						t.Logf("expected failure: %s", expectedFailureReason(fileEntry, hasFileEntry, caseEntry, hasCaseEntry))
+						t.Logf("gbash:\n%s", formatExecutionResult(result.GBash))
+						t.Logf("bash:\n%s", formatExecutionResult(result.Bash))
+					case CaseOutcomeUnexpectedPass:
+						t.Fatalf("unexpected pass: %s", expectedFailureReason(fileEntry, hasFileEntry, caseEntry, hasCaseEntry))
+					case CaseOutcomeFailure:
+						t.Fatalf("bash mismatch\ngbash:\n%s\n\nbash:\n%s", formatExecutionResult(result.GBash), formatExecutionResult(result.Bash))
+					}
+				})
+			}
+		})
+	}
+}
+
+func RunCase(ctx context.Context, cfg *SuiteConfig, bashPath string, specCase SpecCase) (ComparisonResult, error) {
+	resolvedCfg := resolvedSuiteConfig(cfg)
+	cfg = &resolvedCfg
+
+	bashWorkspace, err := prepareWorkspace(cfg)
+	if err != nil {
+		return ComparisonResult{}, err
+	}
+	defer removeAll(bashWorkspace)
+
+	gbashWorkspace, err := prepareWorkspace(cfg)
+	if err != nil {
+		return ComparisonResult{}, err
+	}
+	defer removeAll(gbashWorkspace)
+
+	script := ensureTrailingNewline(specCase.Script)
+
+	bashResult, err := runBash(ctx, cfg, bashPath, bashWorkspace, script)
+	if err != nil {
+		return ComparisonResult{}, err
+	}
+	gbashResult, err := runGBash(ctx, cfg, gbashWorkspace, script)
+	if err != nil {
+		return ComparisonResult{}, err
+	}
+	return ComparisonResult{
+		GBash: normalizeExecutionResult(gbashResult, gbashWorkspace),
+		Bash:  normalizeExecutionResult(bashResult, bashWorkspace),
+	}, nil
+}
+
+//nolint:forbidigo // The conformance harness builds isolated host temp workspaces per case.
+func prepareWorkspace(cfg *SuiteConfig) (string, error) {
+	workspace, err := os.MkdirTemp("", "gbash-conformance-*")
+	if err != nil {
+		return "", err
+	}
+
+	for _, relDir := range append([]string{cfg.BinDir}, cfg.FixtureDirs...) {
+		if strings.TrimSpace(relDir) == "" {
+			continue
+		}
+		src := relDir
+		dst := workspace
+		if filepath.Base(relDir) == "bin" {
+			dst = filepath.Join(workspace, "bin")
+		}
+		if filepath.Base(relDir) != "bin" {
+			dst = workspace
+		}
+		if err := copyTree(src, dst); err != nil {
+			removeAll(workspace)
+			return "", err
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Join(workspace, "tmp"), 0o755); err != nil {
+		removeAll(workspace)
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "_tmp"), 0o755); err != nil {
+		removeAll(workspace)
+		return "", err
+	}
+	return workspace, nil
+}
+
+//nolint:forbidigo // The conformance harness copies vendored helper trees into a host temp workspace.
+func copyTree(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", src)
+	}
+	return filepath.WalkDir(src, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		if err := copyFile(path, target); err != nil {
+			return err
+		}
+		if filepath.Base(src) == "bin" {
+			return os.Chmod(target, 0o755)
+		}
+		return nil
+	})
+}
+
+//nolint:forbidigo // The conformance harness copies vendored fixtures into a host temp workspace.
+func copyFile(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer closeIgnoringError(in)
+
+	mode := info.Mode().Perm()
+	if mode == 0 {
+		mode = 0o644
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	outClosed := false
+	defer func() {
+		if !outClosed {
+			closeIgnoringError(out)
+		}
+	}()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	outClosed = true
+	return nil
+}
+
+func runGBash(ctx context.Context, cfg *SuiteConfig, workspace, script string) (ExecutionResult, error) {
+	rt, err := gbash.New(gbash.WithFileSystem(gbash.ReadWriteDirectoryFileSystem(workspace, gbash.ReadWriteDirectoryOptions{})))
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	session, err := rt.NewSession(ctx)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	result, err := session.Exec(ctx, &gbash.ExecutionRequest{
+		Script:     script,
+		WorkDir:    "/",
+		ReplaceEnv: true,
+		Env:        gbashEnv(cfg),
+	})
+	if err != nil {
+		return ExecutionResult{
+			ExitCode: 2,
+			Stderr:   err.Error() + "\n",
+		}, nil
+	}
+	return ExecutionResult{
+		ExitCode: result.ExitCode,
+		Stdout:   result.Stdout,
+		Stderr:   result.Stderr,
+	}, nil
+}
+
+//nolint:forbidigo // The oracle side of the harness intentionally executes the real host bash binary.
+func runBash(ctx context.Context, cfg *SuiteConfig, bashPath, workspace, script string) (ExecutionResult, error) {
+	args := OracleCommandArgs(cfg.OracleMode, script)
+	cmd := exec.CommandContext(ctx, bashPath, args...)
+	cmd.Dir = workspace
+	cmd.Env = bashEnv(cfg, workspace)
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	exitCode := 0
+	if err != nil {
+		exitErr, ok := err.(*exec.ExitError)
+		if !ok {
+			return ExecutionResult{}, err
+		}
+		exitCode = exitErr.ExitCode()
+	}
+	return ExecutionResult{
+		ExitCode: exitCode,
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+	}, nil
+}
+
+func OracleCommandArgs(mode OracleMode, script string) []string {
+	switch mode {
+	case OracleBash:
+		return []string{"--noprofile", "--norc", "-c", script}
+	case OracleBashPosix:
+		return []string{"--posix", "--noprofile", "--norc", "-c", script}
+	default:
+		return []string{"--noprofile", "--norc", "-c", script}
+	}
+}
+
+func normalizeExecutionResult(result ExecutionResult, workspace string) ExecutionResult {
+	result.Stdout = normalizeOutput(result.Stdout, workspace)
+	result.Stderr = normalizeBashStderr(normalizeOutput(result.Stderr, workspace))
+	return result
+}
+
+func normalizeOutput(value, workspace string) string {
+	value = filepath.ToSlash(value)
+	workspace = filepath.ToSlash(workspace)
+	value = strings.ReplaceAll(value, workspace+"/", "/")
+	value = strings.ReplaceAll(value, workspace, "/")
+	return value
+}
+
+func normalizeBashStderr(value string) string {
+	return bashLinePrefixPattern.ReplaceAllString(filepath.ToSlash(value), "")
+}
+
+func gbashEnv(cfg *SuiteConfig) map[string]string {
+	env := map[string]string{
+		"HOME":   "/",
+		"PATH":   "/bin:/usr/bin",
+		"LANG":   "C",
+		"LC_ALL": "C",
+		"PWD":    "/",
+		"SH":     "bash",
+		"TMP":    "/tmp",
+		"TMPDIR": "/tmp",
+	}
+	if cfg.OracleMode == OracleBashPosix {
+		env["POSIXLY_CORRECT"] = "1"
+	}
+	return env
+}
+
+func bashEnv(cfg *SuiteConfig, workspace string) []string {
+	values := []string{
+		"HOME=" + workspace,
+		"PWD=" + workspace,
+		"PATH=" + filepath.Join(workspace, "bin") + ":/usr/bin:/bin",
+		"LANG=C",
+		"LC_ALL=C",
+		"SH=bash",
+		"TMP=" + filepath.Join(workspace, "tmp"),
+		"TMPDIR=" + filepath.Join(workspace, "tmp"),
+	}
+	if cfg.OracleMode == OracleBashPosix {
+		values = append(values, "POSIXLY_CORRECT=1")
+	}
+	slices.Sort(values)
+	return values
+}
+
+func expectedFailureReason(fileEntry ManifestEntry, hasFileEntry bool, caseEntry ManifestEntry, hasCaseEntry bool) string {
+	if hasCaseEntry {
+		return caseEntry.Reason
+	}
+	if hasFileEntry {
+		return fileEntry.Reason
+	}
+	return "expected failure"
+}
+
+func formatExecutionResult(result ExecutionResult) string {
+	return fmt.Sprintf("exit_code: %d\nstdout: %q\nstderr: %q", result.ExitCode, result.Stdout, result.Stderr)
+}
+
+func ensureTrailingNewline(script string) string {
+	if script == "" || strings.HasSuffix(script, "\n") {
+		return script
+	}
+	return script + "\n"
+}
+
+//nolint:forbidigo // Host temp workspaces are cleaned up after each conformance case.
+func removeAll(path string) {
+	_ = os.RemoveAll(path)
+}
+
+func closeIgnoringError(closer io.Closer) {
+	_ = closer.Close()
+}
