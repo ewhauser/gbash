@@ -45,7 +45,7 @@ type Config struct {
 
 // ListenAndServeUnix serves the gbash JSON-RPC protocol on a Unix domain socket.
 func ListenAndServeUnix(ctx context.Context, socketPath string, cfg Config) error {
-	socketPath, ln, err := listenUnixSocket(socketPath)
+	socketPath, ln, err := listenUnixSocket(ctx, socketPath)
 	if err != nil {
 		return err
 	}
@@ -56,7 +56,7 @@ func ListenAndServeUnix(ctx context.Context, socketPath string, cfg Config) erro
 	return Serve(ctx, ln, cfg)
 }
 
-func listenUnixSocket(socketPath string) (string, net.Listener, error) {
+func listenUnixSocket(ctx context.Context, socketPath string) (string, net.Listener, error) {
 	socketPath = strings.TrimSpace(socketPath)
 	if socketPath == "" {
 		return "", nil, fmt.Errorf("server: socket path must not be empty")
@@ -64,10 +64,10 @@ func listenUnixSocket(socketPath string) (string, net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
 		return "", nil, fmt.Errorf("server: create socket directory: %w", err)
 	}
-	if err := removeStaleUnixSocket(socketPath); err != nil {
+	if err := removeStaleUnixSocket(ctx, socketPath); err != nil {
 		return "", nil, err
 	}
-	ln, err := net.Listen("unix", socketPath)
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "unix", socketPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("server: listen on unix socket: %w", err)
 	}
@@ -121,7 +121,7 @@ func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 }
 
 type serverState struct {
-	ctx       context.Context
+	ctx       context.Context //nolint:containedctx // intentional: server-scoped lifetime context
 	cfg       Config
 	transport string
 
@@ -203,13 +203,15 @@ func listenerTransport(ln net.Listener) string {
 	}
 }
 
-func removeStaleUnixSocket(socketPath string) error {
+func removeStaleUnixSocket(ctx context.Context, socketPath string) error {
 	info, err := os.Lstat(socketPath)
 	if err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
 			return fmt.Errorf("server: path exists and is not a socket: %s", socketPath)
 		}
-		conn, dialErr := net.DialTimeout("unix", socketPath, 100*time.Millisecond)
+		probeCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
+		conn, dialErr := (&net.Dialer{}).DialContext(probeCtx, "unix", socketPath)
 		if dialErr == nil {
 			_ = conn.Close()
 			return fmt.Errorf("server: socket already in use: %s", socketPath)
@@ -553,7 +555,7 @@ func decodeParams[T any](raw json.RawMessage) (T, error) {
 		return out, nil
 	}
 	if err := json.Unmarshal(trimmed, &out); err != nil {
-		return out, fmt.Errorf("%w: %v", errInvalidArgument, err)
+		return out, fmt.Errorf("%w: %w", errInvalidArgument, err)
 	}
 	return out, nil
 }

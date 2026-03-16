@@ -287,6 +287,67 @@ func TestServerConcurrentSessionsAndBusy(t *testing.T) {
 	}
 }
 
+func TestServerExecReturnsRawOutputsAndFinalEnvWithTraceRedacted(t *testing.T) {
+	t.Parallel()
+	srv := startServer(t, gbserver.Config{
+		Name:       "gbash",
+		Version:    "test",
+		SessionTTL: time.Second,
+	}, gbash.WithTracing(gbash.TraceConfig{Mode: gbash.TraceRedacted}))
+	client := dialClient(t, srv.socket)
+	defer client.Close()
+
+	sessionID := mustCreateSession(t, client)
+	exec := client.call("session.exec", map[string]any{
+		"session_id": sessionID,
+		"script": "" +
+			"export API_TOKEN=env-secret\n" +
+			"printf 'stdout:%s\\n' \"$API_TOKEN\"\n" +
+			"printf 'stderr:%s\\n' \"$API_TOKEN\" >&2\n" +
+			"echo -H 'Authorization: Bearer argv-secret' >/dev/null\n",
+	})
+	mustOK(t, &exec)
+
+	var payload execResult
+	decodeResult(t, &exec, &payload)
+	if got, want := payload.Stdout, "stdout:env-secret\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got, want := payload.Stderr, "stderr:env-secret\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+	if got, want := payload.FinalEnv["API_TOKEN"], "env-secret"; got != want {
+		t.Fatalf("FinalEnv[API_TOKEN] = %q, want %q", got, want)
+	}
+}
+
+func TestServerSessionTTLExpiry(t *testing.T) {
+	t.Parallel()
+	srv := startServer(t, gbserver.Config{
+		Name:       "gbash",
+		Version:    "test",
+		SessionTTL: 250 * time.Millisecond,
+	})
+	client := dialClient(t, srv.socket)
+	defer client.Close()
+
+	sessionID := mustCreateSession(t, client)
+
+	time.Sleep(500 * time.Millisecond)
+
+	list := client.call("session.list", nil)
+	mustOK(t, &list)
+	var listed sessionListResult
+	decodeResult(t, &list, &listed)
+	if len(listed.Sessions) != 0 {
+		t.Fatalf("session.list result = %+v, want empty after ttl expiry", listed)
+	}
+
+	get := client.call("session.get", map[string]any{"session_id": sessionID})
+	if get.Error == nil || get.Error.Data == nil || get.Error.Data.Code != "SESSION_NOT_FOUND" {
+		t.Fatalf("session.get result = %#v, want SESSION_NOT_FOUND", get)
+	}
+}
 func TestServeTCPListenerReportsTCPTransport(t *testing.T) {
 	t.Parallel()
 	rt, err := gbash.New()
@@ -294,7 +355,7 @@ func TestServeTCPListenerReportsTCPTransport(t *testing.T) {
 		t.Fatalf("gbash.New() error = %v", err)
 	}
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx // test setup
 	if err != nil {
 		t.Fatalf("Listen(tcp) error = %v", err)
 	}
@@ -350,7 +411,7 @@ func startServer(t *testing.T, cfg gbserver.Config, opts ...gbash.Option) *serve
 
 	ctx, cancel := context.WithCancel(context.Background())
 	socket := newSocketPath(t)
-	ln, err := net.Listen("unix", socket)
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "unix", socket)
 	if err != nil {
 		t.Fatalf("Listen(unix) error = %v", err)
 	}
@@ -385,7 +446,7 @@ func startServer(t *testing.T, cfg gbserver.Config, opts ...gbash.Option) *serve
 func dialClient(t *testing.T, socket string) *testClient {
 	t.Helper()
 
-	conn, err := net.DialTimeout("unix", socket, 5*time.Second)
+	conn, err := net.DialTimeout("unix", socket, 5*time.Second) //nolint:noctx // test helper
 	if err != nil {
 		t.Fatalf("DialTimeout(%q) error = %v", socket, err)
 	}
@@ -400,7 +461,7 @@ func dialClient(t *testing.T, socket string) *testClient {
 func mustDialTCP(t *testing.T, addr string) net.Conn {
 	t.Helper()
 
-	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second) //nolint:noctx // test helper
 	if err != nil {
 		t.Fatalf("DialTimeout(%q) error = %v", addr, err)
 	}
