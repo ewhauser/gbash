@@ -208,7 +208,7 @@ func parseWCMatches(inv *Invocation, matches *ParsedCommand) (wcOptions, error) 
 	return opts, nil
 }
 
-func wcResolveInputs(ctx context.Context, inv *Invocation, opts *wcOptions, files []string) (resolved []string, inputCount int, exitCode int, fromFiles0 bool, err error) {
+func wcResolveInputs(ctx context.Context, inv *Invocation, opts *wcOptions, files []string) (resolved []string, inputCount, exitCode int, fromFiles0 bool, err error) {
 	if opts.files0From == "" {
 		return files, len(files), 0, false, nil
 	}
@@ -236,7 +236,7 @@ func wcResolveInputs(ctx context.Context, inv *Invocation, opts *wcOptions, file
 	return resolved, inputCount, exitCode, true, nil
 }
 
-func parseWCFiles0From(inv *Invocation, source string, data []byte) (files []string, inputCount int, exitCode int) {
+func parseWCFiles0From(inv *Invocation, source string, data []byte) (files []string, inputCount, exitCode int) {
 	if len(data) == 0 {
 		return nil, 0, 0
 	}

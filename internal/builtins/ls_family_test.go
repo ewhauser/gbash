@@ -900,7 +900,7 @@ func TestLSLongShellEscapeSpacingRespectsTimeStyleEnv(t *testing.T) {
 	if !regexp.MustCompile(`\sT 'a b'`).MatchString(parts[1]) {
 		t.Fatalf("long output = %q, want TIME_STYLE env to drive +T timestamps", parts[1])
 	}
-	if !regexp.MustCompile(`\n.*  \x1b\[0m\x1b\[0;31;42mc\.foo\x1b\[0m\n`).MatchString(parts[1]) {
+	if !regexp.MustCompile(`\n.* {2}\x1b\[0m\x1b\[0;31;42mc\.foo\x1b\[0m\n`).MatchString(parts[1]) {
 		t.Fatalf("long output = %q, want GNU shell-escape spacing for unquoted names", parts[1])
 	}
 }

@@ -1641,9 +1641,9 @@ func parseLSColorsEnv(value string) lsParsedColors {
 		if !ok {
 			continue
 		}
-		if strings.HasPrefix(key, "*") {
+		if suffix, ok := strings.CutPrefix(key, "*"); ok {
 			parsed.patterns = append(parsed.patterns, lsColorPattern{
-				suffix: strings.TrimPrefix(key, "*"),
+				suffix: suffix,
 				code:   code,
 			})
 			continue
@@ -1860,7 +1860,7 @@ func sortLSEntries(entries []lsEntry, opts *lsOptions) {
 	}
 }
 
-func lsLoadEntryInfo(ctx context.Context, inv *Invocation, abs string, opts *lsOptions) (info stdfs.FileInfo, groupAsDir bool, unknownShortMetadata bool, err error) {
+func lsLoadEntryInfo(ctx context.Context, inv *Invocation, abs string, opts *lsOptions) (info stdfs.FileInfo, groupAsDir, unknownShortMetadata bool, err error) {
 	linfo, _, err := lstatPath(ctx, inv, abs)
 	if err != nil {
 		return nil, false, false, err
