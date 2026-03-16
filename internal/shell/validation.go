@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/ewhauser/gbash/policy"
-	"github.com/ewhauser/gbash/third_party/mvdan-sh/pattern"
-	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
+	"mvdan.cc/sh/v3/pattern"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 type budgetViolation struct {

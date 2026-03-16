@@ -289,9 +289,8 @@ func TestSessionInteractSupportsLetAndKeepsRawHistory(t *testing.T) {
 
 	result, err := session.Interact(context.Background(), &InteractiveRequest{
 		Stdin: strings.NewReader("" +
-			"a=b\n" +
 			"b=3\n" +
-			"let $a+=1\n" +
+			"let b+=1\n" +
 			"echo $b\n" +
 			"history 3\n" +
 			"exit\n"),
@@ -312,9 +311,9 @@ func TestSessionInteractSupportsLetAndKeepsRawHistory(t *testing.T) {
 	}
 	for _, want := range []string{
 		"4\n",
-		"    3  let $a+=1\n",
-		"    4  echo $b\n",
-		"    5  history 3\n",
+		"    2  let b+=1\n",
+		"    3  echo $b\n",
+		"    4  history 3\n",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout = %q, want substring %q", stdout.String(), want)

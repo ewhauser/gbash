@@ -4,10 +4,6 @@ formatters:
   enable:
     - gofmt
     - goimports
-  exclusions:
-    paths:
-      - third_party/mvdan-sh/
-
 linters:
   enable:
     - depguard
@@ -247,8 +243,6 @@ linters:
           msg: Use fmt.Fprint with inv.Stdout/inv.Stderr instead of writing to host stdout.
 
   exclusions:
-    paths:
-      - third_party/mvdan-sh/
     rules:
       - path-except: (commands|internal|trace|policy|network|contrib)/
         linters:

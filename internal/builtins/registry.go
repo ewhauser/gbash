@@ -128,6 +128,7 @@ func DefaultRegistry() *commands.Registry {
 		NewSHA384Sum(),
 		NewSHA512Sum(),
 		NewStrings(),
+		NewUmask(),
 		NewWho(),
 	}
 	return commands.NewRegistry(cmds...)

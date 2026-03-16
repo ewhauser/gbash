@@ -7,8 +7,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/ewhauser/gbash/third_party/mvdan-sh/interp"
-	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
+	"mvdan.cc/sh/v3/interp"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 const (
