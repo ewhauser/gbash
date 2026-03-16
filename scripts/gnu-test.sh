@@ -320,7 +320,9 @@ remove_tmp_ ()
     echo "Not removing temporary directory $test_dir_"
   else
     cd "$initial_cwd_" || cd / || cd /tmp
-    "$jbgo_host_chmod_" -R u+rwx "$test_dir_"
+    if test -e "$test_dir_"; then
+      "$jbgo_host_chmod_" -R u+rwx "$test_dir_" 2>/dev/null || :
+    fi
     "$jbgo_host_rm_" -rf "$test_dir_" 2>/dev/null \
       || { "$jbgo_host_sleep_" 1 && "$jbgo_host_rm_" -rf "$test_dir_"; } \
       || { test $__st = 0 && __st=1; }
