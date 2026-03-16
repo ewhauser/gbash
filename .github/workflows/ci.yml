@@ -48,8 +48,6 @@ jobs:
             go list -deps -test -f '{{if and .Dir (not .Standard)}}{{.Dir}}{{end}}' ./internal/runtime ./fs ./policy ./network \
               | sort -u
           )
-          repo_core_deep_dirs+=("third_party/mvdan-sh/patches")
-
           while IFS= read -r file; do
             case "$file" in
               Makefile|go.mod|go.sum|go.work|go.work.sum|.github/workflows/ci.yml|.github/workflows/fuzz-full.yml)

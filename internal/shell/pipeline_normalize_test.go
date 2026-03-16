@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 func TestRewritePipelineSubshellsWrapsFinalPipelineStage(t *testing.T) {

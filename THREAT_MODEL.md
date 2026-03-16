@@ -4,7 +4,7 @@
 For the validated context of local or embedded single-tenant use, `gbash`'s highest-risk areas are the boundaries where untrusted shell text meets host-backed filesystems, optional network egress, and caller-controlled observability sinks. The core runtime does a number of important things correctly by default, including registry-backed command resolution, in-memory filesystem defaults, network-off-by-default behavior, path-policy enforcement, and execution budgets, but the security posture changes materially when an embedder opts into `WithWorkspace`, `ReadWriteDirectoryFileSystem`, `WithHTTPAccess` or `WithNetwork`, `TraceRaw`, or server mode.
 
 ## Scope and assumptions
-- In-scope paths: `cmd/gbash/`, `cli/`, `api.go`, `options.go`, `internal/runtime/`, `internal/shell/`, `internal/builtins/`, `commands/`, `policy/`, `fs/`, `network/`, `server/`, and the runtime-facing parts of `third_party/mvdan-sh/`.
+- In-scope paths: `cmd/gbash/`, `cli/`, `api.go`, `options.go`, `internal/runtime/`, `internal/shell/`, `internal/builtins/`, `commands/`, `policy/`, `fs/`, `network/`, `server/`.
 - Out-of-scope: CI and release automation, benchmarks, website build and docs, `cmd/gbash-gnu`, optional `contrib/` modules not registered by default, and package publishing/WASM distribution. Those surfaces may matter operationally, but this report is intentionally centered on runtime and sandbox behavior.
 - Clarified context: primary deployment is local or embedded single-tenant use, not a multi-tenant internet-facing service.
 - Clarified context: host-mounted repositories, environment variables, and tokens are high-sensitivity assets when exposed to the runtime.
@@ -120,7 +120,7 @@ flowchart LR
 | In-process API | `gbash.New`, `Runtime.Run`, `Session.Exec` | Local caller -> runtime session | Primary embedder surface for agent hosts. | `api.go`, `internal/runtime/runtime.go`, `internal/runtime/session.go` |
 | JSON-RPC server | `session.create`, `session.exec`, etc. | Local client -> server transport | No protocol auth; transport protection is external. | `server/server.go:handleRequest`, `server/session.go:sessionExecParams` |
 | Host-backed filesystem modes | `WithWorkspace`, `HostDirectoryFileSystem`, `ReadWriteDirectoryFileSystem`, `--root`, `--readwrite-root` | Runtime -> host filesystem | This is the main host data boundary. | `cli/runtime_options.go`, `internal/runtime/filesystem.go`, `fs/host_posix.go`, `fs/readwrite_posix.go` |
-| Shell builtins and nested execution | `eval`, `source`, `exec`, `bash`, `sh`, `xargs`, `timeout` | Untrusted script -> policy and nested shell | These amplify attacker-controlled work inside the same sandbox. | `internal/shell/mvdan.go:execHandler`, `third_party/mvdan-sh/interp/builtin.go`, `internal/builtins/bash.go` |
+| Shell builtins and nested execution | `eval`, `source`, `exec`, `bash`, `sh`, `xargs`, `timeout` | Untrusted script -> policy and nested shell | These amplify attacker-controlled work inside the same sandbox. | `internal/shell/mvdan.go:execHandler`, `internal/builtins/bash.go` |
 | Network egress | `curl` | Runtime -> outbound HTTP client | Present only when network is configured. | `internal/builtins/curl.go:RunParsed`, `network/network.go` |
 | Observability outputs | JSON mode, server results, trace callbacks, logger callbacks | Runtime -> caller-controlled sink | High-signal debugging surface; also a data exfil surface. | `cli/json_output.go`, `server/session.go:sessionExecResult`, `observability.go`, `internal/runtime/observability_runtime.go` |
 

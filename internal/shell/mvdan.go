@@ -21,10 +21,10 @@ import (
 	"github.com/ewhauser/gbash/internal/shellstate"
 	"github.com/ewhauser/gbash/network"
 	"github.com/ewhauser/gbash/policy"
-	"github.com/ewhauser/gbash/third_party/mvdan-sh/expand"
-	"github.com/ewhauser/gbash/third_party/mvdan-sh/interp"
-	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 	"github.com/ewhauser/gbash/trace"
+	"mvdan.cc/sh/v3/expand"
+	"mvdan.cc/sh/v3/interp"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 type Engine interface {
@@ -455,6 +455,9 @@ func (m *MVdan) execHandler(exec *Execution, budget *executionBudget) interp.Exe
 		commandCtx := shellstate.WithCompletionState(ctx, completionStateForExecution(exec))
 		err = commands.RunCommand(commandCtx, resolved.command, invocation)
 		if syncErr := syncCommandHistory(ctx, &hc, currentEnv, invocation.Env); syncErr != nil {
+			return syncErr
+		}
+		if syncErr := syncUmaskEnv(ctx, &hc, currentEnv, invocation.Env); syncErr != nil {
 			return syncErr
 		}
 
@@ -1553,6 +1556,23 @@ func prependRuntimePreludeLines(script string) string {
 func isInternalHelperCommand(name string) bool {
 	_, ok := internalHelperCommands[name]
 	return ok
+}
+
+const umaskEnvVar = "GBASH_UMASK"
+
+func syncUmaskEnv(ctx context.Context, hc *interp.HandlerContext, before, after map[string]string) error {
+	if hc == nil {
+		return nil
+	}
+	beforeValue, beforeOK := before[umaskEnvVar]
+	afterValue, afterOK := after[umaskEnvVar]
+	if beforeOK == afterOK && beforeValue == afterValue {
+		return nil
+	}
+	if !afterOK {
+		return hc.Builtin(ctx, []string{"unset", umaskEnvVar})
+	}
+	return hc.Builtin(ctx, []string{"eval", fmt.Sprintf("%s='%s'; export %s", umaskEnvVar, shellSingleQuote(afterValue), umaskEnvVar)})
 }
 
 var _ Engine = (*MVdan)(nil)

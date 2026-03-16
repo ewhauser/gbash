@@ -12,7 +12,7 @@ import (
 	"unicode"
 
 	"github.com/ewhauser/gbash/policy"
-	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 const (
