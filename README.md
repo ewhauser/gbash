@@ -5,7 +5,7 @@ A deterministic, sandbox-only, bash-like runtime for AI agents, implemented in G
 Shell parsing is delegated to [`mvdan/sh`](https://github.com/mvdan/sh), with project-owned virtual filesystem, registry-backed command execution, policy enforcement, and structured tracing layers around it. Commands never fall through to host binaries, and network access is off by default. Originally inspired by [Vercel's `just-bash`](https://github.com/vercel-labs/just-bash).
 
 > [!WARNING]
-> This is beta software. It is likely that additional security hardening is needed. Use with care.
+> This is alpha software. It is likely that additional security hardening is needed. Use with care.
 
 ## Table of Contents
 
