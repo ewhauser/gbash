@@ -71,10 +71,18 @@ func listenUnixSocket(ctx context.Context, socketPath string) (string, net.Liste
 	if err != nil {
 		return "", nil, fmt.Errorf("server: listen on unix socket: %w", err)
 	}
-	if err := os.Chmod(socketPath, 0o600); err != nil {
+	cleanup := true
+	defer func() {
+		if !cleanup {
+			return
+		}
 		_ = ln.Close()
+		_ = os.Remove(socketPath)
+	}()
+	if err := os.Chmod(socketPath, 0o600); err != nil {
 		return "", nil, fmt.Errorf("server: chmod socket: %w", err)
 	}
+	cleanup = false
 	return socketPath, ln, nil
 }
 
