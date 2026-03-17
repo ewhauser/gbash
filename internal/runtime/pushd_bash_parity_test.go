@@ -124,6 +124,18 @@ func TestDirectoryStackMatchesBashBehavior(t *testing.T) {
 				"dirs -v -l\n",
 		},
 		{
+			name: "cd accepts end of options marker",
+			script: "" +
+				"mkdir -p -- /tmp/-dir\n" +
+				"cd -- /tmp\n" +
+				"pwd\n" +
+				"cd -- -dir\n" +
+				"pwd\n" +
+				"cd /\n" +
+				"cd --\n" +
+				"pwd\n",
+		},
+		{
 			name:   "nonexistent target errors",
 			script: "pushd /no/such/dir\n",
 		},
