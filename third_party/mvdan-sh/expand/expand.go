@@ -796,7 +796,8 @@ func (cfg *Config) quotedElemFields(pe *syntax.ParamExp) ([]string, bool, error)
 	}
 
 	set := len(elems) > 0
-	null := !set || (len(elems) == 1 && elems[0] == "")
+	quotedAt := pe.Param.Value == "@" || nodeLit(pe.Index) == "@"
+	null := !set || (!quotedAt && len(elems) == 1 && elems[0] == "")
 	switch pe.Exp.Op {
 	case syntax.AlternateUnset:
 		if set {
@@ -805,13 +806,6 @@ func (cfg *Config) quotedElemFields(pe *syntax.ParamExp) ([]string, bool, error)
 		}
 		return fields, true, nil
 	case syntax.AlternateUnsetOrNull:
-		if pe.Param.Value == "@" || nodeLit(pe.Index) == "@" {
-			if set {
-				word, err := cfg.quotedParamWord(pe.Exp.Word)
-				return word, true, err
-			}
-			return fields, true, nil
-		}
 		if !null {
 			word, err := cfg.quotedParamWord(pe.Exp.Word)
 			return word, true, err

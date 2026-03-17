@@ -480,7 +480,7 @@ var runTests = []runTest{
 	},
 	{
 		`show() { echo $#; for x in "$@"; do printf "<%s>\n" "$x"; done; }; a=(""); show "${a[@]:-with-colon}"`,
-		"1\n<with-colon>\n",
+		"1\n<>\n",
 	},
 	{
 		`show() { echo $#; for x in "$@"; do printf "<%s>\n" "$x"; done; }; a=("" ""); show "${a[@]:-with-colon}"`,
