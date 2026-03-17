@@ -3688,6 +3688,11 @@ done <<< 2`,
 	},
 }
 
+var runTestsBash52Want = map[string]string{
+	"[[ aa =~ a{,2} ]]; echo lower:$?; [[ aa =~ a{,} ]]; echo open:$?": "lower:0\nopen:0\n",
+	"[[ a =~ $(( 1 / 0 )) ]]; echo status=$?":                         "1 / 0 : division by 0 (error token is \"0 \")\nexit status 1",
+}
+
 var runTestsUnix = []runTest{
 	{"[[ -n $PPID && $PPID -ge 0 ]]", ""}, // can be 0 if running as the init process
 	{
@@ -4506,14 +4511,20 @@ func TestRunnerRunConfirm(t *testing.T) {
 			if err != nil {
 				got += err.Error()
 			}
+			want := c.want
+			if hasBash52 {
+				if bash52Want, ok := runTestsBash52Want[c.in]; ok {
+					want = bash52Want
+				}
+			}
 			if strings.HasPrefix(got, "bash: line 1: ") {
-				if trimmed := strings.TrimPrefix(got, "bash: line 1: "); trimmed == c.want {
+				if trimmed := strings.TrimPrefix(got, "bash: line 1: "); trimmed == want {
 					got = trimmed
 				}
 			}
-			if got != c.want {
+			if got != want {
 				t.Fatalf("wrong bash output in %q:\nwant: %q\ngot:  %q",
-					c.in, c.want, got)
+					c.in, want, got)
 			}
 		})
 	}
