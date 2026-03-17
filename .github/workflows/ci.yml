@@ -44,4 +44,6 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: cachix/install-nix-action@v30
+
       - run: make conformance-test

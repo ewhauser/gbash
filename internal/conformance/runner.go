@@ -52,9 +52,17 @@ func RunSuite(t *testing.T, cfg *SuiteConfig) {
 	resolvedCfg := resolvedSuiteConfig(cfg)
 	cfg = &resolvedCfg
 
-	bashPath, err := exec.LookPath("bash")
-	if err != nil {
-		t.Skip("bash not available")
+	bashPath := os.Getenv("GBASH_CONFORMANCE_BASH")
+	if bashPath == "" {
+		var err error
+		bashPath, err = exec.LookPath("bash")
+		if err != nil {
+			t.Skip("bash not available")
+		}
+	}
+	if out, err := exec.Command(bashPath, "--version").Output(); err == nil {
+		firstLine, _, _ := strings.Cut(string(out), "\n")
+		t.Logf("bash oracle: %s (%s)", firstLine, bashPath)
 	}
 
 	manifest, err := LoadManifest(cfg.ManifestPath)
