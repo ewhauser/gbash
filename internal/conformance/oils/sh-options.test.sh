@@ -518,7 +518,9 @@ show-strict() {
 }
 
 show-strict
+shopt -s strict:all
 show-strict
+shopt -u strict_argv
 show-strict
 ## STDOUT:
 shopt -u strict_arg_parse
@@ -547,6 +549,7 @@ set -o errexit
 shopt -p nullglob || true  # bash returns 1 here?  Like -q.
 
 # This should set nullglob, and return 1, which can be ignored
+shopt -s nullglob strict_OPTION_NOT_YET_IMPLEMENTED 2>/dev/null || true
 echo status=$?
 
 shopt -p nullglob || true
@@ -603,6 +606,7 @@ status=127
 ## END
 
 #### stubbed out bash options
+shopt -s ignore_shopt_not_impl
 for name in foo autocd cdable_vars checkwinsize; do
   shopt -s $name
   echo $?
@@ -695,6 +699,8 @@ set=1
 #### Unimplemented options - OSH shopt -s ignore_shopt_not_impl
 case $SH in dash|mksh) exit ;; esac
 
+shopt -s ignore_shopt_not_impl
+
 
 opt_name=xpg_echo
 
@@ -751,4 +757,3 @@ echo --
 shopt -u xpg_echo
 --
 ## END
-

@@ -212,6 +212,7 @@ echo $w $x $y
 ## N-I dash/mksh stdout-json: ""
 
 #### YSH allows unquoted foo\ bar too
+shopt -s ysh:all
 touch foo\ bar
 ls foo\ bar
 ## STDOUT:
