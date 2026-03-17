@@ -3,8 +3,8 @@ module github.com/ewhauser/gbash/examples
 go 1.26.1
 
 require (
-	github.com/ewhauser/gbash v0.0.18
-	github.com/ewhauser/gbash/contrib/sqlite3 v0.0.18
+	github.com/ewhauser/gbash v0.0.19
+	github.com/ewhauser/gbash/contrib/sqlite3 v0.0.19
 	github.com/klauspost/compress v1.18.4
 	github.com/ncruces/go-sqlite3 v0.31.1
 	github.com/openai/openai-go v1.12.0
@@ -25,11 +25,9 @@ require (
 	cloud.google.com/go/auth v0.17.0 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/creack/pty v1.1.24 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-quicktest/qt v1.101.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
