@@ -23,7 +23,7 @@ BENCH_SMOKE_COUNT ?= 8
 BENCH_SMOKE_TIME ?= 100ms
 BENCH_FULL_COUNT ?= 10
 BENCH_FULL_TIME ?= 200ms
-BENCH_SMOKE_REGEX ?= Benchmark(NewSession|RuntimeRunSimpleScript|SessionExecWarmSimpleScript|WorkflowCodebaseExploration|CommandRGRecursive|CLIBinary|CommandJQTransform)$$
+BENCH_SMOKE_REGEX ?= Benchmark(NewSession|RuntimeRunSimpleScript|SessionExecWarmSimpleScript|WorkflowCodebaseExploration|CommandGrepRecursive|CLIBinary|CommandJQTransform)$$
 BENCH_COMPARE_RUNS ?= 100
 BENCH_FS_RUNS ?= 50
 BENCH_FS_JSON_OUT ?= website/content/performance/filesystem-benchmark-data.json
@@ -52,7 +52,6 @@ FUZZ_SMOKE_SHARD_PATHS := \
 	FuzzCompatPredicateCommands \
 	FuzzDirectoryTraversalCommands \
 	FuzzCsplitCommand \
-	FuzzTextSearchCommands \
 	FuzzTSortCommand
 
 FUZZ_SMOKE_SHARD_DATA := \
@@ -110,7 +109,6 @@ FUZZ_FULL_SHARD_2 := \
 FUZZ_FULL_SHARD_3 := \
 	FuzzDirectoryTraversalCommands \
 	FuzzCsplitCommand \
-	FuzzTextSearchCommands \
 	FuzzNumfmtCommand \
 	FuzzColumnCommand \
 	FuzzSedFlagsCommand \

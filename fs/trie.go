@@ -102,8 +102,7 @@ func Trie() Factory {
 // composition is `Reusable(SeededTrie(...))`, which shares one trie-backed
 // lower tree and gives each caller a fresh writable overlay. That factory can
 // then be passed through `gbash.CustomFileSystem(...)`, mounted with
-// `gbash.MountableFileSystem(...)`, or wrapped with [NewSearchableFactory] when
-// a mounted trie tree should also expose a search provider.
+// `gbash.MountableFileSystem(...)`.
 //
 // Example single-root usage:
 //

@@ -390,7 +390,7 @@ The default runtime exposes registry-backed commands plus shell builtins and shi
 | Category | Commands |
 |---|---|
 | File and path | `basename` `cat` `chmod` `chown` `cp` `dircolors` `dirname` `du` `file` `find` `ln` `link` `ls` `dir` `mkdir` `mktemp` `mv` `readlink` `realpath` `rm` `rmdir` `stat` `touch` `tree` `truncate` `unlink` `vdir` |
-| Search and text | `base32` `base64` `basenc` `column` `comm` `csplit` `cut` `diff` `egrep` `fgrep` `grep` `head` `join` `nl` `numfmt` `od` `paste` `printf` `rev` `rg` `sed` `seq` `sort` `split` `strings` `tac` `tail` `tee` `tr` `uniq` `wc` `xan` |
+| Search and text | `base32` `base64` `basenc` `column` `comm` `csplit` `cut` `diff` `egrep` `fgrep` `grep` `head` `join` `nl` `numfmt` `od` `paste` `printf` `rev` `sed` `seq` `sort` `split` `strings` `tac` `tail` `tee` `tr` `uniq` `wc` `xan` |
 | Archive | `gzip` `gunzip` `tar` `zcat` |
 | Builtins | `.` `:` `[` `alias` `break` `builtin` `cd` `command` `continue` `declare` `dirs` `echo` `eval` `exec` `exit` `export` `false` `getopts` `hash` `help` `history` `let` `local` `mapfile` `popd` `printf` `pushd` `pwd` `read` `readarray` `readonly` `return` `set` `shift` `shopt` `source` `test` `trap` `true` `type` `typeset` `unalias` `unset` `wait` |
 | Environment and execution | `arch` `b2sum` `bash` `cksum` `clear` `date` `echo` `env` `expr` `factor` `false` `help` `history` `id` `md5sum` `printenv` `pwd` `sh` `sha1sum` `sha224sum` `sha256sum` `sha384sum` `sha512sum` `sleep` `sum` `test` `timeout` `true` `tsort` `tty` `uname` `uptime` `which` `who` `whoami` `xargs` `yes` |
