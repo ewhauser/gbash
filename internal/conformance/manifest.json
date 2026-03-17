@@ -286,10 +286,6 @@
           "mode": "xfail",
           "reason": "sourced-file lookup failures still format stderr differently from bash for missing fixture paths"
         },
-        "oils/introspect.test.sh::${FUNCNAME} and \"set -u\" (OSH regression)": {
-          "mode": "xfail",
-          "reason": "unbound FUNCNAME matches bash stderr but still returns exit status 1 instead of 127"
-        },
         "oils/introspect.test.sh::${BASH_SOURCE[@]} with source and function name": {
           "mode": "xfail",
           "reason": "sourced-file lookup failures still format stderr differently from bash for missing fixture paths"
@@ -417,6 +413,10 @@
         "oils/var-op-len.test.sh::Unicode string length (spec/testdata/utf8-chars.txt)": {
           "mode": "xfail",
           "reason": "cat error message format differs: 'file does not exist' vs 'No such file or directory'"
+        },
+        "oils/var-op-len.test.sh::${#s} respects LC_ALL - length in bytes or code points": {
+          "mode": "xfail",
+          "reason": "gbash follows POSIX locale semantics but Linux bash ignores LANG when en_US.UTF-8 locale is unavailable"
         },
         "oils/var-op-patsub.test.sh": {
           "mode": "xfail",
