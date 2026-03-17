@@ -283,6 +283,7 @@ ale
 ## END
 
 #### array ref with strict_array
+shopt -s strict_array
 
 declare -a array=(ale bean)
 ref='array'
@@ -295,6 +296,7 @@ ale
 ## END
 
 #### var ref TO array var
+shopt -s compat_array
 
 declare -a array=(ale bean)
 
@@ -329,6 +331,7 @@ f 'array[*]'
 ## END
 
 #### var ref TO assoc array a[key]
+shopt -s compat_array
 
 declare -A assoc=([ale]=bean [corn]=dip)
 ref=assoc
@@ -356,6 +359,7 @@ ref_SUB_BAD=
 ## END
 
 #### var ref TO array with arbitrary subscripts
+shopt -s eval_unsafe_arith compat_array
 
 f() {
   local val=$(echo "${!1}")

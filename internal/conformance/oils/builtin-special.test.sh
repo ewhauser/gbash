@@ -206,6 +206,7 @@ if test -n "$BASH_VERSION"; then
   set -o posix
 fi
 
+shopt -s invalid_ || true
 echo ok
 set -o invalid_ || true
 echo should not get here

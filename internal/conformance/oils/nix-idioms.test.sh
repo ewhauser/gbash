@@ -85,6 +85,7 @@ show
 #### ${!ref} to undefined array
 
 set -u
+shopt -s eval_unsafe_arith || true 2>/dev/null
 
 #preHooks=()
 hookSlice="preHooks[@]"

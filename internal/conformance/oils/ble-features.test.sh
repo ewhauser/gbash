@@ -376,6 +376,7 @@ argv.sh ${d['0']} ${d['foo']} ${d['bar']}
 #### [compat_array] ${alpha@a}
 declare -A alpha=(['1']=2)
 echo type=${alpha@a}
+shopt -s compat_array
 echo type=${alpha@a}
 ## STDOUT:
 type=A

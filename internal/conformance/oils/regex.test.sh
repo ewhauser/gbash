@@ -113,9 +113,23 @@ true
 true
 ## END
 
+#### Regex with == and not =~ is parse error, different lexer mode required
+# They both give a syntax error.  This is lame.
+[[ '^(a b)$' == ^(a\ b)$ ]] && echo true
+## status: 2
+## OK zsh status: 1
+
 #### Omitting ( )
 [[ '^a b$' == ^a\ b$ ]] && echo true
 ## stdout: true
+
+#### Malformed regex
+# Are they trying to PARSE the regex?  Do they feed the buffer directly to
+# regcomp()?
+[[ 'a b' =~ ^)a\ b($ ]] && echo true
+## stdout-json: ""
+## status: 2
+## OK zsh status: 1
 
 #### Regex with |
 [[ 'bar' =~ foo|bar ]] && echo true
@@ -327,6 +341,7 @@ status=0
 ## END
 
 #### pattern @f(x)
+shopt -s parse_at
 [[ @fx =~ @f(x) ]]
 echo status=$?
 [[ fx =~ @f(x) ]]
@@ -576,6 +591,21 @@ echo mu=$?
 ## STDOUT:
 mu
 mu=0
+## END
+
+#### Parse error with 2 words
+
+if [[ a =~ c a ]]; then
+  echo one
+fi
+
+## status: 2
+## STDOUT:
+## END
+
+## BUG zsh status: 1
+## BUG zsh STDOUT:
+one
 ## END
 
 #### make a lisp example

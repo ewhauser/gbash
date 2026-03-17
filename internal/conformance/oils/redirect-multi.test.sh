@@ -38,6 +38,7 @@ zz-*-xx
 
 #### ysh behavior when glob doesn't match
 
+shopt -s ysh:upgrade
 
 echo hi > qq-*-zz
 echo status=$?
