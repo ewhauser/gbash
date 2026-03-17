@@ -452,21 +452,6 @@ func (f *procSubstFS) Chdir(name string) error {
 	return f.inner.Chdir(name)
 }
 
-func (f *procSubstFS) SearchProviderForPath(name string) (gbfs.SearchProvider, bool) {
-	if f == nil || f.inner == nil || f.manager == nil {
-		return nil, false
-	}
-	if _, ok := f.procSubstPath(name); ok {
-		return nil, false
-	}
-	capable, ok := f.inner.(gbfs.SearchCapable)
-	if !ok {
-		return nil, false
-	}
-	abs := gbfs.Resolve(f.inner.Getwd(), name)
-	return capable.SearchProviderForPath(abs)
-}
-
 func (f *procSubstFS) procSubstPath(name string) (string, bool) {
 	if f == nil || f.inner == nil || f.manager == nil {
 		return "", false

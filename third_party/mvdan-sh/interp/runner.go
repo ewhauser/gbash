@@ -500,6 +500,10 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			}
 			i += len(als.args)
 		}
+		if decl := prefixAssignDeclClause(args, cm.Assigns); decl != nil {
+			r.cmd(ctx, decl)
+			return
+		}
 		r.lastExpandExit = exitStatus{}
 		fields := r.fields(args...)
 		if len(fields) == 0 {
@@ -1001,6 +1005,32 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 	}
 }
 
+func prefixAssignDeclClause(args []*syntax.Word, assigns []*syntax.Assign) *syntax.DeclClause {
+	if len(assigns) == 0 || len(args) == 0 {
+		return nil
+	}
+	variant := args[0].Lit()
+	switch variant {
+	case "declare", "local", "export", "readonly", "typeset", "nameref":
+	default:
+		return nil
+	}
+	declArgs := make([]*syntax.Assign, 0, len(args)-1)
+	for _, arg := range args[1:] {
+		if arg == nil {
+			continue
+		}
+		declArgs = append(declArgs, &syntax.Assign{
+			Naked: true,
+			Value: arg,
+		})
+	}
+	return &syntax.DeclClause{
+		Variant: &syntax.Lit{Value: variant},
+		Args:    declArgs,
+	}
+}
+
 func (r *Runner) lastpipeStmt(stmt *syntax.Stmt) (*syntax.Stmt, bool) {
 	if !r.opts[optLastPipe] || r.interactive || stmt == nil {
 		return nil, false
@@ -1359,11 +1389,11 @@ func (r *Runner) open(ctx context.Context, path string, flags int, mode os.FileM
 	}
 
 	f, err := r.openHandler(r.handlerCtx(ctx, handlerKindOpen, todoPos), path, flags, mode)
-	// TODO: support wrapped PathError returned from openHandler.
-	switch err.(type) {
-	case nil:
+	var pathErr *os.PathError
+	switch {
+	case err == nil:
 		return f, nil
-	case *os.PathError:
+	case errors.As(err, &pathErr):
 		if print {
 			r.errf("%v\n", err)
 		}

@@ -29,7 +29,6 @@ func DefaultRegistry() *commands.Registry {
 		NewGrep(),
 		NewEGrep(),
 		NewFGrep(),
-		NewRG(),
 		NewHead(),
 		NewTail(),
 		NewWC(),

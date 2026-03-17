@@ -484,12 +484,6 @@ type PolicyEvent struct {
 
 The command-facing `Invocation` is capability-only. Custom commands get sandboxed filesystem and fetch helpers plus nested execution and limits metadata, but they do not receive the raw policy object, raw trace recorder, or raw network client. Policy checks and file-access tracing happen behind `Invocation.FS`, and `Invocation.Fetch` is nil unless network access is configured.
 
-Experimental command-facing search bridge:
-
-- `Invocation.FS.SearchProviderForPath(ctx, name)` is an opt-in capability for built-ins and custom commands that want indexed search without reaching around the command filesystem boundary
-- the bridge resolves `name` against the invocation working directory, applies normal read policy and symlink checks, and returns a scoped provider view rather than the raw backend capability
-- delegated search queries must stay within the scoped root, and returned hits are filtered back to that subtree so commands keep policy enforcement behind `Invocation.FS`
-
 Registry semantics are override-friendly: later registrations replace earlier ones so embedders can swap in custom implementations for built-ins, and `RegisterLazy` defers expensive command setup until first execution while still participating in `PATH` resolution and `Names()`.
 
 Key design decisions:
@@ -669,27 +663,12 @@ Current and planned backends:
 - `MountableFS`: multi-mount namespace over a base filesystem plus sibling mount points, with synthetic parent directories and path routing handled inside the backend
 - `SnapshotFS`: deterministic read-only clone of another filesystem for tests and replay fixtures
 
-Optional experimental search capability:
-
-- `fs.SearchCapable` is an opt-in Go-only extension surface for backends that can expose a filesystem- or mount-scoped search provider without changing the core `fs.FileSystem` contract
-- the search surface is experimental and subject to change; it is intentionally not mirrored into `gbash` root-package helpers or the `@ewhauser/gbash-wasm` API
-- capability discovery is explicit via interface assertion and `SearchProviderForPath(name)`
-- `MountableFS` resolves search providers per routed backend and returns no provider for synthetic multi-backend roots such as `/`
-- search providers report `CurrentGeneration` and `IndexedGeneration` so callers can reject stale providers and fall back to normal scanning
-- the built-in v1 provider is synchronous, literal-only, and exact for the indexed file paths it tracks; it supports case-insensitive literal queries, root restriction, include/exclude path globs, optional byte offsets, and verified result flags
-- the built-in wrapper performs an initial crawl and may materialize lazy files because full-text search is a content-sensitive capability
-- search remains an accelerator, not the semantic source of truth for `grep`/`rg`; callers may use provider hits as verified matches or as prefiltered candidates and still apply exact userspace verification
-- `grep` may use indexed providers as a per-root prefilter when it can extract safe mandatory literals from the compiled pattern; candidate files are still opened and matched in userspace before output is emitted
-- `grep` falls back per root when a provider is unavailable, stale, unsupported, or the current search mode cannot produce a bounded safe literal set; stdin, invert-match mode, and symlink-directory descendants stay on the direct scan path
-- `rg` may use indexed providers as a per-root prefilter after its normal root walking, ignore, glob, type, hidden-file, and max-depth filtering; candidate files are still opened and matched in userspace before output is emitted
-- `rg` falls back per root when a provider is unavailable, stale, unsupported, or the current search mode cannot produce a bounded safe literal set; invert-match mode and symlink-directory descendants stay on the direct scan path, and binary-sensitive guaranteed-miss modes such as `-c` and `--files-without-match` without `--text` still read the file to preserve ripgrep-style binary behavior
-
 Backend boundary for the current implementation:
 
 - `gbash.Config.FileSystem` is the public setup boundary for session storage and starting directory; callers should not have to coordinate separate runtime knobs to mount a backend and choose the initial working directory
 - `SeededMemory` and `gbash.SeededInMemoryFileSystem(...)` are the productized seed path for eager or lazy per-file session bootstrap
 - `TrieFS` is an opt-in experimental backend exposed through `gbfs.Trie()` and `gbfs.SeededTrie(...)`
-- the preferred shared-lower composition for read-mostly trie data is `gbfs.Reusable(gbfs.SeededTrie(...))`, optionally wrapped by `gbfs.NewSearchableFactory(...)` when the mount should also expose a filesystem-local search provider
+- the preferred shared-lower composition for read-mostly trie data is `gbfs.Reusable(gbfs.SeededTrie(...))`
 - `TrieFS` is intended for static or read-mostly in-memory data and mounted datasets; it is not the default `runtime` session backend and is not the recommended path for `WithWorkspace`, `HostDirectoryFileSystem(...)`, or other live host-backed filesystem flows
 - `HostFS` is an opt-in lower-layer backend exposed through `gbfs.Host(...)`; it is intended to sit underneath `gbfs.Overlay(...)`, not to replace the default in-memory runtime path
 - `ReadWriteFS` is an opt-in mutable backend exposed through `gbfs.ReadWrite(...)`; it is intended for developer tooling, external test harnesses, and embedders that explicitly want host mutations

@@ -15,6 +15,22 @@ func TestRedirectRegressionSupportsOverwriteAppendAndInputRedirection(t *testing
 	}
 }
 
+func TestRedirectRegressionDirectoryOpenFailureOnlyFailsTheCommand(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "mkdir dir\n echo foo > ./dir\n echo status=$?\n printf foo > ./dir\n echo status=$?\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "status=1\nstatus=1\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, "./dir: Is a directory\n./dir: Is a directory\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
 func TestPipelineRegressionChainsShellAndRegistryCommands(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
@@ -170,6 +186,31 @@ func TestLetRegressionSupportsLiteralArithmeticExpressions(t *testing.T) {
 	}
 	if got, want := result.Stdout, "9,13\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestDeclarationRegressionIgnoresPrefixEnvAssignments(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, ""+
+		"f() {\n"+
+		"  E=env local l=var\n"+
+		"  E=env declare d=var\n"+
+		"  E=env export x=var\n"+
+		"  E=env readonly r=var\n"+
+		"  E=env typeset t=var\n"+
+		"  printf 'E:<%s> l:%s d:%s x:%s r:%s t:%s\\n' \"${E-}\" \"$l\" \"$d\" \"$x\" \"$r\" \"$t\"\n"+
+		"}\n"+
+		"f\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "E:<> l:var d:var x:var r:var t:var\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
 	}
 }
 

@@ -19,13 +19,11 @@ import (
 
 	"github.com/ewhauser/gbash/examples/internal/sqlitefs"
 	gbfs "github.com/ewhauser/gbash/fs"
-	"github.com/ewhauser/gbash/internal/searchadapter"
 )
 
 const (
 	defaultRuns         = 50
 	virtualWorkspace    = "/workspace"
-	searchLiteral       = "fulltext-benchmark-needle"
 	mutationCreatePath  = "/workspace/scratch/session/output.txt"
 	mutationCreateBody  = "created in benchmark mutation\n"
 	mutationRewritePath = "/workspace/docs/runbook00.md"
@@ -71,7 +69,6 @@ type scenarioResult struct {
 	Backend      string       `json:"backend"`
 	SuccessCount int          `json:"success_count"`
 	FailureCount int          `json:"failure_count"`
-	SearchMode   string       `json:"search_mode,omitempty"`
 	Stats        latencyStats `json:"stats"`
 }
 
@@ -96,8 +93,6 @@ type benchmarkFixture struct {
 	DirectoryCount int
 	BulkReadPaths  []string
 	BulkReadBytes  int64
-	SearchLiteral  string
-	SearchHitCount int
 	RenameSource   string
 	RenameTarget   string
 	RenameBody     string
@@ -115,20 +110,15 @@ type benchmarkEnv struct {
 	sqliteTemplateDB string
 }
 
-type workloadObservation struct {
-	SearchMode string
-}
-
 type workloadConfig struct {
 	Name        string
 	Description string
-	Run         func(context.Context, gbfs.FileSystem, *benchmarkFixture) (workloadObservation, error)
+	Run         func(context.Context, gbfs.FileSystem, *benchmarkFixture) error
 }
 
 type backendConfig struct {
-	Info              backendInfo
-	ExpectIndexedMode bool
-	Prepare           func(context.Context, *benchmarkEnv) (gbfs.Factory, func() error, error)
+	Info    backendInfo
+	Prepare func(context.Context, *benchmarkEnv) (gbfs.Factory, func() error, error)
 }
 
 func main() {
@@ -298,17 +288,11 @@ func benchmarkScenarios() []workloadConfig {
 			Description: "Create, overwrite, rename, and remove files inside /workspace with verification.",
 			Run:         runMutationRoundTrip,
 		},
-		{
-			Name:        "literal_search",
-			Description: "Literal search over /workspace, using indexed search when a backend provides it.",
-			Run:         runLiteralSearch,
-		},
 	}
 }
 
 func runScenarioTrials(ctx context.Context, backend backendConfig, scenario workloadConfig, env *benchmarkEnv, runs int) (scenarioResult, error) {
 	durations := make([]time.Duration, 0, runs)
-	searchMode := ""
 
 	for range runs {
 		factory, cleanup, err := backend.Prepare(ctx, env)
@@ -325,7 +309,7 @@ func runScenarioTrials(ctx context.Context, backend backendConfig, scenario work
 			_ = cleanup()
 			return scenarioResult{}, err
 		}
-		observation, runErr := scenario.Run(ctx, fsys, &env.fixture)
+		runErr := scenario.Run(ctx, fsys, &env.fixture)
 		duration := time.Since(start)
 		closeErr := closeIfPossible(fsys)
 		cleanupErr := cleanup()
@@ -340,20 +324,6 @@ func runScenarioTrials(ctx context.Context, backend backendConfig, scenario work
 			return scenarioResult{}, cleanupErr
 		}
 
-		if observation.SearchMode != "" {
-			if observation.SearchMode == "index" && !backend.ExpectIndexedMode {
-				return scenarioResult{}, fmt.Errorf("unexpected indexed search mode")
-			}
-			if observation.SearchMode == "scan" && backend.ExpectIndexedMode {
-				return scenarioResult{}, fmt.Errorf("expected indexed search mode")
-			}
-			if searchMode == "" {
-				searchMode = observation.SearchMode
-			} else if searchMode != observation.SearchMode {
-				return scenarioResult{}, fmt.Errorf("search mode changed across trials: %q vs %q", searchMode, observation.SearchMode)
-			}
-		}
-
 		durations = append(durations, duration)
 	}
 
@@ -365,7 +335,6 @@ func runScenarioTrials(ctx context.Context, backend backendConfig, scenario work
 		Backend:      backend.Info.Name,
 		SuccessCount: runs,
 		FailureCount: 0,
-		SearchMode:   searchMode,
 		Stats:        stats,
 	}, nil
 }
@@ -383,7 +352,6 @@ func buildBenchmarkFixture() benchmarkFixture {
 	dirs := map[string]struct{}{virtualWorkspace: {}}
 	summary := fixtureSummary{}
 	modTime := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
-	searchHitCount := 0
 
 	addFile := func(name, body string) {
 		files[name] = gbfs.InitialFile{
@@ -405,8 +373,7 @@ func buildBenchmarkFixture() benchmarkFixture {
 		var body strings.Builder
 		fmt.Fprintf(&body, "package pkg%02d\n\n", i%12)
 		if i < 36 {
-			fmt.Fprintf(&body, "// %s source-%03d\n", searchLiteral, i)
-			searchHitCount++
+			fmt.Fprintf(&body, "// benchmark source-%03d\n", i)
 		}
 		for line := range 14 {
 			fmt.Fprintf(&body, "func File%03dLine%02d() string { return \"benchmark-%03d-%02d\" }\n", i, line, i, line)
@@ -417,8 +384,7 @@ func buildBenchmarkFixture() benchmarkFixture {
 	for i := range docsFiles {
 		body := fmt.Sprintf("# Runbook %02d\nowner=team-%02d\nnote=follow-up-%02d\n", i, i%6, i)
 		if i < 12 {
-			body += fmt.Sprintf("search=%s-doc-%02d\n", searchLiteral, i)
-			searchHitCount++
+			body += fmt.Sprintf("marker=doc-%02d\n", i)
 		}
 		body += strings.Repeat("stability-check\n", 10)
 		addFile(fmt.Sprintf("/workspace/docs/runbook%02d.md", i), body)
@@ -439,8 +405,7 @@ func buildBenchmarkFixture() benchmarkFixture {
 			fmt.Fprintf(&body, "ts=%02d:%02d level=info batch=%02d row=%02d message=steady-state\n", i, row, i, row)
 		}
 		if i < 12 {
-			fmt.Fprintf(&body, "level=warn marker=%s-log-%02d\n", searchLiteral, i)
-			searchHitCount++
+			fmt.Fprintf(&body, "level=warn marker=log-%02d\n", i)
 		}
 		addFile(fmt.Sprintf("/workspace/logs/batch%02d.log", i), body.String())
 	}
@@ -462,8 +427,6 @@ func buildBenchmarkFixture() benchmarkFixture {
 		DirectoryCount: len(dirs),
 		BulkReadPaths:  bulkReadPaths,
 		BulkReadBytes:  summary.TotalBytes,
-		SearchLiteral:  searchLiteral,
-		SearchHitCount: searchHitCount,
 		RenameSource:   mutationRenameSrc,
 		RenameTarget:   mutationRenameDst,
 		RenameBody:     string(files[mutationRenameSrc].Content),
@@ -519,104 +482,85 @@ func cloneSQLiteTemplate(ctx context.Context, tmpRoot, templatePath string) (str
 	return dbPath, nil
 }
 
-func runMetadataWalk(ctx context.Context, fsys gbfs.FileSystem, fixture *benchmarkFixture) (workloadObservation, error) {
+func runMetadataWalk(ctx context.Context, fsys gbfs.FileSystem, fixture *benchmarkFixture) error {
 	files, dirs, totalBytes, err := walkWorkspace(ctx, fsys, virtualWorkspace)
 	if err != nil {
-		return workloadObservation{}, err
+		return err
 	}
 	if files != fixture.Summary.FileCount {
-		return workloadObservation{}, fmt.Errorf("walk file count = %d, want %d", files, fixture.Summary.FileCount)
+		return fmt.Errorf("walk file count = %d, want %d", files, fixture.Summary.FileCount)
 	}
 	if dirs != fixture.DirectoryCount {
-		return workloadObservation{}, fmt.Errorf("walk dir count = %d, want %d", dirs, fixture.DirectoryCount)
+		return fmt.Errorf("walk dir count = %d, want %d", dirs, fixture.DirectoryCount)
 	}
 	if totalBytes != fixture.Summary.TotalBytes {
-		return workloadObservation{}, fmt.Errorf("walk bytes = %d, want %d", totalBytes, fixture.Summary.TotalBytes)
+		return fmt.Errorf("walk bytes = %d, want %d", totalBytes, fixture.Summary.TotalBytes)
 	}
-	return workloadObservation{}, nil
+	return nil
 }
 
-func runBulkRead(ctx context.Context, fsys gbfs.FileSystem, fixture *benchmarkFixture) (workloadObservation, error) {
+func runBulkRead(ctx context.Context, fsys gbfs.FileSystem, fixture *benchmarkFixture) error {
 	var total int64
 	for _, name := range fixture.BulkReadPaths {
 		data, err := readSandboxFile(ctx, fsys, name)
 		if err != nil {
-			return workloadObservation{}, err
+			return err
 		}
 		total += int64(len(data))
 	}
 	if total != fixture.BulkReadBytes {
-		return workloadObservation{}, fmt.Errorf("bulk read bytes = %d, want %d", total, fixture.BulkReadBytes)
+		return fmt.Errorf("bulk read bytes = %d, want %d", total, fixture.BulkReadBytes)
 	}
-	return workloadObservation{}, nil
+	return nil
 }
 
-func runMutationRoundTrip(ctx context.Context, fsys gbfs.FileSystem, fixture *benchmarkFixture) (workloadObservation, error) {
+func runMutationRoundTrip(ctx context.Context, fsys gbfs.FileSystem, fixture *benchmarkFixture) error {
 	if err := writeSandboxFile(ctx, fsys, fixture.CreateTarget, fixture.CreateBody); err != nil {
-		return workloadObservation{}, err
+		return err
 	}
 	if err := writeSandboxFile(ctx, fsys, fixture.RewriteTarget, fixture.RewriteBody); err != nil {
-		return workloadObservation{}, err
+		return err
 	}
 	if err := fsys.Rename(ctx, fixture.RenameSource, fixture.RenameTarget); err != nil {
-		return workloadObservation{}, err
+		return err
 	}
 	if err := fsys.Remove(ctx, fixture.RemoveTarget, false); err != nil {
-		return workloadObservation{}, err
+		return err
 	}
 
 	if got, err := readSandboxText(ctx, fsys, fixture.CreateTarget); err != nil || got != fixture.CreateBody {
 		if err != nil {
-			return workloadObservation{}, err
+			return err
 		}
-		return workloadObservation{}, fmt.Errorf("created file = %q, want %q", got, fixture.CreateBody)
+		return fmt.Errorf("created file = %q, want %q", got, fixture.CreateBody)
 	}
 	if got, err := readSandboxText(ctx, fsys, fixture.RewriteTarget); err != nil || got != fixture.RewriteBody {
 		if err != nil {
-			return workloadObservation{}, err
+			return err
 		}
-		return workloadObservation{}, fmt.Errorf("rewritten file = %q, want %q", got, fixture.RewriteBody)
+		return fmt.Errorf("rewritten file = %q, want %q", got, fixture.RewriteBody)
 	}
 	if _, err := fsys.Stat(ctx, fixture.RenameSource); !isNotExist(err) {
-		return workloadObservation{}, fmt.Errorf("stat old rename path error = %w, want not exist", err)
+		return fmt.Errorf("stat old rename path error = %w, want not exist", err)
 	}
 	if got, err := readSandboxText(ctx, fsys, fixture.RenameTarget); err != nil || got != fixture.RenameBody {
 		if err != nil {
-			return workloadObservation{}, err
+			return err
 		}
-		return workloadObservation{}, fmt.Errorf("renamed file = %q, want original body", got)
+		return fmt.Errorf("renamed file = %q, want original body", got)
 	}
 	if _, err := fsys.Stat(ctx, fixture.RemoveTarget); !isNotExist(err) {
-		return workloadObservation{}, fmt.Errorf("stat removed file error = %w, want not exist", err)
+		return fmt.Errorf("stat removed file error = %w, want not exist", err)
 	}
 
 	files, _, _, err := walkWorkspace(ctx, fsys, virtualWorkspace)
 	if err != nil {
-		return workloadObservation{}, err
+		return err
 	}
 	if files != fixture.Summary.FileCount {
-		return workloadObservation{}, fmt.Errorf("post-mutation file count = %d, want %d", files, fixture.Summary.FileCount)
+		return fmt.Errorf("post-mutation file count = %d, want %d", files, fixture.Summary.FileCount)
 	}
-	return workloadObservation{}, nil
-}
-
-func runLiteralSearch(ctx context.Context, fsys gbfs.FileSystem, fixture *benchmarkFixture) (workloadObservation, error) {
-	result, err := searchadapter.Search(ctx, fsys, &searchadapter.Query{
-		Roots:         []string{virtualWorkspace},
-		Literal:       fixture.SearchLiteral,
-		IndexEligible: true,
-	}, nil)
-	if err != nil {
-		return workloadObservation{}, err
-	}
-	if len(result.Hits) != fixture.SearchHitCount {
-		return workloadObservation{}, fmt.Errorf("search hit count = %d, want %d", len(result.Hits), fixture.SearchHitCount)
-	}
-	mode := "scan"
-	if result.UsedIndex {
-		mode = "index"
-	}
-	return workloadObservation{SearchMode: mode}, nil
+	return nil
 }
 
 func walkWorkspace(ctx context.Context, fsys gbfs.FileSystem, root string) (files, dirs int, totalBytes int64, err error) {
@@ -753,9 +697,6 @@ func renderTextReport(report *benchmarkReport) string {
 				formatNanos(result.Stats.MedianNanos),
 				formatNanos(result.Stats.P95Nanos),
 			)
-			if result.SearchMode != "" {
-				fmt.Fprintf(&b, " search=%s", result.SearchMode)
-			}
 			b.WriteByte('\n')
 		}
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	stdfs "io/fs"
-	"slices"
 	"testing"
 
 	gbfs "github.com/ewhauser/gbash/fs"
@@ -68,59 +67,5 @@ func TestMountableFactorySupportsTrieDatasetAndScratch(t *testing.T) {
 	writeFile(t, fsys, "/scratch/log.txt", "note\n")
 	if got, want := readFile(t, fsys, "/scratch/log.txt"), "note\n"; got != want {
 		t.Fatalf("scratch read = %q, want %q", got, want)
-	}
-}
-
-func TestMountableSearchableTrieProvider(t *testing.T) {
-	t.Parallel()
-
-	fsys, err := gbfs.Mountable(gbfs.MountableOptions{
-		Base: gbfs.Memory(),
-		Mounts: []gbfs.MountConfig{
-			{
-				MountPoint: "/dataset",
-				Factory: gbfs.NewSearchableFactory(
-					gbfs.Reusable(gbfs.SeededTrie(gbfs.InitialFiles{
-						"/docs/guide.txt": {Content: []byte("needle\n")},
-					})),
-					nil,
-				),
-			},
-			{
-				MountPoint: "/scratch",
-				Factory:    gbfs.Memory(),
-			},
-		},
-	}).New(context.Background())
-	if err != nil {
-		t.Fatalf("Mountable.New() error = %v", err)
-	}
-
-	capable, ok := fsys.(gbfs.SearchCapable)
-	if !ok {
-		t.Fatalf("filesystem %T does not implement SearchCapable", fsys)
-	}
-	rootProvider, ok := capable.SearchProviderForPath("/")
-	if ok || rootProvider != nil {
-		t.Fatalf("SearchProviderForPath(/) = %v, %v, want nil,false", rootProvider, ok)
-	}
-
-	provider, ok := capable.SearchProviderForPath("/dataset")
-	if !ok {
-		t.Fatal("SearchProviderForPath(/dataset) = false, want true")
-	}
-	result, err := provider.Search(context.Background(), &gbfs.SearchQuery{
-		Root:    "/dataset",
-		Literal: "needle",
-	})
-	if err != nil {
-		t.Fatalf("Search() error = %v", err)
-	}
-	var paths []string
-	for _, hit := range result.Hits {
-		paths = append(paths, hit.Path)
-	}
-	if got, want := paths, []string{"/dataset/docs/guide.txt"}; !slices.Equal(got, want) {
-		t.Fatalf("search hits = %v, want %v", got, want)
 	}
 }

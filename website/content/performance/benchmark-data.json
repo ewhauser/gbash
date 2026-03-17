@@ -137,8 +137,8 @@
       ]
     },
     {
-      "name": "agentic_search",
-      "description": "Recursive search across mixed workspace files plus jq summaries.",
+      "name": "agentic_workspace_audit",
+      "description": "Recursive workspace audit across mixed files plus jq summaries.",
       "command": "printf 'files=%s\\nmatches=%s\\nbad_jobs=%s\\ntier1=%s\\n' \"$(find . -type f | grep -c '^')\" \"$(grep -RniE 'timeout|rollback' . | grep -c '^')\" \"$(jq -s 'map(select(.status != \"ok\")) | length' logs/*.jsonl)\" \"$(jq '.services | map(select(.tier == 1)) | length' manifests/services.json)\"",
       "expected_stdout": "files=300\nmatches=60\nbad_jobs=24\ntier1=8\n",
       "workspace": true,

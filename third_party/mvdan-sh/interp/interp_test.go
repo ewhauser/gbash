@@ -1853,12 +1853,44 @@ var runTests = []runTest{
 		"foo\n",
 	},
 	{
+		`[[ 'a b' =~ '^(a b)$' ]] || echo single; [[ 'a b' =~ "^(a b)$" ]] || echo double; pat='^(a b)$'; [[ 'a b' =~ "$pat" ]] || echo var`,
+		"single\ndouble\nvar\n",
+	},
+	{
+		`[[ + =~ "+" ]] && echo plus; [[ * =~ "*" ]] && echo star; [[ ? =~ "?" ]] && echo question; [[ '\' =~ '\' ]] && echo slash`,
+		"plus\nstar\nquestion\nslash\n",
+	},
+	{
+		"[[ { =~ { ]] && echo true; echo status=$?",
+		"status=2\n",
+	},
+	{
 		"[[ a =~ [ ]]",
 		"exit status 2",
 	},
 	{
 		"[[ a__b__c =~ _*(b_*) ]]; echo ${BASH_REMATCH[0]}; echo ${BASH_REMATCH[1]}",
 		"__b__\nb__\n",
+	},
+	{
+		"[[ foo123 =~ ([a-z]+)([0-9]+) ]]; [[ failed =~ ([a-z]+)([0-9]+) ]]; echo ${#BASH_REMATCH[@]}",
+		"0\n",
+	},
+	{
+		"[[ foo123 =~ ([a-z]+)([0-9]+) ]]; [[ foo =~ [ ]]; printf '%s\\n' \"${BASH_REMATCH[*]}\"",
+		"foo123 foo 123\n",
+	},
+	{
+		"set -u; [[ foo123 =~ ([a-z]+)([0-9]+) ]]; [[ a =~ $unset ]]; echo no",
+		"unset: unbound variable\nexit status 1",
+	},
+	{
+		"[[ aa =~ a{,2} ]]; echo lower:$?; [[ aa =~ a{,} ]]; echo open:$?",
+		"lower:1\nopen:1\n",
+	},
+	{
+		"[[ a =~ $(( 1 / 0 )) ]]; echo status=$?",
+		"division by zero\nstatus=1\n",
 	},
 	{
 		"[[ -e a ]] && echo x; >a; [[ -e a ]] && echo y",
@@ -3656,6 +3688,11 @@ done <<< 2`,
 	},
 }
 
+var runTestsBash52Want = map[string]string{
+	"[[ aa =~ a{,2} ]]; echo lower:$?; [[ aa =~ a{,} ]]; echo open:$?": "lower:0\nopen:0\n",
+	"[[ a =~ $(( 1 / 0 )) ]]; echo status=$?":                         "1 / 0 : division by 0 (error token is \"0 \")\nexit status 1",
+}
+
 var runTestsUnix = []runTest{
 	{"[[ -n $PPID && $PPID -ge 0 ]]", ""}, // can be 0 if running as the init process
 	{
@@ -4474,14 +4511,20 @@ func TestRunnerRunConfirm(t *testing.T) {
 			if err != nil {
 				got += err.Error()
 			}
+			want := c.want
+			if hasBash52 {
+				if bash52Want, ok := runTestsBash52Want[c.in]; ok {
+					want = bash52Want
+				}
+			}
 			if strings.HasPrefix(got, "bash: line 1: ") {
-				if trimmed := strings.TrimPrefix(got, "bash: line 1: "); trimmed == c.want {
+				if trimmed := strings.TrimPrefix(got, "bash: line 1: "); trimmed == want {
 					got = trimmed
 				}
 			}
-			if got != c.want {
+			if got != want {
 				t.Fatalf("wrong bash output in %q:\nwant: %q\ngot:  %q",
-					c.in, c.want, got)
+					c.in, want, got)
 			}
 		})
 	}
