@@ -398,6 +398,10 @@
           "mode": "xfail",
           "reason": "shopt error message format differs from bash"
         },
+        "oils/process-sub.test.sh::$(<file) idiom with process sub": {
+          "mode": "xfail",
+          "reason": "<(<foo) nested file-to-stdin idiom not supported in process substitution"
+        },
         "oils/prompt.test.sh": {
           "mode": "skip",
           "reason": "exercises host process or terminal behavior outside the gbash sandbox contract"
