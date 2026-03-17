@@ -518,10 +518,6 @@
           "mode": "skip",
           "reason": "uses inline python2 snippets that are not available in the conformance sandbox"
         },
-        "oils/word-eval.test.sh": {
-          "mode": "xfail",
-          "reason": "known gbash divergence from bash semantics in this upstream spec file"
-        },
         "oils/word-split.test.sh": {
           "mode": "skip",
           "reason": "uses inline python2 snippets that are not available in the conformance sandbox"
