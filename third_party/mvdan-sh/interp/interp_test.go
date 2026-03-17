@@ -674,12 +674,20 @@ var runTests = []runTest{
 		"<x,y>\n",
 	},
 	{
+		`rm -f count; unset a; : ${a:-$(printf x; echo hit >>count)}; wc -l <count`,
+		"1\n",
+	},
+	{
 		"a=b; echo ${a?err1}; a=; echo ${a?err2}; unset a; echo ${a?err3}",
 		"b\n\na: err3\nexit status 1 #JUSTERR",
 	},
 	{
 		"echo ${a:?%s}",
 		"a: %s\nexit status 1 #JUSTERR",
+	},
+	{
+		`x=abc; printf '<%s>\n' "${x#'a'}"`,
+		"<bc>\n",
 	},
 	{
 		"x=aaabccc; echo ${x#*a}; echo ${x##*a}",

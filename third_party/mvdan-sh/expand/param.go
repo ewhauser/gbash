@@ -297,26 +297,12 @@ func (cfg *Config) paramExpFields(pe *syntax.ParamExp) ([][]fieldPart, bool, err
 		var fields [][]fieldPart
 		arg := ""
 		if pe.Exp.Word != nil {
-			literalParts, err := cfg.paramArgField(pe.Exp.Word, quoteNone)
-			if err != nil {
-				return nil, "", err
-			}
-			arg = cfg.fieldJoin(literalParts)
-
 			parts, err := cfg.paramArgField(pe.Exp.Word, quoteNone)
 			if err != nil {
 				return nil, "", err
 			}
+			arg = cfg.fieldJoin(parts)
 			fields = cfg.splitFieldParts(parts)
-			if len(fields) == 0 {
-				fields, err = cfg.wordFields(pe.Exp.Word.Parts)
-				if err != nil {
-					return nil, "", err
-				}
-			}
-			if err != nil {
-				return nil, "", err
-			}
 		}
 		return fields, arg, nil
 	}
@@ -488,132 +474,139 @@ func (cfg *Config) paramExp(pe *syntax.ParamExp, ql quoteLevel) (string, error) 
 		sb.WriteString(str[last:])
 		str = sb.String()
 	case pe.Exp != nil:
-		var argField []fieldPart
-		if pe.Exp.Word != nil {
-			argField, err = cfg.paramArgField(pe.Exp.Word, ql)
+		switch op := pe.Exp.Op; op {
+		case syntax.AlternateUnsetOrNull, syntax.AlternateUnset,
+			syntax.DefaultUnset, syntax.DefaultUnsetOrNull,
+			syntax.AssignUnset, syntax.AssignUnsetOrNull:
+			var argField []fieldPart
+			if pe.Exp.Word != nil {
+				argField, err = cfg.paramArgField(pe.Exp.Word, ql)
+				if err != nil {
+					return "", err
+				}
+			}
+			arg := cfg.fieldJoin(argField)
+			switch op {
+			case syntax.AlternateUnsetOrNull:
+				if str == "" {
+					break
+				}
+				fallthrough
+			case syntax.AlternateUnset:
+				if vr.IsSet() {
+					str = arg
+				}
+			case syntax.DefaultUnset:
+				if vr.IsSet() {
+					break
+				}
+				fallthrough
+			case syntax.DefaultUnsetOrNull:
+				if str == "" {
+					str = arg
+				}
+			case syntax.AssignUnset:
+				if vr.IsSet() {
+					break
+				}
+				fallthrough
+			case syntax.AssignUnsetOrNull:
+				if str == "" {
+					if err := cfg.envSet(name, arg); err != nil {
+						return "", err
+					}
+					str = arg
+				}
+			}
+		default:
+			arg, err := Literal(cfg, pe.Exp.Word)
 			if err != nil {
 				return "", err
 			}
-		}
-		arg := cfg.fieldJoin(argField)
-		switch op := pe.Exp.Op; op {
-		case syntax.AlternateUnsetOrNull:
-			if str == "" {
-				break
-			}
-			fallthrough
-		case syntax.AlternateUnset:
-			if vr.IsSet() {
-				str = arg
-			}
-		case syntax.DefaultUnset:
-			if vr.IsSet() {
-				break
-			}
-			fallthrough
-		case syntax.DefaultUnsetOrNull:
-			if str == "" {
-				str = arg
-			}
-		case syntax.ErrorUnset:
-			if vr.IsSet() {
-				break
-			}
-			fallthrough
-		case syntax.ErrorUnsetOrNull:
-			if str == "" {
-				return "", UnsetParameterError{
-					Node:    pe,
-					Message: arg,
+			switch op {
+			case syntax.ErrorUnset:
+				if vr.IsSet() {
+					break
 				}
-			}
-		case syntax.AssignUnset:
-			if vr.IsSet() {
-				break
-			}
-			fallthrough
-		case syntax.AssignUnsetOrNull:
-			if str == "" {
-				if err := cfg.envSet(name, arg); err != nil {
-					return "", err
-				}
-				str = arg
-			}
-		case syntax.RemSmallPrefix, syntax.RemLargePrefix,
-			syntax.RemSmallSuffix, syntax.RemLargeSuffix:
-			suffix := op == syntax.RemSmallSuffix || op == syntax.RemLargeSuffix
-			small := op == syntax.RemSmallPrefix || op == syntax.RemSmallSuffix
-			for i, elem := range elems {
-				elems[i] = removePattern(elem, arg, suffix, small)
-			}
-			str = strings.Join(elems, " ")
-		case syntax.UpperFirst, syntax.UpperAll,
-			syntax.LowerFirst, syntax.LowerAll:
-
-			caseFunc := unicode.ToLower
-			if op == syntax.UpperFirst || op == syntax.UpperAll {
-				caseFunc = unicode.ToUpper
-			}
-			all := op == syntax.UpperAll || op == syntax.LowerAll
-
-			// empty string means '?'; nothing to do there
-			expr, err := pattern.Regexp(arg, 0)
-			if err != nil {
-				return str, nil
-			}
-			rx := regexp.MustCompile(expr)
-
-			for i, elem := range elems {
-				rs := []rune(elem)
-				for ri, r := range rs {
-					if rx.MatchString(string(r)) {
-						rs[ri] = caseFunc(r)
-						if !all {
-							break
-						}
+				fallthrough
+			case syntax.ErrorUnsetOrNull:
+				if str == "" {
+					return "", UnsetParameterError{
+						Node:    pe,
+						Message: arg,
 					}
 				}
-				elems[i] = string(rs)
-			}
-			str = strings.Join(elems, " ")
-		case syntax.OtherParamOps:
-			switch arg {
-			case "Q":
-				str, err = syntax.Quote(str, syntax.LangBash)
+			case syntax.RemSmallPrefix, syntax.RemLargePrefix,
+				syntax.RemSmallSuffix, syntax.RemLargeSuffix:
+				suffix := op == syntax.RemSmallSuffix || op == syntax.RemLargeSuffix
+				small := op == syntax.RemSmallPrefix || op == syntax.RemSmallSuffix
+				for i, elem := range elems {
+					elems[i] = removePattern(elem, arg, suffix, small)
+				}
+				str = strings.Join(elems, " ")
+			case syntax.UpperFirst, syntax.UpperAll,
+				syntax.LowerFirst, syntax.LowerAll:
+
+				caseFunc := unicode.ToLower
+				if op == syntax.UpperFirst || op == syntax.UpperAll {
+					caseFunc = unicode.ToUpper
+				}
+				all := op == syntax.UpperAll || op == syntax.LowerAll
+
+				// empty string means '?'; nothing to do there
+				expr, err := pattern.Regexp(arg, 0)
 				if err != nil {
-					// Is this even possible? If a user runs into this panic,
-					// it's most likely a bug we need to fix.
-					panic(err)
+					return str, nil
 				}
-			case "E":
-				tail := str
-				var rns []rune
-				for tail != "" {
-					var rn rune
-					rn, _, tail, _ = strconv.UnquoteChar(tail, 0)
-					rns = append(rns, rn)
+				rx := regexp.MustCompile(expr)
+
+				for i, elem := range elems {
+					rs := []rune(elem)
+					for ri, r := range rs {
+						if rx.MatchString(string(r)) {
+							rs[ri] = caseFunc(r)
+							if !all {
+								break
+							}
+						}
+					}
+					elems[i] = string(rs)
 				}
-				str = string(rns)
-			case "a":
-				// ${var@a} returns variable attribute flags.
-				// We use orig (before nameref resolve) for the attributes.
-				str = orig.Flags()
-			case "A":
-				// ${var@A} returns a declare statement that recreates the variable.
-				flags := orig.Flags()
-				quoted, err := syntax.Quote(str, syntax.LangBash)
-				if err != nil {
-					return "", err
+				str = strings.Join(elems, " ")
+			case syntax.OtherParamOps:
+				switch arg {
+				case "Q":
+					str, err = syntax.Quote(str, syntax.LangBash)
+					if err != nil {
+						panic(err)
+					}
+				case "E":
+					tail := str
+					var rns []rune
+					for tail != "" {
+						var rn rune
+						rn, _, tail, _ = strconv.UnquoteChar(tail, 0)
+						rns = append(rns, rn)
+					}
+					str = string(rns)
+				case "a":
+					str = orig.Flags()
+				case "A":
+					flags := orig.Flags()
+					quoted, err := syntax.Quote(str, syntax.LangBash)
+					if err != nil {
+						return "", err
+					}
+					if flags == "" {
+						str = fmt.Sprintf("%s=%s", name, quoted)
+					} else {
+						str = fmt.Sprintf("declare -%s %s=%s", flags, name, quoted)
+					}
+				case "P":
+					// TODO: implement prompt expansion (\u, \h, \w, etc.).
+				default:
+					panic(fmt.Sprintf("unexpected @%s param expansion", arg))
 				}
-				if flags == "" {
-					str = fmt.Sprintf("%s=%s", name, quoted)
-				} else {
-					str = fmt.Sprintf("declare -%s %s=%s", flags, name, quoted)
-				}
-			case "P":
-				// TODO: implement prompt expansion (\u, \h, \w, etc.).
-			default:
-				panic(fmt.Sprintf("unexpected @%s param expansion", arg))
 			}
 		}
 	}
