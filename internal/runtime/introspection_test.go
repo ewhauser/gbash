@@ -204,21 +204,26 @@ func TestTraceTreatsLiteralBootstrapNameAsUserScript(t *testing.T) {
 	})
 	result, err := session.Exec(context.Background(), &ExecutionRequest{
 		ScriptPath: "<gbash-prelude>",
-		Script:     "echo hi\n",
+		Script:     "pwd\n",
 	})
 	if err != nil {
 		t.Fatalf("Exec() error = %v", err)
 	}
 
+	var names []string
 	var positions []string
 	for i := range result.Events {
 		event := result.Events[i]
-		if event.Kind != trace.EventCallExpanded || event.Command == nil || event.Command.Name != "echo" {
+		if event.Kind != trace.EventCallExpanded || event.Command == nil {
 			continue
 		}
+		names = append(names, event.Command.Name)
 		positions = append(positions, event.Command.Position)
 	}
 
+	if got, want := names, []string{"pwd"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("call names = %#v, want %#v", got, want)
+	}
 	if got, want := positions, []string{"1:1"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("echo positions = %#v, want %#v", got, want)
 	}

@@ -978,7 +978,7 @@ func (r *Runner) run(ctx context.Context, node syntax.Node, internal bool) error
 	switch node := node.(type) {
 	case *syntax.File:
 		r.filename = node.Name
-		if r.topLevelScriptPath != "" && node.Name == r.topLevelScriptPath {
+		if !r.internalRun && r.topLevelScriptPath != "" && node.Name == r.topLevelScriptPath {
 			restoreFrame := r.pushFrame(execFrame{
 				kind:       frameKindMain,
 				label:      "main",
