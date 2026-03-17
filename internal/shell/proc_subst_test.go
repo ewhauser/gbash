@@ -6,16 +6,22 @@ import (
 	"io"
 	stdfs "io/fs"
 	"os"
+	"strings"
 	"testing"
 
 	gbfs "github.com/ewhauser/gbash/fs"
+	"github.com/ewhauser/gbash/policy"
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
+
+func newTestProcSubstManager(pol policy.Policy) *procSubstManager {
+	return newProcSubstManager(pol, "/home/agent/project", "/home/agent")
+}
 
 func TestProcSubstFSReadPathIsNamedPipeAndOneShot(t *testing.T) {
 	t.Parallel()
 
-	manager := newProcSubstManager()
+	manager := newTestProcSubstManager(nil)
 	defer manager.Close()
 	endpoint, err := manager.endpoint(context.Background(), &syntax.ProcSubst{Op: syntax.CmdIn})
 	if err != nil {
@@ -42,6 +48,12 @@ func TestProcSubstFSReadPathIsNamedPipeAndOneShot(t *testing.T) {
 	}
 	defer func() { _ = file.Close() }()
 
+	if _, err := fsys.Stat(context.Background(), endpoint.Path); !errors.Is(err, stdfs.ErrNotExist) {
+		t.Fatalf("Stat(%q) after open error = %v, want not exist", endpoint.Path, err)
+	}
+	if _, err := fsys.Realpath(context.Background(), endpoint.Path); !errors.Is(err, stdfs.ErrNotExist) {
+		t.Fatalf("Realpath(%q) after open error = %v, want not exist", endpoint.Path, err)
+	}
 	if _, err := fsys.Open(context.Background(), endpoint.Path); !errors.Is(err, stdfs.ErrNotExist) {
 		t.Fatalf("second Open(%q) error = %v, want not exist", endpoint.Path, err)
 	}
@@ -66,7 +78,7 @@ func TestProcSubstFSReadPathIsNamedPipeAndOneShot(t *testing.T) {
 func TestProcSubstFSWritePathEnforcesWriteOnly(t *testing.T) {
 	t.Parallel()
 
-	manager := newProcSubstManager()
+	manager := newTestProcSubstManager(nil)
 	defer manager.Close()
 	endpoint, err := manager.endpoint(context.Background(), &syntax.ProcSubst{Op: syntax.CmdOut})
 	if err != nil {
@@ -104,7 +116,7 @@ func TestProcSubstFSWritePathEnforcesWriteOnly(t *testing.T) {
 func TestProcSubstConsumerCloseUnblocksProducer(t *testing.T) {
 	t.Parallel()
 
-	manager := newProcSubstManager()
+	manager := newTestProcSubstManager(nil)
 	defer manager.Close()
 	endpoint, err := manager.endpoint(context.Background(), &syntax.ProcSubst{Op: syntax.CmdIn})
 	if err != nil {
@@ -119,6 +131,9 @@ func TestProcSubstConsumerCloseUnblocksProducer(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatalf("Close(%q) error = %v", endpoint.Path, err)
 	}
+	if _, ok := manager.entry(endpoint.Path, true); ok {
+		t.Fatalf("entry(%q) still present after consumer close", endpoint.Path)
+	}
 
 	if _, err := endpoint.Writer.Write([]byte("blocked")); err == nil {
 		t.Fatalf("Writer.Write(%q) error = nil, want closed-pipe style failure", endpoint.Path)
@@ -128,7 +143,7 @@ func TestProcSubstConsumerCloseUnblocksProducer(t *testing.T) {
 func TestProcSubstManagerCloseUnblocksEndpoints(t *testing.T) {
 	t.Parallel()
 
-	manager := newProcSubstManager()
+	manager := newTestProcSubstManager(nil)
 	endpoint, err := manager.endpoint(context.Background(), &syntax.ProcSubst{Op: syntax.CmdIn})
 	if err != nil {
 		t.Fatalf("endpoint() error = %v", err)
@@ -138,5 +153,23 @@ func TestProcSubstManagerCloseUnblocksEndpoints(t *testing.T) {
 
 	if _, err := endpoint.Writer.Write([]byte("after-close")); err == nil {
 		t.Fatal("Writer.Write() error = nil, want failure after manager close")
+	}
+}
+
+func TestProcSubstManagerChoosesPolicyAllowedRoot(t *testing.T) {
+	t.Parallel()
+
+	manager := newTestProcSubstManager(policy.NewStatic(&policy.Config{
+		ReadRoots:  []string{"/home/agent"},
+		WriteRoots: []string{"/home/agent"},
+	}))
+	defer manager.Close()
+
+	endpoint, err := manager.endpoint(context.Background(), &syntax.ProcSubst{Op: syntax.CmdOut})
+	if err != nil {
+		t.Fatalf("endpoint() error = %v", err)
+	}
+	if !strings.HasPrefix(endpoint.Path, "/home/agent/") {
+		t.Fatalf("endpoint.Path = %q, want /home/agent/ prefix", endpoint.Path)
 	}
 }

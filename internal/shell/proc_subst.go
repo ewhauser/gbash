@@ -8,16 +8,18 @@ import (
 	stdfs "io/fs"
 	"os"
 	"path"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	gbfs "github.com/ewhauser/gbash/fs"
+	"github.com/ewhauser/gbash/policy"
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/interp"
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
 
-const procSubstDir = "/tmp"
+const procSubstProbeName = ".gbash-procsub-probe"
 
 type procSubstDirection uint8
 
@@ -27,11 +29,14 @@ const (
 )
 
 type procSubstManager struct {
-	mu      sync.Mutex
-	nonce   string
-	counter uint64
-	closed  bool
-	entries map[string]*procSubstEntry
+	mu          sync.Mutex
+	nonce       string
+	counter     uint64
+	closed      bool
+	policy      policy.Policy
+	defaultDir  string
+	defaultHome string
+	entries     map[string]*procSubstEntry
 }
 
 type procSubstEntry struct {
@@ -42,9 +47,10 @@ type procSubstEntry struct {
 	direction procSubstDirection
 	consumer  *os.File
 	producer  *os.File
+	manager   *procSubstManager
 
 	mu     sync.Mutex
-	opened bool
+	hidden bool
 }
 
 type procSubstFS struct {
@@ -64,10 +70,13 @@ type procSubstFileInfo struct {
 	modTime time.Time
 }
 
-func newProcSubstManager() *procSubstManager {
+func newProcSubstManager(pol policy.Policy, defaultDir, defaultHome string) *procSubstManager {
 	return &procSubstManager{
-		nonce:   newProcSubstNonce(),
-		entries: make(map[string]*procSubstEntry),
+		nonce:       newProcSubstNonce(),
+		policy:      pol,
+		defaultDir:  gbfs.Clean(defaultDir),
+		defaultHome: gbfs.Clean(defaultHome),
+		entries:     make(map[string]*procSubstEntry),
 	}
 }
 
@@ -82,7 +91,7 @@ func withProcSubstScope(exec *Execution) func() {
 	if exec == nil {
 		return func() {}
 	}
-	manager := newProcSubstManager()
+	manager := newProcSubstManager(exec.Policy, procSubstDefaultDir(exec), procSubstDefaultHome(exec))
 	inner := exec.FS
 	exec.procSubst = manager
 	exec.FS = newProcSubstFS(inner, manager)
@@ -93,7 +102,7 @@ func withProcSubstScope(exec *Execution) func() {
 	}
 }
 
-func (m *procSubstManager) endpoint(_ context.Context, ps *syntax.ProcSubst) (*interp.ProcSubstEndpoint, error) {
+func (m *procSubstManager) endpoint(ctx context.Context, ps *syntax.ProcSubst) (*interp.ProcSubstEndpoint, error) {
 	if m == nil {
 		return nil, fmt.Errorf("process substitution manager is nil")
 	}
@@ -102,13 +111,19 @@ func (m *procSubstManager) endpoint(_ context.Context, ps *syntax.ProcSubst) (*i
 	if err != nil {
 		return nil, fmt.Errorf("create process substitution pipe: %w", err)
 	}
-	procSubstPath := m.nextPath()
+	procSubstPath, err := m.nextPath(ctx, ps.Op)
+	if err != nil {
+		_ = readEnd.Close()
+		_ = writeEnd.Close()
+		return nil, err
+	}
 
 	entry := &procSubstEntry{
 		path:    procSubstPath,
 		name:    path.Base(procSubstPath),
 		mode:    stdfs.ModeNamedPipe | 0o600,
 		modTime: time.Now().UTC(),
+		manager: m,
 	}
 
 	switch ps.Op {
@@ -148,18 +163,22 @@ func (m *procSubstManager) endpoint(_ context.Context, ps *syntax.ProcSubst) (*i
 	return endpoint, nil
 }
 
-func (m *procSubstManager) nextPath() string {
+func (m *procSubstManager) nextPath(ctx context.Context, op syntax.ProcOperator) (string, error) {
+	root, err := m.pathRoot(ctx, op)
+	if err != nil {
+		return "", err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.nextPathLocked()
+	return m.nextPathLocked(root), nil
 }
 
-func (m *procSubstManager) nextPathLocked() string {
+func (m *procSubstManager) nextPathLocked(root string) string {
 	m.counter++
-	return path.Join(procSubstDir, fmt.Sprintf(".gbash-procsub-%s-%d", m.nonce, m.counter))
+	return path.Join(root, fmt.Sprintf(".gbash-procsub-%s-%d", m.nonce, m.counter))
 }
 
-func (m *procSubstManager) entry(name string) (*procSubstEntry, bool) {
+func (m *procSubstManager) entry(name string, includeHidden bool) (*procSubstEntry, bool) {
 	if m == nil {
 		return nil, false
 	}
@@ -167,11 +186,17 @@ func (m *procSubstManager) entry(name string) (*procSubstEntry, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry, ok := m.entries[abs]
-	return entry, ok
+	if !ok {
+		return nil, false
+	}
+	if !includeHidden && entry.hidden {
+		return nil, false
+	}
+	return entry, true
 }
 
 func (m *procSubstManager) open(abs string, flag int) (gbfs.File, error) {
-	entry, ok := m.entry(abs)
+	entry, ok := m.entry(abs, false)
 	if !ok {
 		return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrNotExist}
 	}
@@ -179,11 +204,32 @@ func (m *procSubstManager) open(abs string, flag int) (gbfs.File, error) {
 }
 
 func (m *procSubstManager) stat(abs string) (stdfs.FileInfo, bool) {
-	entry, ok := m.entry(abs)
+	entry, ok := m.entry(abs, false)
 	if !ok {
 		return nil, false
 	}
 	return entry.info(), true
+}
+
+func (m *procSubstManager) contains(abs string) bool {
+	_, ok := m.entry(abs, true)
+	return ok
+}
+
+func (m *procSubstManager) release(entry *procSubstEntry) {
+	if m == nil || entry == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.entries == nil {
+		return
+	}
+	current, ok := m.entries[entry.path]
+	if !ok || current != entry {
+		return
+	}
+	delete(m.entries, entry.path)
 }
 
 func (m *procSubstManager) Close() {
@@ -226,10 +272,10 @@ func (e *procSubstEntry) open(flag int) (gbfs.File, error) {
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.opened {
+	if e.hidden {
 		return nil, &os.PathError{Op: "open", Path: e.path, Err: stdfs.ErrNotExist}
 	}
-	e.opened = true
+	e.hidden = true
 	return &procSubstFile{entry: e, file: e.consumer}, nil
 }
 
@@ -406,7 +452,7 @@ func (f *procSubstFS) procSubstPath(name string) (string, bool) {
 		return "", false
 	}
 	abs := gbfs.Resolve(f.inner.Getwd(), name)
-	_, ok := f.manager.stat(abs)
+	ok := f.manager.contains(abs)
 	return abs, ok
 }
 
@@ -431,11 +477,20 @@ func (f *procSubstFile) Write(p []byte) (int, error) {
 }
 
 func (f *procSubstFile) Close() error {
-	f.closed.Store(true)
-	if f.file == nil {
+	if !f.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	return f.file.Close()
+	if f.file == nil {
+		if f.entry != nil && f.entry.manager != nil {
+			f.entry.manager.release(f.entry)
+		}
+		return nil
+	}
+	err := f.file.Close()
+	if f.entry != nil && f.entry.manager != nil {
+		f.entry.manager.release(f.entry)
+	}
+	return err
 }
 
 func (f *procSubstFile) Stat() (stdfs.FileInfo, error) {
@@ -451,3 +506,79 @@ func (fi procSubstFileInfo) Mode() stdfs.FileMode { return fi.mode }
 func (fi procSubstFileInfo) ModTime() time.Time   { return fi.modTime }
 func (fi procSubstFileInfo) IsDir() bool          { return false }
 func (fi procSubstFileInfo) Sys() any             { return nil }
+
+func procSubstDefaultDir(exec *Execution) string {
+	if exec == nil || strings.TrimSpace(exec.Dir) == "" {
+		return "/"
+	}
+	return exec.Dir
+}
+
+func procSubstDefaultHome(exec *Execution) string {
+	if exec == nil {
+		return procSubstDefaultDir(nil)
+	}
+	if home := strings.TrimSpace(exec.Env["HOME"]); home != "" {
+		return home
+	}
+	return procSubstDefaultDir(exec)
+}
+
+func (m *procSubstManager) pathRoot(ctx context.Context, op syntax.ProcOperator) (string, error) {
+	for _, candidate := range m.pathRootCandidates(ctx) {
+		probe := path.Join(candidate, procSubstProbeName)
+		if !m.pathAllowed(ctx, policy.FileActionRead, probe) {
+			continue
+		}
+		if op == syntax.CmdOut && !m.pathAllowed(ctx, policy.FileActionWrite, probe) {
+			continue
+		}
+		return candidate, nil
+	}
+	return "", fmt.Errorf("process substitution denied: no policy-allowed sandbox root")
+}
+
+func (m *procSubstManager) pathRootCandidates(ctx context.Context) []string {
+	var raw []string
+	if hc, ok := procSubstHandlerContext(ctx); ok {
+		raw = append(raw, hc.Env.Get("PWD").String(), hc.Env.Get("HOME").String(), hc.Dir)
+	}
+	raw = append(raw, m.defaultDir, m.defaultHome, "/")
+	seen := make(map[string]struct{}, len(raw))
+	out := make([]string, 0, len(raw))
+	for _, candidate := range raw {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		candidate = gbfs.Clean(candidate)
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func (m *procSubstManager) pathAllowed(ctx context.Context, action policy.FileAction, target string) bool {
+	if m == nil || m.policy == nil {
+		return true
+	}
+	return m.policy.AllowPath(ctx, action, target) == nil
+}
+
+func procSubstHandlerContext(ctx context.Context) (hc interp.HandlerContext, ok bool) {
+	if ctx == nil {
+		return interp.HandlerContext{}, false
+	}
+	defer func() {
+		if recover() != nil {
+			hc = interp.HandlerContext{}
+			ok = false
+		}
+	}()
+	hc = interp.HandlerCtx(ctx)
+	ok = true
+	return hc, ok
+}
