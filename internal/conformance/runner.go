@@ -194,12 +194,6 @@ func prepareWorkspace(cfg *SuiteConfig) (string, error) {
 		removeAll(workspace)
 		return "", err
 	}
-	for _, dir := range []string{"dev", "home", "usr", filepath.Join("usr", "bin")} {
-		if err := os.MkdirAll(filepath.Join(workspace, dir), 0o755); err != nil {
-			removeAll(workspace)
-			return "", err
-		}
-	}
 	return workspace, nil
 }
 
@@ -371,13 +365,9 @@ func normalizeBashStderr(value string) string {
 }
 
 func gbashEnv(cfg *SuiteConfig) map[string]string {
-	pathValue := "/usr/bin:/bin"
-	if runtime.GOOS == "darwin" {
-		pathValue = "/bin:/usr/bin"
-	}
 	env := map[string]string{
 		"HOME":   "/",
-		"PATH":   pathValue,
+		"PATH":   "/bin:/usr/bin",
 		"LANG":   "C",
 		"LC_ALL": "C",
 		"PWD":    "/",
