@@ -49,41 +49,340 @@ func overridingUnset(pe *syntax.ParamExp) bool {
 	return false
 }
 
-func (cfg *Config) paramExp(pe *syntax.ParamExp) (string, error) {
-	oldParam := cfg.curParam
-	cfg.curParam = pe
-	defer func() { cfg.curParam = oldParam }()
+type paramExpState struct {
+	name             string
+	orig             Variable
+	vr               Variable
+	str              string
+	elems            []string
+	indexAllElements bool
+	callVarInd       bool
+}
 
-	name := pe.Param.Value
+func (cfg *Config) paramExpState(pe *syntax.ParamExp) (paramExpState, error) {
+	state := paramExpState{
+		name:       pe.Param.Value,
+		callVarInd: true,
+	}
+
 	index := pe.Index
-	switch name {
+	switch state.name {
 	case "@", "*":
 		index = &syntax.Word{Parts: []syntax.WordPart{
-			&syntax.Lit{Value: name},
+			&syntax.Lit{Value: state.name},
 		}}
 	}
-	var vr Variable
-	switch name {
+
+	switch state.name {
 	case "LINENO":
 		// This is the only parameter expansion that the environment
 		// interface cannot satisfy.
 		line := uint64(cfg.curParam.Pos().Line())
-		vr = Variable{Set: true, Kind: String, Str: strconv.FormatUint(line, 10)}
+		state.vr = Variable{Set: true, Kind: String, Str: strconv.FormatUint(line, 10)}
 	default:
-		vr = cfg.Env.Get(name)
+		state.vr = cfg.Env.Get(state.name)
 	}
-	orig := vr
-	_, vr = vr.Resolve(cfg.Env)
-	if cfg.NoUnset && !vr.IsSet() && !overridingUnset(pe) {
-		return "", UnsetParameterError{
+	state.orig = state.vr
+	_, state.vr = state.vr.Resolve(cfg.Env)
+	if cfg.NoUnset && !state.vr.IsSet() && !overridingUnset(pe) {
+		return state, UnsetParameterError{
 			Node:    pe,
 			Message: "unbound variable",
 		}
 	}
 
+	switch nodeLit(index) {
+	case "@", "*":
+		switch state.vr.Kind {
+		case Unknown:
+			state.indexAllElements = true
+		case Indexed:
+			state.indexAllElements = true
+			state.callVarInd = false
+			state.elems = cfg.sliceElems(pe, state.vr.List, state.name == "@" || state.name == "*")
+			state.str = strings.Join(state.elems, " ")
+		}
+	}
+	if state.callVarInd {
+		var err error
+		state.str, err = cfg.varInd(state.vr, index)
+		if err != nil {
+			return state, err
+		}
+	}
+	if !state.indexAllElements {
+		state.elems = []string{state.str}
+	}
+	return state, nil
+}
+
+func (cfg *Config) paramArgField(word *syntax.Word, ql quoteLevel) ([]fieldPart, error) {
+	if word == nil {
+		return nil, nil
+	}
+	var field []fieldPart
+	for i, wp := range word.Parts {
+		switch wp := wp.(type) {
+		case *syntax.Lit:
+			s := wp.Value
+			if i == 0 && ql == quoteNone {
+				if prefix, rest := cfg.expandUser(s, len(word.Parts) > 1); prefix != "" {
+					s = prefix + rest
+				}
+			}
+			if (ql == quoteDouble || ql == quoteHeredoc) && strings.Contains(s, "\\") {
+				sb := cfg.strBuilder()
+				for i := 0; i < len(s); i++ {
+					b := s[i]
+					if b == '\\' && i+1 < len(s) {
+						switch s[i+1] {
+						case '"':
+							if ql != quoteDouble {
+								break
+							}
+							fallthrough
+						case '\\', '$', '`':
+							i++
+							b = s[i]
+						}
+					}
+					sb.WriteByte(b)
+				}
+				s = sb.String()
+			}
+			s, _, _ = strings.Cut(s, "\x00")
+			field = append(field, fieldPart{val: s})
+		case *syntax.SglQuoted:
+			if ql == quoteDouble && !wp.Dollar {
+				field = append(field, fieldPart{quote: quoteDouble, val: "'" + wp.Value + "'"})
+				continue
+			}
+			fp := fieldPart{quote: quoteSingle, val: wp.Value}
+			if wp.Dollar {
+				fp.val, _, _ = Format(cfg, fp.val, nil)
+				fp.val, _, _ = strings.Cut(fp.val, "\x00")
+			}
+			field = append(field, fp)
+		case *syntax.DblQuoted:
+			wfield, err := cfg.paramArgField(&syntax.Word{Parts: wp.Parts}, quoteDouble)
+			if err != nil {
+				return nil, err
+			}
+			for _, part := range wfield {
+				part.quote = quoteDouble
+				field = append(field, part)
+			}
+			continue
+		case *syntax.ParamExp:
+			if parts, ok, err := cfg.paramExpWordField(wp, ql); err != nil {
+				return nil, err
+			} else if ok {
+				field = append(field, parts...)
+				continue
+			}
+			val, err := cfg.paramExp(wp, ql)
+			if err != nil {
+				return nil, err
+			}
+			field = append(field, fieldPart{val: val})
+			continue
+		case *syntax.CmdSubst:
+			val, err := cfg.cmdSubst(wp)
+			if err != nil {
+				return nil, err
+			}
+			field = append(field, fieldPart{val: val})
+		case *syntax.ArithmExp:
+			n, err := Arithm(cfg, wp.X)
+			if err != nil {
+				return nil, err
+			}
+			field = append(field, fieldPart{val: strconv.Itoa(n)})
+		case *syntax.ProcSubst:
+			path, err := cfg.ProcSubst(wp)
+			if err != nil {
+				return nil, err
+			}
+			field = append(field, fieldPart{val: path})
+		case *syntax.ExtGlob:
+			field = append(field, fieldPart{val: wp.Op.String() + wp.Pattern.Value + ")"})
+		default:
+			panic(fmt.Sprintf("unhandled word part: %T", wp))
+		}
+	}
+	return field, nil
+}
+
+func (cfg *Config) paramExpWordField(pe *syntax.ParamExp, ql quoteLevel) ([]fieldPart, bool, error) {
+	if pe.Exp == nil || pe.Excl || pe.Length || pe.Width || pe.IsSet || pe.Repl != nil || pe.Slice != nil {
+		return nil, false, nil
+	}
+	oldParam := cfg.curParam
+	cfg.curParam = pe
+	defer func() { cfg.curParam = oldParam }()
+	state, err := cfg.paramExpState(pe)
+	if err != nil {
+		return nil, false, err
+	}
+	argField := func() ([]fieldPart, string, error) {
+		var parts []fieldPart
+		if pe.Exp.Word != nil {
+			parts, err = cfg.paramArgField(pe.Exp.Word, ql)
+			if err != nil {
+				return nil, "", err
+			}
+		}
+		return parts, cfg.fieldJoin(parts), nil
+	}
+
+	switch op := pe.Exp.Op; op {
+	case syntax.AlternateUnset:
+		if state.vr.IsSet() {
+			parts, _, err := argField()
+			return parts, true, err
+		}
+	case syntax.AlternateUnsetOrNull:
+		if state.str != "" {
+			parts, _, err := argField()
+			return parts, true, err
+		}
+	case syntax.DefaultUnset:
+		if !state.vr.IsSet() {
+			parts, _, err := argField()
+			return parts, true, err
+		}
+	case syntax.DefaultUnsetOrNull:
+		if state.str == "" {
+			parts, _, err := argField()
+			return parts, true, err
+		}
+	case syntax.AssignUnset:
+		if !state.vr.IsSet() {
+			parts, arg, err := argField()
+			if err != nil {
+				return nil, false, err
+			}
+			if err := cfg.envSet(state.name, arg); err != nil {
+				return nil, false, err
+			}
+			return parts, true, nil
+		}
+	case syntax.AssignUnsetOrNull:
+		if state.str == "" {
+			parts, arg, err := argField()
+			if err != nil {
+				return nil, false, err
+			}
+			if err := cfg.envSet(state.name, arg); err != nil {
+				return nil, false, err
+			}
+			return parts, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+func (cfg *Config) paramExpFields(pe *syntax.ParamExp) ([][]fieldPart, bool, error) {
+	if pe.Exp == nil || pe.Excl || pe.Length || pe.Width || pe.IsSet || pe.Repl != nil || pe.Slice != nil {
+		return nil, false, nil
+	}
+	oldParam := cfg.curParam
+	cfg.curParam = pe
+	defer func() { cfg.curParam = oldParam }()
+	state, err := cfg.paramExpState(pe)
+	if err != nil {
+		return nil, false, err
+	}
+	argFields := func() ([][]fieldPart, string, error) {
+		var fields [][]fieldPart
+		if pe.Exp.Word != nil {
+			parts, err := cfg.paramArgField(pe.Exp.Word, quoteNone)
+			if err != nil {
+				return nil, "", err
+			}
+			fields = cfg.splitFieldParts(parts)
+			if len(fields) == 0 {
+				fields, err = cfg.wordFields(pe.Exp.Word.Parts)
+				if err != nil {
+					return nil, "", err
+				}
+			}
+			if err != nil {
+				return nil, "", err
+			}
+		}
+		var sb strings.Builder
+		for i, field := range fields {
+			if i > 0 {
+				sb.WriteByte(' ')
+			}
+			sb.WriteString(cfg.fieldJoin(field))
+		}
+		return fields, sb.String(), nil
+	}
+
+	switch op := pe.Exp.Op; op {
+	case syntax.AlternateUnset:
+		if state.vr.IsSet() {
+			fields, _, err := argFields()
+			return fields, true, err
+		}
+	case syntax.AlternateUnsetOrNull:
+		if state.str != "" {
+			fields, _, err := argFields()
+			return fields, true, err
+		}
+	case syntax.DefaultUnset:
+		if !state.vr.IsSet() {
+			fields, _, err := argFields()
+			return fields, true, err
+		}
+	case syntax.DefaultUnsetOrNull:
+		if state.str == "" {
+			fields, _, err := argFields()
+			return fields, true, err
+		}
+	case syntax.AssignUnset:
+		if !state.vr.IsSet() {
+			fields, arg, err := argFields()
+			if err != nil {
+				return nil, false, err
+			}
+			if err := cfg.envSet(state.name, arg); err != nil {
+				return nil, false, err
+			}
+			return fields, true, nil
+		}
+	case syntax.AssignUnsetOrNull:
+		if state.str == "" {
+			fields, arg, err := argFields()
+			if err != nil {
+				return nil, false, err
+			}
+			if err := cfg.envSet(state.name, arg); err != nil {
+				return nil, false, err
+			}
+			return fields, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+func (cfg *Config) paramExp(pe *syntax.ParamExp, ql quoteLevel) (string, error) {
+	oldParam := cfg.curParam
+	cfg.curParam = pe
+	defer func() { cfg.curParam = oldParam }()
+
+	state, err := cfg.paramExpState(pe)
+	if err != nil {
+		return "", err
+	}
+	name := state.name
+	orig := state.orig
+	vr := state.vr
+
 	var sliceOffset, sliceLen int
 	if pe.Slice != nil {
-		var err error
 		if pe.Slice.Offset != nil {
 			sliceOffset, err = Arithm(cfg, pe.Slice.Offset)
 			if err != nil {
@@ -99,42 +398,16 @@ func (cfg *Config) paramExp(pe *syntax.ParamExp) (string, error) {
 	}
 
 	var (
-		str   string
-		elems []string
-
-		indexAllElements bool // true if var has been accessed with * or @ index
-		callVarInd       = true
+		str        = state.str
+		elems      = state.elems
+		callVarInd = state.callVarInd
 	)
-
-	switch nodeLit(index) {
-	case "@", "*":
-		switch vr.Kind {
-		case Unknown:
-			elems = nil
-			indexAllElements = true
-		case Indexed:
-			indexAllElements = true
-			callVarInd = false
-			elems = cfg.sliceElems(pe, vr.List, name == "@" || name == "*")
-			str = strings.Join(elems, " ")
-		}
-	}
-	if callVarInd {
-		var err error
-		str, err = cfg.varInd(vr, index)
-		if err != nil {
-			return "", err
-		}
-	}
-	if !indexAllElements {
-		elems = []string{str}
-	}
 
 	switch {
 	case pe.Length:
 		n := len(elems)
-		switch nodeLit(index) {
-		case "@", "*":
+		switch {
+		case name == "@", name == "*", nodeLit(pe.Index) == "@", nodeLit(pe.Index) == "*":
 		default:
 			n = utf8.RuneCountInString(str)
 		}
@@ -215,10 +488,14 @@ func (cfg *Config) paramExp(pe *syntax.ParamExp) (string, error) {
 		sb.WriteString(str[last:])
 		str = sb.String()
 	case pe.Exp != nil:
-		arg, err := Literal(cfg, pe.Exp.Word)
-		if err != nil {
-			return "", err
+		var argField []fieldPart
+		if pe.Exp.Word != nil {
+			argField, err = cfg.paramArgField(pe.Exp.Word, ql)
+			if err != nil {
+				return "", err
+			}
 		}
+		arg := cfg.fieldJoin(argField)
 		switch op := pe.Exp.Op; op {
 		case syntax.AlternateUnsetOrNull:
 			if str == "" {

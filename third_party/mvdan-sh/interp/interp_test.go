@@ -654,6 +654,22 @@ var runTests = []runTest{
 		"b\na: err2\nexit status 1 #JUSTERR",
 	},
 	{
+		`unset a; set -- ${a:-'a b c'}; printf '<%s>\n' "$@"`,
+		"<a b c>\n",
+	},
+	{
+		`unset a; set -- ${a:-"a b" c}; printf '<%s>\n' "$@"`,
+		"<a b>\n<c>\n",
+	},
+	{
+		`unset a; printf '<%s>\n' "${a:-'b'}"`,
+		"<'b'>\n",
+	},
+	{
+		`unset a; set -- ${a:-${a:-"1 2" "3 4"}5 "6 7"}; printf '<%s>\n' "$@"`,
+		"<1 2>\n<3 45>\n<6 7>\n",
+	},
+	{
 		"a=b; echo ${a?err1}; a=; echo ${a?err2}; unset a; echo ${a?err3}",
 		"b\n\na: err3\nexit status 1 #JUSTERR",
 	},
