@@ -118,17 +118,9 @@
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"
         },
-        "oils/builtin-fc.test.sh": {
-          "mode": "skip",
-          "reason": "requires an interactive shell or tty behavior"
-        },
         "oils/builtin-getopts.test.sh": {
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"
-        },
-        "oils/builtin-history.test.sh": {
-          "mode": "skip",
-          "reason": "requires an interactive shell or tty behavior"
         },
         "oils/builtin-meta-assign.test.sh": {
           "mode": "xfail",
@@ -306,10 +298,6 @@
           "mode": "skip",
           "reason": "gbash helper scripts cannot read arbitrary file descriptors without shell features that are not implemented yet"
         },
-        "oils/interactive.test.sh": {
-          "mode": "skip",
-          "reason": "requires an interactive shell or tty behavior"
-        },
         "oils/introspect.test.sh::FUNCNAME with source (scalar or array)": {
           "mode": "xfail",
           "reason": "sourced-file lookup failures still format stderr differently from bash for missing fixture paths"
@@ -406,14 +394,6 @@
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"
         },
-        "oils/sh-options.test.sh": {
-          "mode": "skip",
-          "reason": "requires an interactive shell or tty behavior"
-        },
-        "oils/sh-usage.test.sh": {
-          "mode": "skip",
-          "reason": "requires an interactive shell or tty behavior"
-        },
         "oils/smoke.test.sh": {
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"
@@ -445,10 +425,6 @@
         "oils/unicode.test.sh": {
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"
-        },
-        "oils/var-num.test.sh": {
-          "mode": "skip",
-          "reason": "requires an interactive shell or tty behavior"
         },
         "oils/var-op-bash.test.sh": {
           "mode": "xfail",
