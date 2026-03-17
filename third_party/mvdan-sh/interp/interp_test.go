@@ -372,7 +372,7 @@ var runTests = []runTest{
 	{`show() { echo $#; printf "<%s>\n" "$1"; }; a=(); show "${a[*]+x}"`, "1\n<>\n"},
 	{`show() { echo $#; printf "<%s>\n" "$1"; }; set --; show "${*+x}"`, "1\n<>\n"},
 	{`show() { echo $#; printf "<%s>\n" "$1"; }; a=(); show "${a[*]:+x}"`, "1\n<>\n"},
-	{`show() { echo $#; printf "<%s>\n" "$1"; }; a=(""); show "${a[@]:+x}"`, "1\n<x>\n"},
+	{`show() { echo $#; printf "<%s>\n" "$1"; }; a=(""); show "${a[@]:+x}"`, "1\n<>\n"},
 	{`echo $1 $3; set -- a b c; echo $1 $3`, "\na c\n"},
 	{`[[ $0 == "bash" || $0 == "gosh" ]]`, ""},
 
@@ -492,7 +492,7 @@ var runTests = []runTest{
 	},
 	{
 		`show() { echo $#; for x in "$@"; do printf "<%s>\n" "$x"; done; }; a=(""); show "${a[@]:-with-colon}"`,
-		"1\n<>\n",
+		"1\n<with-colon>\n",
 	},
 	{
 		`show() { echo $#; for x in "$@"; do printf "<%s>\n" "$x"; done; }; a=("" ""); show "${a[@]:-with-colon}"`,

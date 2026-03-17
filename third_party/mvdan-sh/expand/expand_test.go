@@ -177,12 +177,12 @@ func TestFieldsQuotedAtSingleEmptyAtMatchesBash(t *testing.T) {
 		{
 			name: "DefaultUnsetOrNull",
 			src:  "\"${@:-fallback}\"",
-			want: []string{""},
+			want: []string{"fallback"},
 		},
 		{
 			name: "AlternateUnsetOrNull",
 			src:  "\"${@:+x}\"",
-			want: []string{"x"},
+			want: []string{""},
 		},
 	}
 	for _, tc := range tests {

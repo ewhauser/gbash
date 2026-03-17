@@ -796,8 +796,12 @@ func (cfg *Config) quotedElemFields(pe *syntax.ParamExp) ([]string, bool, error)
 	}
 
 	hasElems := len(elems) > 0
+	isAt := pe.Param.Value == "@" || nodeLit(pe.Index) == "@"
 	isStar := pe.Param.Value == "*" || nodeLit(pe.Index) == "*"
 	null := !hasElems
+	if isAt && len(elems) == 1 && elems[0] == "" {
+		null = true
+	}
 	if isStar && len(fields) == 1 && fields[0] == "" {
 		null = true
 	}
