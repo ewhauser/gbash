@@ -132,8 +132,8 @@ func BenchmarkCommandFindTree(b *testing.B) {
 	}
 }
 
-func BenchmarkCommandRGRecursive(b *testing.B) {
-	files, totalBytes := rgBenchmarkFiles()
+func BenchmarkCommandGrepRecursive(b *testing.B) {
+	files, totalBytes := grepBenchmarkFiles()
 	for _, backend := range benchmarkFSBackends() {
 		b.Run(backend.name, func(b *testing.B) {
 			rt := newPreparedRuntime(b, backend, files)
@@ -141,7 +141,7 @@ func BenchmarkCommandRGRecursive(b *testing.B) {
 			b.SetBytes(totalBytes)
 
 			benchmarkSessionExec(b, session, &ExecutionRequest{
-				Script: "rg -l needle /bench/search | grep -c '^'\n",
+				Script: "grep -rl needle /bench/search | grep -c '^'\n",
 			}, "40\n")
 		})
 	}
@@ -229,7 +229,7 @@ func findBenchmarkFiles() (files map[string]string, totalBytes int64) {
 	return files, totalBytes
 }
 
-func rgBenchmarkFiles() (files map[string]string, totalBytes int64) {
+func grepBenchmarkFiles() (files map[string]string, totalBytes int64) {
 	files = make(map[string]string, 200)
 	for i := range 200 {
 		var body strings.Builder

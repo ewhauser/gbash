@@ -3,6 +3,7 @@ package builtins
 import (
 	"context"
 	"fmt"
+	stdfs "io/fs"
 	"path"
 	"regexp"
 	"strconv"
@@ -43,6 +44,10 @@ type grepRunState struct {
 	filesWithoutMatchAny bool
 	hadError             bool
 	quietMatched         bool
+}
+
+type grepFileRecord struct {
+	abs string
 }
 
 func NewGrep() *Grep {
@@ -120,8 +125,21 @@ func (c *Grep) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCo
 	} else {
 		showNames := (len(files) > 1 || opts.recursive) && !opts.noFilename
 		for _, file := range files {
-			if err := c.processPath(ctx, inv, file, re, opts, showNames, state); err != nil {
+			records := make([]grepFileRecord, 0, 8)
+			if _, err := c.enumerateTopLevelPath(ctx, inv, file, opts, state, &records); err != nil {
 				return err
+			}
+			for _, record := range records {
+				if state.quietMatched {
+					return nil
+				}
+				data, _, err := readAllFile(ctx, inv, record.abs)
+				if err != nil {
+					return err
+				}
+				if err := writeGrepResult(inv, re, data, record.abs, showNames, opts, state); err != nil {
+					return err
+				}
 			}
 			if state.quietMatched {
 				return nil
@@ -474,48 +492,69 @@ func writeGrepResult(inv *Invocation, re *regexp.Regexp, data []byte, name strin
 	return nil
 }
 
-func (c *Grep) processPath(ctx context.Context, inv *Invocation, file string, re *regexp.Regexp, opts grepOptions, showNames bool, state *grepRunState) error {
-	info, abs, exists, err := statMaybe(ctx, inv, file)
+func (c *Grep) enumerateTopLevelPath(ctx context.Context, inv *Invocation, file string, opts grepOptions, state *grepRunState, records *[]grepFileRecord) (bool, error) {
+	linfo, abs, exists, err := lstatMaybe(ctx, inv, file)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !exists {
 		_, _ = fmt.Fprintf(inv.Stderr, "grep: %s: No such file or directory\n", file)
 		state.hadError = true
-		return nil
+		return false, nil
+	}
+
+	info := linfo
+	throughSymlinkDir := false
+	if linfo.Mode()&stdfs.ModeSymlink != 0 {
+		info, _, err = statPath(ctx, inv, abs)
+		if err != nil {
+			if errorsIsNotExist(err) {
+				_, _ = fmt.Fprintf(inv.Stderr, "grep: %s: No such file or directory\n", file)
+				state.hadError = true
+				return false, nil
+			}
+			return false, err
+		}
+		throughSymlinkDir = info.IsDir()
 	}
 
 	if info.IsDir() {
 		if !opts.recursive {
 			_, _ = fmt.Fprintf(inv.Stderr, "grep: %s: Is a directory\n", file)
 			state.hadError = true
-			return nil
+			return false, nil
 		}
-		return c.walkRecursive(ctx, inv, abs, re, opts, showNames, state)
+		if err := c.enumerateRecursive(ctx, inv, abs, throughSymlinkDir, records); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 
-	data, _, err := readAllFile(ctx, inv, abs)
-	if err != nil {
-		return err
-	}
-	return writeGrepResult(inv, re, data, abs, showNames, opts, state)
+	*records = append(*records, grepFileRecord{abs: abs})
+	return false, nil
 }
 
-func (c *Grep) walkRecursive(ctx context.Context, inv *Invocation, currentAbs string, re *regexp.Regexp, opts grepOptions, showNames bool, state *grepRunState) error {
-	if state.quietMatched {
-		return nil
-	}
-
-	info, _, err := statPath(ctx, inv, currentAbs)
+func (c *Grep) enumerateRecursive(ctx context.Context, inv *Invocation, currentAbs string, throughSymlinkDir bool, records *[]grepFileRecord) error {
+	linfo, _, err := lstatPath(ctx, inv, currentAbs)
 	if err != nil {
 		return err
 	}
-	if !info.IsDir() {
-		data, _, err := readAllFile(ctx, inv, currentAbs)
+
+	info := linfo
+	currentThroughSymlinkDir := throughSymlinkDir
+	if linfo.Mode()&stdfs.ModeSymlink != 0 {
+		info, _, err = statPath(ctx, inv, currentAbs)
 		if err != nil {
 			return err
 		}
-		return writeGrepResult(inv, re, data, currentAbs, showNames, opts, state)
+		if info.IsDir() {
+			currentThroughSymlinkDir = true
+		}
+	}
+
+	if !info.IsDir() {
+		*records = append(*records, grepFileRecord{abs: currentAbs})
+		return nil
 	}
 
 	entries, err := readDir(ctx, inv, currentAbs)
@@ -523,11 +562,8 @@ func (c *Grep) walkRecursive(ctx context.Context, inv *Invocation, currentAbs st
 		return err
 	}
 	for _, entry := range entries {
-		if state.quietMatched {
-			return nil
-		}
 		childAbs := path.Join(currentAbs, entry.Name())
-		if err := c.walkRecursive(ctx, inv, childAbs, re, opts, showNames, state); err != nil {
+		if err := c.enumerateRecursive(ctx, inv, childAbs, currentThroughSymlinkDir, records); err != nil {
 			return err
 		}
 	}

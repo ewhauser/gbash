@@ -21,9 +21,6 @@ func TestBuildBenchmarkFixture(t *testing.T) {
 	if fixture.Summary.TotalBytes == 0 {
 		t.Fatal("fixture total bytes = 0, want non-zero")
 	}
-	if fixture.SearchHitCount == 0 {
-		t.Fatal("fixture search hit count = 0, want non-zero")
-	}
 	if _, ok := fixture.Files[fixture.RenameSource]; !ok {
 		t.Fatalf("fixture missing rename source %q", fixture.RenameSource)
 	}
@@ -82,12 +79,8 @@ func TestWorkloadsPassOnMemoryBackend(t *testing.T) {
 		if err != nil {
 			t.Fatalf("factory.New() error = %v", err)
 		}
-		observation, err := scenario.Run(context.Background(), fsys, &fixture)
-		if err != nil {
+		if err := scenario.Run(context.Background(), fsys, &fixture); err != nil {
 			t.Fatalf("%s Run() error = %v", scenario.Name, err)
-		}
-		if scenario.Name == "literal_search" && observation.SearchMode != "scan" {
-			t.Fatalf("%s SearchMode = %q, want scan", scenario.Name, observation.SearchMode)
 		}
 	}
 }
@@ -110,7 +103,7 @@ func TestRunMainWritesJSONReport(t *testing.T) {
 	if len(report.Backends) != 3 {
 		t.Fatalf("backend count = %d, want 3", len(report.Backends))
 	}
-	if len(report.Scenarios) != 4 {
-		t.Fatalf("scenario count = %d, want 4", len(report.Scenarios))
+	if len(report.Scenarios) != 3 {
+		t.Fatalf("scenario count = %d, want 3", len(report.Scenarios))
 	}
 }
