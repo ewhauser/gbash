@@ -1,24 +1,9 @@
 package shell
 
-import (
-	"sync"
-
-	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
-)
-
-var pipelineSyntheticCache sync.Map // map[*syntax.File]map[*syntax.Stmt]*syntax.Stmt
+import "github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 
 func normalizeExecutionProgram(program *syntax.File) map[*syntax.Stmt]*syntax.Stmt {
-	if program != nil {
-		if cached, ok := pipelineSyntheticCache.Load(program); ok {
-			return cached.(map[*syntax.Stmt]*syntax.Stmt)
-		}
-	}
-	synthetic := rewritePipelineSubshells(program)
-	if program != nil {
-		pipelineSyntheticCache.Store(program, synthetic)
-	}
-	return synthetic
+	return rewritePipelineSubshells(program)
 }
 
 func rewritePipelineSubshells(program *syntax.File) map[*syntax.Stmt]*syntax.Stmt {
@@ -38,6 +23,10 @@ func rewritePipelineSubshells(program *syntax.File) map[*syntax.Stmt]*syntax.Stm
 		if cmd.Y == nil || cmd.Y.Cmd == nil {
 			return true
 		}
+		if inner, ok := syntheticWrappedStmt(cmd.Y); ok {
+			synthetic[cmd.Y] = inner
+			return true
+		}
 		if _, ok := cmd.Y.Cmd.(*syntax.Subshell); ok {
 			return true
 		}
@@ -46,6 +35,26 @@ func rewritePipelineSubshells(program *syntax.File) map[*syntax.Stmt]*syntax.Stm
 		return true
 	})
 	return synthetic
+}
+
+func syntheticWrappedStmt(stmt *syntax.Stmt) (*syntax.Stmt, bool) {
+	if stmt == nil {
+		return nil, false
+	}
+	sub, ok := stmt.Cmd.(*syntax.Subshell)
+	if !ok || len(sub.Stmts) != 1 {
+		return nil, false
+	}
+	inner := sub.Stmts[0]
+	if inner == nil {
+		return nil, false
+	}
+	// Synthetic wrappers reuse the inner statement's span exactly; user-authored
+	// subshells include their parentheses and therefore have a wider span.
+	if sub.Lparen != inner.Pos() || sub.Rparen != inner.End() {
+		return nil, false
+	}
+	return inner, true
 }
 
 func wrapStmtInSubshell(stmt *syntax.Stmt, synthetic map[*syntax.Stmt]*syntax.Stmt) *syntax.Stmt {

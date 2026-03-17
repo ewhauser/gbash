@@ -111,6 +111,22 @@ func TestNormalizeExecutionProgramReusesSyntheticMetadataForSameProgram(t *testi
 	}
 }
 
+func TestNormalizeExecutionProgramDoesNotTreatUserSubshellAsSyntheticOnReuse(t *testing.T) {
+	t.Parallel()
+
+	program := parseShellTestProgram(t, "printf 'hello\\n' | (read -r value)\n")
+
+	first := normalizeExecutionProgram(program)
+	second := normalizeExecutionProgram(program)
+
+	if len(first) != 0 {
+		t.Fatalf("len(first) = %d, want 0", len(first))
+	}
+	if len(second) != 0 {
+		t.Fatalf("len(second) = %d, want 0", len(second))
+	}
+}
+
 func parseShellTestProgram(t testing.TB, script string) *syntax.File {
 	t.Helper()
 
