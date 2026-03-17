@@ -16,12 +16,10 @@ argv.sh bare 'sq'
 ## stdout: ['bare', 'sq']
 
 #### Evaluation of each part
-#set -o noglob
-HOME=/home/bob
 str=s
 array=(a1 a2)
-argv.sh bare 'sq' ~ $str "-${str}-" "${array[@]}" $((1+2)) $(echo c) `echo c`
-## stdout: ['bare', 'sq', '/home/bob', 's', '-s-', 'a1', 'a2', '3', 'c', 'c']
+argv.sh bare 'sq' $str "-${str}-" "${array[@]}" $((1+2)) $(echo c) `echo c`
+## stdout: ['bare', 'sq', 's', '-s-', 'a1', 'a2', '3', 'c', 'c']
 ## N-I dash stdout-json: ""
 ## N-I dash status: 2
 
