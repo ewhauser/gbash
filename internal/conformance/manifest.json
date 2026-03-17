@@ -386,9 +386,17 @@
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"
         },
-        "oils/process-sub.test.sh": {
-          "mode": "skip",
-          "reason": "exercises host process or terminal behavior outside the gbash sandbox contract"
+        "oils/process-sub.test.sh::Process sub from external process to stdin": {
+          "mode": "xfail",
+          "reason": "output process substitution >(cmd) does not connect stdout"
+        },
+        "oils/process-sub.test.sh::Non-linear pipeline with >()": {
+          "mode": "xfail",
+          "reason": "output ordering differs from bash with process substitution and pipes"
+        },
+        "oils/process-sub.test.sh::status code is available": {
+          "mode": "xfail",
+          "reason": "shopt error message format differs from bash"
         },
         "oils/prompt.test.sh": {
           "mode": "skip",
