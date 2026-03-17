@@ -470,6 +470,22 @@ var runTests = []runTest{
 	{`a=(1 2 3 4 5); echo "${a[@]:3}"`, "4 5\n"},
 	{`a=(1 2 3 4 5); echo "${a[@]: -2}"`, "4 5\n"},
 	{`a=(1 2 3 4 5); echo "${a[@]: -99}"`, "\n"},
+	{
+		`show() { echo $#; for x in "$@"; do printf "<%s>\n" "$x"; done; }; empty=(); show "${empty[@]:-not one}"`,
+		"1\n<not one>\n",
+	},
+	{
+		`show() { echo $#; for x in "$@"; do printf "<%s>\n" "$x"; done; }; a=(""); show "${a[@]:-with-colon}"`,
+		"1\n<with-colon>\n",
+	},
+	{
+		`show() { echo $#; for x in "$@"; do printf "<%s>\n" "$x"; done; }; a=("" ""); show "${a[@]:-with-colon}"`,
+		"2\n<>\n<>\n",
+	},
+	{
+		`show() { echo $#; for x in "$@"; do printf "<%s>\n" "$x"; done; }; a=("" ""); show "${a[*]:-with-colon}"`,
+		"1\n< >\n",
+	},
 
 	// positional parameter slicing (1-based offset, $0 at offset 0)
 	{`f() { echo "${@:2:2}"; }; f a b c d e`, "b c\n"},
