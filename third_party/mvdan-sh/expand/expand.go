@@ -20,9 +20,9 @@ import (
 	"strconv"
 	"strings"
 
-	"mvdan.cc/sh/v3/internal"
-	"mvdan.cc/sh/v3/pattern"
-	"mvdan.cc/sh/v3/syntax"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/internal"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/pattern"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
 
 // A Config specifies details about how shell expansion should be performed. The

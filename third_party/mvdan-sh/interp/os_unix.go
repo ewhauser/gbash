@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 	"golang.org/x/sys/unix"
-	"mvdan.cc/sh/v3/syntax"
 )
 
 func mkfifo(path string, mode uint32) error {

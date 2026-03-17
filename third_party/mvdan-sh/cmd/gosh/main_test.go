@@ -9,8 +9,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/interp"
 	"github.com/go-quicktest/qt"
-	"mvdan.cc/sh/v3/interp"
 )
 
 // Each test has an even number of strings, which form input-output pairs for

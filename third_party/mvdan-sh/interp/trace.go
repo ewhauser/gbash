@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"mvdan.cc/sh/v3/syntax"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
 
 // tracer prints expressions like a shell would do if its

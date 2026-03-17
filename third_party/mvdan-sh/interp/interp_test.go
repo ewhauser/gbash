@@ -21,11 +21,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/expand"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/internal"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/interp"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 	"github.com/go-quicktest/qt"
-	"mvdan.cc/sh/v3/expand"
-	"mvdan.cc/sh/v3/internal"
-	"mvdan.cc/sh/v3/interp"
-	"mvdan.cc/sh/v3/syntax"
 )
 
 // runnerRunTimeout is the context timeout used by any tests calling [Runner.Run].

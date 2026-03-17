@@ -20,8 +20,8 @@ import (
 
 	"golang.org/x/term"
 
-	"mvdan.cc/sh/v3/expand"
-	"mvdan.cc/sh/v3/syntax"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/expand"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
 
 // TODO: given the categories below, perhaps this should be more like:

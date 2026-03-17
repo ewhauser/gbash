@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"mvdan.cc/sh/v3/expand"
-	"mvdan.cc/sh/v3/syntax"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/expand"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
 
 // Expand performs shell expansion on s as if it were within double quotes,

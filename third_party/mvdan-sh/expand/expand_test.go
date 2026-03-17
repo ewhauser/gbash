@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"mvdan.cc/sh/v3/syntax"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
 
 func parseWord(t *testing.T, src string) *syntax.Word {

@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/internal"
 	"github.com/go-quicktest/qt"
 	"github.com/google/go-cmp/cmp"
-	"mvdan.cc/sh/v3/internal"
 )
 
 func TestParseFiles(t *testing.T) {

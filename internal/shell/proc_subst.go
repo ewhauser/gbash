@@ -13,8 +13,8 @@ import (
 	"time"
 
 	gbfs "github.com/ewhauser/gbash/fs"
-	"mvdan.cc/sh/v3/interp"
-	"mvdan.cc/sh/v3/syntax"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/interp"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
 
 const procSubstDir = "/tmp"

@@ -15,8 +15,8 @@ import (
 	"strconv"
 	"strings"
 
-	"mvdan.cc/sh/v3/expand"
-	"mvdan.cc/sh/v3/syntax"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/expand"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
 
 func newOverlayEnviron(parent expand.Environ, background bool) *overlayEnviron {

@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"mvdan.cc/sh/v3/interp"
-	"mvdan.cc/sh/v3/syntax"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/interp"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
 
 func blocklistOneExec(name string) func(interp.ExecHandlerFunc) interp.ExecHandlerFunc {

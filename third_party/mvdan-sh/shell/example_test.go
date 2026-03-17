@@ -6,7 +6,7 @@ package shell_test
 import (
 	"fmt"
 
-	"mvdan.cc/sh/v3/shell"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/shell"
 )
 
 func ExampleExpand() {

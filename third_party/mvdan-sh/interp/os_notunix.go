@@ -9,7 +9,7 @@ import (
 	"context"
 	"fmt"
 
-	"mvdan.cc/sh/v3/syntax"
+	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
 
 func mkfifo(path string, mode uint32) error {
