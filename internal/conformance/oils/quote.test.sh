@@ -116,6 +116,21 @@ echo $\
 
 # TODO: Also test unterminated quotes inside ${} and $()
 
+#### Unterminated single quote
+## code: ls foo bar '
+## status: 2
+## OK mksh status: 1
+
+#### Unterminated double quote
+## code: ls foo bar "
+## status: 2
+## OK mksh status: 1
+
+
+#
+# TODO: Might be another section?
+#
+
 #### Semicolon
 echo separated; echo by semi-colon
 ## STDOUT:

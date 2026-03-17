@@ -55,6 +55,17 @@ $SH -o errexit -c 'false; echo status=$?'
 ## stdout-json: ""
 ## status: 1
 
+#### pass shopt options like sh -O nullglob
+$SH +O nullglob -c 'echo foo *.nonexistent bar'
+$SH -O nullglob -c 'echo foo *.nonexistent bar'
+## STDOUT:
+foo *.nonexistent bar
+foo bar
+## END
+## N-I dash/mksh stdout-json: ""
+## N-I dash status: 2
+## N-I mksh status: 1
+
 #### set -o vi/emacs
 set -o vi
 echo $?
@@ -740,5 +751,4 @@ echo --
 shopt -u xpg_echo
 --
 ## END
-
 
