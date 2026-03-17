@@ -371,9 +371,13 @@ func normalizeBashStderr(value string) string {
 }
 
 func gbashEnv(cfg *SuiteConfig) map[string]string {
+	pathValue := "/usr/bin:/bin"
+	if runtime.GOOS == "darwin" {
+		pathValue = "/bin:/usr/bin"
+	}
 	env := map[string]string{
 		"HOME":   "/",
-		"PATH":   "/bin:/usr/bin",
+		"PATH":   pathValue,
 		"LANG":   "C",
 		"LC_ALL": "C",
 		"PWD":    "/",
