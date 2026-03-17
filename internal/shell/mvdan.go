@@ -1335,7 +1335,19 @@ cd() {
 			target=$HOME
 			;;
 		1)
-			target=$1
+			if [ "$1" = "--" ]; then
+				target=$HOME
+			else
+				target=$1
+			fi
+			;;
+		2)
+			if [ "$1" = "--" ]; then
+				target=$2
+			else
+				printf 'cd: usage: cd [dir]\n' >&2
+				return 2
+			fi
 			;;
 		*)
 			printf 'cd: usage: cd [dir]\n' >&2

@@ -172,6 +172,35 @@ func TestVirtualCDUpdatesPWD(t *testing.T) {
 	}
 }
 
+func TestVirtualCDAcceptsEndOfOptionsMarker(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "" +
+			"mkdir -p -- /tmp/-dir\n" +
+			"cd -- /tmp\n" +
+			"pwd\n" +
+			"cd -- -dir\n" +
+			"pwd\n" +
+			"cd /\n" +
+			"cd --\n" +
+			"pwd\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "/tmp\n/tmp/-dir\n/home/agent\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
 func TestDirectoryStackBuiltinsManageVirtualPWD(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
