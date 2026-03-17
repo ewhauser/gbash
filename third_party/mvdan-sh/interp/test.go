@@ -5,9 +5,11 @@ package interp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
+	"unicode"
 
 	"golang.org/x/term"
 
@@ -29,6 +31,24 @@ func (r *Runner) bashTest(ctx context.Context, expr syntax.TestExpr, classic boo
 		return r.bashTest(ctx, x.X, classic)
 	case *syntax.BinaryTest:
 		switch x.Op {
+		case syntax.TsReMatch:
+			if classic {
+				break
+			}
+			left, ok := r.testExpandWord(x.X.(*syntax.Word), expand.Literal)
+			if !ok {
+				r.clearBASH_REMATCH()
+				return ""
+			}
+			right, ok := r.testExpandWord(x.Y.(*syntax.Word), expand.Regexp)
+			if !ok {
+				r.clearBASH_REMATCH()
+				return ""
+			}
+			if r.binTest(ctx, x.Op, left, right) {
+				return "1"
+			}
+			return ""
 		case syntax.TsMatchShort, syntax.TsMatch, syntax.TsNoMatch:
 			str := r.literal(x.X.(*syntax.Word))
 			yw := x.Y.(*syntax.Word)
@@ -58,9 +78,51 @@ func (r *Runner) bashTest(ctx context.Context, expr syntax.TestExpr, classic boo
 	return ""
 }
 
+func (r *Runner) testExpandWord(word *syntax.Word, expandFunc func(*expand.Config, *syntax.Word) (string, error)) (string, bool) {
+	str, err := expandFunc(r.ecfg, word)
+	if err == nil {
+		return str, true
+	}
+	fmt.Fprintln(r.stderr, err)
+	if testExpandErrFatal(err) {
+		r.exit.code = 1
+		r.exit.exiting = true
+	} else {
+		r.exit.code = 1
+	}
+	return "", false
+}
+
+func (r *Runner) clearBASH_REMATCH() {
+	r.setVar("BASH_REMATCH", expand.Variable{
+		Set:  true,
+		Kind: expand.Indexed,
+		List: []string{},
+	})
+}
+
+func testExpandErrFatal(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	switch {
+	case errors.As(err, &expand.UnsetParameterError{}):
+		return true
+	case errMsg == "invalid indirect expansion":
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *Runner) binTest(ctx context.Context, op syntax.BinTestOperator, x, y string) bool {
 	switch op {
 	case syntax.TsReMatch:
+		if bashRegexHasInvalidBareBraces(y) {
+			r.exit.code = 2
+			return false
+		}
 		re, err := regexp.Compile(y)
 		if err != nil {
 			r.exit.code = 2
@@ -68,6 +130,7 @@ func (r *Runner) binTest(ctx context.Context, op syntax.BinTestOperator, x, y st
 		}
 		m := re.FindStringSubmatch(x)
 		if m == nil {
+			r.clearBASH_REMATCH()
 			return false
 		}
 		vr := expand.Variable{
@@ -121,6 +184,58 @@ func (r *Runner) binTest(ctx context.Context, op syntax.BinTestOperator, x, y st
 	default:
 		panic(fmt.Sprintf("unsupported binary test operator: %q", op))
 	}
+}
+
+func bashRegexHasInvalidBareBraces(expr string) bool {
+	escaped := false
+	inClass := false
+	for i := 0; i < len(expr); i++ {
+		ch := expr[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch ch {
+		case '\\':
+			escaped = true
+		case '[':
+			if !inClass {
+				inClass = true
+			}
+		case ']':
+			if inClass {
+				inClass = false
+			}
+		case '{':
+			if inClass {
+				continue
+			}
+			j := i + 1
+			start := j
+			for j < len(expr) && unicode.IsDigit(rune(expr[j])) {
+				j++
+			}
+			if j == start {
+				if j < len(expr) && expr[j] == ',' {
+					j++
+					for j < len(expr) && unicode.IsDigit(rune(expr[j])) {
+						j++
+					}
+				} else {
+					return true
+				}
+			} else if j < len(expr) && expr[j] == ',' {
+				j++
+				for j < len(expr) && unicode.IsDigit(rune(expr[j])) {
+					j++
+				}
+			}
+			if j >= len(expr) || expr[j] != '}' {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *Runner) statMode(ctx context.Context, name string, mode os.FileMode) bool {
