@@ -10,6 +10,7 @@
     in {
       packages = forAllSystems (pkgs: {
         bash = pkgs.bash;
+        bats = pkgs.bats;
       });
     };
 }

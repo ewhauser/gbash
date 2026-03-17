@@ -1,4 +1,4 @@
-.PHONY: lint test conformance-test build fuzz fuzz-run fuzz-shard fuzz-smoke fuzz-full bench-smoke bench-full bench-compare bench-fs gnu-test compat-docker-build compat-docker-run website-dev release release-check release-snapshot fix-modules tag-release bats-test ensure-bash
+.PHONY: lint test conformance-test build fuzz fuzz-run fuzz-shard fuzz-smoke fuzz-full bench-smoke bench-full bench-compare bench-fs gnu-test compat-docker-build compat-docker-run website-dev release release-check release-snapshot fix-modules tag-release bats-test ensure-bash ensure-bats
 
 GO_PACKAGES := ./... ./contrib/awk/... ./contrib/extras/... ./contrib/htmltomarkdown/... ./contrib/sqlite3/... ./contrib/jq/... ./contrib/yq/... ./examples/...
 BENCH_PACKAGES := ./internal/runtime ./cmd/gbash ./contrib/jq
@@ -273,5 +273,9 @@ tag-release:
 	PUSH='$(PUSH_TAGS)' REMOTE='$(TAG_REMOTE)' ./scripts/tag_release.sh $(RELEASE_VERSION)
 
 bats-test:
+	$(eval BATS_PATH := $(shell ./scripts/ensure-bats.sh))
 	@go build -o scripts/tests/.gbash-test-bin ./cmd/gbash/
-	bats scripts/tests/
+	'$(BATS_PATH)' scripts/tests/
+
+ensure-bats:
+	@./scripts/ensure-bats.sh
