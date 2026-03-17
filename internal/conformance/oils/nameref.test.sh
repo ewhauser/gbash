@@ -153,6 +153,26 @@ ref=#
 ref=3
 ## END
 
+#### named ref with $# and shopt -s strict_nameref
+ref='#'
+echo ref=$ref
+typeset -n ref
+echo ref=$ref
+## STDOUT:
+ref=#
+## END
+## status: 1
+## N-I bash status: 0
+## N-I bash STDOUT:
+ref=#
+ref=#
+## END
+## N-I mksh status: 0
+## N-I mksh STDOUT:
+ref=#
+ref=0
+## END
+
 
 #### named ref with 1 $1 etc.
 set -- one two three

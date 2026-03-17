@@ -36,6 +36,23 @@ zz-*-xx
 ## OK zsh STDOUT:
 ## END
 
+#### ysh behavior when glob doesn't match
+
+echo hi > qq-*-zz
+echo status=$?
+
+echo qq*
+
+## status: 1
+## STDOUT:
+## END
+
+## N-I bash/mksh/ash status: 0
+## N-I bash/mksh/ash STDOUT:
+status=0
+qq-*-zz
+## END
+
 #### File redirect without matching any file, with failglob
 
 shopt -s failglob

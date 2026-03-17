@@ -77,6 +77,32 @@ FOO
 hi
 ## END
 
+#### status code is available
+
+cat <(seq 2; exit 2) <(seq 3; exit 3)
+
+case $SH in bash*|zsh) exit ;; esac
+
+echo status @_process_sub_status
+echo done
+
+## STDOUT:
+1
+2
+1
+2
+3
+status 2 3
+done
+## END
+## N-I bash/zsh STDOUT:
+1
+2
+1
+2
+3
+## END
+
 #### process sub in background &
 
 cat <(seq 3; sleep 0.1) & wait

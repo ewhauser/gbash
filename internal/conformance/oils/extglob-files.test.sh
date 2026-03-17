@@ -309,6 +309,26 @@ echo ,(osh|style)
 @(__nope__*|__nope__?|*|?|[:alpha:]||)
 ## END
 
+#### no_dash_glob
+shopt -s extglob
+mkdir -p opts
+cd opts
+
+touch -- foo bar -dash
+echo @(*)
+
+echo @(*)
+
+
+## STDOUT:
+-dash bar foo
+-dash bar foo
+## END
+## N-I bash/mksh STDOUT:
+-dash bar foo
+-dash bar foo
+## END
+
 #### noglob
 shopt -s extglob
 mkdir -p _noglob
