@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -987,10 +988,11 @@ func lookupCommandPath(ctx context.Context, exec *Execution, dir, name, source, 
 		return script, true, nil
 	}
 
-	script, ok, err = resolveScriptCommand(ctx, exec, fullPath)
-	if err != nil {
-		return nil, false, err
+	if !isScriptFallbackEligible(ctx, exec, info, fullPath) {
+		return nil, false, nil
 	}
+
+	script, ok = resolveScriptCommand(exec, fullPath)
 	if !ok {
 		return nil, false, nil
 	}
@@ -1060,16 +1062,44 @@ func resolveShebangCommand(ctx context.Context, exec *Execution, fullPath string
 	}, true, nil
 }
 
-func resolveScriptCommand(_ context.Context, exec *Execution, fullPath string) (_ *resolvedCommand, ok bool, err error) {
+func resolveScriptCommand(exec *Execution, fullPath string) (_ *resolvedCommand, ok bool) {
 	cmd, ok := exec.Registry.Lookup("sh")
 	if !ok {
-		return nil, false, nil
+		return nil, false
 	}
 	return &resolvedCommand{
 		command: cmd,
 		name:    "sh",
 		args:    []string{fullPath},
-	}, true, nil
+	}, true
+}
+
+func isScriptFallbackEligible(ctx context.Context, exec *Execution, info stdfs.FileInfo, fullPath string) bool {
+	if info == nil || info.IsDir() {
+		return false
+	}
+	if runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
+		return false
+	}
+	return !hasShebangPrefix(ctx, exec, fullPath)
+}
+
+func hasShebangPrefix(ctx context.Context, exec *Execution, fullPath string) bool {
+	if exec == nil || exec.FS == nil {
+		return false
+	}
+	file, err := exec.FS.Open(ctx, fullPath)
+	if err != nil {
+		return false
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+	line, ok, err := readFirstLine(file)
+	if err != nil || !ok {
+		return false
+	}
+	return strings.HasPrefix(line, "#!")
 }
 
 func readShebangLine(r io.Reader) (line string, ok bool, err error) {
