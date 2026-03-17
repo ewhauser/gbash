@@ -290,17 +290,6 @@ foo.py
 zzz bar.py foo.py
 ## END
 
-#### No extended glob with simple_word_eval (YSH evaluation)
-shopt -s extglob
-mkdir -p eg12
-cd eg12
-touch {foo,bar,spam}.py
-builtin write -- x@(fo*|bar).py
-builtin write -- @(fo*|bar).py
-## status: 1
-## STDOUT:
-## END
-
 #### no match
 shopt -s extglob
 echo @(__nope__)

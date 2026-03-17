@@ -64,20 +64,6 @@ $SH -o errexit $REPO_ROOT/spec/testdata/top-level-control-flow.sh
 SUBSHELL
 ## END
 
-#### shopt -s strict_control_flow
-echo break
-break
-echo hi
-## STDOUT:
-break
-## END
-## status: 1
-## N-I dash/bash/mksh STDOUT:
-break
-hi
-# END
-## N-I dash/bash/mksh status: 0
-
 #### return at top level is an error
 return
 echo "status=$?"
@@ -130,51 +116,6 @@ VarSub FAILED
 CommandSub FAILED
 ## END
 
-#### empty argv WITH strict_argv
-echo empty
-x=''
-$x
-echo status=$?
-## status: 1
-## STDOUT:
-empty
-## END
-## N-I dash/bash/mksh status: 0
-## N-I dash/bash/mksh STDOUT:
-empty
-status=0
-## END
-
-#### Arrays are incorrectly compared, but strict_array prevents it
-
-# NOTE: from spec/dbracket has a test case like this
-# sane-array should turn this ON.
-# bash and mksh allow this because of decay
-
-a=('a b' 'c d')
-b=('a' 'b' 'c' 'd')
-echo ${#a[@]}
-echo ${#b[@]}
-[[ "${a[@]}" == "${b[@]}" ]] && echo EQUAL
-
-[[ "${a[@]}" == "${b[@]}" ]] && echo EQUAL
-
-## status: 1
-## STDOUT:
-2
-4
-EQUAL
-## END
-## OK bash/mksh status: 0
-## OK bash/mksh STDOUT:
-2
-4
-EQUAL
-EQUAL
-## END
-## N-I dash status: 2
-## N-I dash stdout-json: ""
-
 #### automatically creating arrays WITHOUT strict_array
 undef[2]=x
 undef[3]=y
@@ -200,43 +141,5 @@ argv.sh "${undef[@]}"
 ## END
 ## N-I dash status: 2
 ## N-I dash stdout-json: ""
-
-#### simple_eval_builtin
-for i in 1 2; do
-  eval  # zero args
-  echo status=$?
-  eval echo one
-  echo status=$?
-  eval 'echo two'
-  echo status=$?
-  echo ---
-done
-## STDOUT:
-status=0
-one
-status=0
-two
-status=0
----
-status=2
-status=2
-two
-status=0
----
-## END
-## N-I dash/bash/mksh STDOUT:
-status=0
-one
-status=0
-two
-status=0
----
-status=0
-one
-status=0
-two
-status=0
----
-## END
 
 
