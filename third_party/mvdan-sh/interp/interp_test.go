@@ -357,6 +357,10 @@ var runTests = []runTest{
 	{`count() { echo $#; }; a=(); count "${a[@]}"`, "0\n"},
 	{`count() { echo $#; }; count "${unset_var[@]}"`, "0\n"},
 	{`count() { echo $#; }; a=(""); count "${a[@]}"`, "1\n"},
+	{`show() { echo $#; printf "<%s>\n" "$1"; }; a=(); show "${a[*]+x}"`, "1\n<>\n"},
+	{`show() { echo $#; printf "<%s>\n" "$1"; }; set --; show "${*+x}"`, "1\n<>\n"},
+	{`show() { echo $#; printf "<%s>\n" "$1"; }; a=(); show "${a[*]:+x}"`, "1\n<>\n"},
+	{`show() { echo $#; printf "<%s>\n" "$1"; }; a=(""); show "${a[@]:+x}"`, "1\n<x>\n"},
 	{`echo $1 $3; set -- a b c; echo $1 $3`, "\na c\n"},
 	{`[[ $0 == "bash" || $0 == "gosh" ]]`, ""},
 

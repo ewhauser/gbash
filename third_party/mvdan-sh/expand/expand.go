@@ -803,13 +803,20 @@ func (cfg *Config) quotedElemFields(pe *syntax.ParamExp) ([]string, bool, error)
 			word, err := cfg.quotedParamWord(pe.Exp.Word)
 			return word, true, err
 		}
-		return []string{}, true, nil
+		return fields, true, nil
 	case syntax.AlternateUnsetOrNull:
+		if pe.Param.Value == "@" || nodeLit(pe.Index) == "@" {
+			if set {
+				word, err := cfg.quotedParamWord(pe.Exp.Word)
+				return word, true, err
+			}
+			return fields, true, nil
+		}
 		if !null {
 			word, err := cfg.quotedParamWord(pe.Exp.Word)
 			return word, true, err
 		}
-		return []string{}, true, nil
+		return fields, true, nil
 	case syntax.DefaultUnset:
 		if set {
 			return fields, true, nil
