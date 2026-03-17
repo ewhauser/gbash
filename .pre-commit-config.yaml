@@ -7,3 +7,9 @@ repos:
         language: system
         pass_filenames: false
         types: [go]
+      - id: sync-claude-md
+        name: symlink CLAUDE.md to AGENTS.md
+        entry: sh -c 'find . -name AGENTS.md -not -path "./node_modules/*" -not -path "./.git/*" -not -path "./.claude/worktrees/*" | while read -r f; do dir=$(dirname "$f"); if [ ! -L "$dir/CLAUDE.md" ] || [ "$(readlink "$dir/CLAUDE.md")" != "AGENTS.md" ]; then ln -sf AGENTS.md "$dir/CLAUDE.md" && git add "$dir/CLAUDE.md"; fi; done'
+        language: system
+        always_run: true
+        pass_filenames: false
