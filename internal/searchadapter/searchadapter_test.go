@@ -494,6 +494,30 @@ func TestPrefilterCandidatesFallsBackWhenProviderIsStale(t *testing.T) {
 	}
 }
 
+func TestPrefilterCandidatesUsesIgnoreCaseWhenRegexpContainsInlineFlag(t *testing.T) {
+	t.Parallel()
+	provider := &caseAwareLiteralProvider{}
+
+	result, err := PrefilterCandidates(context.Background(), provider, "/workspace", []string{
+		"/workspace/hit.txt",
+	}, regexp.MustCompile("(?i)Needle"), false)
+	if err != nil {
+		t.Fatalf("PrefilterCandidates() error = %v", err)
+	}
+	if !result.UsedIndex {
+		t.Fatal("UsedIndex = false, want true")
+	}
+	if got, want := sortedCandidatePaths(result.CandidatePaths), []string{"/workspace/hit.txt"}; !slices.Equal(got, want) {
+		t.Fatalf("CandidatePaths = %v, want %v", got, want)
+	}
+	if len(provider.queries) != 1 {
+		t.Fatalf("query count = %d, want 1", len(provider.queries))
+	}
+	if !provider.queries[0].IgnoreCase {
+		t.Fatal("query IgnoreCase = false, want true")
+	}
+}
+
 type searchCapableFS struct {
 	gbfs.FileSystem
 	provider gbfs.SearchProvider
