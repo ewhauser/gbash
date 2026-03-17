@@ -83,6 +83,8 @@ Process substitution is supported as a sandbox-native shell feature. The adapter
 
 Registry-backed replacements for Bash builtins should preserve shell-visible Bash coercions when practical. One compatibility requirement is that numeric `printf` conversions accept quoted character constants such as `"'A"` and `"\"B"`.
 
+Shell builtins that remain implemented inside the vendored interpreter should preserve the Bash-facing option contracts we depend on for conformance. One current requirement is Bash-compatible `type` resolution and reporting for `-a`, `-f`, `-p`, `-P`, and `-t` across aliases, functions, builtins, keywords, and PATH files.
+
 ### 5.3 Project-owned boundaries
 
 The runtime owns:
