@@ -3,12 +3,12 @@ module github.com/ewhauser/gbash/contrib/extras
 go 1.26.1
 
 require (
-	github.com/ewhauser/gbash v0.0.18
-	github.com/ewhauser/gbash/contrib/awk v0.0.18
-	github.com/ewhauser/gbash/contrib/htmltomarkdown v0.0.18
-	github.com/ewhauser/gbash/contrib/jq v0.0.18
-	github.com/ewhauser/gbash/contrib/sqlite3 v0.0.18
-	github.com/ewhauser/gbash/contrib/yq v0.0.18
+	github.com/ewhauser/gbash v0.0.19
+	github.com/ewhauser/gbash/contrib/awk v0.0.19
+	github.com/ewhauser/gbash/contrib/htmltomarkdown v0.0.19
+	github.com/ewhauser/gbash/contrib/jq v0.0.19
+	github.com/ewhauser/gbash/contrib/sqlite3 v0.0.19
+	github.com/ewhauser/gbash/contrib/yq v0.0.19
 )
 
 require (
@@ -19,12 +19,10 @@ require (
 	github.com/alecthomas/participle/v2 v2.1.4 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
 	github.com/benhoyt/goawk v1.31.0 // indirect
-	github.com/creack/pty v1.1.24 // indirect
 	github.com/dimchansky/utfbom v1.1.1 // indirect
 	github.com/elliotchance/orderedmap v1.8.0 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
-	github.com/go-quicktest/qt v1.101.0 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
