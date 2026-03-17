@@ -62,10 +62,6 @@
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"
         },
-        "oils/background.test.sh": {
-          "mode": "skip",
-          "reason": "exercises host process or terminal behavior outside the gbash sandbox contract"
-        },
         "oils/ble-features.test.sh": {
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"
