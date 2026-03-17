@@ -611,6 +611,7 @@ func runODDump(inv *Invocation, data []byte, opts *odOptions) error {
 
 	var previous []byte
 	duplicate := false
+	wroteLine := false
 	for len(data) > 0 {
 		lineLen := minInt(len(data), info.lineBytes)
 		line := data[:lineLen]
@@ -633,7 +634,11 @@ func runODDump(inv *Invocation, data []byte, opts *odOptions) error {
 		if err := writeODLine(inv.Stdout, offset.format(), line, lineLen, info, opts.byteOrder); err != nil {
 			return &ExitError{Code: 1, Err: err}
 		}
+		wroteLine = true
 		offset.increase(uint64(lineLen))
+	}
+	if !wroteLine && offset.radix == odRadixNone && offset.label == nil {
+		return nil
 	}
 	if err := offset.printFinal(inv.Stdout); err != nil {
 		return &ExitError{Code: 1, Err: err}

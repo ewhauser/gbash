@@ -922,7 +922,7 @@ func shellOpenPathError(ctx context.Context, stderr io.Writer, name string, err 
 	if policy.IsDenied(err) {
 		return shellFailureToWriter(ctx, stderr, 126, "%v", err)
 	}
-	return fmt.Errorf("%s: %s", name, shellPathErrorText(err))
+	return shellWrappedOpenError(name, err)
 }
 
 func shellPathErrorText(err error) string {
@@ -949,6 +949,32 @@ func shellPathErrorText(err error) string {
 		return "Is a directory"
 	}
 	return err.Error()
+}
+
+type shellOpenError struct {
+	pathErr *os.PathError
+	text    string
+}
+
+func shellWrappedOpenError(name string, err error) error {
+	return &shellOpenError{
+		pathErr: &os.PathError{Op: "open", Path: name, Err: err},
+		text:    fmt.Sprintf("%s: %s", name, shellPathErrorText(err)),
+	}
+}
+
+func (e *shellOpenError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.text
+}
+
+func (e *shellOpenError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.pathErr
 }
 
 func lookupCommand(ctx context.Context, exec *Execution, dir string, env expand.Environ, name string) (_ *resolvedCommand, ok bool, err error) {
