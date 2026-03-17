@@ -173,3 +173,30 @@ func TestProcSubstManagerChoosesPolicyAllowedRoot(t *testing.T) {
 		t.Fatalf("endpoint.Path = %q, want /home/agent/ prefix", endpoint.Path)
 	}
 }
+
+func TestProcSubstFSPreservesSearchProviderForRegularPaths(t *testing.T) {
+	t.Parallel()
+
+	searchable, err := gbfs.NewSearchableFileSystem(context.Background(), gbfs.NewMemory(), nil)
+	if err != nil {
+		t.Fatalf("NewSearchableFileSystem() error = %v", err)
+	}
+	manager := newTestProcSubstManager(nil)
+	defer manager.Close()
+
+	wrapped, ok := newProcSubstFS(searchable, manager).(gbfs.SearchCapable)
+	if !ok {
+		t.Fatal("wrapped fs does not implement SearchCapable")
+	}
+	if _, ok := wrapped.SearchProviderForPath("/workspace"); !ok {
+		t.Fatal("SearchProviderForPath(/workspace) = false, want true")
+	}
+
+	endpoint, err := manager.endpoint(context.Background(), &syntax.ProcSubst{Op: syntax.CmdIn})
+	if err != nil {
+		t.Fatalf("endpoint() error = %v", err)
+	}
+	if _, ok := wrapped.SearchProviderForPath(endpoint.Path); ok {
+		t.Fatalf("SearchProviderForPath(%q) = true, want false", endpoint.Path)
+	}
+}

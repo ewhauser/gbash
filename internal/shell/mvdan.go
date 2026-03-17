@@ -712,11 +712,8 @@ func interactiveInvoker(interactFn func(context.Context, *commands.InteractiveRe
 }
 
 func completionStateForExecution(exec *Execution) *shellstate.CompletionState {
-	if exec == nil {
+	if exec == nil || exec.CompletionState == nil {
 		return shellstate.NewCompletionState()
-	}
-	if exec.CompletionState == nil {
-		exec.CompletionState = shellstate.NewCompletionState()
 	}
 	return exec.CompletionState
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/ewhauser/gbash/internal/shellstate"
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/interp"
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
@@ -31,6 +32,9 @@ func (m *MVdan) Interact(ctx context.Context, exec *Execution) (*InteractiveResu
 	}
 	if exec.Stderr == nil {
 		exec.Stderr = io.Discard
+	}
+	if exec.CompletionState == nil {
+		exec.CompletionState = shellstate.NewCompletionState()
 	}
 	exec.Interactive = true
 	input := bufio.NewReader(exec.Stdin)
