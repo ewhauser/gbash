@@ -795,51 +795,27 @@ func (cfg *Config) quotedElemFields(pe *syntax.ParamExp) ([]string, bool, error)
 		return fields, true, nil
 	}
 
-	set := len(elems) > 0
-	quotedAt := pe.Param.Value == "@" || nodeLit(pe.Index) == "@"
-	null := !set || (!quotedAt && len(elems) == 1 && elems[0] == "")
+	hasElems := len(elems) > 0
 	switch pe.Exp.Op {
-	case syntax.AlternateUnset:
-		if set {
+	case syntax.AlternateUnset, syntax.AlternateUnsetOrNull:
+		if hasElems {
 			word, err := cfg.quotedParamWord(pe.Exp.Word)
 			return word, true, err
 		}
 		return fields, true, nil
-	case syntax.AlternateUnsetOrNull:
-		if !null {
-			word, err := cfg.quotedParamWord(pe.Exp.Word)
-			return word, true, err
-		}
-		return fields, true, nil
-	case syntax.DefaultUnset:
-		if set {
+	case syntax.DefaultUnset, syntax.DefaultUnsetOrNull:
+		if hasElems {
 			return fields, true, nil
 		}
 		word, err := cfg.quotedParamWord(pe.Exp.Word)
 		return word, true, err
-	case syntax.DefaultUnsetOrNull:
-		if null {
-			word, err := cfg.quotedParamWord(pe.Exp.Word)
-			return word, true, err
-		}
-		return fields, true, nil
-	case syntax.ErrorUnset:
-		if set {
+	case syntax.ErrorUnset, syntax.ErrorUnsetOrNull:
+		if hasElems {
 			return fields, true, nil
 		}
 		return nil, false, nil
-	case syntax.ErrorUnsetOrNull:
-		if !null {
-			return fields, true, nil
-		}
-		return nil, false, nil
-	case syntax.AssignUnset:
-		if set {
-			return fields, true, nil
-		}
-		return nil, false, nil
-	case syntax.AssignUnsetOrNull:
-		if !null {
+	case syntax.AssignUnset, syntax.AssignUnsetOrNull:
+		if hasElems {
 			return fields, true, nil
 		}
 		return nil, false, nil
