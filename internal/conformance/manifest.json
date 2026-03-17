@@ -270,10 +270,6 @@
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"
         },
-        "oils/here-doc.test.sh::Here doc from another input file descriptor": {
-          "mode": "skip",
-          "reason": "gbash helper scripts cannot read arbitrary file descriptors without shell features that are not implemented yet"
-        },
         "oils/here-doc.test.sh::Here doc with bad comsub delimiter": {
           "mode": "xfail",
           "reason": "gbash rejects expanded heredoc delimiters that bash accepts"
@@ -285,18 +281,6 @@
         "oils/here-doc.test.sh::Here doc with line continuation, then pipe.  Syntax error.": {
           "mode": "xfail",
           "reason": "gbash reports a different heredoc syntax failure than bash for this malformed pipeline"
-        },
-        "oils/here-doc.test.sh::Multiple here docs in pipeline": {
-          "mode": "skip",
-          "reason": "gbash helper scripts cannot read arbitrary file descriptors without shell features that are not implemented yet"
-        },
-        "oils/here-doc.test.sh::Multiple here docs in pipeline on multiple lines": {
-          "mode": "skip",
-          "reason": "gbash helper scripts cannot read arbitrary file descriptors without shell features that are not implemented yet"
-        },
-        "oils/here-doc.test.sh::Multiple here docs with different descriptors": {
-          "mode": "skip",
-          "reason": "gbash helper scripts cannot read arbitrary file descriptors without shell features that are not implemented yet"
         },
         "oils/introspect.test.sh::FUNCNAME with source (scalar or array)": {
           "mode": "xfail",
