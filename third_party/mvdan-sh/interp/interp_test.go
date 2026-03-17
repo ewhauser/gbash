@@ -627,7 +627,7 @@ var runTests = []runTest{
 	},
 	{
 		"set -u; echo ${1}",
-		"1: unbound variable\nexit status 1 #JUSTERR",
+		"1: unbound variable\nexit status 127 #JUSTERR",
 	},
 	{
 		"echo ${a-b}; echo $a; a=; echo ${a-b}; a=c; echo ${a-b}",
@@ -651,7 +651,7 @@ var runTests = []runTest{
 	},
 	{
 		"a=b; echo ${a:?err1}; a=; echo ${a:?err2}; unset a; echo ${a:?err3}",
-		"b\na: err2\nexit status 1 #JUSTERR",
+		"b\na: err2\nexit status 127 #JUSTERR",
 	},
 	{
 		`unset a; set -- ${a:-'a b c'}; printf '<%s>\n' "$@"`,
@@ -679,11 +679,11 @@ var runTests = []runTest{
 	},
 	{
 		"a=b; echo ${a?err1}; a=; echo ${a?err2}; unset a; echo ${a?err3}",
-		"b\n\na: err3\nexit status 1 #JUSTERR",
+		"b\n\na: err3\nexit status 127 #JUSTERR",
 	},
 	{
 		"echo ${a:?%s}",
-		"a: %s\nexit status 1 #JUSTERR",
+		"a: %s\nexit status 127 #JUSTERR",
 	},
 	{
 		`x=abc; printf '<%s>\n' "${x#'a'}"`,
@@ -2333,7 +2333,7 @@ var runTests = []runTest{
 	},
 	{
 		"echo $a; set -u; echo $a; echo extra",
-		"\na: unbound variable\nexit status 1 #JUSTERR",
+		"\na: unbound variable\nexit status 127 #JUSTERR",
 	},
 	{
 		"foo=bar; set -u; echo ${foo/bar/}",
@@ -2345,16 +2345,16 @@ var runTests = []runTest{
 	},
 	{
 		"set -u; echo ${foo/bar/}",
-		"foo: unbound variable\nexit status 1 #JUSTERR",
+		"foo: unbound variable\nexit status 127 #JUSTERR",
 	},
 	{
 		"set -u; echo ${foo#bar}",
-		"foo: unbound variable\nexit status 1 #JUSTERR",
+		"foo: unbound variable\nexit status 127 #JUSTERR",
 	},
 	// TODO: detect this case as unset
 	// {
 	// 	"set -u; foo=(bar); echo $foo; echo ${foo[3]}",
-	// 	"bar\nfoo: unbound variable\nexit status 1 #JUSTERR",
+	// 	"bar\nfoo: unbound variable\nexit status 127 #JUSTERR",
 	// },
 	{
 		"set -u; foo=(''); echo ${foo[0]}",
@@ -2362,7 +2362,7 @@ var runTests = []runTest{
 	},
 	{
 		"set -u; echo ${#foo}",
-		"foo: unbound variable\nexit status 1 #JUSTERR",
+		"foo: unbound variable\nexit status 127 #JUSTERR",
 	},
 	{
 		"set -u; echo ${foo+bar}",
@@ -2390,11 +2390,11 @@ var runTests = []runTest{
 	},
 	{
 		"set -u; echo ${foo?bar}",
-		"foo: bar\nexit status 1 #JUSTERR",
+		"foo: bar\nexit status 127 #JUSTERR",
 	},
 	{
 		"set -u; echo ${foo:?bar}",
-		"foo: bar\nexit status 1 #JUSTERR",
+		"foo: bar\nexit status 127 #JUSTERR",
 	},
 	{
 		"set -ue; set -ueo pipefail",
@@ -4552,7 +4552,7 @@ func TestRunnerOpts(t *testing.T) {
 		{
 			opts(interp.Params("-u", "--", "foo")),
 			"echo $@; echo $unset",
-			"foo\nunset: unbound variable\nexit status 1",
+			"foo\nunset: unbound variable\nexit status 127",
 		},
 		{
 			opts(interp.Params("-u", "--", "foo")),

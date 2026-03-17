@@ -35,6 +35,58 @@ func (u UnsetParameterError) Error() string {
 	return fmt.Sprintf("%s: %s", u.Node.Param.Value, u.Message)
 }
 
+// BadSubstitutionError is returned when a parameter expansion is malformed,
+// such as combining ${#var} with other operators like ${#var-default}.
+type BadSubstitutionError struct {
+	Node *syntax.ParamExp
+}
+
+func (b BadSubstitutionError) Error() string {
+	return fmt.Sprintf("${#%s%s}: bad substitution", b.Node.Param.Value, expOpString(b.Node))
+}
+
+// expOpString returns the string representation of an expansion operator for error messages.
+func expOpString(pe *syntax.ParamExp) string {
+	if pe.Exp != nil {
+		op := expOpChar(pe.Exp.Op)
+		word := ""
+		if pe.Exp.Word != nil {
+			word = pe.Exp.Word.Lit()
+		}
+		return op + word
+	}
+	if pe.Repl != nil {
+		return "//..."
+	}
+	if pe.Slice != nil {
+		return ":..."
+	}
+	return ""
+}
+
+func expOpChar(op syntax.ParExpOperator) string {
+	switch op {
+	case syntax.DefaultUnset:
+		return "-"
+	case syntax.DefaultUnsetOrNull:
+		return ":-"
+	case syntax.AssignUnset:
+		return "="
+	case syntax.AssignUnsetOrNull:
+		return ":="
+	case syntax.ErrorUnset:
+		return "?"
+	case syntax.ErrorUnsetOrNull:
+		return ":?"
+	case syntax.AlternateUnset:
+		return "+"
+	case syntax.AlternateUnsetOrNull:
+		return ":+"
+	default:
+		return ""
+	}
+}
+
 func overridingUnset(pe *syntax.ParamExp) bool {
 	if pe.Exp == nil {
 		return false
@@ -394,13 +446,23 @@ func (cfg *Config) paramExp(pe *syntax.ParamExp, ql quoteLevel) (string, error) 
 		callVarInd = state.callVarInd
 	)
 
+	// Check for invalid combinations like ${#var-default} (bad substitution)
+	if pe.Length && (pe.Exp != nil || pe.Repl != nil || pe.Slice != nil) {
+		return "", BadSubstitutionError{Node: pe}
+	}
+
 	switch {
 	case pe.Length:
 		n := len(elems)
 		switch {
 		case name == "@", name == "*", nodeLit(pe.Index) == "@", nodeLit(pe.Index) == "*":
 		default:
-			n = utf8.RuneCountInString(str)
+			// In C/POSIX locale, count bytes; in UTF-8 locale, count characters
+			if cfg.localeIsMultibyte() {
+				n = utf8.RuneCountInString(str)
+			} else {
+				n = len(str)
+			}
 		}
 		str = strconv.Itoa(n)
 	case pe.Excl:

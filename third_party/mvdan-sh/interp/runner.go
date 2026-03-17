@@ -288,14 +288,20 @@ func (r *Runner) expandErr(err error) {
 	fmt.Fprintln(r.stderr, errMsg)
 	switch {
 	case errors.As(err, &expand.UnsetParameterError{}):
+		// Unbound variable error - fatal exit with code 127 (matching bash)
+		r.exit.code = 127
+		r.exit.exiting = true
+	case errors.As(err, &expand.BadSubstitutionError{}):
+		// Bad substitution - set exit code 1 but continue execution
+		r.exit.code = 1
 	case errMsg == "invalid indirect expansion":
 		// TODO: These errors are treated as fatal by bash.
 		// Make the error type reflect that.
+		r.exit.code = 1
+		r.exit.exiting = true
 	default:
 		return // other cases do not exit
 	}
-	r.exit.code = 1
-	r.exit.exiting = true
 }
 
 func (r *Runner) arithm(expr syntax.ArithmExpr) int {

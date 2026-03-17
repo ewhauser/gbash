@@ -1519,9 +1519,9 @@ func (p *Parser) paramExp() *ParamExp {
 		p.next()
 		return pe
 	}
-	if p.tok != _EOF && (pe.Length || pe.Width || pe.IsSet) {
-		p.curErr("cannot combine multiple parameter expansion operators")
-	}
+	// Note: we allow pe.Length/pe.Width/pe.IsSet combined with other operators
+	// to parse. The expansion code will reject these as "bad substitution" at
+	// expansion time, matching bash behavior.
 	switch p.tok {
 	case slash, dblSlash: // pattern search and replace
 		p.checkLang(p.pos, langBashLike|LangMirBSDKorn|LangZsh, "search and replace")

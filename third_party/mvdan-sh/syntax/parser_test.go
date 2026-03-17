@@ -1327,18 +1327,8 @@ var errorCases = []errorCase{
 		"echo ${foo!}",
 		langErr("1:11: not a valid parameter expansion operator: `!`", LangBash|LangMirBSDKorn),
 	),
-	errCase(
-		"echo ${#foo:-bar}",
-		langErr("1:12: cannot combine multiple parameter expansion operators", LangBash|LangMirBSDKorn),
-	),
-	errCase(
-		"echo ${%foo:1:3}",
-		langErr("1:12: cannot combine multiple parameter expansion operators", LangMirBSDKorn),
-	),
-	errCase(
-		"echo ${#foo%x}",
-		langErr("1:12: cannot combine multiple parameter expansion operators", LangMirBSDKorn),
-	),
+	// Note: "${#foo:-bar}" and similar combinations are now allowed to parse;
+	// they produce a "bad substitution" error at expansion time, matching bash behavior.
 	errCase(
 		"echo foo\n;",
 		langErr("2:1: `;` can only immediately follow a statement"),

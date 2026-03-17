@@ -173,6 +173,20 @@ func (cfg *Config) envSet(name, value string) error {
 	return wenv.Set(name, Variable{Set: true, Kind: String, Str: value})
 }
 
+// localeIsMultibyte returns true if the current locale supports multibyte
+// characters (UTF-8). When false, string operations should use byte semantics.
+// This checks LC_ALL, then LC_CTYPE, then LANG, following POSIX locale precedence.
+func (cfg *Config) localeIsMultibyte() bool {
+	for _, name := range []string{"LC_ALL", "LC_CTYPE", "LANG"} {
+		val := strings.ToLower(cfg.envGet(name))
+		if val == "" {
+			continue
+		}
+		return strings.Contains(val, "utf-8") || strings.Contains(val, "utf8")
+	}
+	return false
+}
+
 // Literal expands a single shell word. It is similar to [Fields], but the result
 // is a single string. This is the behavior when a word is used as the value in
 // a shell variable assignment, for example.
@@ -257,7 +271,10 @@ func Format(cfg *Config, format string, args []string) (string, int, error) {
 	return sb.String(), consumed, err
 }
 
-func decodeANSICString(src string) string {
+// decodeANSICString decodes ANSI-C escape sequences in a $'...' string.
+// If skipUnicodeEscapes is true, \u and \U sequences are kept as literal
+// backslash + characters (matching bash behavior in C/POSIX locales).
+func decodeANSICString(src string, skipUnicodeEscapes bool) string {
 	var sb strings.Builder
 	sb.Grow(len(src))
 
@@ -305,11 +322,29 @@ func decodeANSICString(src string) string {
 			}
 			n, _ := strconv.ParseUint(src[start:i+1], 8, 8)
 			sb.WriteByte(byte(n))
-		case 'x', 'u', 'U':
-			maxDigits := 2
-			if c == 'u' {
-				maxDigits = 4
-			} else if c == 'U' {
+		case 'x':
+			start := i + 1
+			end := start
+			for end < len(src) && end-start < 2 && isHex(src[end]) {
+				end++
+			}
+			if start == end {
+				sb.WriteByte('\\')
+				sb.WriteByte(c)
+				break
+			}
+			i = end - 1
+			n, _ := strconv.ParseUint(src[start:end], 16, 32)
+			sb.WriteByte(byte(n))
+		case 'u', 'U':
+			// In C/POSIX locale, bash does not process \u and \U escapes
+			if skipUnicodeEscapes {
+				sb.WriteByte('\\')
+				sb.WriteByte(c)
+				break
+			}
+			maxDigits := 4
+			if c == 'U' {
 				maxDigits = 8
 			}
 			start := i + 1
@@ -324,10 +359,6 @@ func decodeANSICString(src string) string {
 			}
 			i = end - 1
 			n, _ := strconv.ParseUint(src[start:end], 16, 32)
-			if c == 'x' {
-				sb.WriteByte(byte(n))
-				break
-			}
 			r := rune(n)
 			if !utf8.ValidRune(r) {
 				sb.WriteString(src[start-2 : end])
@@ -680,7 +711,7 @@ func (cfg *Config) wordField(wps []syntax.WordPart, ql quoteLevel) ([]fieldPart,
 		case *syntax.SglQuoted:
 			fp := fieldPart{quote: quoteSingle, val: wp.Value}
 			if wp.Dollar {
-				fp.val = decodeANSICString(fp.val)
+				fp.val = decodeANSICString(fp.val, !cfg.localeIsMultibyte())
 				fp.val, _, _ = strings.Cut(fp.val, "\x00") // cut the string if format included \x00
 			}
 			field = append(field, fp)
@@ -809,7 +840,7 @@ func (cfg *Config) wordFields(wps []syntax.WordPart) ([][]fieldPart, error) {
 			allowEmpty = true
 			fp := fieldPart{quote: quoteSingle, val: wp.Value}
 			if wp.Dollar {
-				fp.val = decodeANSICString(fp.val)
+				fp.val = decodeANSICString(fp.val, !cfg.localeIsMultibyte())
 				fp.val, _, _ = strings.Cut(fp.val, "\x00") // cut the string if format included \x00
 			}
 			curField = append(curField, fp)
