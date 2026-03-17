@@ -376,12 +376,11 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 			case "-f":
 				mode.suppressFuncs = true
 			case "-p":
-				mode.pathOnly = true
+				mode.output = shellTypeOutputPath
 			case "-P":
-				mode.pathOnly = true
-				mode.forcePath = true
+				mode.output = shellTypeOutputForcePath
 			case "-t":
-				mode.kindOnly = true
+				mode.output = shellTypeOutputKind
 			case "--help":
 				return failf(3, "command: NOT IMPLEMENTED\n")
 			default:
@@ -392,7 +391,7 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		for _, arg := range args {
 			matches, found := r.typeMatches(ctx, arg, mode)
 			if !found {
-				if !mode.kindOnly && !mode.pathOnly {
+				if mode.output == shellTypeOutputVerbose {
 					r.errf("type: %s: not found\n", arg)
 				}
 				anyNotFound = true
@@ -1092,9 +1091,7 @@ func (r *Runner) absPath(path string) string {
 type shellTypeMode struct {
 	all           bool
 	suppressFuncs bool
-	pathOnly      bool
-	forcePath     bool
-	kindOnly      bool
+	output        shellTypeOutputMode
 }
 
 type shellTypeMatchKind uint8
@@ -1107,6 +1104,15 @@ const (
 	shellTypeFile
 )
 
+type shellTypeOutputMode uint8
+
+const (
+	shellTypeOutputVerbose shellTypeOutputMode = iota
+	shellTypeOutputPath
+	shellTypeOutputForcePath
+	shellTypeOutputKind
+)
+
 type shellTypeMatch struct {
 	kind shellTypeMatchKind
 	path string
@@ -1116,7 +1122,7 @@ type shellTypeMatch struct {
 
 func (r *Runner) typeMatches(ctx context.Context, name string, mode shellTypeMode) ([]shellTypeMatch, bool) {
 	files := r.typeFileMatches(ctx, name, mode.all)
-	if mode.forcePath {
+	if mode.output == shellTypeOutputForcePath {
 		return files, len(files) > 0
 	}
 
@@ -1130,7 +1136,7 @@ func (r *Runner) typeMatches(ctx context.Context, name string, mode shellTypeMod
 
 	if als, ok := r.alias[name]; ok && r.opts[optExpandAliases] {
 		if !appendMatch(shellTypeMatch{kind: shellTypeAlias, als: als}) {
-			if mode.pathOnly {
+			if mode.output == shellTypeOutputPath {
 				return nil, true
 			}
 			return matches, true
@@ -1138,7 +1144,7 @@ func (r *Runner) typeMatches(ctx context.Context, name string, mode shellTypeMod
 	}
 	if syntax.IsKeyword(name) {
 		if !appendMatch(shellTypeMatch{kind: shellTypeKeyword}) {
-			if mode.pathOnly {
+			if mode.output == shellTypeOutputPath {
 				return nil, true
 			}
 			return matches, true
@@ -1147,7 +1153,7 @@ func (r *Runner) typeMatches(ctx context.Context, name string, mode shellTypeMod
 	if !mode.suppressFuncs {
 		if body := r.Funcs[name]; body != nil && !r.funcInternal(name) {
 			if !appendMatch(shellTypeMatch{kind: shellTypeFunction, body: body}) {
-				if mode.pathOnly {
+				if mode.output == shellTypeOutputPath {
 					return nil, true
 				}
 				return matches, true
@@ -1156,14 +1162,14 @@ func (r *Runner) typeMatches(ctx context.Context, name string, mode shellTypeMod
 	}
 	if IsBuiltin(name) {
 		if !appendMatch(shellTypeMatch{kind: shellTypeBuiltin}) {
-			if mode.pathOnly {
+			if mode.output == shellTypeOutputPath {
 				return nil, true
 			}
 			return matches, true
 		}
 	}
 
-	if mode.pathOnly {
+	if mode.output == shellTypeOutputPath {
 		if len(files) > 0 {
 			return files, true
 		}
@@ -1241,7 +1247,7 @@ func (r *Runner) typeStatExecutable(ctx context.Context, name string) (string, e
 }
 
 func (r *Runner) printTypeMatch(name string, match shellTypeMatch, mode shellTypeMode) {
-	if mode.kindOnly {
+	if mode.output == shellTypeOutputKind {
 		switch match.kind {
 		case shellTypeAlias:
 			r.out("alias\n")
@@ -1256,7 +1262,7 @@ func (r *Runner) printTypeMatch(name string, match shellTypeMatch, mode shellTyp
 		}
 		return
 	}
-	if mode.pathOnly {
+	if mode.output == shellTypeOutputPath || mode.output == shellTypeOutputForcePath {
 		if match.kind == shellTypeFile {
 			r.outf("%s\n", match.path)
 		}

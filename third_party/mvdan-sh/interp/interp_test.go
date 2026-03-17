@@ -2659,6 +2659,9 @@ done <<< 2`,
 	{"mkdir bin; >bin/type; chmod +x bin/type; PATH=$PWD/bin:$PATH; type -p type; echo p:$?; type -P type | grep -q '/type$'; echo P:$?", "p:0\nP:0\n"},
 	{"mkdir bin; >bin/interp_foo; chmod +x bin/interp_foo; PATH=$PWD/bin:$PATH; interp_foo(){ :; }; type -pf interp_foo | grep -q '/interp_foo$'; echo grep:$?; type -pf interp_foo >/dev/null; echo type:$?", "grep:0\ntype:0\n"},
 	{"interp_foo(){ :; }; type -pf interp_foo; echo status:$?", "status:1\n"},
+	{"type -t -p $PATH_PROG | grep -q -E '^(/|[A-Z]:)'; echo status:$?", "status:0\n"},
+	{"type -p -t type; echo status:$?", "builtin\nstatus:0\n"},
+	{"type -t -a -P $PATH_PROG | grep -q -E '^(/|[A-Z]:)'; echo status:$?", "status:0\n"},
 
 	// hash
 	{"hash $PATH_PROG", ""},
