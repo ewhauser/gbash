@@ -183,10 +183,6 @@ var fileTests = []fileTestCase{
 		langFile(&File{}),
 	),
 	fileTest(
-		[]string{"\r \r\n"},
-		langFile(litWord("\r")),
-	),
-	fileTest(
 		[]string{"", "# foo", "# foo ( bar", "# foo'bar"},
 		langFile(&File{}),
 	),
@@ -5155,6 +5151,10 @@ var fileTests = []fileTestCase{
 
 // these don't have a canonical format with the same syntax tree
 var fileTestsNoPrint = []fileTestCase{
+	fileTest(
+		[]string{"\r \r\n"},
+		langFile(litWord("\r")),
+	),
 	fileTest(
 		[]string{`$[foo]`},
 		langFile(word(lit("$"), lit("[foo]")), LangPOSIX),

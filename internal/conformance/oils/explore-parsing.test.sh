@@ -19,6 +19,9 @@ $SH myscript
 ## status: 127
 ## STDOUT:
 ## END
+## OK bash STDERR:
+$'echo\rTEST': command not found
+## END
 
 #### readonly +
 
