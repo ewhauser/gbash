@@ -36,6 +36,8 @@ func (m *MVdan) Interact(ctx context.Context, exec *Execution) (*InteractiveResu
 	input := bufio.NewReader(exec.Stdin)
 	exec.Stdin = strings.NewReader("")
 	runnerExec := *exec
+	cleanupProcSubst := withProcSubstScope(&runnerExec)
+	defer cleanupProcSubst()
 
 	budget := newExecutionBudget(exec.Policy, runtimePreludeLineCount())
 	runner, err := interp.New(m.runnerOptions(&runnerExec, budget)...)
@@ -117,11 +119,7 @@ func (m *MVdan) Interact(ctx context.Context, exec *Execution) (*InteractiveResu
 		if err := instrumentLoopBudgets(executionFile, exec.Policy); err != nil {
 			return &InteractiveResult{ExitCode: exitCode}, err
 		}
-		runErr := func() error {
-			cleanupProcSubst := withProcSubstScope(&runnerExec)
-			defer cleanupProcSubst()
-			return runner.Run(ctx, executionFile)
-		}()
+		runErr := runner.Run(ctx, executionFile)
 		exitCode = ExitCode(runErr)
 		pending.Reset()
 		if runner.Exited() {

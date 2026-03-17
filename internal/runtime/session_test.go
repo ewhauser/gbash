@@ -341,9 +341,11 @@ func TestSessionInteractSupportsProcessSubstitution(t *testing.T) {
 
 	result, err := session.Interact(context.Background(), &InteractiveRequest{
 		Stdin: strings.NewReader("" +
-			"cat <(echo hello)\n" +
+			"p=<(echo hello)\n" +
+			"cat \"$p\"\n" +
 			"while IFS= read -r line; do echo \"loop:$line\"; done < <(printf 'a\\nb\\n')\n" +
-			"printf 'hello-out\\n' > >(cat > /tmp/out)\n" +
+			"q=>(cat > /tmp/out)\n" +
+			"printf 'hello-out\\n' > \"$q\"\n" +
 			"while [ ! -s /tmp/out ]; do sleep 0.01; done\n" +
 			"cat /tmp/out\n" +
 			"exit\n"),
