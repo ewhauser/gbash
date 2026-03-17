@@ -12,5 +12,14 @@
         bash = pkgs.bash;
         bats = pkgs.bats;
       });
+
+      devShells = forAllSystems (pkgs: {
+        default = pkgs.mkShell {
+          packages = [
+            pkgs.bash
+            pkgs.bats
+          ];
+        };
+      });
     };
 }
