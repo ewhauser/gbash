@@ -670,6 +670,10 @@ var runTests = []runTest{
 		"<1 2>\n<3 45>\n<6 7>\n",
 	},
 	{
+		`unset a; IFS=,; : ${a:=x,y}; printf '<%s>\n' "$a"`,
+		"<x,y>\n",
+	},
+	{
 		"a=b; echo ${a?err1}; a=; echo ${a?err2}; unset a; echo ${a?err3}",
 		"b\n\na: err3\nexit status 1 #JUSTERR",
 	},

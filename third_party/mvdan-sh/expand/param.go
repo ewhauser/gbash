@@ -295,7 +295,14 @@ func (cfg *Config) paramExpFields(pe *syntax.ParamExp) ([][]fieldPart, bool, err
 	}
 	argFields := func() ([][]fieldPart, string, error) {
 		var fields [][]fieldPart
+		arg := ""
 		if pe.Exp.Word != nil {
+			literalParts, err := cfg.paramArgField(pe.Exp.Word, quoteNone)
+			if err != nil {
+				return nil, "", err
+			}
+			arg = cfg.fieldJoin(literalParts)
+
 			parts, err := cfg.paramArgField(pe.Exp.Word, quoteNone)
 			if err != nil {
 				return nil, "", err
@@ -311,14 +318,7 @@ func (cfg *Config) paramExpFields(pe *syntax.ParamExp) ([][]fieldPart, bool, err
 				return nil, "", err
 			}
 		}
-		var sb strings.Builder
-		for i, field := range fields {
-			if i > 0 {
-				sb.WriteByte(' ')
-			}
-			sb.WriteString(cfg.fieldJoin(field))
-		}
-		return fields, sb.String(), nil
+		return fields, arg, nil
 	}
 
 	switch op := pe.Exp.Op; op {
