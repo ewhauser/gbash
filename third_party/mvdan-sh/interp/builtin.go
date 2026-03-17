@@ -526,14 +526,13 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 	case "test":
 		parseErr := false
 		p := testParser{
-			rem: args,
+			args: args,
 			err: func(err error) {
 				r.errf("%v: %v\n", pos, err)
 				parseErr = true
 			},
 		}
-		p.next()
-		expr := p.classicTest("[", false)
+		expr := p.classicTest()
 		if parseErr {
 			exit.code = 2
 			return exit
