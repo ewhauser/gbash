@@ -363,19 +363,39 @@ func (f *TrieFS) OpenFile(ctx context.Context, name string, flag int, perm stdfs
 }
 
 func (f *TrieFS) Stat(ctx context.Context, name string) (stdfs.FileInfo, error) {
-	abs, entry, err := f.materializePath(ctx, name, true)
+	requested := Resolve(f.Getwd(), name)
+	abs, _, err := f.materializePath(ctx, name, true)
 	if err != nil {
-		return nil, &os.PathError{Op: "stat", Path: Resolve(f.cwd, name), Err: err}
+		return nil, &os.PathError{Op: "stat", Path: requested, Err: err}
 	}
-	return newTrieFileInfo(path.Base(abs), entry.inode), nil
+
+	f.mu.RLock()
+	entry, ok := f.lookupAbsNoFollowLocked(abs)
+	if !ok || entry == nil {
+		f.mu.RUnlock()
+		return nil, &os.PathError{Op: "stat", Path: abs, Err: stdfs.ErrNotExist}
+	}
+	info := newTrieFileInfo(path.Base(abs), entry.inode)
+	f.mu.RUnlock()
+	return info, nil
 }
 
 func (f *TrieFS) Lstat(ctx context.Context, name string) (stdfs.FileInfo, error) {
-	abs, entry, err := f.materializePath(ctx, name, false)
+	requested := Resolve(f.Getwd(), name)
+	abs, _, err := f.materializePath(ctx, name, false)
 	if err != nil {
-		return nil, &os.PathError{Op: "lstat", Path: Resolve(f.cwd, name), Err: err}
+		return nil, &os.PathError{Op: "lstat", Path: requested, Err: err}
 	}
-	return newTrieFileInfo(path.Base(abs), entry.inode), nil
+
+	f.mu.RLock()
+	entry, ok := f.lookupAbsNoFollowLocked(abs)
+	if !ok || entry == nil {
+		f.mu.RUnlock()
+		return nil, &os.PathError{Op: "lstat", Path: abs, Err: stdfs.ErrNotExist}
+	}
+	info := newTrieFileInfo(path.Base(abs), entry.inode)
+	f.mu.RUnlock()
+	return info, nil
 }
 
 func (f *TrieFS) ReadDir(_ context.Context, name string) ([]stdfs.DirEntry, error) {

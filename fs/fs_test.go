@@ -3,11 +3,14 @@ package fs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	stdfs "io/fs"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 )
@@ -316,6 +319,89 @@ func TestMemoryFSCloneIsolated(t *testing.T) {
 	}
 	if _, err := base.Stat(context.Background(), "/new.txt"); !errors.Is(err, stdfs.ErrNotExist) {
 		t.Fatalf("base Stat(/new.txt) error = %v, want not exist", err)
+	}
+}
+
+func TestMutableBackendsStatConcurrentWithWrite(t *testing.T) {
+	t.Parallel()
+
+	t.Run("memory", func(t *testing.T) {
+		t.Parallel()
+		assertStatConcurrentWithWrite(t, NewMemory())
+	})
+
+	t.Run("trie", func(t *testing.T) {
+		t.Parallel()
+		assertStatConcurrentWithWrite(t, NewTrie())
+	})
+}
+
+func assertStatConcurrentWithWrite(t *testing.T, fsys FileSystem) {
+	t.Helper()
+
+	file, err := fsys.OpenFile(context.Background(), "/data.txt", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile(/data.txt) error = %v", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	const iterations = 2048
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < iterations; i++ {
+			if _, err := file.Write([]byte("x")); err != nil {
+				errs <- fmt.Errorf("Write() error: %w", err)
+				return
+			}
+			runtime.Gosched()
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < iterations; i++ {
+			var (
+				info stdfs.FileInfo
+				err  error
+			)
+			if i%2 == 0 {
+				info, err = fsys.Stat(context.Background(), "/data.txt")
+			} else {
+				info, err = fsys.Lstat(context.Background(), "/data.txt")
+			}
+			if err != nil {
+				errs <- fmt.Errorf("stat-like error: %w", err)
+				return
+			}
+			if info.IsDir() {
+				errs <- fmt.Errorf("stat-like reported directory for regular file")
+				return
+			}
+			runtime.Gosched()
+		}
+	}()
+
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got := len(readTestFile(t, fsys, "/data.txt")); got != iterations {
+		t.Fatalf("final size = %d, want %d", got, iterations)
 	}
 }
 

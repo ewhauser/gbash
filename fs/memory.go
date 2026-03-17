@@ -365,19 +365,39 @@ func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm std
 }
 
 func (m *MemoryFS) Stat(ctx context.Context, name string) (stdfs.FileInfo, error) {
-	abs, node, err := m.materializePath(ctx, name, true)
+	requested := Resolve(m.Getwd(), name)
+	abs, _, err := m.materializePath(ctx, name, true)
 	if err != nil {
-		return nil, &os.PathError{Op: "stat", Path: Resolve(m.cwd, name), Err: err}
+		return nil, &os.PathError{Op: "stat", Path: requested, Err: err}
 	}
-	return newFileInfo(path.Base(abs), node), nil
+
+	m.mu.RLock()
+	node, ok := m.nodes[abs]
+	if !ok {
+		m.mu.RUnlock()
+		return nil, &os.PathError{Op: "stat", Path: abs, Err: stdfs.ErrNotExist}
+	}
+	info := newFileInfo(path.Base(abs), node)
+	m.mu.RUnlock()
+	return info, nil
 }
 
 func (m *MemoryFS) Lstat(ctx context.Context, name string) (stdfs.FileInfo, error) {
-	abs, node, err := m.materializePath(ctx, name, false)
+	requested := Resolve(m.Getwd(), name)
+	abs, _, err := m.materializePath(ctx, name, false)
 	if err != nil {
-		return nil, &os.PathError{Op: "lstat", Path: Resolve(m.cwd, name), Err: err}
+		return nil, &os.PathError{Op: "lstat", Path: requested, Err: err}
 	}
-	return newFileInfo(path.Base(abs), node), nil
+
+	m.mu.RLock()
+	node, ok := m.nodes[abs]
+	if !ok {
+		m.mu.RUnlock()
+		return nil, &os.PathError{Op: "lstat", Path: abs, Err: stdfs.ErrNotExist}
+	}
+	info := newFileInfo(path.Base(abs), node)
+	m.mu.RUnlock()
+	return info, nil
 }
 
 func (m *MemoryFS) ReadDir(_ context.Context, name string) ([]stdfs.DirEntry, error) {
