@@ -86,10 +86,10 @@ $SH -c "$cr"
 #### Default IFS does not include \r \v \f
 
 # dash and zsh don't have echo -e
-tab=$(printf '-\t-')
-cr=$(printf '-\r-')
-vert=$(printf '-\v-')
-ff=$(printf '-\f-')
+tab=$(printf -- '-\t-')
+cr=$(printf -- '-\r-')
+vert=$(printf -- '-\v-')
+ff=$(printf -- '-\f-')
 
 $SH -c 'argv.sh $1' dummy0 "$tab"
 $SH -c 'argv.sh $1' dummy0 "$cr"
