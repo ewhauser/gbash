@@ -316,7 +316,8 @@ func (r *Runner) setFunc(name string, body *syntax.Stmt) {
 		r.Funcs = make(map[string]*syntax.Stmt, 4)
 	}
 	r.Funcs[name] = body
-	r.setFuncSource(name, r.currentExecFile())
+	r.setFuncSource(name, r.currentDefinitionSource())
+	r.setFuncInternal(name, r.currentInternal())
 }
 
 func stringIndex(index syntax.ArithmExpr) bool {

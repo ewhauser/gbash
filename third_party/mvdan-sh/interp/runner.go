@@ -357,6 +357,7 @@ func (r *Runner) handlerCtx(ctx context.Context, kind handlerKind, pos syntax.Po
 		Env:      &overlayEnviron{parent: r.writeEnv},
 		Dir:      r.Dir,
 		ExecFile: r.currentExecFile(),
+		Internal: r.currentInternal(),
 		Pos:      pos,
 		Stdout:   r.stdout,
 		Stderr:   r.stderr,
@@ -1160,8 +1161,9 @@ func (r *Runner) call(ctx context.Context, pos syntax.Pos, args []string) {
 	name := args[0]
 	if body := r.Funcs[name]; body != nil {
 		source := r.funcSource(name)
+		internal := r.funcInternal(name)
 		bashSource := source
-		if source == internalBootstrapSource {
+		if internal {
 			bashSource = ""
 		}
 		// stack them to support nested func calls
@@ -1175,6 +1177,7 @@ func (r *Runner) call(ctx context.Context, pos syntax.Pos, args []string) {
 			execFile:   source,
 			bashSource: bashSource,
 			callLine:   r.functionCallLine(pos),
+			internal:   internal,
 		})
 
 		// Functions run in a nested scope.

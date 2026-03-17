@@ -22,6 +22,7 @@ type execFrame struct {
 	execFile   string
 	bashSource string
 	callLine   int
+	internal   bool
 }
 
 func (r *Runner) pushFrame(frame execFrame) func() {
@@ -36,6 +37,13 @@ func (r *Runner) currentExecFile() string {
 		return ""
 	}
 	return r.frames[len(r.frames)-1].execFile
+}
+
+func (r *Runner) currentInternal() bool {
+	if len(r.frames) == 0 {
+		return r.internalRun
+	}
+	return r.frames[len(r.frames)-1].internal
 }
 
 func (r *Runner) currentCallFile() string {
@@ -53,10 +61,20 @@ func (r *Runner) functionCallLine(pos syntax.Pos) int {
 }
 
 func (r *Runner) sourceCallLine(pos syntax.Pos) int {
-	if !pos.IsValid() || r.currentExecFile() == "" {
+	if !pos.IsValid() || r.currentCallFile() == "" {
 		return 0
 	}
 	return int(pos.Line())
+}
+
+func (r *Runner) currentDefinitionSource() string {
+	if execFile := r.currentExecFile(); execFile != "" {
+		return execFile
+	}
+	if r.currentInternal() {
+		return internalBootstrapSource
+	}
+	return ""
 }
 
 func (r *Runner) funcSource(name string) string {
@@ -73,6 +91,26 @@ func (r *Runner) setFuncSource(name, source string) {
 	r.funcSources[name] = source
 }
 
+func (r *Runner) funcInternal(name string) bool {
+	if r == nil || r.funcInternals == nil {
+		return false
+	}
+	return r.funcInternals[name]
+}
+
+func (r *Runner) setFuncInternal(name string, internal bool) {
+	if !internal {
+		if r.funcInternals != nil {
+			delete(r.funcInternals, name)
+		}
+		return
+	}
+	if r.funcInternals == nil {
+		r.funcInternals = make(map[string]bool, 4)
+	}
+	r.funcInternals[name] = true
+}
+
 // SetFuncSource overrides the execution source tracked for a declared shell function.
 func (r *Runner) SetFuncSource(name, source string) {
 	r.setFuncSource(name, source)
@@ -84,6 +122,9 @@ func (r *Runner) delFunc(name string) {
 	}
 	if r.funcSources != nil {
 		delete(r.funcSources, name)
+	}
+	if r.funcInternals != nil {
+		delete(r.funcInternals, name)
 	}
 }
 

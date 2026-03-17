@@ -465,7 +465,7 @@ func (m *MVdan) callHandler(exec *Execution, budget *executionBudget) interp.Cal
 			return args, nil
 		}
 		hc := interp.HandlerCtx(ctx)
-		fromBootstrap := hc.ExecFile == bootstrapProgramName
+		fromBootstrap := hc.Internal
 		if !fromBootstrap {
 			if err := budget.beforeCommand(ctx); err != nil {
 				return nil, err
@@ -588,7 +588,7 @@ func (m *MVdan) execHandler(exec *Execution, budget *executionBudget) interp.Exe
 		virtualWD := virtualDir(hc.Env, hc.Dir)
 		currentEnv := envMap(hc.Env)
 		internal := isInternalHelperCommand(args[0])
-		fromBootstrap := hc.ExecFile == bootstrapProgramName
+		fromBootstrap := hc.Internal
 		resolved, ok, err := lookupCommand(ctx, exec, virtualWD, hc.Env, args[0])
 		if err != nil {
 			if policy.IsDenied(err) {
@@ -829,28 +829,11 @@ func (m *MVdan) bootstrapRunner(ctx context.Context, runner *interp.Runner, exec
 		return err
 	}
 	if budget == nil {
-		if err := runner.Run(ctx, bootstrap); err != nil {
-			return err
-		}
-		tagBootstrapFunctions(runner)
-		return nil
+		return runner.RunInternal(ctx, bootstrap)
 	}
 	budget.disable()
 	defer budget.enable()
-	if err := runner.Run(ctx, bootstrap); err != nil {
-		return err
-	}
-	tagBootstrapFunctions(runner)
-	return nil
-}
-
-func tagBootstrapFunctions(runner *interp.Runner) {
-	if runner == nil {
-		return
-	}
-	for name := range runner.Funcs {
-		runner.SetFuncSource(name, bootstrapProgramName)
-	}
+	return runner.RunInternal(ctx, bootstrap)
 }
 
 func mergeEnv(base, override map[string]string) map[string]string {

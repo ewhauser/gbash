@@ -69,7 +69,7 @@ func TestSourceAndFunctionStacksTrackDefinitionAndCalls(t *testing.T) {
 func TestSourceFromInlineExecutionOmitsPseudoFrames(t *testing.T) {
 	t.Parallel()
 
-	stdout, stderr, err := runIntrospectionScript(t, "", "source ./lib.sh\n", map[string]string{
+	stdout, stderr, err := runIntrospectionScript(t, "inline.sh", "source ./lib.sh\n", map[string]string{
 		"lib.sh": joinLines(
 			`printf 'FUNC:%s\n' "${FUNCNAME[*]-}"`,
 			`printf 'SRC:%s\n' "${BASH_SOURCE[*]-}"`,
@@ -83,7 +83,7 @@ func TestSourceFromInlineExecutionOmitsPseudoFrames(t *testing.T) {
 	if got, want := stdout, joinLines(
 		"FUNC:",
 		"SRC:./lib.sh",
-		"LINE:0",
+		"LINE:1",
 	); got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}

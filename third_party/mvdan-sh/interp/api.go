@@ -73,7 +73,8 @@ type Runner struct {
 	Vars  map[string]expand.Variable
 	Funcs map[string]*syntax.Stmt
 
-	funcSources map[string]string
+	funcSources   map[string]string
+	funcInternals map[string]bool
 
 	alias map[string]alias
 
@@ -121,6 +122,7 @@ type Runner struct {
 
 	topLevelScriptPath string
 	frames             []execFrame
+	internalRun        bool
 
 	// >0 to break or continue out of N enclosing loops
 	breakEnclosing, contnEnclosing int
@@ -848,8 +850,9 @@ func (r *Runner) Reset() {
 		origStderr: r.origStderr,
 
 		// emptied below, to reuse the space
-		Vars:        r.Vars,
-		funcSources: r.funcSources,
+		Vars:          r.Vars,
+		funcSources:   r.funcSources,
+		funcInternals: r.funcInternals,
 
 		dirStack:           r.dirStack[:0],
 		usedNew:            r.usedNew,
@@ -868,6 +871,11 @@ func (r *Runner) Reset() {
 		r.funcSources = make(map[string]string)
 	} else {
 		clear(r.funcSources)
+	}
+	if r.funcInternals == nil {
+		r.funcInternals = make(map[string]bool)
+	} else {
+		clear(r.funcInternals)
 	}
 	// TODO(v4): Use the supplied Env directly if it implements enough methods.
 	r.writeEnv = &overlayEnviron{parent: r.Env}
@@ -946,9 +954,24 @@ func IsExitStatus(err error) (status uint8, ok bool) {
 // Calling Run on an entire [*File] implies an exit, meaning that an exit trap may
 // run.
 func (r *Runner) Run(ctx context.Context, node syntax.Node) error {
+	return r.run(ctx, node, false)
+}
+
+// RunInternal interprets trusted bootstrap code that should stay invisible to
+// user-facing bash stack introspection and policy accounting.
+func (r *Runner) RunInternal(ctx context.Context, node syntax.Node) error {
+	return r.run(ctx, node, true)
+}
+
+func (r *Runner) run(ctx context.Context, node syntax.Node, internal bool) error {
 	if !r.didReset {
 		r.Reset()
 	}
+	prevInternalRun := r.internalRun
+	r.internalRun = internal
+	defer func() {
+		r.internalRun = prevInternalRun
+	}()
 	r.fillExpandConfig(ctx)
 	r.exit = exitStatus{}
 	r.filename = ""
@@ -962,6 +985,7 @@ func (r *Runner) Run(ctx context.Context, node syntax.Node) error {
 				execFile:   node.Name,
 				bashSource: node.Name,
 				callLine:   0,
+				internal:   false,
 			})
 			r.stmts(ctx, node.Stmts)
 			restoreFrame()
@@ -1040,6 +1064,7 @@ func (r *Runner) subshell(background bool) *Runner {
 		stderr:             r.stderr,
 		filename:           r.filename,
 		topLevelScriptPath: r.topLevelScriptPath,
+		internalRun:        r.internalRun,
 		opts:               r.opts,
 		usedNew:            r.usedNew,
 		exit:               r.exit,
@@ -1051,6 +1076,7 @@ func (r *Runner) subshell(background bool) *Runner {
 	// Funcs are copied, since they might be modified.
 	r2.Funcs = maps.Clone(r.Funcs)
 	r2.funcSources = maps.Clone(r.funcSources)
+	r2.funcInternals = maps.Clone(r.funcInternals)
 	r2.Vars = make(map[string]expand.Variable)
 	r2.alias = maps.Clone(r.alias)
 	r2.frames = append(r2.frames, r.frames...)

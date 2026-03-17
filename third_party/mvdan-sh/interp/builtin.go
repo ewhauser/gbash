@@ -490,12 +490,18 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		// We want to track if the sourced file explicitly sets the
 		// parameters.
 		r.sourceSetParams = false
+		internal := r.currentInternal()
+		bashSource := sourceName
+		if internal {
+			bashSource = ""
+		}
 		restoreFrame := r.pushFrame(execFrame{
 			kind:       frameKindSource,
 			label:      "source",
 			execFile:   sourceName,
-			bashSource: sourceName,
+			bashSource: bashSource,
 			callLine:   r.sourceCallLine(pos),
+			internal:   internal,
 		})
 		r.inSource = true // know that we're inside a sourced script.
 		r.stmts(ctx, file.Stmts)

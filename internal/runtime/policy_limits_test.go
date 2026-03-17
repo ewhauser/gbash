@@ -169,3 +169,22 @@ func TestMaxCommandCountCountsUserCommandsWithInternalPrefix(t *testing.T) {
 		t.Fatalf("Stderr = %q, want command-count limit message", result.Stderr)
 	}
 }
+
+func TestMaxCommandCountCountsUserScriptNamedBootstrapPrelude(t *testing.T) {
+	t.Parallel()
+
+	rt := newRuntimeWithLimits(t, policy.Limits{MaxCommandCount: 1})
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		ScriptPath: "<gbash-prelude>",
+		Script:     "echo one\necho two\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 126 {
+		t.Fatalf("ExitCode = %d, want 126", result.ExitCode)
+	}
+	if !strings.Contains(result.Stderr, "too many commands executed") {
+		t.Fatalf("Stderr = %q, want command-count limit message", result.Stderr)
+	}
+}

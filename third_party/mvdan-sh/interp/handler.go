@@ -64,6 +64,10 @@ type HandlerContext struct {
 	// It is empty for inline code that is not executing from a file-backed context.
 	ExecFile string
 
+	// Internal reports whether this handler invocation is executing trusted
+	// interpreter bootstrap code rather than user-supplied shell code.
+	Internal bool
+
 	// Pos is the source position which relates to the operation,
 	// such as a [syntax.CallExpr] when calling an [ExecHandlerFunc].
 	// It may be invalid if the operation has no relevant position information.

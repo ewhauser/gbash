@@ -97,6 +97,33 @@ func TestExecInlineFunctionsTrackCallLinesWithoutBashSource(t *testing.T) {
 	}
 }
 
+func TestExecInlineSourceTracksCallLinesWithoutPseudoFrames(t *testing.T) {
+	t.Parallel()
+
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/lib.sh", []byte(strings.Join([]string{
+		`printf 'SRC:%s\n' "${BASH_SOURCE[*]-}"`,
+		`printf 'LINE:%s\n' "${BASH_LINENO[*]-}"`,
+		"",
+	}, "\n")))
+
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		Name:   "inline.sh",
+		Script: "source /lib.sh\n",
+	})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+
+	if got, want := result.Stdout, strings.Join([]string{
+		"SRC:/lib.sh",
+		"LINE:1",
+		"",
+	}, "\n"); got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestExecRejectsScriptPathWithCommand(t *testing.T) {
 	t.Parallel()
 
@@ -165,6 +192,34 @@ func TestTraceUsesRealUserLineNumbers(t *testing.T) {
 	}
 
 	if got, want := positions, []string{"1:1", "2:1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("echo positions = %#v, want %#v", got, want)
+	}
+}
+
+func TestTraceTreatsLiteralBootstrapNameAsUserScript(t *testing.T) {
+	t.Parallel()
+
+	session := newSession(t, &Config{
+		Tracing: TraceConfig{Mode: TraceRaw},
+	})
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		ScriptPath: "<gbash-prelude>",
+		Script:     "echo hi\n",
+	})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+
+	var positions []string
+	for i := range result.Events {
+		event := result.Events[i]
+		if event.Kind != trace.EventCallExpanded || event.Command == nil || event.Command.Name != "echo" {
+			continue
+		}
+		positions = append(positions, event.Command.Position)
+	}
+
+	if got, want := positions, []string{"1:1"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("echo positions = %#v, want %#v", got, want)
 	}
 }
