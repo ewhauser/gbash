@@ -98,9 +98,6 @@ func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 		vr.Str = prev.Str
 		vr.List = prev.List
 		vr.Map = prev.Map
-		vr.Integer = prev.Integer || vr.Integer
-		vr.Lower = prev.Lower || vr.Lower
-		vr.Upper = prev.Upper || vr.Upper
 	} else if prev.ReadOnly {
 		return fmt.Errorf("readonly variable")
 	}
