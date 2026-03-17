@@ -13,9 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
-
-	gbfs "github.com/ewhauser/gbash/fs"
-	"github.com/ewhauser/gbash/internal/searchadapter"
 )
 
 type RG struct{}
@@ -69,24 +66,14 @@ type rgOptions struct {
 }
 
 type rgCollectedFile struct {
-	abs           string
-	display       string
-	scope         *rgSearchScope
-	indexEligible bool
+	abs     string
+	display string
 }
 
 type rgCollectResult struct {
 	files              []rgCollectedFile
-	scopes             []*rgSearchScope
 	hadError           bool
 	singleExplicitFile bool
-}
-
-type rgSearchScope struct {
-	root          string
-	eligiblePaths []string
-	candidates    map[string]struct{}
-	usedIndex     bool
 }
 
 func NewRG() *RG {
@@ -262,16 +249,7 @@ func (c *RG) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedComm
 
 	showNames := !opts.noFilename && (opts.withFilename || !collectResult.singleExplicitFile || len(collectResult.files) > 1)
 	state := &grepRunState{}
-	if err := c.prefilterScopes(ctx, inv, collectResult.scopes, re, opts.invert, grepOpts.ignoreCase); err != nil {
-		return err
-	}
 	for _, file := range collectResult.files {
-		if !rgPathNeedsVerification(file, grepOpts, opts.searchBinary) {
-			if err := rgWriteGuaranteedMiss(inv, file.display, showNames, grepOpts, state); err != nil {
-				return err
-			}
-			continue
-		}
 		data, _, err := readAllFile(ctx, inv, file.abs)
 		if err != nil {
 			return err
@@ -567,58 +545,9 @@ func rgLooksBinary(data []byte) bool {
 	return bytes.IndexByte(data, 0) >= 0
 }
 
-func (c *RG) prefilterScopes(ctx context.Context, inv *Invocation, scopes []*rgSearchScope, re *regexp.Regexp, invert, ignoreCase bool) error {
-	if invert || inv == nil || inv.FS == nil {
-		return nil
-	}
-	for _, scope := range scopes {
-		if scope == nil || len(scope.eligiblePaths) == 0 {
-			continue
-		}
-		provider, _, ok, err := inv.FS.SearchProviderForPath(ctx, scope.root)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			continue
-		}
-		result, err := searchadapter.PrefilterCandidates(ctx, provider, scope.root, scope.eligiblePaths, re, ignoreCase)
-		if err != nil {
-			return err
-		}
-		if result.UsedIndex {
-			scope.candidates = result.CandidatePaths
-			scope.usedIndex = true
-		}
-	}
-	return nil
-}
-
-func rgIndexableFileInfo(info stdfs.FileInfo) bool {
-	return info != nil && info.Mode().IsRegular()
-}
-
-func rgPathNeedsVerification(record rgCollectedFile, opts grepOptions, searchBinary bool) bool {
-	if record.scope == nil || !record.scope.usedIndex || !record.indexEligible {
-		return true
-	}
-	if _, ok := record.scope.candidates[gbfs.Clean(record.abs)]; ok {
-		return true
-	}
-	if !searchBinary && (opts.count || opts.filesWithoutMatch) {
-		return true
-	}
-	return false
-}
-
-func rgWriteGuaranteedMiss(inv *Invocation, name string, showName bool, opts grepOptions, state *grepRunState) error {
-	return writeGrepGuaranteedMiss(inv, name, showName, opts, state)
-}
-
 func (c *RG) collectFiles(ctx context.Context, inv *Invocation, roots []string, opts *rgOptions, ignoreMatcher *rgIgnoreMatcher, typeRegistry *rgTypeRegistry) (rgCollectResult, error) {
 	result := rgCollectResult{
-		files:  make([]rgCollectedFile, 0),
-		scopes: make([]*rgSearchScope, 0, len(roots)),
+		files: make([]rgCollectedFile, 0),
 	}
 
 	explicitFileCount := 0
@@ -649,8 +578,6 @@ func (c *RG) collectFiles(ctx context.Context, inv *Invocation, roots []string, 
 			throughSymlinkDir = info.IsDir()
 		}
 
-		scope := &rgSearchScope{root: abs}
-		result.scopes = append(result.scopes, scope)
 		if ignoreMatcher != nil {
 			if err := ignoreMatcher.loadPath(ctx, inv, abs); err != nil {
 				return rgCollectResult{}, err
@@ -660,16 +587,7 @@ func (c *RG) collectFiles(ctx context.Context, inv *Invocation, roots []string, 
 			explicitFileCount++
 			display := rgDisplayExplicitRoot(inv, root, abs)
 			if c.includeFile(display, abs, opts, ignoreMatcher, typeRegistry) {
-				record := rgCollectedFile{
-					abs:           abs,
-					display:       display,
-					scope:         scope,
-					indexEligible: rgIndexableFileInfo(info),
-				}
-				if record.indexEligible {
-					scope.eligiblePaths = append(scope.eligiblePaths, abs)
-				}
-				result.files = append(result.files, record)
+				result.files = append(result.files, rgCollectedFile{abs: abs, display: display})
 			}
 			continue
 		}
@@ -682,7 +600,6 @@ func (c *RG) collectFiles(ctx context.Context, inv *Invocation, roots []string, 
 			opts:         opts,
 			ignore:       ignoreMatcher,
 			typeRegistry: typeRegistry,
-			scope:        scope,
 		}, &result.files); err != nil {
 			return rgCollectResult{}, err
 		}
@@ -705,7 +622,6 @@ type rgWalkState struct {
 	opts         *rgOptions
 	ignore       *rgIgnoreMatcher
 	typeRegistry *rgTypeRegistry
-	scope        *rgSearchScope
 }
 
 func (c *RG) walkRoot(ctx context.Context, inv *Invocation, state *rgWalkState, files *[]rgCollectedFile) error {
@@ -780,16 +696,7 @@ func (c *RG) walkRoot(ctx context.Context, inv *Invocation, state *rgWalkState, 
 		}
 
 		if c.includeFile(display, childAbs, state.opts, state.ignore, state.typeRegistry) {
-			record := rgCollectedFile{
-				abs:           childAbs,
-				display:       display,
-				scope:         state.scope,
-				indexEligible: rgIndexableFileInfo(info) && !currentThroughLink,
-			}
-			if record.indexEligible && state.scope != nil {
-				state.scope.eligiblePaths = append(state.scope.eligiblePaths, childAbs)
-			}
-			*files = append(*files, record)
+			*files = append(*files, rgCollectedFile{abs: childAbs, display: display})
 		}
 	}
 	return nil
