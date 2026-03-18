@@ -19,7 +19,6 @@ import (
 	"io"
 	"io/fs"
 	"maps"
-	"os"
 	"path"
 	"slices"
 	"strconv"
@@ -114,7 +113,7 @@ type Runner struct {
 	pid  int
 	ppid int
 
-	stdin  *os.File // e.g. the read end of a pipe
+	stdin  StdinReader // e.g. the read end of a pipe
 	stdout io.Writer
 	stderr io.Writer
 
@@ -171,7 +170,7 @@ type Runner struct {
 	origDir    string
 	origParams []string
 	origOpts   runnerOpts
-	origStdin  *os.File
+	origStdin  StdinReader
 	origStdout io.Writer
 	origStderr io.Writer
 
@@ -678,22 +677,19 @@ func ProcSubstHandler(f ProcSubstHandlerFunc) RunnerOption {
 	}
 }
 
-func stdinFile(r io.Reader) (*os.File, error) {
+func stdinReader(r io.Reader) StdinReader {
 	switch r := r.(type) {
-	case *os.File:
-		return r, nil
+	case StdinReader:
+		return r
 	case nil:
-		return nil, nil
+		return nil
 	default:
-		pr, pw, err := os.Pipe()
-		if err != nil {
-			return nil, err
-		}
+		pr, pw := NewVirtualPipe()
 		go func() {
 			io.Copy(pw, r)
 			pw.Close()
 		}()
-		return pr, nil
+		return pr
 	}
 }
 
@@ -701,22 +697,15 @@ func stdinFile(r io.Reader) (*os.File, error) {
 // standard error. If out or err are nil, they default to a writer that discards
 // the output.
 //
-// Note that providing a non-nil standard input other than [*os.File] will require
-// an [os.Pipe] and spawning a goroutine to copy into it,
-// as an [os.File] is the only way to share a reader with subprocesses.
-// This may cause the interpreter to consume the entire reader.
-// See [os/exec.Cmd.Stdin].
+// Note that providing a non-nil standard input other than [StdinReader] will
+// spawn a goroutine to copy into a virtual pipe, which may cause the interpreter
+// to consume the entire reader.
 //
-// When providing an [*os.File] as standard input, consider using an [os.Pipe]
-// as it has the best chance to support cancellable reads via [os.File.SetReadDeadline],
+// Standard input supports [StdinReader.SetReadDeadline] for cancellable reads,
 // so that cancelling the runner's context can stop a blocked standard input read.
 func StdIO(in io.Reader, out, err io.Writer) RunnerOption {
 	return func(r *Runner) error {
-		stdin, _err := stdinFile(in)
-		if _err != nil {
-			return _err
-		}
-		r.stdin = stdin
+		r.stdin = stdinReader(in)
 		if out == nil {
 			out = io.Discard
 		}

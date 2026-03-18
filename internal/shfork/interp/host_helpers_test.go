@@ -126,12 +126,20 @@ func hostTestExecMiddleware(killTimeout time.Duration) func(interp.ExecHandlerFu
 				fmt.Fprintln(hc.Stderr, err)
 				return interp.ExitStatus(127)
 			}
+			// When stdin is not *os.File, exec.Cmd will spawn a goroutine to copy
+			// all data from the reader to a pipe. This consumes all stdin, breaking
+			// the semantics for commands that don't read stdin (like 'env').
+			// To preserve the correct behavior, only pass *os.File stdin to the command.
+			var stdin *os.File
+			if f, ok := hc.Stdin.(*os.File); ok {
+				stdin = f
+			}
 			cmd := exec.Cmd{
 				Path:   path,
 				Args:   args,
 				Env:    hostTestExecEnv(hc.Env),
 				Dir:    hostTestResolvePath(hc.Dir, "."),
-				Stdin:  hc.Stdin,
+				Stdin:  stdin,
 				Stdout: hc.Stdout,
 				Stderr: hc.Stderr,
 			}

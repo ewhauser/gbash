@@ -165,21 +165,20 @@ func (r *Runner) runProcSubst(ctx context.Context, ps *syntax.ProcSubst, path st
 	return path, nil
 }
 
-func procSubstStdin(reader io.ReadCloser) (*os.File, func(), error) {
+func procSubstStdin(reader io.ReadCloser) (StdinReader, func(), error) {
 	if reader == nil {
 		return nil, nil, fmt.Errorf("process substitution reader is nil")
 	}
-	if file, ok := reader.(*os.File); ok {
-		return file, func() {
-			_ = file.Close()
+	if sr, ok := reader.(StdinReader); ok {
+		return sr, func() {
+			_ = reader.Close()
 		}, nil
 	}
-	file, err := stdinFile(reader)
-	if err != nil {
-		return nil, nil, fmt.Errorf("cannot open process substitution reader for stdin: %w", err)
-	}
-	return file, func() {
-		_ = file.Close()
+	sr := stdinReader(reader)
+	return sr, func() {
+		if closer, ok := sr.(io.Closer); ok {
+			_ = closer.Close()
+		}
 		_ = reader.Close()
 	}, nil
 }
@@ -520,11 +519,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				r.stmt(ctx, cm.Y)
 			}
 		case syntax.Pipe, syntax.PipeAll:
-			pr, pw, err := os.Pipe()
-			if err != nil {
-				r.exit.fatal(err) // not being able to create a pipe is rare but critical
-				return
-			}
+			pr, pw := NewVirtualPipe()
 			r2 := r.subshell(true)
 			r2.stdout = pw
 			if cm.Op == syntax.PipeAll {
@@ -1133,11 +1128,8 @@ func (r *Runner) stmts(ctx context.Context, stmts []*syntax.Stmt) {
 	}
 }
 
-func (r *Runner) hdocReader(rd *syntax.Redirect) (*os.File, error) {
-	pr, pw, err := os.Pipe()
-	if err != nil {
-		return nil, err
-	}
+func (r *Runner) hdocReader(rd *syntax.Redirect) (StdinReader, error) {
+	pr, pw := NewVirtualPipe()
 	// We write to the pipe in a new goroutine,
 	// as pipe writes may block once the buffer gets full.
 	// We still construct and buffer the entire heredoc first,
@@ -1145,7 +1137,7 @@ func (r *Runner) hdocReader(rd *syntax.Redirect) (*os.File, error) {
 	if rd.Op != syntax.DashHdoc {
 		hdoc := r.document(rd.Hdoc)
 		go func() {
-			pw.WriteString(hdoc)
+			io.WriteString(pw, hdoc)
 			pw.Close()
 		}()
 		return pr, nil
@@ -1211,16 +1203,13 @@ func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (io.Closer, err
 	arg := r.literal(rd.Word)
 	switch rd.Op {
 	case syntax.WordHdoc:
-		pr, pw, err := os.Pipe()
-		if err != nil {
-			return nil, err
-		}
+		pr, pw := NewVirtualPipe()
 		r.stdin = pr
 		// We write to the pipe in a new goroutine,
 		// as pipe writes may block once the buffer gets full.
 		go func() {
-			pw.WriteString(arg)
-			pw.WriteString("\n")
+			io.WriteString(pw, arg)
+			io.WriteString(pw, "\n")
 			pw.Close()
 		}()
 		return pr, nil
@@ -1263,11 +1252,7 @@ func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (io.Closer, err
 	}
 	switch rd.Op {
 	case syntax.RdrIn:
-		stdin, err := stdinFile(f)
-		if err != nil {
-			return nil, err
-		}
-		r.stdin = stdin
+		r.stdin = stdinReader(f)
 	case syntax.RdrOut, syntax.AppOut:
 		*orig = f
 	case syntax.RdrAll, syntax.AppAll:
