@@ -238,7 +238,17 @@ func (r *Runner) expandErr(err error) {
 }
 
 func (r *Runner) arithm(expr syntax.ArithmExpr) int {
+	return r.arithmWithPrefix(expr, "")
+}
+
+func (r *Runner) arithmWithPrefix(expr syntax.ArithmExpr, prefix string) int {
 	n, err := expand.Arithm(r.ecfg, expr)
+	if err != nil {
+		var syntaxErr expand.ArithmSyntaxError
+		if prefix != "" && errors.As(err, &syntaxErr) {
+			err = fmt.Errorf("%s%s", prefix, syntaxErr.Error())
+		}
+	}
 	r.expandErr(err)
 	return n
 }
@@ -663,7 +673,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 	case *syntax.FuncDecl:
 		r.setFunc(cm.Name.Value, cm.Body)
 	case *syntax.ArithmCmd:
-		r.exit.oneIf(r.arithm(cm.X) == 0)
+		r.exit.oneIf(r.arithmWithPrefix(cm.X, "((: ") == 0)
 	case *syntax.LetClause:
 		var val int
 		for _, expr := range cm.Exprs {

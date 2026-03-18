@@ -404,7 +404,7 @@
         },
         "oils/type-compat.test.sh::append in arith context": {
           "mode": "xfail",
-          "reason": "gbash does not error on single-quoted strings inside (( )) like bash does"
+          "reason": "gbash now rejects single-quoted strings in (( )) with correct behavior, but error message trailing whitespace differs from bash"
         },
         "oils/type-compat.test.sh::declare array vs. associative array": {
           "mode": "xfail",
