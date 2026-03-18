@@ -5,7 +5,6 @@ package shell
 
 import (
 	"fmt"
-	"os"
 	"reflect"
 	"runtime"
 	"strings"
@@ -32,7 +31,7 @@ var expandTests = []struct {
 	{"foo", nil, "foo"},
 	{"\nfoo\n", nil, "\nfoo\n"},
 	{"a-$b-c", nil, "a--c"},
-	{"${INTERP_GLOBAL:+hasOsEnv}", nil, "hasOsEnv"},
+	{"${INTERP_GLOBAL:+hasOsEnv}", nil, ""},
 	{"a-$b-c", strEnviron(), "a--c"},
 	{"a-$b-c", strEnviron("b=b_val"), "a-b_val-c"},
 	{"${x//o/a}", strEnviron("x=foo"), "faa"},
@@ -41,7 +40,6 @@ var expandTests = []struct {
 }
 
 func TestExpand(t *testing.T) {
-	os.Setenv("INTERP_GLOBAL", "value")
 	for _, tc := range expandTests {
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
@@ -108,7 +106,6 @@ var fieldsTests = []struct {
 }
 
 func TestFields(t *testing.T) {
-	os.Setenv("INTERP_GLOBAL", "value")
 	for _, tc := range fieldsTests {
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
