@@ -14,7 +14,7 @@ type compiledProgram struct {
 }
 
 func (m *core) compileProgram(name, script string, pol policy.Policy) (*compiledProgram, error) {
-	program, err := m.parseUserProgram(name, script)
+	program, err := m.parseProgram(name, script)
 	if err != nil {
 		return nil, err
 	}
