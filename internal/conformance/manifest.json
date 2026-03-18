@@ -322,6 +322,10 @@
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"
         },
+        "oils/regex.test.sh::Fatal error inside [[ =~ ]]": {
+          "mode": "xfail",
+          "reason": "division-by-zero error message format differs from bash: gbash reconstructs expression without whitespace"
+        },
         "oils/regex.test.sh::Operator chars ; & but not |": {
           "mode": "xfail",
           "reason": "the [[ parser still rejects operator tokens like ; and & after =~ earlier than bash, so the conditional parse diagnostics and status flow diverge"

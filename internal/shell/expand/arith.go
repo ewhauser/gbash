@@ -204,7 +204,7 @@ func arithm(cfg *Config, root, expr syntax.ArithmExpr) (int, error) {
 		}
 		// Check for division by zero with source tokens
 		if right == 0 && (expr.Op == syntax.Quo || expr.Op == syntax.Rem) {
-			return 0, divByZeroError(expr)
+			return 0, divByZeroError(expr, left, right)
 		}
 		return binArit(expr.Op, left, right)
 	default:
@@ -226,10 +226,37 @@ func atoi(s string) int64 {
 	return n
 }
 
+// containsShellExpansion reports whether a Word contains any shell expansion
+// parts ($var, ${var}, $(cmd), etc.) that are pre-expanded before arithmetic.
+func containsShellExpansion(w *syntax.Word) bool {
+	for _, part := range w.Parts {
+		switch part.(type) {
+		case *syntax.ParamExp, *syntax.CmdSubst, *syntax.ArithmExp:
+			return true
+		case *syntax.DblQuoted:
+			// Double-quoted strings can contain expansions
+			return true
+		}
+	}
+	return false
+}
+
 // divByZeroError creates a division-by-zero error with source tokens matching bash's format.
-func divByZeroError(expr *syntax.BinaryArithm) error {
-	fullExpr := arithExprSource(expr)
-	divisor := arithExprSource(expr.Y)
+// For shell expansions ($y), bash reports the expanded value; for bare variables (x), it shows the name.
+func divByZeroError(expr *syntax.BinaryArithm, evaluatedLeft, evaluatedDivisor int) error {
+	// Build full expression: expand $-style expansions like bash does
+	var leftStr, divisor string
+	if w, ok := expr.X.(*syntax.Word); ok && containsShellExpansion(w) {
+		leftStr = strconv.Itoa(evaluatedLeft)
+	} else {
+		leftStr = arithExprSource(expr.X)
+	}
+	if w, ok := expr.Y.(*syntax.Word); ok && containsShellExpansion(w) {
+		divisor = strconv.Itoa(evaluatedDivisor)
+	} else {
+		divisor = arithExprSource(expr.Y)
+	}
+	fullExpr := leftStr + expr.Op.String() + divisor
 	return fmt.Errorf("%s: division by 0 (error token is \"%s\")", fullExpr, divisor)
 }
 

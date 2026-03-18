@@ -1,7 +1,10 @@
 ## compare_shells: bash
 
 # Tests for arithmetic division-by-zero error message format.
-# The error message should include original source tokens, not evaluated values.
+# The error message token matches bash behavior:
+# - Bare variable names (x) show the name
+# - Shell expansions ($y) show the expanded value (bash pre-expands these)
+# - Expressions ((2-2)) show the source expression
 # Note: We use braces {} to group the command so the error is captured in the pipe.
 # Note: We escape parentheses in the grep pattern for BRE compatibility.
 
@@ -38,6 +41,20 @@ echo status=$?
 
 ## STDOUT:
 division by 0 (error token is "x")
+status=0
+## END
+
+
+#### Division by zero with parameter expansion shows expanded value
+
+# When the divisor uses $-style expansion, bash pre-expands it before
+# arithmetic evaluation, so the error token shows the expanded value.
+y=0
+{ echo $((1/$y)); } 2>&1 | grep -oE 'division by 0 \(error token is "[^"]*"\)'
+echo status=$?
+
+## STDOUT:
+division by 0 (error token is "0")
 status=0
 ## END
 
