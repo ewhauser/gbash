@@ -45,9 +45,12 @@ type procSubstEntry struct {
 	mode      stdfs.FileMode
 	modTime   time.Time
 	direction procSubstDirection
-	consumer  *os.File
-	producer  *os.File
-	manager   *procSubstManager
+	// pipeReader and pipeWriter form a buffered in-memory virtual pipe.
+	// For CmdIn (read): consumer reads from pipeReader, subprocess writes to pipeWriter.
+	// For CmdOut (write): consumer writes to pipeWriter, subprocess reads from pipeReader.
+	pipeReader *interp.VirtualPipeReader
+	pipeWriter *interp.VirtualPipeWriter
+	manager    *procSubstManager
 
 	mu     sync.Mutex
 	hidden bool
@@ -60,7 +63,8 @@ type procSubstFS struct {
 
 type procSubstFile struct {
 	entry  *procSubstEntry
-	file   *os.File
+	reader *interp.VirtualPipeReader
+	writer *interp.VirtualPipeWriter
 	closed atomic.Bool
 }
 
@@ -107,41 +111,37 @@ func (m *procSubstManager) endpoint(ctx context.Context, ps *syntax.ProcSubst) (
 		return nil, fmt.Errorf("process substitution manager is nil")
 	}
 
-	readEnd, writeEnd, err := os.Pipe()
-	if err != nil {
-		return nil, fmt.Errorf("create process substitution pipe: %w", err)
-	}
 	procSubstPath, err := m.nextPath(ctx, ps.Op)
 	if err != nil {
-		_ = readEnd.Close()
-		_ = writeEnd.Close()
 		return nil, err
 	}
 
+	// Create a buffered in-memory virtual pipe instead of an OS pipe.
+	// The buffer allows writes to proceed without blocking (up to buffer size),
+	// matching OS pipe semantics while avoiding host kernel resources.
+	pipeReader, pipeWriter := interp.NewVirtualPipe()
+
 	entry := &procSubstEntry{
-		path:    procSubstPath,
-		name:    path.Base(procSubstPath),
-		mode:    stdfs.ModeNamedPipe | 0o600,
-		modTime: time.Now().UTC(),
-		manager: m,
+		path:       procSubstPath,
+		name:       path.Base(procSubstPath),
+		mode:       stdfs.ModeNamedPipe | 0o600,
+		modTime:    time.Now().UTC(),
+		pipeReader: pipeReader,
+		pipeWriter: pipeWriter,
+		manager:    m,
 	}
 
 	switch ps.Op {
 	case syntax.CmdIn:
 		entry.direction = procSubstRead
-		entry.consumer = readEnd
-		entry.producer = writeEnd
 	case syntax.CmdOut:
 		entry.direction = procSubstWrite
-		entry.consumer = writeEnd
-		entry.producer = readEnd
 	default:
-		_ = readEnd.Close()
-		_ = writeEnd.Close()
+		_ = pipeReader.Close()
+		_ = pipeWriter.Close()
 		return nil, fmt.Errorf("unsupported process substitution operator: %q", ps.Op)
 	}
 
-	entry.name = path.Base(entry.path)
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -156,9 +156,11 @@ func (m *procSubstManager) endpoint(ctx context.Context, ps *syntax.ProcSubst) (
 	}
 	switch ps.Op {
 	case syntax.CmdIn:
-		endpoint.Writer = entry.producer
+		// <(cmd): subprocess writes to pipeWriter, consumer reads from pipeReader
+		endpoint.Writer = pipeWriter
 	case syntax.CmdOut:
-		endpoint.Reader = entry.producer
+		// >(cmd): consumer writes to pipeWriter, subprocess reads from pipeReader
+		endpoint.Reader = pipeReader
 	}
 	return endpoint, nil
 }
@@ -281,7 +283,15 @@ func (e *procSubstEntry) open(flag int) (gbfs.File, error) {
 		return nil, &os.PathError{Op: "open", Path: e.path, Err: stdfs.ErrNotExist}
 	}
 	e.hidden = true
-	return &procSubstFile{entry: e, file: e.consumer}, nil
+
+	f := &procSubstFile{entry: e}
+	switch e.direction {
+	case procSubstRead:
+		f.reader = e.pipeReader
+	case procSubstWrite:
+		f.writer = e.pipeWriter
+	}
+	return f, nil
 }
 
 func (e *procSubstEntry) checkFlags(flag int) error {
@@ -307,19 +317,29 @@ func (e *procSubstEntry) closeAll() {
 	if e == nil {
 		return
 	}
-	if e.consumer != nil {
-		_ = e.consumer.Close()
+	if e.pipeReader != nil {
+		_ = e.pipeReader.Close()
 	}
-	if e.producer != nil {
-		_ = e.producer.Close()
+	if e.pipeWriter != nil {
+		_ = e.pipeWriter.Close()
 	}
 }
 
 func (e *procSubstEntry) closeConsumer() {
-	if e == nil || e.consumer == nil {
+	if e == nil {
 		return
 	}
-	_ = e.consumer.Close()
+	// Close the consumer end based on direction.
+	switch e.direction {
+	case procSubstRead:
+		if e.pipeReader != nil {
+			_ = e.pipeReader.Close()
+		}
+	case procSubstWrite:
+		if e.pipeWriter != nil {
+			_ = e.pipeWriter.Close()
+		}
+	}
 }
 
 func newProcSubstNonce() string {
@@ -465,33 +485,35 @@ func (f *procSubstFile) Read(p []byte) (int, error) {
 	if f.closed.Load() {
 		return 0, stdfs.ErrClosed
 	}
-	if f.entry.direction != procSubstRead {
+	if f.reader == nil {
 		return 0, stdfs.ErrPermission
 	}
-	return f.file.Read(p)
+	return f.reader.Read(p)
 }
 
 func (f *procSubstFile) Write(p []byte) (int, error) {
 	if f.closed.Load() {
 		return 0, stdfs.ErrClosed
 	}
-	if f.entry.direction != procSubstWrite {
+	if f.writer == nil {
 		return 0, stdfs.ErrPermission
 	}
-	return f.file.Write(p)
+	return f.writer.Write(p)
 }
 
 func (f *procSubstFile) Close() error {
 	if !f.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	if f.file == nil {
-		if f.entry != nil && f.entry.manager != nil {
-			f.entry.manager.release(f.entry)
-		}
-		return nil
+	var err error
+	if f.reader != nil {
+		err = f.reader.Close()
 	}
-	err := f.file.Close()
+	if f.writer != nil {
+		if werr := f.writer.Close(); werr != nil && err == nil {
+			err = werr
+		}
+	}
 	if f.entry != nil && f.entry.manager != nil {
 		f.entry.manager.release(f.entry)
 	}
