@@ -133,7 +133,7 @@ func (e errBuiltinExitStatus) Error() string {
 // Note that a non-nil error may be returned in cases where the builtin
 // alters the control flow of the runner, even if the builtin did not fail.
 // For example, this is the case with `exit 0` or `return`.
-func (hc HandlerContext) Builtin(ctx context.Context, args []string) error {
+func (hc *HandlerContext) Builtin(ctx context.Context, args []string) error {
 	if hc.kind != handlerKindExec {
 		return fmt.Errorf("HandlerContext.Builtin can only be called via an ExecHandlerFunc")
 	}
@@ -540,7 +540,7 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 					r.printOptLine(opt.name, r.opts[i], true)
 				}
 			} else {
-				for i, opt := range bashOptsTable {
+				for i, opt := range &bashOptsTable {
 					r.printOptLine(opt.name, r.opts[len(posixOptsTable)+i], opt.supported)
 				}
 			}
@@ -1065,8 +1065,8 @@ func (r *Runner) commandBuiltin(ctx context.Context, pos syntax.Pos, args []stri
 					continue
 				}
 			}
-			if path, err := r.lookPath(ctx, r.Dir, r.writeEnv, arg, true, useDefaultPath); err == nil {
-				r.outf("%s\n", path)
+			if foundPath, err := r.lookPath(ctx, r.Dir, r.writeEnv, arg, true, useDefaultPath); err == nil {
+				r.outf("%s\n", foundPath)
 			} else {
 				last = 1
 			}
@@ -1096,7 +1096,7 @@ func (r *Runner) setTemporaryPath(pathValue string) func() {
 }
 
 func (r *Runner) dirsBuiltin(args []string) uint8 {
-	clear := false
+	clearStack := false
 	long := false
 	printMode := false
 	verbose := false
@@ -1126,7 +1126,7 @@ func (r *Runner) dirsBuiltin(args []string) uint8 {
 			for _, opt := range arg[1:] {
 				switch opt {
 				case 'c':
-					clear = true
+					clearStack = true
 				case 'l':
 					long = true
 				case 'p':
@@ -1149,7 +1149,7 @@ func (r *Runner) dirsBuiltin(args []string) uint8 {
 		}
 	}
 
-	if clear {
+	if clearStack {
 		r.dirStack = append(r.dirStack[:0], r.Dir)
 		return 0
 	}
@@ -1742,7 +1742,7 @@ func (p *flagParser) more() bool {
 		p.remaining = p.remaining[1:]
 		return false
 	}
-	if len(arg) == 0 || (arg[0] != '-' && arg[0] != '+') {
+	if arg == "" || (arg[0] != '-' && arg[0] != '+') {
 		// The next argument is not a flag.
 		return false
 	}

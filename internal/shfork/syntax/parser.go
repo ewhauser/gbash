@@ -1893,7 +1893,7 @@ func (p *Parser) getAssign(needEqual bool) *Assign {
 			p.tok = leftParen
 			p.pos = posAddCol(p.pos, 1)
 		} else {
-			if len(p.val) > 0 && p.val[0] == '+' {
+			if p.val != "" && p.val[0] == '+' {
 				as.Append = true
 				p.val = p.val[1:]
 				p.pos = posAddCol(p.pos, 1)

@@ -423,15 +423,15 @@ func formatInto(sb *strings.Builder, format string, args []string) (int, error) 
 				sb.WriteByte(byte(n))
 			case 'x', 'u', 'U':
 				i++
-				max := 2
+				maxDigits := 2
 				switch c {
 				case 'u':
-					max = 4
+					maxDigits = 4
 				case 'U':
-					max = 8
+					maxDigits = 8
 				}
-				digits := readDigits(max, true)
-				if len(digits) > 0 {
+				digits := readDigits(maxDigits, true)
+				if digits != "" {
 					// can't error
 					n, _ := strconv.ParseUint(digits, 16, 32)
 					if c == 'x' {
@@ -457,7 +457,7 @@ func formatInto(sb *strings.Builder, format string, args []string) (int, error) 
 				if len(args) > 0 {
 					arg := ""
 					arg, args = args[0], args[1:]
-					if len(arg) > 0 {
+					if arg != "" {
 						b = arg[0]
 					}
 				}
@@ -618,11 +618,11 @@ func FieldsSeq(cfg *Config, words ...*syntax.Word) iter.Seq2[string, error] {
 					return
 				}
 				for _, field := range wfields {
-					path, doGlob := cfg.escapedGlobField(field)
+					globPath, doGlob := cfg.escapedGlobField(field)
 					if doGlob && cfg.ReadDir2 != nil {
 						// Note that globbing requires keeping a slice state, so it doesn't
 						// really benefit from using an iterator.
-						matches, err := cfg.glob(dir, path)
+						matches, err := cfg.glob(dir, globPath)
 						if err != nil {
 							// We avoid [errors.As] as it allocates,
 							// and we know that [Config.glob] returns [pattern.Regexp] errors without wrapping.
@@ -738,11 +738,11 @@ func (cfg *Config) wordField(wps []syntax.WordPart, ql quoteLevel) ([]fieldPart,
 			}
 			field = append(field, fieldPart{val: strconv.Itoa(n)})
 		case *syntax.ProcSubst:
-			path, err := cfg.ProcSubst(wp)
+			procPath, err := cfg.ProcSubst(wp)
 			if err != nil {
 				return nil, err
 			}
-			field = append(field, fieldPart{val: path})
+			field = append(field, fieldPart{val: procPath})
 		case *syntax.ExtGlob:
 			// Like how [Config.wordFields] deals with [syntax.ExtGlob],
 			// except that we allow these through even when [Config.ExtGlob]
@@ -890,11 +890,11 @@ func (cfg *Config) wordFields(wps []syntax.WordPart) ([][]fieldPart, error) {
 			}
 			curField = append(curField, fieldPart{val: strconv.Itoa(n)})
 		case *syntax.ProcSubst:
-			path, err := cfg.ProcSubst(wp)
+			procPath, err := cfg.ProcSubst(wp)
 			if err != nil {
 				return nil, err
 			}
-			splitAdd(path)
+			splitAdd(procPath)
 		case *syntax.ExtGlob:
 			if !cfg.ExtGlob {
 				return nil, fmt.Errorf("extended globbing operator used without the \"extglob\" option set")

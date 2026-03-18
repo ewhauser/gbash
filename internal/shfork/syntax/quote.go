@@ -54,7 +54,7 @@ func Quote(s string, lang LangVariant) (string, error) {
 	shellChars := false
 	nonPrintable := false
 	offs := 0
-	for rem := s; len(rem) > 0; {
+	for rem := s; rem != ""; {
 		r, size := utf8.DecodeRuneInString(rem)
 		switch r {
 		// Like regOps; token characters.
@@ -101,7 +101,7 @@ func Quote(s string, lang LangVariant) (string, error) {
 		b.WriteString("$'")
 		lastRequoteIfHex := false
 		offs := 0
-		for rem := s; len(rem) > 0; {
+		for rem := s; rem != ""; {
 			nextRequoteIfHex := false
 			r, size := utf8.DecodeRuneInString(rem)
 			switch {

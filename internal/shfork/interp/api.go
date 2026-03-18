@@ -319,7 +319,7 @@ func newRunnerBase() *Runner {
 	}
 	r.dirStack = r.dirBootstrap[:0]
 	// turn "on" the default Bash options
-	for i, opt := range bashOptsTable {
+	for i, opt := range &bashOptsTable {
 		r.opts[len(posixOptsTable)+i] = opt.defaultState
 	}
 	return r
@@ -411,7 +411,7 @@ func New(opts ...RunnerOption) (*Runner, error) {
 
 // NewVirtual creates a new Runner configured with an explicit virtual runtime
 // boundary.
-func NewVirtual(cfg VirtualConfig, opts ...RunnerOption) (*Runner, error) {
+func NewVirtual(cfg *VirtualConfig, opts ...RunnerOption) (*Runner, error) {
 	r := newRunnerBase()
 	r.Env = cfg.Env
 	r.Dir = cfg.Dir
@@ -562,9 +562,9 @@ func Params(args ...string) RunnerOption {
 
 // TopLevelScriptPath marks the file path that should receive a root "main"
 // execution frame when passed to [Runner.Run] as a [*syntax.File].
-func TopLevelScriptPath(path string) RunnerOption {
+func TopLevelScriptPath(scriptPath string) RunnerOption {
 	return func(r *Runner) error {
-		r.topLevelScriptPath = path
+		r.topLevelScriptPath = scriptPath
 		return nil
 	}
 }
@@ -748,7 +748,7 @@ func (r *Runner) posixOptByFlag(flag byte) *bool {
 }
 
 func (r *Runner) bashOptByName(name string) (status *bool, supported bool) {
-	for i, opt := range bashOptsTable {
+	for i, opt := range &bashOptsTable {
 		if opt.name == name {
 			index := len(posixOptsTable) + i
 			return &r.opts[index], opt.supported

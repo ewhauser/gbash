@@ -43,7 +43,7 @@ func TestNewVirtualUsesDeterministicDefaults(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	runner, err := interp.NewVirtual(interp.VirtualConfig{}, interp.StdIO(nil, &stdout, &stderr))
+	runner, err := interp.NewVirtual(&interp.VirtualConfig{}, interp.StdIO(nil, &stdout, &stderr))
 	if err != nil {
 		t.Fatal(err)
 	}

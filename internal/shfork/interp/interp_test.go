@@ -520,7 +520,7 @@ var runTests = []runTest{
 
 	{`echo ${foo[@]}; echo ${foo[*]}`, "\n\n"},
 	// TODO: reenable once we figure out the broken pipe error
-	//{`$ENV_PROG | while read line; do if test -z "$line"; then echo empty; fi; break; done`, ""}, // never begin with an empty element
+	// {`$ENV_PROG | while read line; do if test -z "$line"; then echo empty; fi; break; done`, ""}, // never begin with an empty element
 
 	// inline variables have special scoping
 	{
@@ -3103,10 +3103,10 @@ done <<< 2`,
 		"xxx xxx\n",
 	},
 	// TODO: figure this one out
-	//{
+	// {
 	//        "declare -n foo=bar bar=baz; foo=xxx; echo $foo $bar; echo $baz",
 	//        "xxx xxx\nxxx\n",
-	//},
+	// },
 	{
 		"echo ${!@}-${!*}; set -- foo; echo ${!@}-${!*}-${!1}; foo=value; echo ${!@}-${!*}-${!1}",
 		"-\n--\nvalue-value-value\n",
@@ -4225,7 +4225,7 @@ func TestRunnerRun(t *testing.T) {
 	}
 }
 
-func readLines(hc interp.HandlerContext) ([][]byte, error) {
+func readLines(hc *interp.HandlerContext) ([][]byte, error) {
 	bs, err := io.ReadAll(hc.Stdin)
 	if err != nil {
 		return nil, err
@@ -4313,7 +4313,7 @@ var testBuiltinsMap = map[string]func(interp.HandlerContext, []string) error{
 		return nil
 	},
 	"sort": func(hc interp.HandlerContext, args []string) error {
-		lines, err := readLines(hc)
+		lines, err := readLines(&hc)
 		if err != nil {
 			return err
 		}
@@ -4342,7 +4342,7 @@ var testBuiltinsMap = map[string]func(interp.HandlerContext, []string) error{
 				return fmt.Errorf("unexpected arg: %q", arg)
 			}
 		}
-		lines, err := readLines(hc)
+		lines, err := readLines(&hc)
 		if err != nil {
 			return err
 		}
@@ -4536,8 +4536,8 @@ func TestRunnerRunConfirm(t *testing.T) {
 					want = bash52Want
 				}
 			}
-			if strings.HasPrefix(got, "bash: line 1: ") {
-				if trimmed := strings.TrimPrefix(got, "bash: line 1: "); trimmed == want {
+			if after, ok := strings.CutPrefix(got, "bash: line 1: "); ok {
+				if trimmed := after; trimmed == want {
 					got = trimmed
 				}
 			}

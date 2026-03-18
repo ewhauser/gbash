@@ -181,7 +181,7 @@ func (r *Runner) lookPath(ctx context.Context, cwd string, env expand.Environ, f
 	if pathValue == "" {
 		return "", fmt.Errorf("%q: executable file not found in $PATH", file)
 	}
-	for _, elem := range strings.Split(pathValue, ":") {
+	for elem := range strings.SplitSeq(pathValue, ":") {
 		candidate := file
 		switch elem {
 		case "", ".":

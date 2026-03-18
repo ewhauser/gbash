@@ -698,8 +698,8 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		str := r.literal(cm.Word)
 		for _, ci := range cm.Items {
 			for _, word := range ci.Patterns {
-				pattern := r.pattern(word)
-				if match(pattern, str) {
+				pat := r.pattern(word)
+				if match(pat, str) {
 					r.stmts(ctx, ci.Stmts)
 					return
 				}
@@ -921,8 +921,8 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		} else {
 			r.outf("\n")
 		}
-		real := time.Since(start)
-		r.outf(format, "real", elapsedString(real, cm.PosixFormat))
+		realTime := time.Since(start)
+		r.outf(format, "real", elapsedString(realTime, cm.PosixFormat))
 		// TODO: can we do these?
 		r.outf(format, "user", elapsedString(0, cm.PosixFormat))
 		r.outf(format, "sys", elapsedString(0, cm.PosixFormat))
@@ -1122,9 +1122,9 @@ func elapsedString(d time.Duration, posix bool) string {
 	if posix {
 		return fmt.Sprintf("%.2f", d.Seconds())
 	}
-	min := int(d.Minutes())
+	mins := int(d.Minutes())
 	sec := math.Mod(d.Seconds(), 60.0)
-	return fmt.Sprintf("%dm%.3fs", min, sec)
+	return fmt.Sprintf("%dm%.3fs", mins, sec)
 }
 
 func (r *Runner) stmts(ctx context.Context, stmts []*syntax.Stmt) {
@@ -1313,9 +1313,9 @@ func (r *Runner) call(ctx context.Context, pos syntax.Pos, args []string) {
 	name := args[0]
 	if body := r.Funcs[name]; body != nil {
 		source := r.funcSource(name)
-		internal := r.funcInternal(name)
+		isInternal := r.funcInternal(name)
 		bashSource := source
-		if internal {
+		if isInternal {
 			bashSource = ""
 		}
 		// stack them to support nested func calls
@@ -1329,7 +1329,7 @@ func (r *Runner) call(ctx context.Context, pos syntax.Pos, args []string) {
 			execFile:   source,
 			bashSource: bashSource,
 			callLine:   r.functionCallLine(pos),
-			internal:   internal,
+			internal:   isInternal,
 		})
 
 		// Functions run in a nested scope.
@@ -1358,14 +1358,14 @@ func (r *Runner) exec(ctx context.Context, pos syntax.Pos, args []string) {
 	r.exit.fromHandlerError(r.execHandler(r.handlerCtx(ctx, handlerKindExec, pos), args))
 }
 
-func (r *Runner) open(ctx context.Context, path string, flags int, mode os.FileMode, print bool) (io.ReadWriteCloser, error) {
+func (r *Runner) open(ctx context.Context, path string, flags int, mode os.FileMode, printErr bool) (io.ReadWriteCloser, error) {
 	f, err := r.openHandler(r.handlerCtx(ctx, handlerKindOpen, todoPos), path, flags, mode)
 	var pathErr *os.PathError
 	switch {
 	case err == nil:
 		return f, nil
 	case errors.As(err, &pathErr):
-		if print {
+		if printErr {
 			r.errf("%v\n", err)
 		}
 	default: // handler's custom fatal error

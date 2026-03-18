@@ -286,8 +286,8 @@ func (m *MVdan) RunCommand(ctx context.Context, exec *Execution) (*RunResult, er
 	return result, err
 }
 
-func (m *MVdan) runnerConfig(exec *Execution, budget *executionBudget) interp.VirtualConfig {
-	return interp.VirtualConfig{
+func (m *MVdan) runnerConfig(exec *Execution, budget *executionBudget) *interp.VirtualConfig {
+	return &interp.VirtualConfig{
 		Env:              expand.ListEnviron(envPairs(m.runnerEnv(exec))...),
 		Dir:              exec.Dir,
 		ExecHandler:      m.execHandler(exec, budget),

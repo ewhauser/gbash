@@ -259,7 +259,7 @@ func hostTestPathExts(env expand.Environ) []string {
 		return []string{".com", ".exe", ".bat", ".cmd"}
 	}
 	var exts []string
-	for _, ext := range strings.Split(strings.ToLower(pathext), ";") {
+	for ext := range strings.SplitSeq(strings.ToLower(pathext), ";") {
 		if ext == "" {
 			continue
 		}
