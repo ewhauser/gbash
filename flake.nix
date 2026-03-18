@@ -1,7 +1,7 @@
 {
   description = "gbash development tools";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
   outputs = { self, nixpkgs }:
     let
@@ -16,8 +16,34 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = [
+            # Shell and testing
             pkgs.bash
             pkgs.bats
+
+            # Go toolchain
+            pkgs.go
+            pkgs.golangci-lint
+            pkgs.goreleaser
+
+            # Build tools
+            pkgs.gnumake
+
+            # Version control and GitHub
+            pkgs.git
+            pkgs.gh
+
+            # Standard utilities
+            pkgs.coreutils
+            pkgs.findutils
+            pkgs.curl
+            pkgs.jq
+
+            # Container runtime (for compat tests)
+            pkgs.docker
+
+            # Website development
+            pkgs.nodejs
+            pkgs.pnpm
           ];
         };
       });

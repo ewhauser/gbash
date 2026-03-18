@@ -1,14 +1,17 @@
 .PHONY: lint test conformance-test build fuzz fuzz-run fuzz-shard fuzz-smoke fuzz-full bench-smoke bench-full bench-compare bench-fs gnu-test compat-docker-build compat-docker-run website-dev release release-check release-snapshot fix-modules tag-release bats-test ensure-bash ensure-bats
 
+# Run all commands under nix develop
+SHELL := nix develop -c bash
+.SHELLFLAGS := -c
+
 GO_PACKAGES := ./... ./contrib/awk/... ./contrib/extras/... ./contrib/htmltomarkdown/... ./contrib/sqlite3/... ./contrib/jq/... ./contrib/yq/... ./examples/...
 BENCH_PACKAGES := ./internal/runtime ./cmd/gbash ./contrib/jq
 
 FUZZTIME ?= 10s
 FUZZ_SMOKE_TIME ?= 3s
 FUZZ_DEEP_TIME ?= 15s
-GORELEASER_VERSION ?= v2.14.3
-GOLANGCI_LINT_VERSION ?= v2.11.3
-GOLANGCI_LINT := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+GOLANGCI_LINT := golangci-lint
+GORELEASER := goreleaser
 # Discover every main module in the active go.work so local lint matches CI.
 LINT_MODULE_DIRS_CMD = go list -m -f '{{if .Main}}{{.Dir}}{{end}}' all
 LINT_DIR_FILTER = grep -v '/third_party/mvdan-sh\(/.*\)\?$$'
@@ -35,7 +38,7 @@ COMPAT_DOCKER_IMAGE ?= gbash-compat-local
 COMPAT_DOCKER_BASE_IMAGE ?= ghcr.io/ewhauser/gbash-compat:latest
 COMPAT_DOCKER_PLATFORM ?=
 COMPAT_DOCKER_PULL ?= always
-WEBSITE_PNPM ?= npx --yes pnpm@10.32.1
+WEBSITE_PNPM ?= pnpm
 GBASH_WEBSITE_REMOTE_COMPAT_BASE_URL ?= https://ewhauser.github.io/gbash/compat/latest
 GBASH_WEBSITE_REMOTE_COMPAT_SUMMARY_URL ?= $(GBASH_WEBSITE_REMOTE_COMPAT_BASE_URL)/summary.json
 GBASH_WEBSITE_REMOTE_COMPAT_BADGE_URL ?= $(GBASH_WEBSITE_REMOTE_COMPAT_BASE_URL)/badge.svg
@@ -259,10 +262,10 @@ release:
 	$(GH) workflow run $(RELEASE_WORKFLOW) --ref $(RELEASE_REF)
 
 release-check:
-	go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) check
+	$(GORELEASER) check
 
 release-snapshot:
-	go run github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION) release --snapshot --clean
+	$(GORELEASER) release --snapshot --clean
 
 fix-modules:
 	./scripts/fix_modules.sh $(MODULE_VERSION)
