@@ -1,7 +1,7 @@
 # gbash
 
 Status: Draft v0.1
-Last updated: 2026-03-16
+Last updated: 2026-03-18
 
 ## 1. Purpose
 
@@ -9,7 +9,7 @@ Last updated: 2026-03-16
 
 It preserves the product idea behind Vercel's `just-bash` while making different implementation choices:
 
-- shell parsing and evaluation are delegated to `mvdan/sh/v3`
+- shell parsing and evaluation are owned in-tree under `internal/shell`
 - filesystem access is virtualized by default
 - commands are implemented in Go and resolved through an explicit registry
 - unknown commands never fall through to the host OS
@@ -42,7 +42,7 @@ The runtime is optimized for LLM and agent workloads:
 ## 3. Goals
 
 1. Port the `just-bash` concept to a Go-native runtime named `gbash`.
-2. Use `mvdan/sh/v3` for parsing, ASTs, expansion semantics, control flow, and interpreter behavior where feasible.
+2. Keep parsing, ASTs, expansion semantics, control flow, and interpreter behavior inside the project-owned `internal/shell` tree.
 3. Support only sandbox mode.
 4. Use explicit Go command implementations instead of host subprocesses.
 5. Default to an in-memory or otherwise virtualized filesystem.
@@ -67,23 +67,23 @@ The runtime is optimized for LLM and agent workloads:
 
 There is no runtime mode where command execution falls back to `exec.Command`, `/bin/sh`, or `/bin/bash`. Unknown commands return a clear shell-style failure, typically exit status `127`.
 
-### 5.2 `mvdan/sh` owns shell semantics
+### 5.2 The shell core owns shell semantics
 
-We do not reimplement parsing, quoting, command substitution, loops, or shell AST traversal from scratch. Those responsibilities stay in `mvdan/sh/v3`.
+We do not reimplement parsing, quoting, command substitution, loops, or shell AST traversal from scratch during execution. Those responsibilities stay inside the in-tree shell packages under `internal/shell`.
 
-`mvdan/sh` is now treated as gbash-owned code under `internal/shell`. The parser, expansion, pattern, and interpreter packages live in-tree as `internal/shell/syntax`, `internal/shell/expand`, `internal/shell/pattern`, and `internal/shell/interp`, and `internal/runtime` only calls the concrete `internal/shell` entrypoints.
+The parser, expansion, pattern, and interpreter packages live in-tree as `internal/shell/syntax`, `internal/shell/expand`, `internal/shell/pattern`, and `internal/shell/interp`, and `internal/runtime` only calls the concrete `internal/shell` entrypoints.
 
-The fork also owns Bash-style stack introspection state. `BASH_SOURCE`, `BASH_LINENO`, `FUNCNAME`, `caller`, sourced-file provenance, and top-level file-backed `$0` semantics are tracked inside the forked interpreter rather than synthesized in a shell prelude.
+The shell core also owns Bash-style stack introspection state. `BASH_SOURCE`, `BASH_LINENO`, `FUNCNAME`, `caller`, sourced-file provenance, and top-level file-backed `$0` semantics are tracked inside the in-tree interpreter rather than synthesized in a shell prelude.
 
 The shell core compiles each user script once before execution. That compile pipeline parses the script, validates unsupported constructs that would otherwise panic the interpreter, checks substitution and glob budgets, applies pipeline rewriting, and instruments loop guards before the runner sees the AST.
 
-The shell core may also apply small AST normalizations when `mvdan/sh` behavior diverges from the Bash semantics we intend to preserve. One example is wrapping the right-hand side of pipelines in synthetic subshells so default parent-shell state matches Bash's `lastpipe=off` behavior while still allowing the interpreter to unwrap those specific synthetic wrappers when `shopt -s lastpipe` is enabled.
+The shell core may also apply small AST normalizations when the in-tree parser or interpreter behavior diverges from the Bash semantics we intend to preserve. One example is wrapping the right-hand side of pipelines in synthetic subshells so default parent-shell state matches Bash's `lastpipe=off` behavior while still allowing the interpreter to unwrap those specific synthetic wrappers when `shopt -s lastpipe` is enabled.
 
 Process substitution is supported as a sandbox-native shell feature. The shell core must provision runtime-owned opaque pipe paths under the sandbox namespace and must not rely on host FIFOs, host-visible `TMPDIR` paths, or host path semantics to implement `<(...)` and `>(...)`.
 
 Registry-backed replacements for Bash builtins should preserve shell-visible Bash coercions when practical. One compatibility requirement is that numeric `printf` conversions accept quoted character constants such as `"'A"` and `"\"B"`.
 
-Shell builtins that remain implemented inside the vendored interpreter should preserve the Bash-facing option contracts we depend on for conformance. One current requirement is Bash-compatible `type` resolution and reporting for `-a`, `-f`, `-p`, `-P`, and `-t` across aliases, functions, builtins, keywords, and PATH files.
+Shell builtins that remain implemented inside the in-tree interpreter should preserve the Bash-facing option contracts we depend on for conformance. One current requirement is Bash-compatible `type` resolution and reporting for `-a`, `-f`, `-p`, `-P`, and `-t` across aliases, functions, builtins, keywords, and PATH files.
 
 ### 5.3 Project-owned boundaries
 
@@ -102,14 +102,14 @@ When Bash compatibility conflicts with deterministic, inspectable behavior for a
 
 ### 5.5 Small explicit surfaces
 
-Every major subsystem should have a narrow interface. Callers should be able to replace the filesystem backend, registry, or observability callbacks without understanding `mvdan/sh` internals.
+Every major subsystem should have a narrow interface. Callers should be able to replace the filesystem backend, registry, or observability callbacks without understanding shell implementation internals.
 
 ## 6. Runtime Architecture
 
 The runtime is composed of five layers:
 
-1. `syntax` parser layer from `mvdan/sh/v3`
-2. project-owned shell core around `interp.Runner`
+1. in-tree `syntax` parser layer under `internal/shell`
+2. project-owned shell core and runner orchestration
 3. sandboxed project-owned filesystem abstraction
 4. Go command registry
 5. policy and trace layers
@@ -508,7 +508,7 @@ Key design decisions:
 - orchestration-style commands such as `xargs`, `find -exec`, and shell-wrapper helpers should use `Invocation.Exec`
 - policy is an explicit interface so embedders can swap simple allowlists for richer policy engines later
 
-## 9. `mvdan/sh` Integration Plan
+## 9. Shell Core Integration Plan
 
 ### 9.1 Compile pipeline
 
@@ -548,7 +548,7 @@ Implementation detail for the current runtime:
 
 - the runner's virtual directory is authoritative for filesystem behavior
 - shell-visible `PWD` may differ from the cleaned virtual directory when a visible logical path is still valid
-- `let` is handled natively by `mvdan/sh`'s `LetClause` AST node
+- `let` is handled natively by the in-tree `syntax.LetClause` AST node
 - all project path handlers resolve relative paths from virtual `PWD`, not from host cwd
 - the forked runner keeps an execution-frame stack for `main`, `source`, and shell-function calls and derives `BASH_SOURCE`, `BASH_LINENO`, `FUNCNAME`, and `caller` from that stack
 - shell vars, `BASH_HISTORY`, and `GBASH_UMASK` are synchronized through direct runner mutation APIs rather than bootstrap `eval` calls
@@ -563,7 +563,7 @@ Runner stdio is wired to bounded buffers owned by `internal/runtime/`. This give
 
 ### 9.4 File handlers
 
-The shell-core file handlers bridge `mvdan/sh` into the project filesystem.
+The shell-core file handlers bridge the in-tree parser and interpreter into the project filesystem.
 
 Responsibilities:
 
@@ -599,7 +599,7 @@ The runner exec handler is the command dispatch path for non-builtin, non-functi
 
 Flow:
 
-1. receive expanded argv from `mvdan/sh`
+1. receive expanded argv from the shell interpreter
 2. resolve `argv[0]` against virtual command paths from the current `PATH`, or against an explicit virtual path such as `/bin/ls`
 3. if missing, write a shell-style error to stderr and return exit status `127`
 4. if present, run the Go command implementation

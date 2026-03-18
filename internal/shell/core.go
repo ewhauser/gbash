@@ -79,31 +79,31 @@ type core struct {
 	parseFunc func(string, string) (*syntax.File, error)
 }
 
-var defaultCore = newCore()
+var defaultShellCore = newShellCore()
 
 var internalHelperCommands = map[string]struct{}{
 	loopIterCommandName: {},
 }
 
-func newCore() *core {
+func newShellCore() *core {
 	return &core{
 		parser: syntax.NewParser(),
 	}
 }
 
 func Run(ctx context.Context, exec *Execution) (*RunResult, error) {
-	return defaultCore.Run(ctx, exec)
+	return defaultShellCore.Run(ctx, exec)
 }
 
 func RunCommand(ctx context.Context, exec *Execution) (*RunResult, error) {
-	return defaultCore.RunCommand(ctx, exec)
+	return defaultShellCore.RunCommand(ctx, exec)
 }
 
 func Interact(ctx context.Context, exec *Execution) (*InteractiveResult, error) {
-	return defaultCore.Interact(ctx, exec)
+	return defaultShellCore.Interact(ctx, exec)
 }
 
-func (m *core) parseUserProgram(name, script string) (*syntax.File, error) {
+func (m *core) parseProgram(name, script string) (*syntax.File, error) {
 	if m.parseFunc != nil {
 		return m.parseFunc(name, script)
 	}
