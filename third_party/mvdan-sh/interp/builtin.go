@@ -842,14 +842,17 @@ func (r *Runner) resolvePwd(ctx context.Context, logical, physical bool) (string
 	if physical || !useLogical {
 		return r.pwdPhysicalPath(ctx)
 	}
-	return r.pwdLogicalPath(), nil
+	if candidate, ok := r.pwdLogicalPath(); ok {
+		return candidate, nil
+	}
+	return r.pwdPhysicalPath(ctx)
 }
 
-func (r *Runner) pwdLogicalPath() string {
+func (r *Runner) pwdLogicalPath() (string, bool) {
 	if candidate := r.envGet("PWD"); r.pwdLooksReasonable(candidate) {
-		return candidate
+		return candidate, true
 	}
-	return r.Dir
+	return "", false
 }
 
 func (r *Runner) pwdPhysicalPath(ctx context.Context) (string, error) {

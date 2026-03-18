@@ -237,6 +237,9 @@ func bashRegexHasInvalidBareBraces(expr string) bool {
 }
 
 func (r *Runner) statMode(ctx context.Context, name string, mode os.FileMode) bool {
+	if name == "" {
+		return false
+	}
 	info, err := r.stat(ctx, name)
 	return err == nil && info.Mode()&mode != 0
 }
@@ -251,9 +254,15 @@ const (
 func (r *Runner) unTest(ctx context.Context, op syntax.UnTestOperator, x string) bool {
 	switch op {
 	case syntax.TsExists:
+		if x == "" {
+			return false
+		}
 		_, err := r.stat(ctx, x)
 		return err == nil
 	case syntax.TsRegFile:
+		if x == "" {
+			return false
+		}
 		info, err := r.stat(ctx, x)
 		return err == nil && info.Mode().IsRegular()
 	case syntax.TsDirect:
@@ -281,12 +290,24 @@ func (r *Runner) unTest(ctx context.Context, op syntax.UnTestOperator, x string)
 	// case syntax.TsUsrOwn:
 	// case syntax.TsModif:
 	case syntax.TsRead:
+		if x == "" {
+			return false
+		}
 		return r.access(ctx, r.absPath(x), access_R_OK) == nil
 	case syntax.TsWrite:
+		if x == "" {
+			return false
+		}
 		return r.access(ctx, r.absPath(x), access_W_OK) == nil
 	case syntax.TsExec:
+		if x == "" {
+			return false
+		}
 		return r.access(ctx, r.absPath(x), access_X_OK) == nil
 	case syntax.TsNoEmpty:
+		if x == "" {
+			return false
+		}
 		info, err := r.stat(ctx, x)
 		return err == nil && info.Size() > 0
 	case syntax.TsFdTerm:

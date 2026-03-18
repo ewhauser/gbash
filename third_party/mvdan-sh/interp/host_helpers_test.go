@@ -10,8 +10,10 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +29,7 @@ func hostTestRunnerOptions(dir string, killTimeout time.Duration, opts ...interp
 		dir = hostTestWorkingDir()
 	}
 	all := []interp.RunnerOption{
-		interp.Env(expand.ListEnviron(os.Environ()...)),
+		interp.Env(hostTestEnviron(dir)),
 		interp.Dir(dir),
 		interp.OpenHandler(hostTestOpenHandler),
 		interp.ReadDirHandler2(hostTestReadDirHandler),
@@ -46,6 +48,64 @@ func newHostTestRunner(tb testing.TB, opts ...interp.RunnerOption) *interp.Runne
 		tb.Fatal(err)
 	}
 	return runner
+}
+
+func hostTestEnviron(dir string, extra ...string) expand.Environ {
+	if dir == "" {
+		dir = hostTestWorkingDir()
+	}
+	pairs := make([]string, 0, len(os.Environ())+7+len(extra))
+	for _, pair := range os.Environ() {
+		switch {
+		case strings.HasPrefix(pair, "HOME="):
+			continue
+		case strings.HasPrefix(pair, "PWD="):
+			continue
+		case strings.HasPrefix(pair, "TMPDIR="):
+			continue
+		case strings.HasPrefix(pair, "UID="):
+			continue
+		case strings.HasPrefix(pair, "EUID="):
+			continue
+		case strings.HasPrefix(pair, "GID="):
+			continue
+		case strings.HasPrefix(pair, "EGID="):
+			continue
+		default:
+			pairs = append(pairs, pair)
+		}
+	}
+	pairs = append(pairs,
+		"HOME="+dir,
+		"PWD="+dir,
+		"TMPDIR="+os.TempDir(),
+	)
+	if uid, gid, ok := hostTestUserIDs(); ok {
+		pairs = append(pairs,
+			"UID="+strconv.Itoa(uid),
+			"EUID="+strconv.Itoa(uid),
+			"GID="+strconv.Itoa(gid),
+			"EGID="+strconv.Itoa(gid),
+		)
+	}
+	pairs = append(pairs, extra...)
+	return expand.ListEnviron(pairs...)
+}
+
+func hostTestUserIDs() (uid, gid int, ok bool) {
+	current, err := user.Current()
+	if err != nil {
+		return 0, 0, false
+	}
+	uid, err = strconv.Atoi(current.Uid)
+	if err != nil {
+		return 0, 0, false
+	}
+	gid, err = strconv.Atoi(current.Gid)
+	if err != nil {
+		return 0, 0, false
+	}
+	return uid, gid, true
 }
 
 func hostTestWorkingDir() string {
