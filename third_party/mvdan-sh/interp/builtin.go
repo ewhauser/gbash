@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -366,82 +367,39 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		exit = r.builtin(ctx, pos, args[0], args[1:])
 	case "type":
 		anyNotFound := false
-		mode := ""
+		mode := shellTypeMode{}
 		fp := flagParser{remaining: args}
 		for fp.more() {
 			switch flag := fp.flag(); flag {
-			case "-a", "-f", "--help":
+			case "-a":
+				mode.all = true
+			case "-f":
+				mode.suppressFuncs = true
+			case "-p":
+				mode.output = shellTypeOutputPath
+			case "-P":
+				mode.output = shellTypeOutputForcePath
+			case "-t":
+				mode.output = shellTypeOutputKind
+			case "--help":
 				return failf(3, "command: NOT IMPLEMENTED\n")
-			case "-p", "-P", "-t":
-				mode = flag
 			default:
 				return failf(2, "command: invalid option %q\n", flag)
 			}
 		}
 		args := fp.args()
 		for _, arg := range args {
-			if mode == "-p" || mode == "-P" {
-				if path, err := LookPathDir(r.Dir, r.writeEnv, arg); err == nil {
-					r.outf("%s\n", path)
-				} else {
-					anyNotFound = true
+			matches, found := r.typeMatches(ctx, arg, mode)
+			if !found {
+				if mode.output == shellTypeOutputVerbose {
+					r.errf("type: %s: not found\n", arg)
 				}
+				anyNotFound = true
 				continue
 			}
-			if syntax.IsKeyword(arg) {
-				if mode == "-t" {
-					r.out("keyword\n")
-				} else {
-					r.outf("%s is a shell keyword\n", arg)
-				}
-				continue
+			for _, match := range matches {
+				r.printTypeMatch(arg, match, mode)
 			}
-			if als, ok := r.alias[arg]; ok && r.opts[optExpandAliases] {
-				var buf bytes.Buffer
-				if len(als.args) > 0 {
-					printer := syntax.NewPrinter()
-					printer.Print(&buf, &syntax.CallExpr{
-						Args: als.args,
-					})
-				}
-				if als.blank {
-					buf.WriteByte(' ')
-				}
-				if mode == "-t" {
-					r.out("alias\n")
-				} else {
-					r.outf("%s is aliased to `%s'\n", arg, &buf)
-				}
-				continue
-			}
-			if _, ok := r.Funcs[arg]; ok {
-				if mode == "-t" {
-					r.out("function\n")
-				} else {
-					r.outf("%s is a function\n", arg)
-				}
-				continue
-			}
-			if IsBuiltin(arg) {
-				if mode == "-t" {
-					r.out("builtin\n")
-				} else {
-					r.outf("%s is a shell builtin\n", arg)
-				}
-				continue
-			}
-			if path, err := LookPathDir(r.Dir, r.writeEnv, arg); err == nil {
-				if mode == "-t" {
-					r.out("file\n")
-				} else {
-					r.outf("%s is %s\n", arg, path)
-				}
-				continue
-			}
-			if mode != "-t" {
-				r.errf("type: %s: not found\n", arg)
-			}
-			anyNotFound = true
 		}
 		if anyNotFound {
 			exit.code = 1
@@ -1128,6 +1086,217 @@ func absPath(dir, path string) string {
 
 func (r *Runner) absPath(path string) string {
 	return absPath(r.Dir, path)
+}
+
+type shellTypeMode struct {
+	all           bool
+	suppressFuncs bool
+	output        shellTypeOutputMode
+}
+
+type shellTypeMatchKind uint8
+
+const (
+	shellTypeAlias shellTypeMatchKind = iota + 1
+	shellTypeKeyword
+	shellTypeFunction
+	shellTypeBuiltin
+	shellTypeFile
+)
+
+type shellTypeOutputMode uint8
+
+const (
+	shellTypeOutputVerbose shellTypeOutputMode = iota
+	shellTypeOutputPath
+	shellTypeOutputForcePath
+	shellTypeOutputKind
+)
+
+type shellTypeMatch struct {
+	kind shellTypeMatchKind
+	path string
+	als  alias
+	body *syntax.Stmt
+}
+
+func (r *Runner) typeMatches(ctx context.Context, name string, mode shellTypeMode) ([]shellTypeMatch, bool) {
+	files := r.typeFileMatches(ctx, name, mode.all)
+	if mode.output == shellTypeOutputForcePath {
+		return files, len(files) > 0
+	}
+
+	var matches []shellTypeMatch
+	foundNonFile := false
+	appendMatch := func(match shellTypeMatch) bool {
+		matches = append(matches, match)
+		foundNonFile = true
+		return mode.all
+	}
+
+	if als, ok := r.alias[name]; ok && r.opts[optExpandAliases] {
+		if !appendMatch(shellTypeMatch{kind: shellTypeAlias, als: als}) {
+			if mode.output == shellTypeOutputPath {
+				return nil, true
+			}
+			return matches, true
+		}
+	}
+	if syntax.IsKeyword(name) {
+		if !appendMatch(shellTypeMatch{kind: shellTypeKeyword}) {
+			if mode.output == shellTypeOutputPath {
+				return nil, true
+			}
+			return matches, true
+		}
+	}
+	if !mode.suppressFuncs {
+		if body := r.Funcs[name]; body != nil && !r.funcInternal(name) {
+			if !appendMatch(shellTypeMatch{kind: shellTypeFunction, body: body}) {
+				if mode.output == shellTypeOutputPath {
+					return nil, true
+				}
+				return matches, true
+			}
+		}
+	}
+	if IsBuiltin(name) {
+		if !appendMatch(shellTypeMatch{kind: shellTypeBuiltin}) {
+			if mode.output == shellTypeOutputPath {
+				return nil, true
+			}
+			return matches, true
+		}
+	}
+
+	if mode.output == shellTypeOutputPath {
+		if len(files) > 0 {
+			return files, true
+		}
+		return nil, foundNonFile
+	}
+	if len(files) > 0 {
+		matches = append(matches, files...)
+	}
+	return matches, foundNonFile || len(files) > 0
+}
+
+func (r *Runner) typeFileMatches(ctx context.Context, name string, all bool) []shellTypeMatch {
+	pathList := filepath.SplitList(r.writeEnv.Get("PATH").String())
+	if len(pathList) == 0 {
+		pathList = []string{""}
+	}
+	chars := `/`
+	if runtime.GOOS == "windows" {
+		chars = `:\/`
+	}
+	exts := pathExts(r.writeEnv)
+	if strings.ContainsAny(name, chars) {
+		if path, err := r.typeExecutablePath(ctx, name, exts); err == nil {
+			return []shellTypeMatch{{kind: shellTypeFile, path: path}}
+		}
+		return nil
+	}
+
+	matches := make([]shellTypeMatch, 0, 1)
+	for _, elem := range pathList {
+		path := "." + string(filepath.Separator) + name
+		if elem != "" && elem != "." {
+			path = filepath.Join(elem, name)
+		}
+		if found, err := r.typeExecutablePath(ctx, path, exts); err == nil {
+			matches = append(matches, shellTypeMatch{kind: shellTypeFile, path: found})
+			if !all {
+				break
+			}
+		}
+	}
+	return matches
+}
+
+func (r *Runner) typeExecutablePath(ctx context.Context, name string, exts []string) (string, error) {
+	if len(exts) == 0 {
+		return r.typeStatExecutable(ctx, name)
+	}
+	if winHasExt(name) {
+		if path, err := r.typeStatExecutable(ctx, name); err == nil {
+			return path, nil
+		}
+	}
+	for _, ext := range exts {
+		if path, err := r.typeStatExecutable(ctx, name+ext); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("not found")
+}
+
+func (r *Runner) typeStatExecutable(ctx context.Context, name string) (string, error) {
+	info, err := r.stat(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	mode := info.Mode()
+	if mode.IsDir() {
+		return "", fmt.Errorf("is a directory")
+	}
+	if runtime.GOOS != "windows" && mode&0o111 == 0 {
+		return "", fmt.Errorf("permission denied")
+	}
+	return name, nil
+}
+
+func (r *Runner) printTypeMatch(name string, match shellTypeMatch, mode shellTypeMode) {
+	if mode.output == shellTypeOutputKind {
+		switch match.kind {
+		case shellTypeAlias:
+			r.out("alias\n")
+		case shellTypeKeyword:
+			r.out("keyword\n")
+		case shellTypeFunction:
+			r.out("function\n")
+		case shellTypeBuiltin:
+			r.out("builtin\n")
+		case shellTypeFile:
+			r.out("file\n")
+		}
+		return
+	}
+	if mode.output == shellTypeOutputPath || mode.output == shellTypeOutputForcePath {
+		if match.kind == shellTypeFile {
+			r.outf("%s\n", match.path)
+		}
+		return
+	}
+
+	switch match.kind {
+	case shellTypeAlias:
+		var buf bytes.Buffer
+		if len(match.als.args) > 0 {
+			printer := syntax.NewPrinter()
+			printer.Print(&buf, &syntax.CallExpr{Args: match.als.args})
+		}
+		if match.als.blank {
+			buf.WriteByte(' ')
+		}
+		r.outf("%s is aliased to `%s'\n", name, &buf)
+	case shellTypeKeyword:
+		r.outf("%s is a shell keyword\n", name)
+	case shellTypeFunction:
+		r.outf("%s is a function\n", name)
+		printer := syntax.NewPrinter()
+		var buf bytes.Buffer
+		printer.Print(&buf, &syntax.FuncDecl{
+			Name:   &syntax.Lit{Value: name},
+			Parens: true,
+			Body:   match.body,
+		})
+		r.outf("%s\n", buf.String())
+	case shellTypeBuiltin:
+		r.outf("%s is a shell builtin\n", name)
+	case shellTypeFile:
+		r.outf("%s is %s\n", name, match.path)
+	}
 }
 
 // flagParser is used to parse builtin flags.

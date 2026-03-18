@@ -174,10 +174,6 @@
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"
         },
-        "oils/builtin-type.test.sh": {
-          "mode": "xfail",
-          "reason": "known gbash divergence from bash semantics in this upstream spec file"
-        },
         "oils/builtin-umask.test.sh": {
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"

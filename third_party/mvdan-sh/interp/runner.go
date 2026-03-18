@@ -494,6 +494,20 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			i += len(als.args)
 		}
 		if decl := prefixAssignDeclClause(args, cm.Assigns); decl != nil {
+			r.expandAssignsForSideEffects(cm.Assigns)
+			if r.exit.fatalExit || r.exit.exiting {
+				return
+			}
+			r.cmd(ctx, decl)
+			return
+		}
+		// Check for declaration builtins before expanding args to avoid
+		// double expansion of command substitutions in decl arguments.
+		if decl := callExprDeclClause(args); decl != nil {
+			r.expandAssignsForSideEffects(cm.Assigns)
+			if r.exit.fatalExit || r.exit.exiting {
+				return
+			}
 			r.cmd(ctx, decl)
 			return
 		}
@@ -550,24 +564,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			break
 		}
 
-		type restoreVar struct {
-			name string
-			vr   expand.Variable
-		}
-		var restores []restoreVar
-
-		for _, as := range cm.Assigns {
-			name := as.Name.Value
-			prev := r.lookupVar(name)
-
-			vr := r.assignVal(prev, as, "")
-			// Inline command vars are always exported.
-			vr.Exported = true
-
-			restores = append(restores, restoreVar{name, prev})
-
-			r.setVar(name, vr)
-		}
+		restores := r.runCallAssigns(cm.Assigns)
 
 		trace.call(fields[0], fields[1:]...)
 		trace.newLineFlush()
@@ -1088,6 +1085,64 @@ func (r *Runner) flattenAssigns(args []*syntax.Assign) iter.Seq[*syntax.Assign] 
 			}
 		}
 	}
+}
+
+type restoreVar struct {
+	name string
+	vr   expand.Variable
+}
+
+// expandAssignsForSideEffects expands assignment values to trigger side effects
+// (like command substitutions) without persisting the assignments. This is used
+// for prefix assignments before declaration builtins, where bash runs command
+// substitutions but does not actually set the variables.
+func (r *Runner) expandAssignsForSideEffects(assigns []*syntax.Assign) {
+	for _, as := range assigns {
+		// Just expand the value to trigger side effects; don't set the variable.
+		r.assignVal(r.lookupVar(as.Name.Value), as, "")
+	}
+}
+
+func (r *Runner) runCallAssigns(assigns []*syntax.Assign) []restoreVar {
+	var restores []restoreVar
+	for _, as := range assigns {
+		name := as.Name.Value
+		prev := r.lookupVar(name)
+
+		vr := r.assignVal(prev, as, "")
+		// Inline command vars are always exported.
+		vr.Exported = true
+
+		restores = append(restores, restoreVar{name, prev})
+		r.setVar(name, vr)
+	}
+	return restores
+}
+
+func callExprDeclClause(args []*syntax.Word) *syntax.DeclClause {
+	if len(args) == 0 {
+		return nil
+	}
+	name := args[0].Lit()
+	switch name {
+	case "declare", "local", "export", "readonly", "typeset", "nameref":
+	default:
+		return nil
+	}
+	decl := &syntax.DeclClause{
+		Variant: &syntax.Lit{
+			ValuePos: args[0].Pos(),
+			ValueEnd: args[0].End(),
+			Value:    name,
+		},
+	}
+	for _, arg := range args[1:] {
+		decl.Args = append(decl.Args, &syntax.Assign{
+			Naked: true,
+			Value: arg,
+		})
+	}
+	return decl
 }
 
 // reparseCompoundAssign checks if an assign's value looks like a compound
