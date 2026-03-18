@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -12,7 +13,7 @@ func TestResolveNixBash(t *testing.T) {
 	t.Run("missing env", func(t *testing.T) {
 		t.Setenv(nixBashEnv, "")
 
-		_, _, err := resolveNixBash()
+		_, _, err := resolveNixBash(context.Background())
 		if !errors.Is(err, errNixBashUnset) {
 			t.Fatalf("resolveNixBash() error = %v, want %v", err, errNixBashUnset)
 		}
@@ -22,7 +23,7 @@ func TestResolveNixBash(t *testing.T) {
 		path := writeFakeBash(t, "GNU bash, version 5.2.37(1)-release")
 		t.Setenv(nixBashEnv, path)
 
-		_, _, err := resolveNixBash()
+		_, _, err := resolveNixBash(context.Background())
 		if err == nil {
 			t.Fatal("resolveNixBash() error = nil, want version error")
 		}
@@ -36,7 +37,7 @@ func TestResolveNixBash(t *testing.T) {
 		path := writeFakeBash(t, wantFirstLine)
 		t.Setenv(nixBashEnv, path)
 
-		gotPath, gotFirstLine, err := resolveNixBash()
+		gotPath, gotFirstLine, err := resolveNixBash(context.Background())
 		if err != nil {
 			t.Fatalf("resolveNixBash() error = %v", err)
 		}

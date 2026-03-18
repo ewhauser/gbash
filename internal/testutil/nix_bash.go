@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -22,7 +23,7 @@ var errNixBashUnset = errors.New(nixBashEnv + " is not set")
 func RequireNixBash(tb testing.TB) string {
 	tb.Helper()
 
-	path, firstLine, err := resolveNixBash()
+	path, firstLine, err := resolveNixBash(tb.Context())
 	if err != nil {
 		tb.Fatalf("%v\n\n%s", err, nixBashInstructions())
 	}
@@ -37,7 +38,7 @@ func RequireNixBash(tb testing.TB) string {
 func RequireNixBashOrSkip(tb testing.TB) string {
 	tb.Helper()
 
-	path, firstLine, err := resolveNixBash()
+	path, firstLine, err := resolveNixBash(tb.Context())
 	if err != nil {
 		if errors.Is(err, errNixBashUnset) {
 			tb.Skipf("%v\n\n%s", err, nixBashInstructions())
@@ -48,13 +49,13 @@ func RequireNixBashOrSkip(tb testing.TB) string {
 	return path
 }
 
-func resolveNixBash() (path, firstLine string, err error) {
+func resolveNixBash(ctx context.Context) (path, firstLine string, err error) {
 	path = strings.TrimSpace(os.Getenv(nixBashEnv)) //nolint:forbidigo // Tests explicitly read the oracle bash path from the host env.
 	if path == "" {
 		return "", "", errNixBashUnset
 	}
 
-	out, err := exec.Command(path, "--version").Output() //nolint:forbidigo // Tests validate the configured external bash oracle before use.
+	out, err := exec.CommandContext(ctx, path, "--version").Output() //nolint:forbidigo // Tests validate the configured external bash oracle before use.
 	if err != nil {
 		return "", "", fmt.Errorf("failed to get bash version from %s: %w", path, err)
 	}
