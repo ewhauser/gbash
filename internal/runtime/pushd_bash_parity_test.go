@@ -22,7 +22,7 @@ var bashLinePrefixPattern = regexp.MustCompile(`(?m)^(?:[^:\n]+/)?bash: line \d+
 // cases to the newer Bash form used in CI.
 func TestDirectoryStackMatchesBashBehavior(t *testing.T) {
 	t.Parallel()
-	bashPath := testutil.RequireConformanceBashOrSkip(t)
+	bashPath := testutil.RequireNixBashOrSkip(t)
 
 	testCases := []struct {
 		name   string

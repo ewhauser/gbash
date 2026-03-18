@@ -17,7 +17,7 @@ import (
 
 func TestShellScriptsMatchBashBehavior(t *testing.T) {
 	t.Parallel()
-	bashPath := testutil.RequireConformanceBashOrSkip(t)
+	bashPath := testutil.RequireNixBashOrSkip(t)
 
 	scripts := loadBashCompatScripts(t)
 	// Keep each allowlisted divergence in its own single-purpose fixture so a

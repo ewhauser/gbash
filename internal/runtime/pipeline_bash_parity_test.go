@@ -13,7 +13,7 @@ import (
 
 func TestPipelineStateMatchesBashBehavior(t *testing.T) {
 	t.Parallel()
-	bashPath := testutil.RequireConformanceBashOrSkip(t)
+	bashPath := testutil.RequireNixBashOrSkip(t)
 
 	testCases := []struct {
 		name   string

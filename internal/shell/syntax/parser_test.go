@@ -98,7 +98,7 @@ func TestParseConfirm(t *testing.T) {
 			}
 			cmd := external.cmd
 			if lang == LangBash {
-				cmd = testutil.RequireConformanceBashOrSkip(t)
+				cmd = testutil.RequireNixBashOrSkip(t)
 			}
 			if external.require != nil {
 				external.require(t)

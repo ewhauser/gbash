@@ -8,43 +8,43 @@ import (
 	"testing"
 )
 
-func TestResolveConformanceBash(t *testing.T) {
+func TestResolveNixBash(t *testing.T) {
 	t.Run("missing env", func(t *testing.T) {
-		t.Setenv(conformanceBashEnv, "")
+		t.Setenv(nixBashEnv, "")
 
-		_, _, err := resolveConformanceBash()
-		if !errors.Is(err, errConformanceBashUnset) {
-			t.Fatalf("resolveConformanceBash() error = %v, want %v", err, errConformanceBashUnset)
+		_, _, err := resolveNixBash()
+		if !errors.Is(err, errNixBashUnset) {
+			t.Fatalf("resolveNixBash() error = %v, want %v", err, errNixBashUnset)
 		}
 	})
 
 	t.Run("wrong version", func(t *testing.T) {
 		path := writeFakeBash(t, "GNU bash, version 5.2.37(1)-release")
-		t.Setenv(conformanceBashEnv, path)
+		t.Setenv(nixBashEnv, path)
 
-		_, _, err := resolveConformanceBash()
+		_, _, err := resolveNixBash()
 		if err == nil {
-			t.Fatal("resolveConformanceBash() error = nil, want version error")
+			t.Fatal("resolveNixBash() error = nil, want version error")
 		}
-		if !strings.Contains(err.Error(), "tests require bash "+pinnedConformanceBashVersion) {
-			t.Fatalf("resolveConformanceBash() error = %v, want pinned version diagnostic", err)
+		if !strings.Contains(err.Error(), "tests require bash "+pinnedNixBashVersion) {
+			t.Fatalf("resolveNixBash() error = %v, want pinned version diagnostic", err)
 		}
 	})
 
 	t.Run("success", func(t *testing.T) {
 		wantFirstLine := "GNU bash, version 5.3.9(1)-release"
 		path := writeFakeBash(t, wantFirstLine)
-		t.Setenv(conformanceBashEnv, path)
+		t.Setenv(nixBashEnv, path)
 
-		gotPath, gotFirstLine, err := resolveConformanceBash()
+		gotPath, gotFirstLine, err := resolveNixBash()
 		if err != nil {
-			t.Fatalf("resolveConformanceBash() error = %v", err)
+			t.Fatalf("resolveNixBash() error = %v", err)
 		}
 		if gotPath != path {
-			t.Fatalf("resolveConformanceBash() path = %q, want %q", gotPath, path)
+			t.Fatalf("resolveNixBash() path = %q, want %q", gotPath, path)
 		}
 		if gotFirstLine != wantFirstLine {
-			t.Fatalf("resolveConformanceBash() firstLine = %q, want %q", gotFirstLine, wantFirstLine)
+			t.Fatalf("resolveNixBash() firstLine = %q, want %q", gotFirstLine, wantFirstLine)
 		}
 	})
 }

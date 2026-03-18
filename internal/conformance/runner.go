@@ -58,7 +58,7 @@ func RunSuite(t *testing.T, cfg *SuiteConfig) {
 	resolvedCfg := resolvedSuiteConfig(cfg)
 	cfg = &resolvedCfg
 
-	bashPath := testutil.RequireConformanceBash(t)
+	bashPath := testutil.RequireNixBash(t)
 
 	manifest, err := LoadManifest(cfg.ManifestPath)
 	if err != nil {

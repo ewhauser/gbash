@@ -14,7 +14,7 @@ import (
 )
 
 func FuzzQuote(f *testing.F) {
-	bashPath := testutil.RequireConformanceBashOrSkip(f)
+	bashPath := testutil.RequireNixBashOrSkip(f)
 
 	// Keep in sync with ExampleQuote.
 	f.Add("foo", uint8(LangBash))

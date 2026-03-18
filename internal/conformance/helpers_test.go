@@ -86,7 +86,7 @@ func TestTacHelperScript(t *testing.T) {
 func runHelperCase(t *testing.T, specCase SpecCase) ComparisonResult {
 	t.Helper()
 
-	bashPath := testutil.RequireConformanceBashOrSkip(t)
+	bashPath := testutil.RequireNixBashOrSkip(t)
 	result, err := RunCase(context.Background(), &SuiteConfig{
 		Name:       "bash",
 		BinDir:     "bin",
