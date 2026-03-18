@@ -7,8 +7,8 @@
 Use Go 1.26+. The full workspace build/test command spans multiple modules:
 
 ```sh
-go build ./... ./contrib/extras/... ./contrib/sqlite3/... ./contrib/jq/... ./contrib/yq/... ./examples/...
-go test ./... ./contrib/extras/... ./contrib/sqlite3/... ./contrib/jq/... ./contrib/yq/... ./examples/...
+make build
+make test
 ```
 
 Before submitting or updating a PR, run `make lint` from the repo root and fix any reported issues.
@@ -27,12 +27,6 @@ Before submitting or updating a PR, run `make lint` from the repo root and fix a
 - expanding scope, roadmap, or introducing new public packages/interfaces
 
 Read the relevant `SPEC.md` sections before editing code, and update them once the design is clear. When in doubt, prefer a small SPEC update over silent drift.
-
-## Skills
-- **command** — Guide for adding or modifying built-in commands. Located at `.agents/skills/command/`.
-- **implement-coreutils-command** — Port a command from uutils/coreutils Rust repo into Go. Located at `.agents/skills/implement-coreutils-command/`.
-- **release** — Tag-driven GitHub release workflow with GoReleaser. Located at `.agents/skills/release/`.
-- **upstream-diff** — Diff against upstream [vercel-labs/just-bash](https://github.com/vercel-labs/just-bash) to find missing commands/flags. Located at `.claude/skills/upstream-diff/`.
 
 ## Commits & PRs
 Use short, imperative subjects scoped to one change (e.g., `runtime: normalize command-not-found errors`). PRs should explain user-visible behavior, note any SPEC updates, include trace/CLI output when changing execution behavior, and only be submitted after a clean local `make lint`.
