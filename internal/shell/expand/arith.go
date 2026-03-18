@@ -137,12 +137,12 @@ func (cfg *Config) assgnArit(b *syntax.BinaryArithm) (int, error) {
 		val *= arg
 	case syntax.QuoAssgn:
 		if arg == 0 {
-			return 0, fmt.Errorf("division by zero")
+			return 0, fmt.Errorf("%d / %d : division by 0 (error token is \"%d \")", val, arg, arg)
 		}
 		val /= arg
 	case syntax.RemAssgn:
 		if arg == 0 {
-			return 0, fmt.Errorf("division by zero")
+			return 0, fmt.Errorf("%d %% %d : division by 0 (error token is \"%d \")", val, arg, arg)
 		}
 		val %= arg
 	case syntax.AndAssgn:
@@ -184,12 +184,12 @@ func binArit(op syntax.BinAritOperator, x, y int) (int, error) {
 		return x * y, nil
 	case syntax.Quo:
 		if y == 0 {
-			return 0, fmt.Errorf("division by zero")
+			return 0, fmt.Errorf("%d / %d : division by 0 (error token is \"%d \")", x, y, y)
 		}
 		return x / y, nil
 	case syntax.Rem:
 		if y == 0 {
-			return 0, fmt.Errorf("division by zero")
+			return 0, fmt.Errorf("%d %% %d : division by 0 (error token is \"%d \")", x, y, y)
 		}
 		return x % y, nil
 	case syntax.Pow:
