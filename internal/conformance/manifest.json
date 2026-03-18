@@ -406,10 +406,6 @@
           "mode": "xfail",
           "reason": "gbash now rejects single-quoted strings in (( )) with correct behavior, but error message trailing whitespace differs from bash"
         },
-        "oils/type-compat.test.sh::declare array vs. associative array": {
-          "mode": "xfail",
-          "reason": "gbash sorts associative array keys/values alphabetically, bash uses hash order"
-        },
         "oils/unicode.test.sh": {
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"
