@@ -19,6 +19,7 @@ import (
 	"github.com/ewhauser/gbash/commands"
 	gbfs "github.com/ewhauser/gbash/fs"
 	"github.com/ewhauser/gbash/internal/commandutil"
+	"github.com/ewhauser/gbash/internal/interpreter"
 	"github.com/ewhauser/gbash/internal/shellstate"
 	"github.com/ewhauser/gbash/internal/shfork/expand"
 	"github.com/ewhauser/gbash/internal/shfork/interp"
@@ -184,7 +185,7 @@ func (m *MVdan) Run(ctx context.Context, exec *Execution) (result *RunResult, ru
 	cleanupProcSubst := withProcSubstScope(&effectiveExec)
 	defer cleanupProcSubst()
 
-	runner, err := interp.NewVirtual(m.runnerConfig(&effectiveExec, budget), m.runnerOptions(&effectiveExec, budget)...)
+	runner, err := m.newRunner(m.runnerConfig(&effectiveExec, budget), m.runnerOptions(&effectiveExec, budget)...)
 	if err != nil {
 		return nil, err
 	}
@@ -223,67 +224,16 @@ func (m *MVdan) RunCommand(ctx context.Context, exec *Execution) (*RunResult, er
 		return &RunResult{FinalEnv: finalEnv}, nil
 	}
 
-	env := expand.ListEnviron(envPairs(finalEnv)...)
-	virtualWD := gbfs.Clean(exec.Dir)
-	resolved, ok, err := lookupCommand(ctx, exec, virtualWD, env, exec.Command[0])
-	if err != nil {
-		if policy.IsDenied(err) {
-			recordPolicyDenied(exec.Trace, err, string(policy.FileActionStat), "", exec.Command[0], "")
-			return &RunResult{FinalEnv: finalEnv}, shellFailureToWriter(ctx, exec.Stderr, 126, "%v", err)
-		}
-		return &RunResult{FinalEnv: finalEnv}, err
-	}
-	start := time.Now().UTC()
-	if !ok {
-		return &RunResult{FinalEnv: finalEnv}, shellFailureToWriter(ctx, exec.Stderr, 127, "%s: command not found", exec.Command[0])
-	}
-	if err := allowCommand(ctx, exec.Policy, resolved.name, exec.Command); err != nil {
-		recordPolicyDenied(exec.Trace, err, "", resolved.path, resolved.name, resolved.source)
-		return &RunResult{FinalEnv: finalEnv}, shellFailureToWriter(ctx, exec.Stderr, 126, "%v", err)
-	}
-	recordCommand(exec.Trace, trace.EventCommandStart, traceCommandInfo(exec.Command, false, &commandTraceResolution{
-		Dir:              virtualWD,
-		ResolvedName:     resolved.name,
-		ResolvedPath:     resolved.path,
-		ResolutionSource: resolved.source,
-	}))
-
-	finalEnv, err = invokeResolvedCommand(ctx, exec, resolved, exec.Command, finalEnv, virtualWD, exec.Stdin, exec.Stdout, exec.Stderr)
-	result := &RunResult{FinalEnv: finalEnv}
-	if err == nil {
-		recordCommand(exec.Trace, trace.EventCommandExit, traceCommandInfo(exec.Command, false, &commandTraceResolution{
-			Dir:              virtualWD,
-			ExitCode:         0,
-			Duration:         time.Since(start),
-			ResolvedName:     resolved.name,
-			ResolvedPath:     resolved.path,
-			ResolutionSource: resolved.source,
-		}))
-		return result, nil
-	}
-	if code, ok := commands.ExitCode(err); ok {
-		if message, ok := commands.DiagnosticMessage(err); ok && exec.Stderr != nil {
-			_, _ = fmt.Fprintln(exec.Stderr, message)
-		}
-		recordCommand(exec.Trace, trace.EventCommandExit, traceCommandInfo(exec.Command, false, &commandTraceResolution{
-			Dir:              virtualWD,
-			ExitCode:         code,
-			Duration:         time.Since(start),
-			ResolvedName:     resolved.name,
-			ResolvedPath:     resolved.path,
-			ResolutionSource: resolved.source,
-		}))
-		return result, interp.ExitStatus(code)
-	}
-	recordCommand(exec.Trace, trace.EventCommandExit, traceCommandInfo(exec.Command, false, &commandTraceResolution{
-		Dir:              virtualWD,
-		ExitCode:         1,
-		Duration:         time.Since(start),
-		ResolvedName:     resolved.name,
-		ResolvedPath:     resolved.path,
-		ResolutionSource: resolved.source,
-	}))
-	return result, err
+	finalEnv, err := m.commandFacade(exec).Execute(ctx, &interpreter.ExecuteRequest{
+		Argv:       exec.Command,
+		VirtualWD:  gbfs.Clean(exec.Dir),
+		Env:        expand.ListEnviron(envPairs(finalEnv)...),
+		CurrentEnv: finalEnv,
+		Stdin:      exec.Stdin,
+		Stdout:     exec.Stdout,
+		Stderr:     exec.Stderr,
+	})
+	return &RunResult{FinalEnv: finalEnv}, err
 }
 
 func (m *MVdan) runnerConfig(exec *Execution, budget *executionBudget) *interp.VirtualConfig {
@@ -612,92 +562,31 @@ func (m *MVdan) execHandler(exec *Execution, budget *executionBudget) interp.Exe
 		currentEnv := envMap(hc.Env)
 		internal := isInternalHelperCommand(args[0])
 		fromBootstrap := hc.Internal
-		resolved, ok, err := lookupCommand(ctx, exec, virtualWD, hc.Env, args[0])
-		if err != nil {
-			if policy.IsDenied(err) {
-				recordPolicyDenied(exec.Trace, err, string(policy.FileActionStat), "", args[0], "")
-				return shellFailure(ctx, 126, "%v", err)
-			}
-			return err
-		}
-		start := time.Now().UTC()
-		if !ok {
-			return shellFailure(ctx, 127, "%s: command not found", args[0])
-		}
-
-		if !internal {
-			if err := allowCommand(ctx, exec.Policy, resolved.name, args); err != nil {
-				recordPolicyDenied(exec.Trace, err, "", resolved.path, resolved.name, resolved.source)
-				return shellFailure(ctx, 126, "%v", err)
-			}
-			if !fromBootstrap {
-				recordCommand(exec.Trace, trace.EventCommandStart, traceCommandInfo(args, false, &commandTraceResolution{
-					Dir:              virtualWD,
-					Position:         hc.Pos.String(),
-					ResolvedName:     resolved.name,
-					ResolvedPath:     resolved.path,
-					ResolutionSource: resolved.source,
-				}))
-			}
-		}
-
 		shellVars := shellstate.NewShellVarAssignments()
-		commandCtx := shellstate.WithShellVarAssignments(ctx, shellVars)
-		finalEnv, err := invokeResolvedCommand(commandCtx, exec, resolved, args, currentEnv, virtualWD, hc.Stdin, hc.Stdout, hc.Stderr)
-		if syncErr := syncShellVarAssignments(ctx, &hc, shellVars); syncErr != nil {
-			return syncErr
-		}
-		if syncErr := syncCommandHistory(ctx, &hc, currentEnv, finalEnv); syncErr != nil {
-			return syncErr
-		}
-		if syncErr := syncUmaskEnv(ctx, &hc, currentEnv, finalEnv); syncErr != nil {
-			return syncErr
-		}
-
-		if err == nil {
-			if !internal && !fromBootstrap {
-				recordCommand(exec.Trace, trace.EventCommandExit, traceCommandInfo(args, false, &commandTraceResolution{
-					Dir:              virtualWD,
-					Position:         hc.Pos.String(),
-					ExitCode:         0,
-					Duration:         time.Since(start),
-					ResolvedName:     resolved.name,
-					ResolvedPath:     resolved.path,
-					ResolutionSource: resolved.source,
-				}))
-			}
-			return nil
-		}
-
-		if code, ok := commands.ExitCode(err); ok {
-			if message, ok := commands.DiagnosticMessage(err); ok && hc.Stderr != nil {
-				_, _ = fmt.Fprintln(hc.Stderr, message)
-			}
-			if !internal && !fromBootstrap {
-				recordCommand(exec.Trace, trace.EventCommandExit, traceCommandInfo(args, false, &commandTraceResolution{
-					Dir:              virtualWD,
-					Position:         hc.Pos.String(),
-					ExitCode:         code,
-					Duration:         time.Since(start),
-					ResolvedName:     resolved.name,
-					ResolvedPath:     resolved.path,
-					ResolutionSource: resolved.source,
-				}))
-			}
-			return interp.ExitStatus(code)
-		}
-
-		if !internal && !fromBootstrap {
-			recordCommand(exec.Trace, trace.EventCommandExit, traceCommandInfo(args, false, &commandTraceResolution{
-				Dir:              virtualWD,
-				Position:         hc.Pos.String(),
-				ExitCode:         1,
-				Duration:         time.Since(start),
-				ResolvedName:     resolved.name,
-				ResolvedPath:     resolved.path,
-				ResolutionSource: resolved.source,
-			}))
-		}
+		_, err := m.commandFacade(exec).Execute(ctx, &interpreter.ExecuteRequest{
+			Argv:          args,
+			VirtualWD:     virtualWD,
+			Env:           hc.Env,
+			CurrentEnv:    currentEnv,
+			Stdin:         hc.Stdin,
+			Stdout:        hc.Stdout,
+			Stderr:        hc.Stderr,
+			Position:      hc.Pos.String(),
+			Internal:      internal,
+			FromBootstrap: fromBootstrap,
+			PrepareInvoke: func(callCtx context.Context) context.Context {
+				return shellstate.WithShellVarAssignments(callCtx, shellVars)
+			},
+			SyncEnv: func(callCtx context.Context, before, after map[string]string) error {
+				if syncErr := syncShellVarAssignments(callCtx, &hc, shellVars); syncErr != nil {
+					return syncErr
+				}
+				if syncErr := syncCommandHistory(callCtx, &hc, before, after); syncErr != nil {
+					return syncErr
+				}
+				return syncUmaskEnv(callCtx, &hc, before, after)
+			},
+		})
 		return err
 	}
 }
@@ -1064,17 +953,17 @@ func resolveShebangCommand(ctx context.Context, exec *Execution, fullPath string
 	if err != nil || !ok {
 		return nil, false, err
 	}
-	interpreter, argv, ok := parseShebangInterpreter(line)
+	shebangInterpreter, argv, ok := parseShebangInterpreter(line)
 	if !ok {
 		return nil, false, nil
 	}
-	cmd, ok := exec.Registry.Lookup(interpreter)
+	cmd, ok := exec.Registry.Lookup(shebangInterpreter)
 	if !ok {
 		return nil, false, nil
 	}
 	return &resolvedCommand{
 		command: cmd,
-		name:    interpreter,
+		name:    shebangInterpreter,
 		args:    append(argv, fullPath),
 	}, true, nil
 }
