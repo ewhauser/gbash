@@ -1,4 +1,4 @@
-.PHONY: lint test conformance-test build fuzz fuzz-run fuzz-shard fuzz-smoke fuzz-full bench-smoke bench-full bench-compare bench-fs gnu-test compat-docker-build compat-docker-run website-dev release release-check release-snapshot fix-modules tag-release bats-test ensure-bash ensure-bats
+.PHONY: lint test conformance-test build fuzz fuzz-run fuzz-shard fuzz-smoke fuzz-full bench-smoke bench-full bench-compare bench-fs gnu-test compat-docker-build compat-docker-run website-dev release release-check release-snapshot fix-modules tag-release bats-test ensure-bash ensure-bats nix-build nix-cache
 
 GO_PACKAGES := ./... ./contrib/awk/... ./contrib/extras/... ./contrib/htmltomarkdown/... ./contrib/sqlite3/... ./contrib/jq/... ./contrib/yq/... ./examples/...
 BENCH_PACKAGES := ./internal/runtime ./cmd/gbash ./contrib/jq
@@ -278,3 +278,15 @@ bats-test:
 
 ensure-bats:
 	@./scripts/ensure-bats.sh
+
+NIX_CACHE_BUCKET ?= gbash-nix-cache
+NIX_CACHE_ENDPOINT ?= aea0a2c4e5c5c74a3e84a12c855a7e37.r2.cloudflarestorage.com
+NIX_CACHE_PROFILE ?= r2
+NIX_SECRET_KEY ?= $(HOME)/.config/nix/secret-key.pem
+
+nix-build:
+	nix build .#coreutils-test-suite
+
+nix-cache: nix-build
+	nix copy --to "s3://$(NIX_CACHE_BUCKET)?profile=$(NIX_CACHE_PROFILE)&endpoint=$(NIX_CACHE_ENDPOINT)" \
+		--secret-key-files "$(NIX_SECRET_KEY)" ./result
