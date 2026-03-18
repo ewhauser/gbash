@@ -120,7 +120,7 @@ echo $((i+1))
 ## stdout: 2
 ```
 
-Annotations like `## stdout:`, `## status:`, `## N-I bash` control expected output.
+Annotations like `## stdout:`, `## status:` control expected output.
 
 ### Manifest Structure
 

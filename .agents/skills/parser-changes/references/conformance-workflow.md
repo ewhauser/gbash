@@ -78,24 +78,15 @@ code_to_run
 - `## stderr: text` - Expected stderr
 - `## status: N` - Expected exit status
 
-**Shell-specific behavior:**
-- `## N-I bash` - Not Implemented in bash (skips for bash oracle)
-- `## OK bash/zsh` - Alternative expected behavior
-- `## BUG bash` - Known bash bug, alternative expectation
-
 ### Example
 ```bash
 #### Constant with quotes like '1'
 echo $(('1' + 2))
 ## status: 0
-## N-I bash/zsh status: 1
-## N-I dash status: 2
+## N-I bash status: 1
 ```
 
-This test expects:
-- Default: status 0
-- bash, zsh: status 1 (not implemented)
-- dash: status 2
+This test expects status 0 by default, but status 1 when comparing against bash.
 
 ## Manifest Configuration
 
@@ -114,9 +105,6 @@ This test expects:
           "reason": "specific case reason"
         }
       }
-    },
-    "posix": {
-      "entries": { ... }
     }
   }
 }
@@ -303,7 +291,7 @@ If one case in a file is fixed but others aren't:
 
 3. **Bisect large failures** - If a whole file fails, identify which specific constructs cause issues
 
-4. **Mind the oracle** - The "bash" suite compares against GNU bash; the "posix" suite uses `bash --posix`
+4. **Mind the oracle** - The conformance suite compares against GNU bash
 
 5. **Check bash version** - Conformance uses a pinned bash version via Nix. Behavior may differ from your system bash.
 

@@ -78,8 +78,8 @@ type Stmt struct {
     Semicolon  Pos         // Position of ';', '&', or '|&'
     Negated    bool        // ! stmt
     Background bool        // stmt &
-    Coprocess  bool        // mksh's |&
-    Disown     bool        // zsh's &| or &!
+    Coprocess  bool        // |&
+    Disown     bool        // &| or &!
     Redirs     []*Redirect // stmt >a <b
 }
 ```
@@ -163,7 +163,7 @@ type CStyleLoop struct {
 ```go
 type CaseClause struct {
     Case, In, Esac Pos
-    Braces         bool  // deprecated mksh { } form
+    Braces         bool  // deprecated { } form
     Word           *Word
     Items          []*CaseItem
     Last           []Comment
@@ -198,7 +198,7 @@ type Subshell struct {  // ( stmts )
 ```go
 type ArithmCmd struct {  // (( expr ))
     Left, Right Pos
-    Unsigned    bool  // mksh's ((# expr))
+    Unsigned    bool  // ((# expr))
     X           ArithmExpr
 }
 ```
@@ -218,7 +218,7 @@ type FuncDecl struct {
     RsrvWord bool   // "function f" style
     Parens   bool   // has () parentheses
     Name     *Lit   // Function name
-    Names    []*Lit // Multiple names (zsh)
+    Names    []*Lit // Multiple names
     Body     *Stmt
 }
 ```
@@ -278,11 +278,11 @@ type ParamExp struct {
     // Prefix operators (only one set)
     Excl   bool  // ${!a}
     Length bool  // ${#a}
-    Width  bool  // ${%a} (mksh)
-    IsSet  bool  // ${+a} (zsh)
+    Width  bool  // ${%a}
+    IsSet  bool  // ${+a}
 
     Param       *Lit
-    NestedParam WordPart     // zsh nested expansion
+    NestedParam WordPart     // nested expansion
     Index       ArithmExpr   // ${a[i]}
 
     // Expansion operations (only one set)
@@ -290,7 +290,7 @@ type ParamExp struct {
     Repl      *Replace        // ${a/x/y}
     Names     ParNamesOperator // ${!prefix*}
     Exp       *Expansion      // ${a:-b}, ${a#b}, etc.
-    Modifiers []*Lit          // zsh ${a:h2}
+    Modifiers []*Lit          // ${a:h2}
 }
 
 type Slice struct {
@@ -315,8 +315,8 @@ type CmdSubst struct {
     Stmts       []*Stmt
     Last        []Comment
     Backquotes  bool  // deprecated `cmd` form
-    TempFile    bool  // mksh ${ cmd;}
-    ReplyVar    bool  // mksh ${|cmd;}
+    TempFile    bool  // ${ cmd;}
+    ReplyVar    bool  // ${|cmd;}
 }
 ```
 
