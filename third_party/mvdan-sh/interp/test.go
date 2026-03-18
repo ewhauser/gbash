@@ -11,8 +11,6 @@ import (
 	"regexp"
 	"unicode"
 
-	"golang.org/x/term"
-
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/expand"
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
@@ -303,11 +301,12 @@ func (r *Runner) unTest(ctx context.Context, op syntax.UnTestOperator, x string)
 			f = r.stderr
 		}
 		if f, ok := f.(interface{ Fd() uintptr }); ok {
-			// Support [os.File.Fd] methods such as the one on [*os.File].
-			return term.IsTerminal(int(f.Fd()))
+			if statter, ok := f.(interface{ Stat() (os.FileInfo, error) }); ok {
+				if info, err := statter.Stat(); err == nil {
+					return info.Mode()&os.ModeCharDevice != 0
+				}
+			}
 		}
-		// TODO: allow term.IsTerminal here too if running in the
-		// "single process" mode.
 		return false
 	case syntax.TsEmpStr:
 		return x == ""

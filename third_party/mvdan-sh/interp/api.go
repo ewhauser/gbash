@@ -20,10 +20,9 @@ import (
 	"io/fs"
 	"maps"
 	"os"
-	"path/filepath"
+	"path"
 	"slices"
 	"strconv"
-	"time"
 
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/expand"
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
@@ -46,7 +45,7 @@ type Runner struct {
 	// If it includes a TMPDIR variable describing an absolute directory,
 	// it is used as the directory in which to create temporary files needed
 	// for the interpreter's use, such as named pipes for process substitutions.
-	// Otherwise, [os.TempDir] is used.
+	// Otherwise, a deterministic virtual default is used.
 	Env expand.Environ
 
 	// writeEnv overlays [Runner.Env] so that we can write environment variables
@@ -57,7 +56,8 @@ type Runner struct {
 	// absolute path. It can only be set via [Dir].
 	Dir string
 
-	// tempDir is either $TMPDIR from [Runner.Env], or [os.TempDir].
+	// tempDir is either [VirtualConfig.TempDir], $TMPDIR from [Runner.Env],
+	// or a deterministic virtual default.
 	tempDir string
 
 	// Params are the current shell parameters, e.g. from running a shell
@@ -100,9 +100,19 @@ type Runner struct {
 	// statHandler is a function responsible for getting file stat. It must be non-nil.
 	statHandler StatHandlerFunc
 
+	// realpathHandler resolves a physical path without host filesystem fallbacks.
+	realpathHandler RealpathHandlerFunc
+
 	// procSubstHandler overrides the default host-FIFO implementation used by
 	// process substitutions.
 	procSubstHandler ProcSubstHandlerFunc
+
+	uid  int
+	euid int
+	gid  int
+	egid int
+	pid  int
+	ppid int
 
 	stdin  *os.File // e.g. the read end of a pipe
 	stdout io.Writer
@@ -270,44 +280,160 @@ type alias struct {
 	blank bool
 }
 
-// New creates a new Runner, applying a number of options. If applying any of
-// the options results in an error, it is returned.
-//
-// Any unset options fall back to their defaults. For example, not supplying the
-// environment falls back to the process's environment, and not supplying the
-// standard output writer means that the output will be discarded.
-func New(opts ...RunnerOption) (*Runner, error) {
+const (
+	defaultVirtualHomeDir = "/home/agent"
+	defaultVirtualTempDir = "/tmp"
+	defaultVirtualID      = 1000
+	defaultVirtualPID     = 1
+	defaultVirtualPPID    = 0
+)
+
+// VirtualConfig defines the virtual runtime boundary for a Runner.
+type VirtualConfig struct {
+	Env expand.Environ
+
+	// Dir is the authoritative virtual current directory.
+	Dir string
+
+	// TempDir is the virtual temporary directory used by the interpreter.
+	TempDir string
+
+	UID  int
+	EUID int
+	GID  int
+	EGID int
+	PID  int
+	PPID int
+
+	ExecHandler      ExecHandlerFunc
+	OpenHandler      OpenHandlerFunc
+	ReadDirHandler2  ReadDirHandlerFunc2
+	StatHandler      StatHandlerFunc
+	RealpathHandler  RealpathHandlerFunc
+	ProcSubstHandler ProcSubstHandlerFunc
+}
+
+func newRunnerBase() *Runner {
 	r := &Runner{
-		usedNew:        true,
-		openHandler:    DefaultOpenHandler(),
-		readDirHandler: DefaultReadDirHandler2(),
-		statHandler:    DefaultStatHandler(),
+		usedNew: true,
 	}
 	r.dirStack = r.dirBootstrap[:0]
 	// turn "on" the default Bash options
 	for i, opt := range bashOptsTable {
 		r.opts[len(posixOptsTable)+i] = opt.defaultState
 	}
+	return r
+}
 
+func (r *Runner) applyConstructorDefaults() error {
+	if r.Env == nil {
+		r.Env = expand.ListEnviron()
+	}
+	if r.Dir == "" {
+		if home := r.Env.Get("HOME").String(); path.IsAbs(home) {
+			r.Dir = path.Clean(home)
+		} else {
+			r.Dir = defaultVirtualHomeDir
+		}
+	} else if !path.IsAbs(r.Dir) {
+		return fmt.Errorf("working directory must be an absolute path: %q", r.Dir)
+	} else {
+		r.Dir = path.Clean(r.Dir)
+	}
+	if r.tempDir == "" {
+		if dir := r.Env.Get("TMPDIR").String(); path.IsAbs(dir) {
+			r.tempDir = path.Clean(dir)
+		} else {
+			r.tempDir = defaultVirtualTempDir
+		}
+	} else if !path.IsAbs(r.tempDir) {
+		return fmt.Errorf("temporary directory must be an absolute path: %q", r.tempDir)
+	} else {
+		r.tempDir = path.Clean(r.tempDir)
+	}
+	if r.openHandler == nil {
+		r.openHandler = closedOpenHandler()
+	}
+	if r.readDirHandler == nil {
+		r.readDirHandler = closedReadDirHandler()
+	}
+	if r.statHandler == nil {
+		r.statHandler = closedStatHandler()
+	}
+	if r.realpathHandler == nil {
+		r.realpathHandler = defaultRealpathHandler()
+	}
+	if r.stdout == nil || r.stderr == nil {
+		if err := StdIO(r.stdin, r.stdout, r.stderr)(r); err != nil {
+			return err
+		}
+	}
+	r.normalizeVirtualState()
+	return nil
+}
+
+func (r *Runner) normalizeVirtualState() {
+	r.uid = firstVirtualInt(r.uid, r.Env, "UID", defaultVirtualID)
+	r.euid = firstVirtualInt(r.euid, r.Env, "EUID", r.uid)
+	r.gid = firstVirtualInt(r.gid, r.Env, "GID", defaultVirtualID)
+	r.egid = firstVirtualInt(r.egid, r.Env, "EGID", r.gid)
+	r.pid = firstVirtualInt(r.pid, nil, "", defaultVirtualPID)
+	r.ppid = firstVirtualInt(r.ppid, nil, "", defaultVirtualPPID)
+}
+
+func firstVirtualInt(current int, env expand.Environ, name string, fallback int) int {
+	if current != 0 {
+		return current
+	}
+	if env != nil && name != "" {
+		if value, err := strconv.Atoi(env.Get(name).String()); err == nil {
+			return value
+		}
+	}
+	return fallback
+}
+
+// New creates a new Runner, applying a number of options. If applying any of
+// the options results in an error, it is returned.
+//
+// Any unset options fall back to deterministic virtual defaults. For example,
+// not supplying an environment yields an empty environment, and not supplying
+// standard output means that the output will be discarded.
+func New(opts ...RunnerOption) (*Runner, error) {
+	r := newRunnerBase()
 	for _, opt := range opts {
 		if err := opt(r); err != nil {
 			return nil, err
 		}
 	}
+	return r, r.applyConstructorDefaults()
+}
 
-	// Set the default fallbacks, if necessary.
-	if r.Env == nil {
-		Env(nil)(r)
-	}
-	if r.Dir == "" {
-		if err := Dir("")(r); err != nil {
+// NewVirtual creates a new Runner configured with an explicit virtual runtime
+// boundary.
+func NewVirtual(cfg VirtualConfig, opts ...RunnerOption) (*Runner, error) {
+	r := newRunnerBase()
+	r.Env = cfg.Env
+	r.Dir = cfg.Dir
+	r.tempDir = cfg.TempDir
+	r.execHandler = cfg.ExecHandler
+	r.openHandler = cfg.OpenHandler
+	r.readDirHandler = cfg.ReadDirHandler2
+	r.statHandler = cfg.StatHandler
+	r.realpathHandler = cfg.RealpathHandler
+	r.procSubstHandler = cfg.ProcSubstHandler
+	r.uid = cfg.UID
+	r.euid = cfg.EUID
+	r.gid = cfg.GID
+	r.egid = cfg.EGID
+	r.pid = cfg.PID
+	r.ppid = cfg.PPID
+	for _, opt := range opts {
+		if err := opt(r); err != nil {
 			return nil, err
 		}
 	}
-	if r.stdout == nil || r.stderr == nil {
-		StdIO(r.stdin, r.stdout, r.stderr)(r)
-	}
-	return r, nil
+	return r, r.applyConstructorDefaults()
 }
 
 // RunnerOption can be passed to [New] to alter a [Runner]'s behaviour.
@@ -318,42 +444,29 @@ type RunnerOption func(*Runner) error
 
 // TODO: enforce the rule above via didReset.
 
-// Env sets the interpreter's environment. If nil, a copy of the current
-// process's environment is used.
+// Env sets the interpreter's environment. If nil, an empty environment is used.
 func Env(env expand.Environ) RunnerOption {
 	return func(r *Runner) error {
 		if env == nil {
-			env = expand.ListEnviron(os.Environ()...)
+			env = expand.ListEnviron()
 		}
 		r.Env = env
 		return nil
 	}
 }
 
-// Dir sets the interpreter's working directory. If empty, the process's current
-// directory is used.
-func Dir(path string) RunnerOption {
+// Dir sets the interpreter's working directory. If empty, a deterministic
+// virtual default is used.
+func Dir(dir string) RunnerOption {
 	return func(r *Runner) error {
-		if path == "" {
-			path, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("could not get current dir: %w", err)
-			}
-			r.Dir = path
+		if dir == "" {
+			r.Dir = ""
 			return nil
 		}
-		path, err := filepath.Abs(path)
-		if err != nil {
-			return fmt.Errorf("could not get absolute dir: %w", err)
+		if !path.IsAbs(dir) {
+			return fmt.Errorf("working directory must be an absolute path: %q", dir)
 		}
-		info, err := os.Stat(path)
-		if err != nil {
-			return fmt.Errorf("could not stat: %w", err)
-		}
-		if !info.IsDir() {
-			return fmt.Errorf("%s is not a directory", path)
-		}
-		r.Dir = path
+		r.Dir = path.Clean(dir)
 		return nil
 	}
 }
@@ -464,8 +577,7 @@ func CallHandler(f CallHandlerFunc) RunnerOption {
 	}
 }
 
-// ExecHandler sets one command execution handler,
-// which replaces [DefaultExecHandler](2 * time.Second).
+// ExecHandler sets one command execution handler.
 //
 // Deprecated: use [ExecHandlers] instead, which allows chaining handlers more easily
 // like middleware functions.
@@ -489,7 +601,7 @@ func ExecHandler(f ExecHandlerFunc) RunnerOption {
 // For instance, a middleware could change the arguments to the "next" call,
 // or it could print log lines before or after the call to "next".
 //
-// The last exec handler is always [DefaultExecHandler](2 * time.Second).
+// The last exec handler is the runner's configured execution boundary.
 func ExecHandlers(middlewares ...func(next ExecHandlerFunc) ExecHandlerFunc) RunnerOption {
 	return func(r *Runner) error {
 		r.execMiddlewares = append(r.execMiddlewares, middlewares...)
@@ -545,6 +657,14 @@ func ReadDirHandler2(f ReadDirHandlerFunc2) RunnerOption {
 func StatHandler(f StatHandlerFunc) RunnerOption {
 	return func(r *Runner) error {
 		r.statHandler = f
+		return nil
+	}
+}
+
+// RealpathHandler sets the realpath handler. See [RealpathHandlerFunc] for more info.
+func RealpathHandler(f RealpathHandlerFunc) RunnerOption {
+	return func(r *Runner) error {
+		r.realpathHandler = f
 		return nil
 	}
 }
@@ -829,21 +949,13 @@ func (r *Runner) Reset() {
 			panic("interp.ExecHandler should be replaced with interp.ExecHandlers, not mixed")
 		}
 		if r.execHandler == nil {
-			r.execHandler = DefaultExecHandler(2 * time.Second)
+			r.execHandler = closedExecHandler()
 		}
 		// Middlewares are chained from first to last, and each can call the
 		// next in the chain, so we need to construct the chain backwards.
 		for _, mw := range slices.Backward(r.execMiddlewares) {
 			r.execHandler = mw(r.execHandler)
 		}
-		// Fill tempDir; only need to do this once given that Env will not change.
-		if dir := r.Env.Get("TMPDIR").String(); filepath.IsAbs(dir) {
-			r.tempDir = dir
-		} else {
-			r.tempDir = os.TempDir()
-		}
-		// Clean it as we will later do a string prefix match.
-		r.tempDir = filepath.Clean(r.tempDir)
 	}
 	// reset the internal state
 	*r = Runner{
@@ -854,7 +966,14 @@ func (r *Runner) Reset() {
 		openHandler:      r.openHandler,
 		readDirHandler:   r.readDirHandler,
 		statHandler:      r.statHandler,
+		realpathHandler:  r.realpathHandler,
 		procSubstHandler: r.procSubstHandler,
+		uid:              r.uid,
+		euid:             r.euid,
+		gid:              r.gid,
+		egid:             r.egid,
+		pid:              r.pid,
+		ppid:             r.ppid,
 
 		// These can be set by functions like [Dir] or [Params], but
 		// builtins can overwrite them; reset the fields to whatever the
@@ -906,38 +1025,44 @@ func (r *Runner) Reset() {
 	// TODO(v4): Use the supplied Env directly if it implements enough methods.
 	r.writeEnv = &overlayEnviron{parent: r.Env}
 	if !r.writeEnv.Get("HOME").IsSet() {
-		home, _ := os.UserHomeDir()
-		r.setVarString("HOME", home)
+		r.setVarString("HOME", defaultVirtualHomeDir)
 	}
-	if !r.writeEnv.Get("UID").IsSet() {
-		r.setVar("UID", expand.Variable{
-			Set:      true,
-			Kind:     expand.String,
-			ReadOnly: true,
-			Str:      strconv.Itoa(os.Getuid()),
-		})
+	if !r.writeEnv.Get("TMPDIR").IsSet() {
+		r.setVarString("TMPDIR", r.tempDir)
 	}
-	if !r.writeEnv.Get("EUID").IsSet() {
-		r.setVar("EUID", expand.Variable{
-			Set:      true,
-			Kind:     expand.String,
-			ReadOnly: true,
-			Str:      strconv.Itoa(os.Geteuid()),
-		})
+	r.setVar("UID", expand.Variable{
+		Set:      true,
+		Kind:     expand.String,
+		ReadOnly: true,
+		Str:      strconv.Itoa(r.uid),
+	})
+	r.setVar("EUID", expand.Variable{
+		Set:      true,
+		Kind:     expand.String,
+		ReadOnly: true,
+		Str:      strconv.Itoa(r.euid),
+	})
+	r.setVar("GID", expand.Variable{
+		Set:      true,
+		Kind:     expand.String,
+		ReadOnly: true,
+		Str:      strconv.Itoa(r.gid),
+	})
+	r.setVar("EGID", expand.Variable{
+		Set:      true,
+		Kind:     expand.String,
+		ReadOnly: true,
+		Str:      strconv.Itoa(r.egid),
+	})
+	pwd := r.Dir
+	if candidate := r.writeEnv.Get("PWD").String(); r.pwdCandidateMatchesDir(candidate) {
+		pwd = candidate
 	}
-	if !r.writeEnv.Get("GID").IsSet() {
-		r.setVar("GID", expand.Variable{
-			Set:      true,
-			Kind:     expand.String,
-			ReadOnly: true,
-			Str:      strconv.Itoa(os.Getgid()),
-		})
-	}
-	r.setVarString("PWD", r.Dir)
+	r.setVarString("PWD", pwd)
 	r.setVarString("IFS", " \t\n")
 	r.setVarString("OPTIND", "1")
 
-	r.dirStack = append(r.dirStack, r.Dir)
+	r.dirStack = append(r.dirStack, pwd)
 
 	r.didReset = true
 }
@@ -1084,7 +1209,14 @@ func (r *Runner) subshell(background bool) *Runner {
 		openHandler:        r.openHandler,
 		readDirHandler:     r.readDirHandler,
 		statHandler:        r.statHandler,
+		realpathHandler:    r.realpathHandler,
 		procSubstHandler:   r.procSubstHandler,
+		uid:                r.uid,
+		euid:               r.euid,
+		gid:                r.gid,
+		egid:               r.egid,
+		pid:                r.pid,
+		ppid:               r.ppid,
 		stdin:              r.stdin,
 		stdout:             r.stdout,
 		stderr:             r.stderr,

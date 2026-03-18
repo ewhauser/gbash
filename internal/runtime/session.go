@@ -52,9 +52,6 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 	execEnv := executionEnv(s.cfg.BaseEnv, req)
 	visiblePWD, hasVisiblePWD := execEnv["PWD"]
 	execEnv["PWD"] = workDir
-	if len(req.Command) > 0 {
-		execEnv["__JB_PWD"] = workDir
-	}
 	if !s.bootAt.IsZero() {
 		execEnv["GBASH_SESSION_BOOT_AT"] = s.bootAt.Format(time.RFC3339)
 	}

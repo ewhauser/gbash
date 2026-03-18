@@ -46,7 +46,7 @@ func blocklistNondevOpen(ctx context.Context, path string, flags int, mode os.Fi
 		return nil, fmt.Errorf("non-dev: %s", path)
 	}
 
-	return interp.DefaultOpenHandler()(ctx, path, flags, mode)
+	return hostTestOpenHandler(ctx, path, flags, mode)
 }
 
 func mockFileOpen(ctx context.Context, path string, flags int, mode os.FileMode) (io.ReadWriteCloser, error) {
@@ -506,7 +506,7 @@ func TestKillTimeout(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.Background())
 				r, err := interp.New(
 					interp.StdIO(nil, &rbuf, &rbuf),
-					interp.ExecHandler(interp.DefaultExecHandler(test.killTimeout)),
+					interp.ExecHandlers(hostTestExecMiddleware(test.killTimeout)),
 				)
 				if err != nil {
 					t.Fatal(err)

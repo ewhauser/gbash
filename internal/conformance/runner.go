@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	stdfs "io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -17,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/ewhauser/gbash"
+	gbfs "github.com/ewhauser/gbash/fs"
 )
 
 var bashLinePrefixPattern = regexp.MustCompile(`(?m)^(?:[^:\n]+/)?\w+: line \d+: `)
@@ -37,16 +40,16 @@ func resolvedSuiteConfig(cfg *SuiteConfig) SuiteConfig {
 	return resolved
 }
 
-func packageRelativePath(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" || filepath.IsAbs(path) {
-		return path
+func packageRelativePath(relPath string) string {
+	relPath = strings.TrimSpace(relPath)
+	if relPath == "" || filepath.IsAbs(relPath) {
+		return relPath
 	}
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
-		return path
+		return relPath
 	}
-	return filepath.Join(filepath.Dir(file), path)
+	return filepath.Join(filepath.Dir(file), relPath)
 }
 
 func RunSuite(t *testing.T, cfg *SuiteConfig) {
@@ -269,7 +272,7 @@ func copyFile(src, dst string) error {
 }
 
 func runGBash(ctx context.Context, cfg *SuiteConfig, workspace, script string) (ExecutionResult, error) {
-	rt, err := gbash.New(gbash.WithFileSystem(gbash.ReadWriteDirectoryFileSystem(workspace, gbash.ReadWriteDirectoryOptions{})))
+	rt, err := gbash.New(gbash.WithFileSystem(virtualWorkspaceFileSystem(workspace)))
 	if err != nil {
 		return ExecutionResult{}, err
 	}
@@ -294,6 +297,107 @@ func runGBash(ctx context.Context, cfg *SuiteConfig, workspace, script string) (
 		Stdout:   result.Stdout,
 		Stderr:   result.Stderr,
 	}, nil
+}
+
+func virtualWorkspaceFileSystem(workspace string) gbash.FileSystemConfig {
+	return gbash.CustomFileSystem(gbfs.FactoryFunc(func(ctx context.Context) (gbfs.FileSystem, error) {
+		return loadWorkspaceIntoMemory(ctx, workspace)
+	}), "/")
+}
+
+func loadWorkspaceIntoMemory(ctx context.Context, workspace string) (gbfs.FileSystem, error) {
+	mem := gbfs.NewMemory()
+	if err := copyWorkspaceToSandbox(ctx, mem, workspace); err != nil {
+		return nil, err
+	}
+	return mem, nil
+}
+
+//nolint:forbidigo // The harness mirrors a host temp workspace into a virtual in-memory filesystem.
+func copyWorkspaceToSandbox(ctx context.Context, dst gbfs.FileSystem, workspace string) error {
+	info, err := os.Stat(workspace)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", workspace)
+	}
+	return filepath.WalkDir(workspace, func(hostPath string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(workspace, hostPath)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		sandboxPath := "/" + filepath.ToSlash(rel)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		switch mode := info.Mode(); {
+		case mode.IsDir():
+			if err := dst.MkdirAll(ctx, sandboxPath, mode.Perm()); err != nil {
+				return err
+			}
+			if err := dst.Chmod(ctx, sandboxPath, mode.Perm()); err != nil {
+				return err
+			}
+			return dst.Chtimes(ctx, sandboxPath, info.ModTime(), info.ModTime())
+		case mode&os.ModeSymlink != 0:
+			target, err := os.Readlink(hostPath)
+			if err != nil {
+				return err
+			}
+			return dst.Symlink(ctx, filepath.ToSlash(target), sandboxPath)
+		case mode.IsRegular():
+			return copyWorkspaceFileToSandbox(ctx, dst, hostPath, sandboxPath, info)
+		default:
+			return fmt.Errorf("unsupported fixture type %q (%s)", hostPath, mode.Type())
+		}
+	})
+}
+
+//nolint:forbidigo // The harness mirrors host fixture files into a virtual in-memory filesystem.
+func copyWorkspaceFileToSandbox(ctx context.Context, dst gbfs.FileSystem, hostPath, sandboxPath string, info stdfs.FileInfo) error {
+	if err := dst.MkdirAll(ctx, path.Dir(sandboxPath), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(hostPath)
+	if err != nil {
+		return err
+	}
+	defer closeIgnoringError(in)
+
+	mode := info.Mode().Perm()
+	if mode == 0 {
+		mode = 0o644
+	}
+	out, err := dst.OpenFile(ctx, sandboxPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	outClosed := false
+	defer func() {
+		if !outClosed {
+			closeIgnoringError(out)
+		}
+	}()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	outClosed = true
+	if err := dst.Chmod(ctx, sandboxPath, mode); err != nil {
+		return err
+	}
+	return dst.Chtimes(ctx, sandboxPath, info.ModTime(), info.ModTime())
 }
 
 //nolint:forbidigo // The oracle side of the harness intentionally executes the real host bash binary.
@@ -423,8 +527,8 @@ func ensureTrailingNewline(script string) string {
 }
 
 //nolint:forbidigo // Host temp workspaces are cleaned up after each conformance case.
-func removeAll(path string) {
-	_ = os.RemoveAll(path)
+func removeAll(target string) {
+	_ = os.RemoveAll(target)
 }
 
 func closeIgnoringError(closer io.Closer) {

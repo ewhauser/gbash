@@ -1,6 +1,8 @@
 package conformance
 
 import (
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -63,6 +65,74 @@ func TestResolvedSuiteConfigUsesPackagePaths(t *testing.T) {
 		if !filepath.IsAbs(got) {
 			t.Fatalf("resolved path %q is not absolute", got)
 		}
+	}
+}
+
+func TestLoadWorkspaceIntoMemoryPreservesFixturesAndMutability(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, "bin"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(bin) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "empty"), 0o700); err != nil {
+		t.Fatalf("MkdirAll(empty) error = %v", err)
+	}
+	toolPath := filepath.Join(workspace, "bin", "tool")
+	if err := os.WriteFile(toolPath, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile(tool) error = %v", err)
+	}
+
+	fsys, err := loadWorkspaceIntoMemory(context.Background(), workspace)
+	if err != nil {
+		t.Fatalf("loadWorkspaceIntoMemory() error = %v", err)
+	}
+
+	info, err := fsys.Stat(context.Background(), "/empty")
+	if err != nil {
+		t.Fatalf("Stat(/empty) error = %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("Stat(/empty).IsDir() = false, want true")
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o700); got != want {
+		t.Fatalf("Stat(/empty).Mode().Perm() = %v, want %v", got, want)
+	}
+
+	info, err = fsys.Stat(context.Background(), "/bin/tool")
+	if err != nil {
+		t.Fatalf("Stat(/bin/tool) error = %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o755); got != want {
+		t.Fatalf("Stat(/bin/tool).Mode().Perm() = %v, want %v", got, want)
+	}
+
+	file, err := fsys.Open(context.Background(), "/bin/tool")
+	if err != nil {
+		t.Fatalf("Open(/bin/tool) error = %v", err)
+	}
+	data, err := io.ReadAll(file)
+	closeIgnoringError(file)
+	if err != nil {
+		t.Fatalf("ReadAll(/bin/tool) error = %v", err)
+	}
+	if got, want := string(data), "#!/bin/sh\necho hi\n"; got != want {
+		t.Fatalf("ReadAll(/bin/tool) = %q, want %q", got, want)
+	}
+
+	out, err := fsys.OpenFile(context.Background(), "/new.txt", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile(/new.txt) error = %v", err)
+	}
+	if _, err := out.Write([]byte("mutable\n")); err != nil {
+		t.Fatalf("Write(/new.txt) error = %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("Close(/new.txt) error = %v", err)
+	}
+
+	if _, err := fsys.Stat(context.Background(), "/new.txt"); err != nil {
+		t.Fatalf("Stat(/new.txt) error = %v", err)
 	}
 }
 

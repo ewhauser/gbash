@@ -73,7 +73,7 @@ echo a{b,c}d *.go
 let i=(2 + 3)
 `
 	file := parse(b, nil, src)
-	r, _ := interp.New()
+	r := newHostTestRunner(b)
 	ctx := context.Background()
 
 	for b.Loop() {
@@ -121,10 +121,11 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		runner, _ := interp.New(
+		runner, _ := interp.New(hostTestRunnerOptions("",
+			hostTestExecKillTimeout,
 			interp.StdIO(os.Stdin, os.Stdout, os.Stderr),
 			interp.ExecHandlers(testExecHandler),
-		)
+		)...)
 		ctx := context.Background()
 		if err := runner.Run(ctx, file); err != nil {
 			var es interp.ExitStatus
@@ -3699,7 +3700,7 @@ done <<< 2`,
 
 var runTestsBash52Want = map[string]string{
 	"[[ aa =~ a{,2} ]]; echo lower:$?; [[ aa =~ a{,} ]]; echo open:$?": "lower:0\nopen:0\n",
-	"[[ a =~ $(( 1 / 0 )) ]]; echo status=$?":                         "1 / 0 : division by 0 (error token is \"0 \")\nexit status 1",
+	"[[ a =~ $(( 1 / 0 )) ]]; echo status=$?":                          "1 / 0 : division by 0 (error token is \"0 \")\nexit status 1",
 }
 
 var runTestsUnix = []runTest{
@@ -4182,12 +4183,15 @@ func TestRunnerRun(t *testing.T) {
 
 			tdir := t.TempDir()
 			var cb concBuffer
-			r, err := interp.New(interp.Dir(tdir), interp.StdIO(nil, &cb, &cb),
+			r, err := interp.New(hostTestRunnerOptions(
+				tdir,
+				hostTestExecKillTimeout,
+				interp.StdIO(nil, &cb, &cb),
 				// TODO: why does this make some tests hang?
 				// interp.Env(expand.ListEnviron(append(os.Environ(),
 				// 	"foo_NULL_BAR=foo\x00bar")...)),
 				interp.ExecHandlers(testExecHandler),
-			)
+			)...)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4648,10 +4652,12 @@ func TestRunnerOpts(t *testing.T) {
 			skipIfUnsupported(t, c.in)
 			file := parse(t, p, c.in)
 			var cb concBuffer
-			r, err := interp.New(append(c.opts,
+			opts := append([]interp.RunnerOption{}, c.opts...)
+			opts = append(opts,
 				interp.StdIO(nil, &cb, &cb),
 				interp.ExecHandlers(testExecHandler),
-			)...)
+			)
+			r, err := interp.New(hostTestRunnerOptions("", hostTestExecKillTimeout, opts...)...)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -5021,7 +5027,11 @@ func TestMalformedPathOnWindows(t *testing.T) {
 
 	file := parse(t, nil, "test.cmd")
 	var cb concBuffer
-	r, _ := interp.New(interp.Env(expand.ListEnviron("PATH="+pathList)), interp.StdIO(nil, &cb, &cb))
+	r, _ := interp.New(hostTestRunnerOptions("",
+		hostTestExecKillTimeout,
+		interp.Env(expand.ListEnviron("PATH="+pathList)),
+		interp.StdIO(nil, &cb, &cb),
+	)...)
 	ctx, cancel := context.WithTimeout(context.Background(), runnerRunTimeout)
 	defer cancel()
 	if err := r.Run(ctx, file); err != nil {

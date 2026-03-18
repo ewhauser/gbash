@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"maps"
 	mathrand "math/rand/v2"
-	"os"
 	"runtime"
 	"slices"
 	"strconv"
@@ -171,9 +170,9 @@ func (r *Runner) lookupVar(name string) expand.Variable {
 	case "?":
 		vr.Kind, vr.Str = expand.String, strconv.Itoa(int(r.lastExit.code))
 	case "$":
-		vr.Kind, vr.Str = expand.String, strconv.Itoa(os.Getpid())
+		vr.Kind, vr.Str = expand.String, strconv.Itoa(r.pid)
 	case "PPID":
-		vr.Kind, vr.Str = expand.String, strconv.Itoa(os.Getppid())
+		vr.Kind, vr.Str = expand.String, strconv.Itoa(r.ppid)
 	case "RANDOM": // not for cryptographic use
 		vr.Kind, vr.Str = expand.String, strconv.Itoa(mathrand.IntN(32767))
 		// TODO: support setting RANDOM to seed it

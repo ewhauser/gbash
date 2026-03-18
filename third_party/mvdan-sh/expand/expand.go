@@ -12,8 +12,7 @@ import (
 	"iter"
 	"maps"
 	"os"
-	"os/user"
-	"path/filepath"
+	"path"
 	"regexp"
 	"runtime"
 	"slices"
@@ -35,8 +34,7 @@ type Config struct {
 	//
 	//   * "#", "@", "*", "0"-"9" for the shell's parameters
 	//   * "?", "$", "PPID" for the shell's status and process
-	//   * "HOME foo" to retrieve user foo's home directory (if unset,
-	//     os/user.Lookup will be used)
+	//   * "HOME foo" to retrieve user foo's home directory
 	//
 	// If nil, there are no environment variables set. Use
 	// ListEnviron(os.Environ()...) to use the system's environment
@@ -62,7 +60,6 @@ type Config struct {
 
 	// ReadDir2 is used for file path globbing.
 	// If nil, and [ReadDir] is nil as well, globbing is disabled.
-	// Use [os.ReadDir] to use the filesystem directly.
 	ReadDir2 func(string) ([]fs.DirEntry, error)
 
 	// GlobStar corresponds to the shell option which allows globbing with "**".
@@ -1130,18 +1127,10 @@ func (cfg *Config) expandUser(field string, moreFields bool) (prefix, rest strin
 		return "", field
 	}
 
-	// Not the current user; try via "HOME <name>", otherwise fall back to
-	// os/user. There isn't a way to lookup user home dirs without cgo.
-
 	if vr := cfg.Env.Get("HOME " + name); vr.IsSet() {
 		return vr.String(), rest
 	}
-
-	u, err := user.Lookup(name)
-	if err != nil {
-		return "", field
-	}
-	return u.HomeDir, rest
+	return "", field
 }
 
 func findAllIndex(pat, name string, n int) [][]int {
@@ -1158,38 +1147,28 @@ var (
 	rxGlobStarDotGlob = regexp.MustCompile(`^[^/]*$`)
 )
 
-// pathJoin2 is a simpler version of [filepath.Join] without cleaning the result,
+// pathJoin2 is a simpler version of [path.Join] without cleaning the result,
 // since that's needed for globbing.
 func pathJoin2(elem1, elem2 string) string {
 	if elem1 == "" {
 		return elem2
 	}
-	if strings.HasSuffix(elem1, string(filepath.Separator)) {
+	if strings.HasSuffix(elem1, "/") {
 		return elem1 + elem2
 	}
-	return elem1 + string(filepath.Separator) + elem2
+	return elem1 + "/" + elem2
 }
 
-// pathSplit splits a file path into its elements, retaining empty ones. Before
-// splitting, slashes are replaced with [filepath.Separator], so that splitting
-// Unix paths on Windows works as well.
-func pathSplit(path string) []string {
-	path = filepath.FromSlash(path)
-	return strings.Split(path, string(filepath.Separator))
+// pathSplit splits a POSIX shell path into its elements, retaining empty ones.
+func pathSplit(name string) []string {
+	return strings.Split(name, "/")
 }
 
 func (cfg *Config) glob(base, pat string) ([]string, error) {
 	parts := pathSplit(pat)
 	matches := []string{""}
-	if filepath.IsAbs(pat) {
-		if parts[0] == "" {
-			// unix-like
-			matches[0] = string(filepath.Separator)
-		} else {
-			// windows (for some reason it won't work without the
-			// trailing separator)
-			matches[0] = parts[0] + string(filepath.Separator)
-		}
+	if path.IsAbs(pat) {
+		matches[0] = "/"
 		parts = parts[1:]
 	}
 	// TODO: as an optimization, we could do chunks of the path all at once,
@@ -1216,8 +1195,8 @@ func (cfg *Config) glob(base, pat string) ([]string, error) {
 			var newMatches []string
 			for _, dir := range matches {
 				match := dir
-				if !filepath.IsAbs(match) {
-					match = filepath.Join(base, match)
+				if !path.IsAbs(match) {
+					match = path.Join(base, match)
 				}
 				match = pathJoin2(match, part)
 				// We can't use [Config.ReadDir2] on the parent and match the directory
@@ -1311,8 +1290,8 @@ func (cfg *Config) glob(base, pat string) ([]string, error) {
 
 func (cfg *Config) globDir(base, dir string, matcher func(string) bool, wantDir bool, matches []string) ([]string, error) {
 	fullDir := dir
-	if !filepath.IsAbs(dir) {
-		fullDir = filepath.Join(base, dir)
+	if !path.IsAbs(dir) {
+		fullDir = path.Join(base, dir)
 	}
 	infos, err := cfg.ReadDir2(fullDir)
 	if err != nil {
@@ -1329,7 +1308,7 @@ func (cfg *Config) globDir(base, dir string, matcher func(string) bool, wantDir 
 			// does not follow symlinks for each of the directory entries.
 			// ReadDir is somewhat wasteful here, as we only want its error result,
 			// but we could try to reuse its result as per the TODO in [Config.glob].
-			if _, err := cfg.ReadDir2(filepath.Join(fullDir, info.Name())); err != nil {
+			if _, err := cfg.ReadDir2(path.Join(fullDir, info.Name())); err != nil {
 				continue
 			}
 		} else if !mode.IsDir() {

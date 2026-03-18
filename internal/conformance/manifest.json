@@ -362,6 +362,10 @@
           "mode": "xfail",
           "reason": "malformed regex conditionals still surface parser errors from mvdan/sh rather than bash's conditional-expression diagnostics"
         },
+        "oils/regex.test.sh::Unquoted { is a regex parse error": {
+          "mode": "xfail",
+          "reason": "the [[ parser still treats an unquoted literal { after =~ as a regex parse error, while bash matches it literally in this case"
+        },
         "oils/regex.test.sh::Regex with == and not =~ is parse error, different lexer mode required": {
           "mode": "xfail",
           "reason": "the [[ parser still reports generic operator parsing errors instead of bash's regex-aware conditional diagnostics in this == case"
