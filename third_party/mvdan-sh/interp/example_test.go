@@ -54,7 +54,7 @@ func ExampleExecHandlers() {
 	execNotInstalled := func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
 		return func(ctx context.Context, args []string) error {
 			hc := interp.HandlerCtx(ctx)
-			if _, err := interp.LookPathDir(hc.Dir, hc.Env, args[0]); err != nil {
+			if _, err := hostTestLookPathDir(hc.Dir, hc.Env, args[0]); err != nil {
 				fmt.Printf("%s is not installed\n", args[0])
 				return interp.ExitStatus(1)
 			}
@@ -88,8 +88,7 @@ func ExampleOpenHandler() {
 		if path == "/etc/hostname" {
 			return nopWriterCloser{strings.NewReader("mymachine")}, nil
 		}
-		// DefaultOpenHandler already redirects /dev/null to NUL on Windows.
-		return interp.DefaultOpenHandler()(ctx, path, flag, perm)
+		return hostTestOpenHandler(ctx, path, flag, perm)
 	}
 	runner, _ := interp.New(
 		interp.StdIO(nil, os.Stdout, os.Stdout),

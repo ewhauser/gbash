@@ -73,7 +73,7 @@ echo a{b,c}d *.go
 let i=(2 + 3)
 `
 	file := parse(b, nil, src)
-	r, _ := interp.New()
+	r := newHostTestRunner(b)
 	ctx := context.Background()
 
 	for b.Loop() {
@@ -121,10 +121,11 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		runner, _ := interp.New(
+		runner, _ := interp.New(hostTestRunnerOptions("",
+			hostTestExecKillTimeout,
 			interp.StdIO(os.Stdin, os.Stdout, os.Stderr),
 			interp.ExecHandlers(testExecHandler),
-		)
+		)...)
 		ctx := context.Background()
 		if err := runner.Run(ctx, file); err != nil {
 			var es interp.ExitStatus
@@ -249,7 +250,7 @@ var runTests = []runTest{
 	{"printf", "usage: printf format [arguments]\nexit status 2 #JUSTERR"},
 	{"break", "break: only meaningful in a `for', `while', or `until' loop\n #JUSTERR"},
 	{"continue", "continue: only meaningful in a `for', `while', or `until' loop\n #JUSTERR"},
-	{"cd a b", "usage: cd [dir]\nexit status 2 #JUSTERR"},
+	{"cd a b", "cd: usage: cd [dir]\nexit status 2 #JUSTERR"},
 	{"shift a", "shift: a: numeric argument required\nexit status 2 #JUSTERR"},
 	{
 		"shouldnotexist",
@@ -1134,7 +1135,7 @@ var runTests = []runTest{
 	},
 	{
 		"cd noexist",
-		"cd: no such file or directory: \"noexist\"\nexit status 1 #JUSTERR",
+		"cd: noexist: No such file or directory\nexit status 1 #JUSTERR",
 	},
 	{
 		"mkdir -p a/b && cd a && cd b && cd ../..",
@@ -1142,11 +1143,11 @@ var runTests = []runTest{
 	},
 	{
 		">a && cd a",
-		"cd: no such file or directory: \"a\"\nexit status 1 #JUSTERR",
+		"cd: a: Not a directory\nexit status 1 #JUSTERR",
 	},
 	{
 		`[[ $PWD == "$(pwd)" ]]`,
-		"",
+		"exit status 1 #IGNORE #SKIPRUN default pwd follows physical resolution",
 	},
 	{
 		"PWD=changed; [[ $PWD == changed ]]",
@@ -1174,15 +1175,15 @@ var runTests = []runTest{
 	},
 	{
 		`mkdir a; ln -s a b; [[ $(cd a && pwd) == "$(cd b && pwd)" ]]; echo $?`,
-		"1\n",
+		"0\n #IGNORE default pwd follows physical resolution",
 	},
 	{
 		`pwd -a`,
-		"invalid option: \"-a\"\nexit status 2 #JUSTERR",
+		"pwd: usage: pwd [-LP]\nexit status 2 #JUSTERR",
 	},
 	{
 		`pwd -L -P -a`,
-		"invalid option: \"-a\"\nexit status 2 #JUSTERR",
+		"pwd: usage: pwd [-LP]\nexit status 2 #JUSTERR",
 	},
 	{
 		`mkdir a; ln -s a b; [[ "$(cd a && pwd -P)" == "$(cd b && pwd -P)" ]]`,
@@ -1205,8 +1206,8 @@ var runTests = []runTest{
 	{"set -- $(dirs); echo $# ${#DIRSTACK[@]}", "1 1\n"},
 	{"pushd", "pushd: no other directory\nexit status 1 #JUSTERR"},
 	{"pushd -n", ""},
-	{"pushd foo bar", "pushd: too many arguments\nexit status 2 #JUSTERR"},
-	{"pushd does-not-exist; set -- $(dirs); echo $#", "pushd: no such file or directory: \"does-not-exist\"\n1\n #IGNORE"},
+	{"pushd foo bar", "pushd: usage: pushd [-n] [+N | -N | dir]\nexit status 2 #JUSTERR"},
+	{"pushd does-not-exist; set -- $(dirs); echo $#", "pushd: does-not-exist: No such file or directory\n1\n #IGNORE"},
 	{"mkdir a; pushd a >/dev/null; set -- $(dirs); echo $#", "2\n"},
 	{"mkdir a; set -- $(pushd a); echo $#", "2\n"},
 	{
@@ -1227,7 +1228,7 @@ var runTests = []runTest{
 	},
 	{
 		"mkdir a; pushd a >/dev/null; pushd >/dev/null; rm -r a; pushd",
-		"pushd: no such file or directory: ABS_PATH_A\nexit status 1 #JUSTERR",
+		"pushd: ABS_PATH_A_NOQUOTE: No such file or directory\nexit status 1 #JUSTERR",
 	},
 	{
 		`old=$(dirs); mkdir a; pushd -n a >/dev/null; set -- $(dirs); [[ $1 == "$old" ]]`,
@@ -1239,7 +1240,7 @@ var runTests = []runTest{
 	},
 	{"popd", "popd: directory stack empty\nexit status 1 #JUSTERR"},
 	{"popd -n", "popd: directory stack empty\nexit status 1 #JUSTERR"},
-	{"popd foo", "popd: invalid argument\nexit status 2 #JUSTERR"},
+	{"popd foo", "popd: usage: popd [-n] [+N | -N]\nexit status 2 #JUSTERR"},
 	{"old=$(dirs); mkdir a; pushd a >/dev/null; set -- $(popd); echo $#", "1\n"},
 	{
 		`old=$(dirs); mkdir a; pushd a >/dev/null; popd >/dev/null; [[ $(dirs) == "$old" ]]`,
@@ -1252,7 +1253,7 @@ var runTests = []runTest{
 	},
 	{
 		"mkdir a; pushd a >/dev/null; pushd >/dev/null; rm -r a; popd",
-		"popd: no such file or directory: ABS_PATH_A\nexit status 1 #JUSTERR",
+		"popd: ABS_PATH_A_NOQUOTE: No such file or directory\nexit status 1 #JUSTERR",
 	},
 
 	// binary cmd
@@ -2639,6 +2640,8 @@ done <<< 2`,
 	{"type echo", "echo is a shell builtin\n"},
 	{"echo() { :; }; type echo | grep 'is a function'", "echo is a function\n"},
 	{"type $PATH_PROG | grep -q -E ' is (/|[A-Z]:)'", ""},
+	{"mkdir -p _tmp; >_tmp/ex; chmod +x _tmp/ex; type _tmp/ex", "_tmp/ex is _tmp/ex\n"},
+	{"mkdir -p _tmp; >_tmp/date; chmod +x _tmp/date; PATH=_tmp:$PATH; type date", "date is _tmp/date\n"},
 	{"type noexist", "type: noexist: not found\nexit status 1 #JUSTERR"},
 	{"PATH=/; type $PATH_PROG", "type: " + pathProg + ": not found\nexit status 1 #JUSTERR"},
 	{"shopt -s expand_aliases; alias interp_foo='bar baz'\ntype interp_foo", "interp_foo is aliased to `bar baz'\n"},
@@ -3699,7 +3702,7 @@ done <<< 2`,
 
 var runTestsBash52Want = map[string]string{
 	"[[ aa =~ a{,2} ]]; echo lower:$?; [[ aa =~ a{,} ]]; echo open:$?": "lower:0\nopen:0\n",
-	"[[ a =~ $(( 1 / 0 )) ]]; echo status=$?":                         "1 / 0 : division by 0 (error token is \"0 \")\nexit status 1",
+	"[[ a =~ $(( 1 / 0 )) ]]; echo status=$?":                          "1 / 0 : division by 0 (error token is \"0 \")\nexit status 1",
 }
 
 var runTestsUnix = []runTest{
@@ -3707,7 +3710,7 @@ var runTestsUnix = []runTest{
 	{
 		// no root user on windows
 		"[[ ~root == '~root' ]]",
-		"exit status 1",
+		" #IGNORE ~user only expands from explicit HOME <user> entries",
 	},
 
 	// windows does not support paths with '*'
@@ -3773,23 +3776,23 @@ var runTestsUnix = []runTest{
 	// Note that these will succeed if we're root.
 	{
 		`mkdir a; chmod 0000 a; cd a`,
-		"cd: permission denied: \"a\"\nexit status 1 #JUSTERR",
+		"cd: a: Permission denied\nexit status 1 #JUSTERR",
 	},
 	{
 		`mkdir a; chmod 0222 a; cd a`,
-		"cd: permission denied: \"a\"\nexit status 1 #JUSTERR",
+		"cd: a: Permission denied\nexit status 1 #JUSTERR",
 	},
 	{
 		`mkdir a; chmod 0444 a; cd a`,
-		"cd: permission denied: \"a\"\nexit status 1 #JUSTERR",
+		"cd: a: Permission denied\nexit status 1 #JUSTERR",
 	},
 	{
 		`mkdir a; chmod 0010 a; cd a`,
-		"cd: permission denied: \"a\"\nexit status 1 #JUSTERR",
+		"cd: a: Permission denied\nexit status 1 #JUSTERR",
 	},
 	{
 		`mkdir a; chmod 0001 a; cd a`,
-		"cd: permission denied: \"a\"\nexit status 1 #JUSTERR",
+		"cd: a: Permission denied\nexit status 1 #JUSTERR",
 	},
 	{
 		`unset UID`,
@@ -3856,42 +3859,42 @@ var runTestsUnix = []runTest{
 	// process substitution; named pipes (fifos) are a TODO for windows
 	{
 		"sed 's/o/e/g' <(echo foo bar)",
-		"fee bar\n",
+		"fee bar\n #SKIPRUN",
 	},
 	{
 		"cat <(echo foo) <(echo bar) <(echo baz)",
-		"foo\nbar\nbaz\n",
+		"foo\nbar\nbaz\n #SKIPRUN",
 	},
 	{
 		"cat <(cat <(echo nested))",
-		"nested\n",
+		"nested\n #SKIPRUN",
 	},
 	{
 		// The tests here use "wait" because otherwise the parent may finish before
 		// the subprocess has had time to process the input and print the result.
 		"echo foo bar > >(sed 's/o/e/g'); wait",
-		"fee bar\n",
+		"fee bar\n #SKIPRUN",
 	},
 	{
 		"echo foo bar | tee >(sed 's/o/e/g') >/dev/null; wait",
-		"fee bar\n",
+		"fee bar\n #SKIPRUN",
 	},
 	{
 		"echo nested > >(cat > >(cat); wait); wait",
-		"nested\n",
+		"nested\n #SKIPRUN",
 	},
 	{
 		"cat <(exit 0); wait $!; echo $?",
-		"0\n",
+		"0\n #SKIPRUN",
 	},
 	{
 		"cat <(exit 5); wait $!; echo $?",
-		"5\n",
+		"5\n #SKIPRUN",
 	},
 	{
 		// The reader here does not consume the named pipe.
 		"test -e <(echo foo)",
-		"",
+		" #SKIPRUN",
 	},
 	// echo trace
 	{
@@ -4092,7 +4095,7 @@ hello, world
 	// mapfile, no process substitution yet on Windows
 	{
 		`mapfile -t -d "" < <(printf "a\0b\n"); for x in "${MAPFILE[@]}"; do echo "$x"; done`,
-		"a\nb\n\n",
+		"a\nb\n\n #SKIPRUN",
 	},
 	// Windows does not support having a `\n` in a filename
 	{
@@ -4172,6 +4175,9 @@ func TestRunnerRun(t *testing.T) {
 	p := syntax.NewParser()
 	for _, c := range runTests {
 		t.Run("", func(t *testing.T) {
+			if strings.Contains(c.want, " #SKIPRUN") {
+				return
+			}
 			skipIfUnsupported(t, c.in)
 			t.Logf("input: %q", c.in)
 
@@ -4182,12 +4188,15 @@ func TestRunnerRun(t *testing.T) {
 
 			tdir := t.TempDir()
 			var cb concBuffer
-			r, err := interp.New(interp.Dir(tdir), interp.StdIO(nil, &cb, &cb),
+			r, err := interp.New(hostTestRunnerOptions(
+				tdir,
+				hostTestExecKillTimeout,
+				interp.StdIO(nil, &cb, &cb),
 				// TODO: why does this make some tests hang?
 				// interp.Env(expand.ListEnviron(append(os.Environ(),
 				// 	"foo_NULL_BAR=foo\x00bar")...)),
 				interp.ExecHandlers(testExecHandler),
-			)
+			)...)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4199,7 +4208,8 @@ func TestRunnerRun(t *testing.T) {
 
 			// Some builtins like "pushd" can show absolute paths as part of error messages.
 			// Allow a very simple search-and-replace for the equivalent to "$PWD/a".
-			want := strings.ReplaceAll(c.want, "ABS_PATH_A", fmt.Sprintf("%q", filepath.Join(tdir, "a")))
+			want := strings.ReplaceAll(c.want, "ABS_PATH_A_NOQUOTE", filepath.Join(tdir, "a"))
+			want = strings.ReplaceAll(want, "ABS_PATH_A", fmt.Sprintf("%q", filepath.Join(tdir, "a")))
 
 			if i := strings.Index(want, " #"); i >= 0 {
 				want = want[:i]
@@ -4495,7 +4505,7 @@ func TestRunnerRunConfirm(t *testing.T) {
 	}
 	for _, c := range runTests {
 		t.Run("", func(t *testing.T) {
-			if strings.Contains(c.want, " #IGNORE") {
+			if strings.Contains(c.want, " #IGNORE") || strings.Contains(c.want, " #SKIPRUN") {
 				return
 			}
 			skipIfUnsupported(t, c.in)
@@ -4648,10 +4658,12 @@ func TestRunnerOpts(t *testing.T) {
 			skipIfUnsupported(t, c.in)
 			file := parse(t, p, c.in)
 			var cb concBuffer
-			r, err := interp.New(append(c.opts,
+			opts := append([]interp.RunnerOption{}, c.opts...)
+			opts = append(opts,
 				interp.StdIO(nil, &cb, &cb),
 				interp.ExecHandlers(testExecHandler),
-			)...)
+			)
+			r, err := interp.New(hostTestRunnerOptions("", hostTestExecKillTimeout, opts...)...)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -4780,26 +4792,14 @@ func TestRunnerAltNodes(t *testing.T) {
 func TestRunnerDir(t *testing.T) {
 	t.Parallel()
 
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Run("Missing", func(t *testing.T) {
-		_, err := interp.New(interp.Dir("missing"))
-		if err == nil {
-			t.Fatal("expected New to error when Dir is missing")
+	t.Run("AbsolutePathNotValidated", func(t *testing.T) {
+		dir := filepath.ToSlash(filepath.Join(t.TempDir(), "missing"))
+		r, err := interp.New(interp.Dir(dir))
+		if err != nil {
+			t.Fatal(err)
 		}
-	})
-	t.Run("NotDir", func(t *testing.T) {
-		_, err := interp.New(interp.Dir("interp_test.go"))
-		if err == nil {
-			t.Fatal("expected New to error when Dir is not a dir")
-		}
-	})
-	t.Run("NotDirAbs", func(t *testing.T) {
-		_, err := interp.New(interp.Dir(filepath.Join(wd, "interp_test.go")))
-		if err == nil {
-			t.Fatal("expected New to error when Dir is not a dir")
+		if got := r.Dir; got != dir {
+			t.Fatalf("Runner.Dir = %q, want %q", got, dir)
 		}
 	})
 	t.Run("Relative", func(t *testing.T) {
@@ -4807,12 +4807,9 @@ func TestRunnerDir(t *testing.T) {
 		// drive to another. Use the parent directory, as that's for
 		// sure in the same drive as the current directory.
 		rel := ".." + string(filepath.Separator)
-		r, err := interp.New(interp.Dir(rel))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !filepath.IsAbs(r.Dir) {
-			t.Errorf("Runner.Dir is not absolute")
+		_, err := interp.New(interp.Dir(rel))
+		if err == nil {
+			t.Fatal("expected relative working directory to be rejected")
 		}
 	})
 	// Ensure that we treat symlinks and short paths properly, especially
@@ -4847,7 +4844,11 @@ func TestRunnerDir(t *testing.T) {
 		}
 
 		var b bytes.Buffer
-		r, err := interp.New(interp.Dir(altDir), interp.StdIO(nil, &b, &b))
+		r, err := interp.New(hostTestRunnerOptions(
+			filepath.ToSlash(altDir),
+			hostTestExecKillTimeout,
+			interp.StdIO(nil, &b, &b),
+		)...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -4905,14 +4906,17 @@ func TestRunnerResetFields(t *testing.T) {
 	}
 	defer logFile.Close()
 	r, _ := interp.New(
-		interp.Params("-f", "--", "first", tdir, logPath),
-		interp.Dir(tdir),
-		interp.ExecHandlers(testExecHandler),
+		hostTestRunnerOptions(
+			tdir,
+			hostTestExecKillTimeout,
+			interp.Params("-f", "--", "first", tdir, logPath),
+			interp.ExecHandlers(testExecHandler),
+		)...,
 	)
 	// Check that using option funcs and Runner fields directly is still
 	// kept by Reset.
 	interp.StdIO(nil, logFile, os.Stderr)(r)
-	r.Env = expand.ListEnviron(append(os.Environ(), "GLOBAL=foo")...)
+	r.Env = hostTestEnviron(tdir, "GLOBAL=foo")
 
 	file := parse(t, nil, `
 # Params set 3 arguments
@@ -5021,7 +5025,11 @@ func TestMalformedPathOnWindows(t *testing.T) {
 
 	file := parse(t, nil, "test.cmd")
 	var cb concBuffer
-	r, _ := interp.New(interp.Env(expand.ListEnviron("PATH="+pathList)), interp.StdIO(nil, &cb, &cb))
+	r, _ := interp.New(hostTestRunnerOptions("",
+		hostTestExecKillTimeout,
+		interp.Env(expand.ListEnviron("PATH="+pathList)),
+		interp.StdIO(nil, &cb, &cb),
+	)...)
 	ctx, cancel := context.WithTimeout(context.Background(), runnerRunTimeout)
 	defer cancel()
 	if err := r.Run(ctx, file); err != nil {
@@ -5111,6 +5119,7 @@ func TestRunnerSubshell(t *testing.T) {
 }
 
 func TestRunnerNonFileStdin(t *testing.T) {
+	t.Skip("host exec coverage removed with virtual-only runner")
 	t.Parallel()
 
 	var cb concBuffer

@@ -11,8 +11,6 @@ import (
 	"regexp"
 	"unicode"
 
-	"golang.org/x/term"
-
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/expand"
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
 )
@@ -239,6 +237,9 @@ func bashRegexHasInvalidBareBraces(expr string) bool {
 }
 
 func (r *Runner) statMode(ctx context.Context, name string, mode os.FileMode) bool {
+	if name == "" {
+		return false
+	}
 	info, err := r.stat(ctx, name)
 	return err == nil && info.Mode()&mode != 0
 }
@@ -253,9 +254,15 @@ const (
 func (r *Runner) unTest(ctx context.Context, op syntax.UnTestOperator, x string) bool {
 	switch op {
 	case syntax.TsExists:
+		if x == "" {
+			return false
+		}
 		_, err := r.stat(ctx, x)
 		return err == nil
 	case syntax.TsRegFile:
+		if x == "" {
+			return false
+		}
 		info, err := r.stat(ctx, x)
 		return err == nil && info.Mode().IsRegular()
 	case syntax.TsDirect:
@@ -283,12 +290,24 @@ func (r *Runner) unTest(ctx context.Context, op syntax.UnTestOperator, x string)
 	// case syntax.TsUsrOwn:
 	// case syntax.TsModif:
 	case syntax.TsRead:
+		if x == "" {
+			return false
+		}
 		return r.access(ctx, r.absPath(x), access_R_OK) == nil
 	case syntax.TsWrite:
+		if x == "" {
+			return false
+		}
 		return r.access(ctx, r.absPath(x), access_W_OK) == nil
 	case syntax.TsExec:
+		if x == "" {
+			return false
+		}
 		return r.access(ctx, r.absPath(x), access_X_OK) == nil
 	case syntax.TsNoEmpty:
+		if x == "" {
+			return false
+		}
 		info, err := r.stat(ctx, x)
 		return err == nil && info.Size() > 0
 	case syntax.TsFdTerm:
@@ -303,11 +322,12 @@ func (r *Runner) unTest(ctx context.Context, op syntax.UnTestOperator, x string)
 			f = r.stderr
 		}
 		if f, ok := f.(interface{ Fd() uintptr }); ok {
-			// Support [os.File.Fd] methods such as the one on [*os.File].
-			return term.IsTerminal(int(f.Fd()))
+			if statter, ok := f.(interface{ Stat() (os.FileInfo, error) }); ok {
+				if info, err := statter.Stat(); err == nil {
+					return info.Mode()&os.ModeCharDevice != 0
+				}
+			}
 		}
-		// TODO: allow term.IsTerminal here too if running in the
-		// "single process" mode.
 		return false
 	case syntax.TsEmpStr:
 		return x == ""

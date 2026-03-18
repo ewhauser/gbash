@@ -44,12 +44,9 @@ func (m *MVdan) Interact(ctx context.Context, exec *Execution) (*InteractiveResu
 	defer cleanupProcSubst()
 
 	budget := newExecutionBudget(exec.Policy)
-	runner, err := interp.New(m.runnerOptions(&runnerExec, budget)...)
+	runner, err := interp.NewVirtual(m.runnerConfig(&runnerExec, budget), m.runnerOptions(&runnerExec, budget)...)
 	if err != nil {
 		return nil, err
-	}
-	if err := m.bootstrapRunner(ctx, runner, &runnerExec, budget); err != nil {
-		return &InteractiveResult{ExitCode: ExitCode(err)}, normalizeInteractiveRunError(err)
 	}
 	if err := applyRunnerParams(runner, runnerExec.StartupOptions, runnerExec.Args); err != nil {
 		return nil, err

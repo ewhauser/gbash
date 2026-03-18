@@ -12,10 +12,7 @@ import (
 	"io/fs"
 	"iter"
 	"math"
-	mathrand "math/rand/v2"
 	"os"
-	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,8 +34,6 @@ const (
 	// shellReplyVar, or REPLY, is a special variable in Bash that is used to store the result of
 	// the select command or of the read command, when no variable name is specified
 	shellReplyVar = "REPLY"
-
-	fifoNamePrefix = "sh-interp-"
 )
 
 func (r *Runner) fillExpandConfig(ctx context.Context) {
@@ -75,74 +70,15 @@ func (r *Runner) fillExpandConfig(ctx context.Context) {
 		},
 		ProcSubst: func(ps *syntax.ProcSubst) (string, error) {
 			if len(ps.Stmts) == 0 { // nothing to do
-				return os.DevNull, nil
+				return "/dev/null", nil
 			}
 			if r.procSubstHandler != nil {
 				return r.customProcSubst(ctx, ps)
 			}
-			return r.defaultProcSubst(ctx, ps)
+			return "", fmt.Errorf("process substitution unavailable")
 		},
 	}
 	r.updateExpandOpts()
-}
-
-func (r *Runner) defaultProcSubst(ctx context.Context, ps *syntax.ProcSubst) (string, error) {
-	if runtime.GOOS == "windows" {
-		return "", fmt.Errorf("TODO: support process substitution on Windows")
-	}
-
-	// We can't atomically create a random unused temporary FIFO.
-	// Similar to [os.CreateTemp],
-	// keep trying new random paths until one does not exist.
-	// We use a uint64 because a uint32 easily runs into retries.
-	var path string
-	try := 0
-	for {
-		path = filepath.Join(r.tempDir, fifoNamePrefix+strconv.FormatUint(mathrand.Uint64(), 16))
-		err := mkfifo(path, 0o666)
-		if err == nil {
-			break
-		}
-		if !os.IsExist(err) {
-			return "", fmt.Errorf("cannot create fifo: %v", err)
-		}
-		if try++; try > 100 {
-			return "", fmt.Errorf("giving up at creating fifo: %v", err)
-		}
-	}
-
-	return r.runProcSubst(ctx, ps, path, func(r2 *Runner) (func(), error) {
-		stdout := r.origStdout
-		switch ps.Op {
-		case syntax.CmdIn:
-			f, err := os.OpenFile(path, os.O_WRONLY, 0)
-			if err != nil {
-				_ = os.Remove(path)
-				return nil, fmt.Errorf("cannot open fifo for stdout: %w", err)
-			}
-			r2.stdout = f
-			return func() {
-				if err := f.Close(); err != nil {
-					r.errf("closing stdout fifo: %v\n", err)
-				}
-				_ = os.Remove(path)
-			}, nil
-		case syntax.CmdOut:
-			f, err := os.OpenFile(path, os.O_RDONLY, 0)
-			if err != nil {
-				_ = os.Remove(path)
-				return nil, fmt.Errorf("cannot open fifo for stdin: %w", err)
-			}
-			r2.stdin = f
-			r2.stdout = stdout
-			return func() {
-				_ = f.Close()
-				_ = os.Remove(path)
-			}, nil
-		default:
-			panic(fmt.Sprintf("unsupported process substitution operator: %q", ps.Op))
-		}
-	})
 }
 
 func (r *Runner) customProcSubst(ctx context.Context, ps *syntax.ProcSubst) (string, error) {
@@ -1423,19 +1359,6 @@ func (r *Runner) exec(ctx context.Context, pos syntax.Pos, args []string) {
 }
 
 func (r *Runner) open(ctx context.Context, path string, flags int, mode os.FileMode, print bool) (io.ReadWriteCloser, error) {
-	// If we are opening a FIFO temporary file created by the interpreter itself,
-	// don't pass this along to the open handler as it will not work at all
-	// unless [os.OpenFile] is used directly with it.
-	// Matching by directory and basename prefix isn't perfect, but works.
-	//
-	// If we want FIFOs to use a handler in the future, they probably
-	// need their own separate handler API matching Unix-like semantics.
-	dir, name := filepath.Split(path)
-	dir = strings.TrimSuffix(dir, "/")
-	if dir == r.tempDir && strings.HasPrefix(name, fifoNamePrefix) {
-		return os.OpenFile(path, flags, mode)
-	}
-
 	f, err := r.openHandler(r.handlerCtx(ctx, handlerKindOpen, todoPos), path, flags, mode)
 	var pathErr *os.PathError
 	switch {

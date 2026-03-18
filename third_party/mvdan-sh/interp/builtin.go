@@ -11,15 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
-
-	"golang.org/x/term"
 
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/expand"
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/syntax"
@@ -289,46 +286,10 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 			return exit
 		}
 	case "pwd":
-		evalSymlinks := false
-		for len(args) > 0 {
-			switch args[0] {
-			case "-L":
-				evalSymlinks = false
-			case "-P":
-				evalSymlinks = true
-			default:
-				return failf(2, "invalid option: %q\n", args[0])
-			}
-			args = args[1:]
-		}
-		pwd := r.envGet("PWD")
-		if evalSymlinks {
-			var err error
-			pwd, err = filepath.EvalSymlinks(pwd)
-			if err != nil {
-				exit.fatal(err) // perhaps overly dramatic?
-				return exit
-			}
-		}
-		r.outf("%s\n", pwd)
+		return r.pwdBuiltin(ctx, args)
 	case "cd":
-		var path string
-		switch len(args) {
-		case 0:
-			path = r.envGet("HOME")
-		case 1:
-			path = args[0]
-
-			// replicate the commonly implemented behavior of `cd -`
-			// ref: https://www.man7.org/linux/man-pages/man1/cd.1p.html#OPERANDS
-			if path == "-" {
-				path = r.envGet("OLDPWD")
-				r.outf("%s\n", path)
-			}
-		default:
-			return failf(2, "usage: cd [dir]\n")
-		}
-		exit.code = r.changeDir(ctx, "cd", path)
+		exit.code = r.cdBuiltin(ctx, args)
+		return exit
 	case "wait":
 		fp := flagParser{remaining: args}
 		for fp.more() {
@@ -366,44 +327,7 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		}
 		exit = r.builtin(ctx, pos, args[0], args[1:])
 	case "type":
-		anyNotFound := false
-		mode := shellTypeMode{}
-		fp := flagParser{remaining: args}
-		for fp.more() {
-			switch flag := fp.flag(); flag {
-			case "-a":
-				mode.all = true
-			case "-f":
-				mode.suppressFuncs = true
-			case "-p":
-				mode.output = shellTypeOutputPath
-			case "-P":
-				mode.output = shellTypeOutputForcePath
-			case "-t":
-				mode.output = shellTypeOutputKind
-			case "--help":
-				return failf(3, "command: NOT IMPLEMENTED\n")
-			default:
-				return failf(2, "command: invalid option %q\n", flag)
-			}
-		}
-		args := fp.args()
-		for _, arg := range args {
-			matches, found := r.typeMatches(ctx, arg, mode)
-			if !found {
-				if mode.output == shellTypeOutputVerbose {
-					r.errf("type: %s: not found\n", arg)
-				}
-				anyNotFound = true
-				continue
-			}
-			for _, match := range matches {
-				r.printTypeMatch(arg, match, mode)
-			}
-		}
-		if anyNotFound {
-			exit.code = 1
-		}
+		return r.typeBuiltin(ctx, args)
 	case "hash":
 		// TODO: implement. for now, having this as a no-op is better than nothing.
 	case "eval":
@@ -416,73 +340,7 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		r.stmts(ctx, file.Stmts)
 		exit = r.exit
 	case "source", ".":
-		if len(args) < 1 {
-			return failf(2, "%v: source: need filename\n", pos)
-		}
-		sourceName := args[0]
-		path, err := scriptFromPathDir(r.Dir, r.writeEnv, args[0])
-		if err != nil {
-			// If the script was not found in PATH or there was any error, pass
-			// the source path to the open handler so it has a chance to look
-			// at files it manages (eg: virtual filesystem), and also allow
-			// it to look for the sourced script in the current directory.
-			path = args[0]
-		} else if !strings.ContainsAny(args[0], `/\`) {
-			sourceName = path
-		}
-		f, err := r.open(ctx, path, os.O_RDONLY, 0, false)
-		if err != nil {
-			return failf(1, "source: %v\n", err)
-		}
-		defer f.Close()
-		p := syntax.NewParser()
-		file, err := p.Parse(f, sourceName)
-		if err != nil {
-			return failf(1, "source: %v\n", err)
-		}
-
-		// Keep the current versions of some fields we might modify.
-		oldParams := r.Params
-		oldSourceSetParams := r.sourceSetParams
-		oldInSource := r.inSource
-
-		// If we run "source file args...", set said args as parameters.
-		// Otherwise, keep the current parameters.
-		sourceArgs := len(args[1:]) > 0
-		if sourceArgs {
-			r.Params = args[1:]
-			r.sourceSetParams = false
-		}
-		// We want to track if the sourced file explicitly sets the
-		// parameters.
-		r.sourceSetParams = false
-		internal := r.currentInternal()
-		bashSource := sourceName
-		if internal {
-			bashSource = ""
-		}
-		restoreFrame := r.pushFrame(execFrame{
-			kind:       frameKindSource,
-			label:      "source",
-			execFile:   sourceName,
-			bashSource: bashSource,
-			callLine:   r.sourceCallLine(pos),
-			internal:   internal,
-		})
-		r.inSource = true // know that we're inside a sourced script.
-		r.stmts(ctx, file.Stmts)
-		restoreFrame()
-
-		// If we modified the parameters and the sourced file didn't
-		// explicitly set them, we restore the old ones.
-		if sourceArgs && !r.sourceSetParams {
-			r.Params = oldParams
-		}
-		r.sourceSetParams = oldSourceSetParams
-		r.inSource = oldInSource
-
-		exit = r.exit
-		exit.returning = false
+		return r.sourceBuiltin(ctx, pos, args)
 	case "[":
 		if len(args) == 0 || args[len(args)-1] != "]" {
 			return failf(2, "%v: [: missing matching ]\n", pos)
@@ -517,116 +375,16 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		r.exec(ctx, pos, args)
 		exit = r.exit
 	case "command":
-		show := false
-		fp := flagParser{remaining: args}
-		for fp.more() {
-			switch flag := fp.flag(); flag {
-			case "-v":
-				show = true
-			default:
-				return failf(2, "command: invalid option %q\n", flag)
-			}
-		}
-		args := fp.args()
-		if len(args) == 0 {
-			break
-		}
-		if !show {
-			if IsBuiltin(args[0]) {
-				return r.builtin(ctx, pos, args[0], args[1:])
-			}
-			r.exec(ctx, pos, args)
-			exit = r.exit
-			return exit
-		}
-		last := uint8(0)
-		for _, arg := range args {
-			last = 0
-			if r.Funcs[arg] != nil || IsBuiltin(arg) {
-				r.outf("%s\n", arg)
-			} else if path, err := LookPathDir(r.Dir, r.writeEnv, arg); err == nil {
-				r.outf("%s\n", path)
-			} else {
-				last = 1
-			}
-		}
-		exit.code = last
+		return r.commandBuiltin(ctx, pos, args)
 	case "dirs":
-		for i, dir := range slices.Backward(r.dirStack) {
-			r.outf("%s", dir)
-			if i > 0 {
-				r.out(" ")
-			}
-		}
-		r.out("\n")
+		exit.code = r.dirsBuiltin(args)
+		return exit
 	case "pushd":
-		change := true
-		if len(args) > 0 && args[0] == "-n" {
-			change = false
-			args = args[1:]
-		}
-		swap := func() string {
-			oldtop := r.dirStack[len(r.dirStack)-1]
-			top := r.dirStack[len(r.dirStack)-2]
-			r.dirStack[len(r.dirStack)-1] = top
-			r.dirStack[len(r.dirStack)-2] = oldtop
-			return top
-		}
-		switch len(args) {
-		case 0:
-			if !change {
-				break
-			}
-			if len(r.dirStack) < 2 {
-				return failf(1, "pushd: no other directory\n")
-			}
-			newtop := swap()
-			if code := r.changeDir(ctx, "pushd", newtop); code != 0 {
-				exit.code = code
-				return exit
-			}
-			r.builtin(ctx, syntax.Pos{}, "dirs", nil)
-		case 1:
-			if change {
-				if code := r.changeDir(ctx, "pushd", args[0]); code != 0 {
-					exit.code = code
-					return exit
-				}
-				r.dirStack = append(r.dirStack, r.Dir)
-			} else {
-				r.dirStack = append(r.dirStack, args[0])
-				swap()
-			}
-			r.builtin(ctx, syntax.Pos{}, "dirs", nil)
-		default:
-			return failf(2, "pushd: too many arguments\n")
-		}
+		exit.code = r.pushdBuiltin(ctx, args)
+		return exit
 	case "popd":
-		change := true
-		if len(args) > 0 && args[0] == "-n" {
-			change = false
-			args = args[1:]
-		}
-		switch len(args) {
-		case 0:
-			if len(r.dirStack) < 2 {
-				return failf(1, "popd: directory stack empty\n")
-			}
-			oldtop := r.dirStack[len(r.dirStack)-1]
-			r.dirStack = r.dirStack[:len(r.dirStack)-1]
-			if change {
-				newtop := r.dirStack[len(r.dirStack)-1]
-				if code := r.changeDir(ctx, "popd", newtop); code != 0 {
-					exit.code = code
-					return exit
-				}
-			} else {
-				r.dirStack[len(r.dirStack)-1] = oldtop
-			}
-			r.builtin(ctx, syntax.Pos{}, "dirs", nil)
-		default:
-			return failf(2, "popd: invalid argument\n")
-		}
+		exit.code = r.popdBuiltin(ctx, args)
+		return exit
 	case "return":
 		if !r.inFunc && !r.inSource {
 			return failf(1, "return: can only be done from a func or sourced script\n")
@@ -680,12 +438,8 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 
 		var line []byte
 		var err error
-		if silent {
-			// Note that on Windows, syscall.Stdin is of type uintptr.
-			line, err = term.ReadPassword(int(syscall.Stdin))
-		} else {
-			line, err = r.readLine(ctx, raw)
-		}
+		_ = silent
+		line, err = r.readLine(ctx, raw)
 		if readArray {
 			// read -a arrayname: split line into fields and assign to indexed array.
 			arrayName := shellReplyVar
@@ -1056,36 +810,698 @@ func (r *Runner) readLine(ctx context.Context, raw bool) ([]byte, error) {
 	}
 }
 
-func (r *Runner) changeDir(ctx context.Context, cmd, path string) uint8 {
-	path = cmp.Or(path, ".")
-	apath := r.absPath(path)
-	info, err := r.stat(ctx, apath)
-	if err != nil || !info.IsDir() {
-		r.errf("%s: no such file or directory: %q\n", cmd, path)
-		return 1
+func (r *Runner) pwdBuiltin(ctx context.Context, args []string) (exit exitStatus) {
+	logical := false
+	physical := false
+	for len(args) > 0 {
+		switch args[0] {
+		case "-L":
+			logical = true
+			physical = false
+		case "-P":
+			physical = true
+			logical = false
+		default:
+			r.errf("pwd: usage: pwd [-LP]\n")
+			exit.code = 2
+			return exit
+		}
+		args = args[1:]
 	}
-	if r.access(ctx, apath, access_X_OK) != nil {
-		r.errf("%s: permission denied: %q\n", cmd, path)
-		return 1
+	pwd, err := r.resolvePwd(ctx, logical, physical)
+	if err != nil {
+		exit.fatal(err)
+		return exit
 	}
-	r.Dir = apath
-	r.setVarString("OLDPWD", r.envGet("PWD"))
-	r.setVarString("PWD", apath)
+	r.outf("%s\n", pwd)
+	return exit
+}
+
+func (r *Runner) resolvePwd(ctx context.Context, logical, physical bool) (string, error) {
+	useLogical := logical || (!physical && r.envGet("POSIXLY_CORRECT") != "")
+	if physical || !useLogical {
+		return r.pwdPhysicalPath(ctx)
+	}
+	if candidate, ok := r.pwdLogicalPath(); ok {
+		return candidate, nil
+	}
+	return r.pwdPhysicalPath(ctx)
+}
+
+func (r *Runner) pwdLogicalPath() (string, bool) {
+	if candidate := r.envGet("PWD"); r.pwdLooksReasonable(candidate) {
+		return candidate, true
+	}
+	return "", false
+}
+
+func (r *Runner) pwdPhysicalPath(ctx context.Context) (string, error) {
+	return r.realpath(ctx, r.Dir)
+}
+
+func (r *Runner) pwdLooksReasonable(candidate string) bool {
+	if !path.IsAbs(candidate) {
+		return false
+	}
+	for piece := range strings.SplitSeq(candidate, "/") {
+		if piece == "." || piece == ".." {
+			return false
+		}
+	}
+	return r.pwdCandidateMatchesDir(candidate)
+}
+
+func (r *Runner) pwdCandidateMatchesDir(candidate string) bool {
+	if candidate == "" {
+		return false
+	}
+	if path.Clean(candidate) == r.Dir {
+		return true
+	}
+	candidateReal, err1 := r.realpath(context.Background(), candidate)
+	currentReal, err2 := r.realpath(context.Background(), r.Dir)
+	return err1 == nil && err2 == nil && candidateReal == currentReal
+}
+
+func (r *Runner) cdBuiltin(ctx context.Context, args []string) uint8 {
+	target := ""
+	show := false
+	switch len(args) {
+	case 0:
+		target = r.envGet("HOME")
+	case 1:
+		if args[0] == "--" {
+			target = r.envGet("HOME")
+		} else {
+			target = args[0]
+		}
+	case 2:
+		if args[0] != "--" {
+			r.errf("cd: usage: cd [dir]\n")
+			return 2
+		}
+		target = args[1]
+	default:
+		r.errf("cd: usage: cd [dir]\n")
+		return 2
+	}
+	if target == "-" {
+		target = r.envGet("OLDPWD")
+		show = true
+	}
+	code := r.changeDir(ctx, "cd", target)
+	if code == 0 && show {
+		r.outf("%s\n", r.envGet("PWD"))
+	}
+	return code
+}
+
+func (r *Runner) typeBuiltin(ctx context.Context, args []string) (exit exitStatus) {
+	anyNotFound := false
+	mode := shellTypeMode{}
+	fp := flagParser{remaining: args}
+	for fp.more() {
+		switch flag := fp.flag(); flag {
+		case "-a":
+			mode.all = true
+		case "-f":
+			mode.suppressFuncs = true
+		case "-p":
+			mode.output = shellTypeOutputPath
+		case "-P":
+			mode.output = shellTypeOutputForcePath
+		case "-t":
+			mode.output = shellTypeOutputKind
+		case "--help":
+			r.errf("command: NOT IMPLEMENTED\n")
+			exit.code = 3
+			return exit
+		default:
+			r.errf("command: invalid option %q\n", flag)
+			exit.code = 2
+			return exit
+		}
+	}
+	for _, arg := range fp.args() {
+		matches, found := r.typeMatches(ctx, arg, mode)
+		if !found {
+			if mode.output == shellTypeOutputVerbose {
+				r.errf("type: %s: not found\n", arg)
+			}
+			anyNotFound = true
+			continue
+		}
+		for _, match := range matches {
+			r.printTypeMatch(arg, match, mode)
+		}
+		if len(matches) == 0 && mode.output == shellTypeOutputKind {
+			r.errf("type: %s: not found\n", arg)
+			anyNotFound = true
+		}
+	}
+	if anyNotFound {
+		exit.code = 1
+	}
+	return exit
+}
+
+func (r *Runner) sourceBuiltin(ctx context.Context, pos syntax.Pos, args []string) (exit exitStatus) {
+	if len(args) < 1 {
+		r.errf("%v: source: need filename\n", pos)
+		exit.code = 2
+		return exit
+	}
+	sourceName := args[0]
+	sourcePath := args[0]
+	if !strings.ContainsRune(args[0], '/') {
+		if resolved, err := r.lookPath(ctx, r.Dir, r.writeEnv, args[0], false, false); err == nil {
+			sourcePath = resolved
+			sourceName = resolved
+		}
+	}
+	f, err := r.open(ctx, sourcePath, os.O_RDONLY, 0, false)
+	if err != nil {
+		r.errf("source: %v\n", err)
+		exit.code = 1
+		return exit
+	}
+	defer f.Close()
+	p := syntax.NewParser()
+	file, err := p.Parse(f, sourceName)
+	if err != nil {
+		r.errf("source: %v\n", err)
+		exit.code = 1
+		return exit
+	}
+
+	oldParams := r.Params
+	oldSourceSetParams := r.sourceSetParams
+	oldInSource := r.inSource
+
+	sourceArgs := len(args[1:]) > 0
+	if sourceArgs {
+		r.Params = args[1:]
+		r.sourceSetParams = false
+	}
+	r.sourceSetParams = false
+	internal := r.currentInternal()
+	bashSource := sourceName
+	if internal {
+		bashSource = ""
+	}
+	restoreFrame := r.pushFrame(execFrame{
+		kind:       frameKindSource,
+		label:      "source",
+		execFile:   sourceName,
+		bashSource: bashSource,
+		callLine:   r.sourceCallLine(pos),
+		internal:   internal,
+	})
+	r.inSource = true
+	r.stmts(ctx, file.Stmts)
+	restoreFrame()
+
+	if sourceArgs && !r.sourceSetParams {
+		r.Params = oldParams
+	}
+	r.sourceSetParams = oldSourceSetParams
+	r.inSource = oldInSource
+
+	exit = r.exit
+	exit.returning = false
+	return exit
+}
+
+func (r *Runner) commandBuiltin(ctx context.Context, pos syntax.Pos, args []string) (exit exitStatus) {
+	show := false
+	useDefaultPath := false
+	forcePath := false
+	fp := flagParser{remaining: args}
+	for fp.more() {
+		switch flag := fp.flag(); flag {
+		case "-v":
+			show = true
+		case "-p":
+			useDefaultPath = true
+		case "-P":
+			forcePath = true
+		default:
+			r.errf("command: invalid option %q\n", flag)
+			exit.code = 2
+			return exit
+		}
+	}
+	args = fp.args()
+	if len(args) == 0 {
+		return exit
+	}
+	if show {
+		last := uint8(0)
+		for _, arg := range args {
+			last = 0
+			if !forcePath && !useDefaultPath {
+				if r.Funcs[arg] != nil || IsBuiltin(arg) {
+					r.outf("%s\n", arg)
+					continue
+				}
+			}
+			if path, err := r.lookPath(ctx, r.Dir, r.writeEnv, arg, true, useDefaultPath); err == nil {
+				r.outf("%s\n", path)
+			} else {
+				last = 1
+			}
+		}
+		exit.code = last
+		return exit
+	}
+
+	restorePath := func() {}
+	if useDefaultPath {
+		restorePath = r.setTemporaryPath(defaultExecPath)
+		defer restorePath()
+	}
+	if !forcePath && !useDefaultPath && IsBuiltin(args[0]) {
+		return r.builtin(ctx, pos, args[0], args[1:])
+	}
+	r.exec(ctx, pos, args)
+	return r.exit
+}
+
+func (r *Runner) setTemporaryPath(pathValue string) func() {
+	prev := r.writeEnv.Get("PATH")
+	r.setVar("PATH", expand.Variable{Set: true, Kind: expand.String, Str: pathValue})
+	return func() {
+		_ = r.writeEnv.Set("PATH", prev)
+	}
+}
+
+func (r *Runner) dirsBuiltin(args []string) uint8 {
+	clear := false
+	long := false
+	printMode := false
+	verbose := false
+	indexArg := ""
+
+	for len(args) > 0 {
+		arg := args[0]
+		args = args[1:]
+		switch {
+		case arg == "--":
+			if len(args) > 0 {
+				r.dirsUsage()
+				return 2
+			}
+			args = nil
+		case isDirStackIndexToken(arg):
+			if indexArg != "" {
+				r.dirsUsage()
+				return 2
+			}
+			indexArg = arg
+		case strings.HasPrefix(arg, "+"):
+			r.errf("dirs: %s: invalid number\n", arg)
+			r.dirsUsage()
+			return 2
+		case strings.HasPrefix(arg, "-") && arg != "-":
+			for _, opt := range arg[1:] {
+				switch opt {
+				case 'c':
+					clear = true
+				case 'l':
+					long = true
+				case 'p':
+					printMode = true
+				case 'v':
+					verbose = true
+				default:
+					r.errf("dirs: %s: invalid number\n", arg)
+					r.dirsUsage()
+					return 2
+				}
+			}
+		case arg == "-":
+			r.errf("dirs: %s: invalid number\n", arg)
+			r.dirsUsage()
+			return 2
+		default:
+			r.dirsUsage()
+			return 2
+		}
+	}
+
+	if clear {
+		r.dirStack = append(r.dirStack[:0], r.Dir)
+		return 0
+	}
+
+	mode := "line"
+	if printMode {
+		mode = "print"
+	}
+	if verbose {
+		mode = "verbose"
+	}
+
+	if indexArg != "" {
+		idx, label, err := r.dirStackIndex(indexArg)
+		if err != nil {
+			r.errf("dirs: %s: invalid number\n", indexArg)
+			r.dirsUsage()
+			return 2
+		}
+		if len(r.dirStack) <= 1 && idx != 0 {
+			r.errf("dirs: directory stack empty\n")
+			return 1
+		}
+		if idx < 0 || idx >= len(r.dirStack) {
+			r.errf("dirs: %s: directory stack index out of range\n", label)
+			return 1
+		}
+		r.printDirStack([]int{idx}, mode, long)
+		return 0
+	}
+
+	indices := make([]int, len(r.dirStack))
+	for i := range indices {
+		indices[i] = i
+	}
+	r.printDirStack(indices, mode, long)
 	return 0
 }
 
-func absPath(dir, path string) string {
-	if path == "" {
-		return ""
+func (r *Runner) pushdBuiltin(ctx context.Context, args []string) uint8 {
+	noChdir := false
+	operand := ""
+	for len(args) > 0 {
+		arg := args[0]
+		args = args[1:]
+		switch {
+		case arg == "--":
+			break
+		case arg == "-n":
+			noChdir = true
+			continue
+		case isDirStackIndexToken(arg):
+			if operand != "" {
+				r.pushdUsage()
+				return 2
+			}
+			operand = arg
+			continue
+		case strings.HasPrefix(arg, "+"), strings.HasPrefix(arg, "-"):
+			r.errf("pushd: %s: invalid number\n", arg)
+			r.pushdUsage()
+			return 2
+		default:
+			if operand != "" {
+				r.pushdUsage()
+				return 2
+			}
+			operand = arg
+			continue
+		}
+		if len(args) > 1 {
+			r.pushdUsage()
+			return 2
+		}
+		if len(args) == 1 {
+			if operand != "" {
+				r.pushdUsage()
+				return 2
+			}
+			operand = args[0]
+		}
+		args = nil
 	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(dir, path)
+
+	oldCurrent := r.Dir
+	if operand == "" {
+		if noChdir {
+			return 0
+		}
+		if len(r.dirStack) <= 1 {
+			r.errf("pushd: no other directory\n")
+			return 1
+		}
+		operand = "+1"
 	}
-	return filepath.Clean(path) // TODO: this clean is likely unnecessary
+
+	if isDirStackIndexToken(operand) {
+		idx, _, err := r.dirStackIndex(operand)
+		if err != nil {
+			r.errf("pushd: %s: invalid number\n", operand)
+			r.pushdUsage()
+			return 2
+		}
+		if idx == 0 {
+			return r.dirsBuiltin(nil)
+		}
+		if len(r.dirStack) <= 1 {
+			r.errf("pushd: directory stack empty\n")
+			return 1
+		}
+		if idx < 0 || idx >= len(r.dirStack) {
+			r.errf("pushd: %s: directory stack index out of range\n", operand)
+			return 1
+		}
+		newStack := rotateDirStack(r.dirStack, idx)
+		if noChdir {
+			newStack[0] = oldCurrent
+			r.dirStack = newStack
+			return 0
+		}
+		next, code := r.resolveDir(ctx, "pushd", newStack[0])
+		if code != 0 {
+			return code
+		}
+		r.dirStack = newStack
+		r.setCurrentDir(next, oldCurrent)
+		return r.dirsBuiltin(nil)
+	}
+
+	if noChdir {
+		newStack := make([]string, 0, len(r.dirStack)+1)
+		newStack = append(newStack, r.dirStack[0], operand)
+		newStack = append(newStack, r.dirStack[1:]...)
+		r.dirStack = newStack
+		return r.dirsBuiltin(nil)
+	}
+
+	next, code := r.resolveDir(ctx, "pushd", operand)
+	if code != 0 {
+		return code
+	}
+	newStack := make([]string, 0, len(r.dirStack)+1)
+	newStack = append(newStack, next)
+	newStack = append(newStack, r.dirStack...)
+	r.dirStack = newStack
+	r.setCurrentDir(next, oldCurrent)
+	return r.dirsBuiltin(nil)
 }
 
-func (r *Runner) absPath(path string) string {
-	return absPath(r.Dir, path)
+func (r *Runner) popdBuiltin(ctx context.Context, args []string) uint8 {
+	noChdir := false
+	operand := "+0"
+	explicitOperand := false
+	for len(args) > 0 {
+		arg := args[0]
+		args = args[1:]
+		switch {
+		case arg == "--":
+			if len(args) > 0 {
+				r.popdUsage()
+				return 2
+			}
+			args = nil
+		case arg == "-n":
+			noChdir = true
+		case isDirStackIndexToken(arg):
+			if explicitOperand {
+				r.popdUsage()
+				return 2
+			}
+			operand = arg
+			explicitOperand = true
+		case strings.HasPrefix(arg, "+"), strings.HasPrefix(arg, "-"):
+			r.errf("popd: %s: invalid number\n", arg)
+			r.popdUsage()
+			return 2
+		default:
+			r.popdUsage()
+			return 2
+		}
+	}
+	if len(r.dirStack) <= 1 {
+		r.errf("popd: directory stack empty\n")
+		return 1
+	}
+	idx, _, err := r.dirStackIndex(operand)
+	if err != nil {
+		r.errf("popd: %s: invalid number\n", operand)
+		r.popdUsage()
+		return 2
+	}
+	if idx < 0 || idx >= len(r.dirStack) {
+		r.errf("popd: %s: directory stack index out of range\n", operand)
+		return 1
+	}
+
+	oldCurrent := r.Dir
+	newStack := removeDirStackIndex(r.dirStack, idx)
+	if noChdir {
+		newStack[0] = oldCurrent
+		r.dirStack = newStack
+	} else if idx == 0 {
+		next, code := r.resolveDir(ctx, "popd", newStack[0])
+		if code != 0 {
+			return code
+		}
+		r.dirStack = newStack
+		r.setCurrentDir(next, oldCurrent)
+	} else {
+		r.dirStack = newStack
+	}
+	return r.dirsBuiltin(nil)
+}
+
+func (r *Runner) changeDir(ctx context.Context, cmd, name string) uint8 {
+	next, code := r.resolveDir(ctx, cmd, name)
+	if code != 0 {
+		return code
+	}
+	r.setCurrentDir(next, r.Dir)
+	return 0
+}
+
+func (r *Runner) resolveDir(ctx context.Context, cmd, name string) (string, uint8) {
+	name = cmp.Or(name, ".")
+	apath := r.absPath(name)
+	info, err := r.stat(ctx, apath)
+	if err != nil {
+		r.errf("%s: %s: No such file or directory\n", cmd, name)
+		return "", 1
+	}
+	if !info.IsDir() {
+		r.errf("%s: %s: Not a directory\n", cmd, name)
+		return "", 1
+	}
+	if r.access(ctx, apath, access_X_OK) != nil {
+		r.errf("%s: %s: Permission denied\n", cmd, name)
+		return "", 1
+	}
+	return apath, 0
+}
+
+func (r *Runner) setCurrentDir(newDir, oldDir string) {
+	r.Dir = newDir
+	r.setVarString("OLDPWD", oldDir)
+	r.setVarString("PWD", newDir)
+	if len(r.dirStack) == 0 {
+		r.dirStack = append(r.dirStack, newDir)
+	} else {
+		r.dirStack[0] = newDir
+	}
+}
+
+func (r *Runner) realpath(ctx context.Context, name string) (string, error) {
+	return r.realpathHandler(r.handlerCtx(ctx, handlerKindRealpath, todoPos), absPath(r.Dir, name))
+}
+
+func (r *Runner) printDirStack(indices []int, mode string, long bool) {
+	switch mode {
+	case "verbose":
+		for _, idx := range indices {
+			r.outf("%2d  %s\n", idx, r.displayDir(r.dirStack[idx], long))
+		}
+	case "print":
+		for _, idx := range indices {
+			r.outf("%s\n", r.displayDir(r.dirStack[idx], long))
+		}
+	default:
+		for i, idx := range indices {
+			if i > 0 {
+				r.out(" ")
+			}
+			r.out(r.displayDir(r.dirStack[idx], long))
+		}
+		r.out("\n")
+	}
+}
+
+func (r *Runner) displayDir(dir string, long bool) string {
+	if long {
+		return dir
+	}
+	home := r.envGet("HOME")
+	switch {
+	case home == "":
+		return dir
+	case dir == home:
+		return "~"
+	case strings.HasPrefix(dir, home+"/"):
+		return "~" + strings.TrimPrefix(dir, home)
+	default:
+		return dir
+	}
+}
+
+func (r *Runner) dirsUsage()  { r.errf("dirs: usage: dirs [-clpv] [+N] [-N]\n") }
+func (r *Runner) pushdUsage() { r.errf("pushd: usage: pushd [-n] [+N | -N | dir]\n") }
+func (r *Runner) popdUsage()  { r.errf("popd: usage: popd [-n] [+N | -N]\n") }
+
+func isDirStackIndexToken(arg string) bool {
+	if len(arg) < 2 {
+		return false
+	}
+	if arg[0] != '+' && arg[0] != '-' {
+		return false
+	}
+	for _, r := range arg[1:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *Runner) dirStackIndex(arg string) (index int, label string, err error) {
+	n, err := strconv.Atoi(arg[1:])
+	if err != nil {
+		return 0, "", err
+	}
+	label = arg[1:]
+	if arg[0] == '+' {
+		return n, label, nil
+	}
+	return len(r.dirStack) - 1 - n, label, nil
+}
+
+func rotateDirStack(stack []string, index int) []string {
+	rotated := make([]string, 0, len(stack))
+	rotated = append(rotated, stack[index:]...)
+	rotated = append(rotated, stack[:index]...)
+	return rotated
+}
+
+func removeDirStackIndex(stack []string, index int) []string {
+	out := make([]string, 0, len(stack)-1)
+	out = append(out, stack[:index]...)
+	out = append(out, stack[index+1:]...)
+	return out
+}
+
+func absPath(dir, name string) string {
+	if name == "" {
+		return ""
+	}
+	if !path.IsAbs(name) {
+		name = path.Join(dir, name)
+	}
+	return path.Clean(name)
+}
+
+func (r *Runner) absPath(name string) string {
+	return absPath(r.Dir, name)
 }
 
 type shellTypeMode struct {

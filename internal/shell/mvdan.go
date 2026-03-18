@@ -89,20 +89,8 @@ type MVdan struct {
 	parserMu sync.Mutex
 }
 
-const hostRunnerDir = "/"
-const bootstrapProgramName = "<gbash-prelude>"
-
 var internalHelperCommands = map[string]struct{}{
-	"__jb_activate_new_top":  {},
-	"__jb_cd_resolve":        {},
-	"__jb_dirs_print_path":   {},
-	"__jb_dirs_usage":        {},
-	"__jb_popd_usage":        {},
-	"__jb_pushd_usage":       {},
-	"__jb_stack_parse_index": {},
-	"__jb_stack_remove":      {},
-	"__jb_stack_rotate":      {},
-	loopIterCommandName:      {},
+	loopIterCommandName: {},
 }
 
 func New() *MVdan {
@@ -196,12 +184,9 @@ func (m *MVdan) Run(ctx context.Context, exec *Execution) (result *RunResult, ru
 	cleanupProcSubst := withProcSubstScope(&effectiveExec)
 	defer cleanupProcSubst()
 
-	runner, err := interp.New(m.runnerOptions(&effectiveExec, budget)...)
+	runner, err := interp.NewVirtual(m.runnerConfig(&effectiveExec, budget), m.runnerOptions(&effectiveExec, budget)...)
 	if err != nil {
 		return nil, err
-	}
-	if err := m.bootstrapRunner(ctx, runner, &effectiveExec, budget); err != nil {
-		return &RunResult{FinalEnv: envMapFromVars(runner.Vars), ShellExited: runner.Exited()}, err
 	}
 	if err := applyRunnerParams(runner, effectiveExec.StartupOptions, effectiveExec.Args); err != nil {
 		return &RunResult{FinalEnv: envMapFromVars(runner.Vars), ShellExited: runner.Exited()}, err
@@ -239,7 +224,7 @@ func (m *MVdan) RunCommand(ctx context.Context, exec *Execution) (*RunResult, er
 	}
 
 	env := expand.ListEnviron(envPairs(finalEnv)...)
-	virtualWD := virtualDir(env, exec.Dir)
+	virtualWD := gbfs.Clean(exec.Dir)
 	resolved, ok, err := lookupCommand(ctx, exec, virtualWD, env, exec.Command[0])
 	if err != nil {
 		if policy.IsDenied(err) {
@@ -301,28 +286,46 @@ func (m *MVdan) RunCommand(ctx context.Context, exec *Execution) (*RunResult, er
 	return result, err
 }
 
+func (m *MVdan) runnerConfig(exec *Execution, budget *executionBudget) interp.VirtualConfig {
+	return interp.VirtualConfig{
+		Env:              expand.ListEnviron(envPairs(m.runnerEnv(exec))...),
+		Dir:              exec.Dir,
+		ExecHandler:      m.execHandler(exec, budget),
+		OpenHandler:      m.openHandler(exec),
+		ReadDirHandler2:  m.readDirHandler(exec),
+		StatHandler:      m.statHandler(exec),
+		RealpathHandler:  m.realpathHandler(exec),
+		ProcSubstHandler: m.procSubstHandler(exec),
+	}
+}
+
 func (m *MVdan) runnerOptions(exec *Execution, budget *executionBudget) []interp.RunnerOption {
+	if exec == nil {
+		exec = &Execution{}
+	}
 	options := []interp.RunnerOption{
-		interp.Env(expand.ListEnviron(envPairs(exec.Env)...)),
-		runnerDirOption(hostRunnerDir),
 		interp.StdIO(exec.Stdin, exec.Stdout, exec.Stderr),
-		interp.OpenHandler(m.openHandler(exec)),
-		interp.ReadDirHandler2(m.readDirHandler(exec)),
-		interp.StatHandler(m.statHandler(exec)),
 		interp.CallHandler(m.callHandler(exec, budget)),
-		interp.ExecHandlers(func(_ interp.ExecHandlerFunc) interp.ExecHandlerFunc {
-			return m.execHandler(exec, budget)
-		}),
-		interp.ProcSubstHandler(m.procSubstHandler(exec)),
 		interp.SyntheticPipelineSubshells(exec.pipelineSubshells),
 	}
-	if exec != nil && strings.TrimSpace(exec.ScriptPath) != "" {
+	if strings.TrimSpace(exec.ScriptPath) != "" {
 		options = append(options, interp.TopLevelScriptPath(exec.ScriptPath))
 	}
 	if exec.Interactive {
 		options = append(options, interp.Interactive(true))
 	}
 	return options
+}
+
+func (m *MVdan) runnerEnv(exec *Execution) map[string]string {
+	if exec == nil {
+		return nil
+	}
+	env := mergeEnv(nil, exec.Env)
+	if exec.HasVisiblePWD && strings.TrimSpace(exec.VisiblePWD) != "" {
+		env["PWD"] = exec.VisiblePWD
+	}
+	return env
 }
 
 func (m *MVdan) procSubstHandler(exec *Execution) interp.ProcSubstHandlerFunc {
@@ -403,7 +406,7 @@ func IsExitStatus(err error) bool {
 func (m *MVdan) openHandler(exec *Execution) interp.OpenHandlerFunc {
 	return func(ctx context.Context, name string, flag int, perm os.FileMode) (io.ReadWriteCloser, error) {
 		state := handlerState(ctx, exec)
-		abs := gbfs.Resolve(virtualDir(state.Env, state.Dir), name)
+		abs := gbfs.Resolve(state.Dir, name)
 
 		if canRead := flag&(os.O_WRONLY|os.O_RDWR) != os.O_WRONLY; canRead {
 			if err := allowPath(ctx, exec.Policy, exec.FS, policy.FileActionRead, abs); err != nil {
@@ -437,7 +440,7 @@ func (m *MVdan) openHandler(exec *Execution) interp.OpenHandlerFunc {
 func (m *MVdan) readDirHandler(exec *Execution) interp.ReadDirHandlerFunc2 {
 	return func(ctx context.Context, name string) ([]stdfs.DirEntry, error) {
 		state := handlerState(ctx, exec)
-		abs := gbfs.Resolve(virtualDir(state.Env, state.Dir), name)
+		abs := gbfs.Resolve(state.Dir, name)
 		if err := allowPath(ctx, exec.Policy, exec.FS, policy.FileActionReadDir, abs); err != nil {
 			recordPolicyDenied(exec.Trace, err, string(policy.FileActionReadDir), abs, "", "")
 			return nil, handlerPathError(ctx, state.Stderr, "readdir", abs, err)
@@ -448,15 +451,31 @@ func (m *MVdan) readDirHandler(exec *Execution) interp.ReadDirHandlerFunc2 {
 }
 
 func (m *MVdan) statHandler(exec *Execution) interp.StatHandlerFunc {
-	return func(ctx context.Context, name string, _ bool) (stdfs.FileInfo, error) {
+	return func(ctx context.Context, name string, followSymlinks bool) (stdfs.FileInfo, error) {
 		state := handlerState(ctx, exec)
-		abs := gbfs.Resolve(virtualDir(state.Env, state.Dir), name)
+		abs := gbfs.Resolve(state.Dir, name)
 		if err := allowPath(ctx, exec.Policy, exec.FS, policy.FileActionStat, abs); err != nil {
 			recordPolicyDenied(exec.Trace, err, string(policy.FileActionStat), abs, "", "")
 			return nil, handlerPathError(ctx, state.Stderr, "stat", abs, err)
 		}
 		recordFile(exec.Trace, string(policy.FileActionStat), abs)
-		return exec.FS.Stat(ctx, abs)
+		if followSymlinks {
+			return exec.FS.Stat(ctx, abs)
+		}
+		return exec.FS.Lstat(ctx, abs)
+	}
+}
+
+func (m *MVdan) realpathHandler(exec *Execution) interp.RealpathHandlerFunc {
+	return func(ctx context.Context, name string) (string, error) {
+		state := handlerState(ctx, exec)
+		abs := gbfs.Resolve(state.Dir, name)
+		if err := allowPath(ctx, exec.Policy, exec.FS, policy.FileActionStat, abs); err != nil {
+			recordPolicyDenied(exec.Trace, err, string(policy.FileActionStat), abs, "", "")
+			return "", handlerPathError(ctx, state.Stderr, "realpath", abs, err)
+		}
+		recordFile(exec.Trace, string(policy.FileActionStat), abs)
+		return exec.FS.Realpath(ctx, abs)
 	}
 }
 
@@ -477,7 +496,7 @@ func (m *MVdan) callHandler(exec *Execution, budget *executionBudget) interp.Cal
 		}
 		if !fromBootstrap {
 			commandInfo := traceCommandInfo(args, interp.IsBuiltin(args[0]), &commandTraceResolution{
-				Dir:      virtualDir(hc.Env, hc.Dir),
+				Dir:      hc.Dir,
 				Position: hc.Pos.String(),
 			})
 			recordCommand(exec.Trace, trace.EventCallExpanded, commandInfo)
@@ -511,7 +530,7 @@ func (m *MVdan) callHandler(exec *Execution, budget *executionBudget) interp.Cal
 
 func shouldRewriteBuiltin(name string) bool {
 	switch name {
-	case "true", "false":
+	case "true", "false", "pwd", "cd", "dirs", "pushd", "popd", "type", "command", "source", ".":
 		return false
 	default:
 		return true
@@ -589,7 +608,7 @@ func (m *MVdan) execHandler(exec *Execution, budget *executionBudget) interp.Exe
 		}
 
 		hc := interp.HandlerCtx(ctx)
-		virtualWD := virtualDir(hc.Env, hc.Dir)
+		virtualWD := hc.Dir
 		currentEnv := envMap(hc.Env)
 		internal := isInternalHelperCommand(args[0])
 		fromBootstrap := hc.Internal
@@ -811,33 +830,6 @@ func applyRunnerParams(runner *interp.Runner, startupOptions, args []string) err
 		return nil
 	}
 	return interp.Params(params...)(runner)
-}
-
-func (m *MVdan) bootstrapRunner(ctx context.Context, runner *interp.Runner, exec *Execution, budget *executionBudget) error {
-	if runner == nil {
-		return nil
-	}
-	bootstrap, err := m.Parse(bootstrapProgramName, withRuntimePrelude(exec.Dir, exec.VisiblePWD, exec.HasVisiblePWD, ""))
-	if err != nil {
-		return err
-	}
-	// The runtime shim is trusted internal code; user expansion limits are
-	// enforced against the parsed user program before prelude injection.
-	if invalid := validateInterpreterSafety(bootstrap); invalid != nil {
-		if exec.Stderr != nil {
-			_, _ = fmt.Fprintln(exec.Stderr, invalid.Error())
-		}
-		return interp.ExitStatus(2)
-	}
-	if err := instrumentLoopBudgets(bootstrap, exec.Policy); err != nil {
-		return err
-	}
-	if budget == nil {
-		return runner.RunInternal(ctx, bootstrap)
-	}
-	budget.disable()
-	defer budget.enable()
-	return runner.RunInternal(ctx, bootstrap)
 }
 
 func mergeEnv(base, override map[string]string) map[string]string {
@@ -1133,16 +1125,6 @@ func shellFailureToWriter(_ context.Context, stderr io.Writer, code int, format 
 	return interp.ExitStatus(code)
 }
 
-func virtualDir(env expand.Environ, dir string) string {
-	if internalPWD := strings.TrimSpace(env.Get("__JB_PWD").String()); strings.HasPrefix(internalPWD, "/") {
-		return gbfs.Clean(internalPWD)
-	}
-	if pwd := strings.TrimSpace(env.Get("PWD").String()); strings.HasPrefix(pwd, "/") {
-		return gbfs.Clean(pwd)
-	}
-	return gbfs.Clean(dir)
-}
-
 type resolvedHandlerState struct {
 	Env    expand.Environ
 	Dir    string
@@ -1171,489 +1153,6 @@ func optionalHandlerCtx(ctx context.Context) (_ interp.HandlerContext, ok bool) 
 		}
 	}()
 	return interp.HandlerCtx(ctx), true
-}
-
-func withRuntimePrelude(dir, visiblePWD string, hasVisiblePWD bool, script string) string {
-	const preludeTemplate = `
-__JB_PWD='%s'
-OLDPWD=$__JB_PWD
-%s
-__JB_DIR_STACK=( "$__JB_PWD" )
-export PWD OLDPWD __JB_PWD
-
-pwd() {
-	command /bin/pwd "$@"
-}
-
-__jb_dirs_usage() {
-	printf 'dirs: usage: dirs [-clpv] [+N] [-N]\n' >&2
-}
-
-__jb_pushd_usage() {
-	printf 'pushd: usage: pushd [-n] [+N | -N | dir]\n' >&2
-}
-
-__jb_popd_usage() {
-	printf 'popd: usage: popd [-n] [+N | -N]\n' >&2
-}
-
-__jb_dirs_print_path() {
-	__jb_dirs_path=$1
-	__jb_dirs_long=$2
-	if [ -n "$__jb_dirs_long" ] || [ -z "$HOME" ]; then
-		printf '%%s' "$__jb_dirs_path"
-		return
-	fi
-	case "$__jb_dirs_path" in
-		"$HOME")
-			printf '~'
-			;;
-		"$HOME"/*)
-			printf '~%%s' "${__jb_dirs_path#$HOME}"
-			;;
-		*)
-			printf '%%s' "$__jb_dirs_path"
-			;;
-	esac
-}
-
-__jb_stack_parse_index() {
-	__jb_stack_arg=$1
-	__jb_stack_command=$2
-	case "$__jb_stack_arg" in
-		+[0-9]*)
-			__jb_stack_index_label=${__jb_stack_arg#+}
-			__jb_stack_index=$__jb_stack_index_label
-			;;
-		-[0-9]*)
-			__jb_stack_index_label=${__jb_stack_arg#-}
-			__jb_stack_index=$(( ${#__JB_DIR_STACK[@]} - 1 - __jb_stack_index_label ))
-			;;
-		*)
-			printf '%%s: %%s: invalid number\n' "$__jb_stack_command" "$__jb_stack_arg" >&2
-			case "$__jb_stack_command" in
-				dirs)
-					__jb_dirs_usage
-					;;
-				pushd)
-					__jb_pushd_usage
-					;;
-				popd)
-					__jb_popd_usage
-					;;
-			esac
-			return 2
-			;;
-	esac
-	return 0
-}
-
-__jb_stack_rotate() {
-	__jb_stack_target=$1
-	__jb_new_stack=()
-	__jb_i=$__jb_stack_target
-	while [ "$__jb_i" -lt "${#__JB_DIR_STACK[@]}" ]; do
-		__jb_new_stack+=( "${__JB_DIR_STACK[$__jb_i]}" )
-		__jb_i=$((__jb_i + 1))
-	done
-	__jb_i=0
-	while [ "$__jb_i" -lt "$__jb_stack_target" ]; do
-		__jb_new_stack+=( "${__JB_DIR_STACK[$__jb_i]}" )
-		__jb_i=$((__jb_i + 1))
-	done
-}
-
-__jb_stack_remove() {
-	__jb_stack_target=$1
-	__jb_new_stack=()
-	__jb_i=0
-	while [ "$__jb_i" -lt "${#__JB_DIR_STACK[@]}" ]; do
-		if [ "$__jb_i" -ne "$__jb_stack_target" ]; then
-			__jb_new_stack+=( "${__JB_DIR_STACK[$__jb_i]}" )
-		fi
-		__jb_i=$((__jb_i + 1))
-	done
-}
-
-__jb_activate_new_top() {
-	__jb_activate_command=$1
-	__jb_activate_old=$2
-	__jb_activate_next="$(__jb_cd_resolve "$__jb_activate_old" "${__jb_new_stack[0]}" "$__jb_activate_command")" || return $?
-	__jb_new_stack[0]=$__jb_activate_next
-	__JB_DIR_STACK=( "${__jb_new_stack[@]}" )
-	OLDPWD=$__jb_activate_old
-	__JB_PWD=$__jb_activate_next
-	PWD=$__JB_PWD
-	export PWD OLDPWD __JB_PWD
-}
-
-dirs() {
-	__jb_dirs_clear=
-	__jb_dirs_long=
-	__jb_dirs_print=
-	__jb_dirs_verbose=
-	__jb_dirs_index_arg=
-
-	while [ "$#" -gt 0 ]; do
-		case "$1" in
-			--)
-				shift
-				break
-				;;
-			+[0-9]*|-[0-9]*)
-				if [ -n "$__jb_dirs_index_arg" ]; then
-					__jb_dirs_usage
-					return 2
-				fi
-				__jb_dirs_index_arg=$1
-				;;
-			+*)
-				printf 'dirs: %%s: invalid number\n' "$1" >&2
-				__jb_dirs_usage
-				return 2
-				;;
-			-[clpv]*)
-				__jb_dirs_arg=$1
-				__jb_optchars=${1#-}
-				while [ -n "$__jb_optchars" ]; do
-					__jb_opt=${__jb_optchars%%"${__jb_optchars#?}"}
-					__jb_optchars=${__jb_optchars#?}
-					case "$__jb_opt" in
-						c)
-							__jb_dirs_clear=1
-							;;
-						l)
-							__jb_dirs_long=1
-							;;
-						p)
-							__jb_dirs_print=1
-							;;
-						v)
-							__jb_dirs_verbose=1
-							;;
-						*)
-							printf 'dirs: %%s: invalid number\n' "$__jb_dirs_arg" >&2
-							__jb_dirs_usage
-							return 2
-							;;
-					esac
-				done
-				;;
-			-*)
-				printf 'dirs: %%s: invalid number\n' "$1" >&2
-				__jb_dirs_usage
-				return 2
-				;;
-			*)
-				__jb_dirs_usage
-				return 2
-				;;
-		esac
-		shift
-	done
-	if [ "$#" -gt 0 ]; then
-		__jb_dirs_usage
-		return 2
-	fi
-
-	if [ -n "$__jb_dirs_clear" ]; then
-		__JB_DIR_STACK=( "$__JB_PWD" )
-		return 0
-	fi
-
-	__jb_dirs_mode=line
-	if [ -n "$__jb_dirs_print" ]; then
-		__jb_dirs_mode=print
-	fi
-	if [ -n "$__jb_dirs_verbose" ]; then
-		__jb_dirs_mode=verbose
-	fi
-
-	if [ -n "$__jb_dirs_index_arg" ]; then
-		__jb_stack_parse_index "$__jb_dirs_index_arg" dirs || return $?
-		if [ "${#__JB_DIR_STACK[@]}" -le 1 ] && [ "$__jb_stack_index" -ne 0 ]; then
-			printf 'dirs: directory stack empty\n' >&2
-			return 1
-		fi
-		if [ "$__jb_stack_index" -lt 0 ] || [ "$__jb_stack_index" -ge "${#__JB_DIR_STACK[@]}" ]; then
-			printf 'dirs: %%s: directory stack index out of range\n' "$__jb_stack_index_label" >&2
-			return 1
-		fi
-		case "$__jb_dirs_mode" in
-			verbose)
-				printf '%%2d  ' "$__jb_stack_index"
-				__jb_dirs_print_path "${__JB_DIR_STACK[$__jb_stack_index]}" "$__jb_dirs_long"
-				printf '\n'
-				;;
-			print)
-				__jb_dirs_print_path "${__JB_DIR_STACK[$__jb_stack_index]}" "$__jb_dirs_long"
-				printf '\n'
-				;;
-			*)
-				__jb_dirs_print_path "${__JB_DIR_STACK[$__jb_stack_index]}" "$__jb_dirs_long"
-				printf '\n'
-				;;
-		esac
-		return 0
-	fi
-
-	__jb_i=0
-	while [ "$__jb_i" -lt "${#__JB_DIR_STACK[@]}" ]; do
-		case "$__jb_dirs_mode" in
-			verbose)
-				printf '%%2d  ' "$__jb_i"
-				__jb_dirs_print_path "${__JB_DIR_STACK[$__jb_i]}" "$__jb_dirs_long"
-				printf '\n'
-				;;
-			print)
-				__jb_dirs_print_path "${__JB_DIR_STACK[$__jb_i]}" "$__jb_dirs_long"
-				printf '\n'
-				;;
-			*)
-				if [ "$__jb_i" -gt 0 ]; then
-					printf ' '
-				fi
-				__jb_dirs_print_path "${__JB_DIR_STACK[$__jb_i]}" "$__jb_dirs_long"
-				;;
-		esac
-		__jb_i=$((__jb_i + 1))
-	done
-	if [ "$__jb_dirs_mode" = line ]; then
-		printf '\n'
-	fi
-}
-
-cd() {
-	old=$__JB_PWD
-	show=
-	case "$#" in
-		0)
-			target=$HOME
-			;;
-		1)
-			if [ "$1" = "--" ]; then
-				target=$HOME
-			else
-				target=$1
-			fi
-			;;
-		2)
-			if [ "$1" = "--" ]; then
-				target=$2
-			else
-				printf 'cd: usage: cd [dir]\n' >&2
-				return 2
-			fi
-			;;
-		*)
-			printf 'cd: usage: cd [dir]\n' >&2
-			return 2
-			;;
-	esac
-	if [ "$target" = "-" ]; then
-		target=$OLDPWD
-		show=1
-	fi
-	next="$(__jb_cd_resolve "$__JB_PWD" "$target" cd)" || return $?
-	OLDPWD=$old
-	__JB_PWD=$next
-	PWD=$next
-	__JB_DIR_STACK[0]=$next
-	export PWD OLDPWD __JB_PWD
-	if [ -n "$show" ]; then
-		printf '%%s\n' "$PWD"
-	fi
-}
-
-pushd() {
-	__jb_pushd_nochdir=
-	__jb_pushd_operand=
-
-	while [ "$#" -gt 0 ]; do
-		case "$1" in
-			--)
-				shift
-				break
-				;;
-			-n)
-				__jb_pushd_nochdir=1
-				;;
-			+[0-9]*|-[0-9]*)
-				if [ -n "$__jb_pushd_operand" ]; then
-					__jb_pushd_usage
-					return 2
-				fi
-				__jb_pushd_operand=$1
-				;;
-			+*)
-				printf 'pushd: %%s: invalid number\n' "$1" >&2
-				__jb_pushd_usage
-				return 2
-				;;
-			-*)
-				printf 'pushd: %%s: invalid number\n' "$1" >&2
-				__jb_pushd_usage
-				return 2
-				;;
-			*)
-				if [ -n "$__jb_pushd_operand" ]; then
-					__jb_pushd_usage
-					return 2
-				fi
-				__jb_pushd_operand=$1
-				;;
-		esac
-		shift
-	done
-	if [ "$#" -gt 1 ]; then
-		__jb_pushd_usage
-		return 2
-	fi
-	if [ "$#" -eq 1 ]; then
-		if [ -n "$__jb_pushd_operand" ]; then
-			__jb_pushd_usage
-			return 2
-		fi
-		__jb_pushd_operand=$1
-	fi
-
-	__jb_old_current=$__JB_PWD
-	if [ -z "$__jb_pushd_operand" ]; then
-		if [ "${#__JB_DIR_STACK[@]}" -le 1 ]; then
-			printf 'pushd: no other directory\n' >&2
-			return 1
-		fi
-		__jb_pushd_operand=+1
-	fi
-
-	case "$__jb_pushd_operand" in
-		+[0-9]*|-[0-9]*)
-			__jb_stack_parse_index "$__jb_pushd_operand" pushd || return $?
-			if [ "$__jb_stack_index" -eq 0 ]; then
-				dirs
-				return $?
-			fi
-			if [ "${#__JB_DIR_STACK[@]}" -le 1 ]; then
-				printf 'pushd: directory stack empty\n' >&2
-				return 1
-			fi
-			if [ "$__jb_stack_index" -lt 0 ] || [ "$__jb_stack_index" -ge "${#__JB_DIR_STACK[@]}" ]; then
-				printf 'pushd: %%s: directory stack index out of range\n' "$__jb_pushd_operand" >&2
-				return 1
-			fi
-			__jb_stack_rotate "$__jb_stack_index"
-			if [ -n "$__jb_pushd_nochdir" ]; then
-				__jb_new_stack[0]=$__jb_old_current
-				__JB_DIR_STACK=( "${__jb_new_stack[@]}" )
-				return 0
-			else
-				__jb_activate_new_top pushd "$__jb_old_current" || return $?
-			fi
-			dirs
-			return $?
-			;;
-	esac
-
-	if [ -n "$__jb_pushd_nochdir" ]; then
-		__jb_new_stack=( "${__JB_DIR_STACK[0]}" "$__jb_pushd_operand" )
-		__jb_i=1
-		while [ "$__jb_i" -lt "${#__JB_DIR_STACK[@]}" ]; do
-			__jb_new_stack+=( "${__JB_DIR_STACK[$__jb_i]}" )
-			__jb_i=$((__jb_i + 1))
-		done
-		__JB_DIR_STACK=( "${__jb_new_stack[@]}" )
-		dirs
-		return $?
-	fi
-
-	__jb_next="$(__jb_cd_resolve "$__JB_PWD" "$__jb_pushd_operand" pushd)" || return $?
-	__jb_new_stack=( "$__jb_next" )
-	__jb_i=0
-	while [ "$__jb_i" -lt "${#__JB_DIR_STACK[@]}" ]; do
-		__jb_new_stack+=( "${__JB_DIR_STACK[$__jb_i]}" )
-		__jb_i=$((__jb_i + 1))
-	done
-	__JB_DIR_STACK=( "${__jb_new_stack[@]}" )
-	OLDPWD=$__jb_old_current
-	__JB_PWD=$__jb_next
-	PWD=$__JB_PWD
-	export PWD OLDPWD __JB_PWD
-	dirs
-}
-
-popd() {
-	__jb_popd_nochdir=
-	__jb_popd_operand=+0
-	__jb_popd_operand_explicit=
-
-	while [ "$#" -gt 0 ]; do
-		case "$1" in
-			--)
-				shift
-				break
-				;;
-			-n)
-				__jb_popd_nochdir=1
-				;;
-			+[0-9]*|-[0-9]*)
-				if [ -n "$__jb_popd_operand_explicit" ]; then
-					__jb_popd_usage
-					return 2
-				fi
-				__jb_popd_operand=$1
-				__jb_popd_operand_explicit=1
-				;;
-			+*)
-				printf 'popd: %%s: invalid number\n' "$1" >&2
-				__jb_popd_usage
-				return 2
-				;;
-			-*)
-				printf 'popd: %%s: invalid number\n' "$1" >&2
-				__jb_popd_usage
-				return 2
-				;;
-			*)
-				__jb_popd_usage
-				return 2
-				;;
-		esac
-		shift
-	done
-	if [ "$#" -gt 0 ]; then
-		__jb_popd_usage
-		return 2
-	fi
-	if [ "${#__JB_DIR_STACK[@]}" -le 1 ]; then
-		printf 'popd: directory stack empty\n' >&2
-		return 1
-	fi
-
-	__jb_stack_parse_index "$__jb_popd_operand" popd || return $?
-	if [ "$__jb_stack_index" -lt 0 ] || [ "$__jb_stack_index" -ge "${#__JB_DIR_STACK[@]}" ]; then
-		printf 'popd: %%s: directory stack index out of range\n' "$__jb_popd_operand" >&2
-		return 1
-	fi
-
-	__jb_old_current=$__JB_PWD
-	__jb_stack_remove "$__jb_stack_index"
-	if [ -n "$__jb_popd_nochdir" ]; then
-		__jb_new_stack[0]=$__jb_old_current
-		__JB_DIR_STACK=( "${__jb_new_stack[@]}" )
-	elif [ "$__jb_stack_index" -eq 0 ]; then
-		__jb_activate_new_top popd "$__jb_old_current" || return $?
-	else
-		__JB_DIR_STACK=( "${__jb_new_stack[@]}" )
-	fi
-	dirs
-}
-`
-
-	pwdAssignment := "PWD=$__JB_PWD"
-	if hasVisiblePWD {
-		pwdAssignment = "PWD=" + shellSingleQuote(visiblePWD)
-	}
-	return fmt.Sprintf(preludeTemplate, shellSingleQuote(dir), pwdAssignment) + "\n" + script
 }
 
 type commandTraceResolution struct {
@@ -1829,20 +1328,6 @@ func (b *executionBudget) beforeLoopIteration(ctx context.Context, args []string
 		return nil
 	}
 	return shellFailure(ctx, 126, "%s loop: too many iterations (%d), increase policy.Limits.MaxLoopIterations", loopKind, b.maxLoopIterations)
-}
-
-func (b *executionBudget) disable() {
-	if b == nil {
-		return
-	}
-	b.disabled.Add(1)
-}
-
-func (b *executionBudget) enable() {
-	if b == nil {
-		return
-	}
-	b.disabled.Add(-1)
 }
 
 func isInternalHelperCommand(name string) bool {

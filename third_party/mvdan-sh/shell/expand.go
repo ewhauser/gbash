@@ -4,7 +4,6 @@
 package shell
 
 import (
-	"os"
 	"strings"
 
 	"github.com/ewhauser/gbash/third_party/mvdan-sh/expand"
@@ -15,9 +14,8 @@ import (
 // using env to resolve variables. This includes parameter expansion, arithmetic
 // expansion, and quote removal.
 //
-// If env is nil, the current environment variables are used. Empty variables
-// are treated as unset; to support variables which are set but empty, use the
-// [expand] package directly.
+// If env is nil, all variables are treated as unset. To support variables which
+// are set but empty, use the [expand] package directly.
 //
 // Other forms of expansion are not supported in this simple API, such as
 // command substitutions like $(echo foo). To support them, use the [expand] package.
@@ -29,10 +27,7 @@ func Expand(s string, env func(string) string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if env == nil {
-		env = os.Getenv
-	}
-	cfg := &expand.Config{Env: expand.FuncEnviron(env)}
+	cfg := &expand.Config{Env: shellExpandEnv(env)}
 	return expand.Document(cfg, word)
 }
 
@@ -40,9 +35,8 @@ func Expand(s string, env func(string) string) (string, error) {
 // using env to resolve variables. It is similar to Expand, but includes brace
 // expansion, tilde expansion, and word splitting.
 //
-// If env is nil, the current environment variables are used. Empty variables
-// are treated as unset; to support variables which are set but empty, use the
-// [expand] package directly.
+// If env is nil, all variables are treated as unset. To support variables which
+// are set but empty, use the [expand] package directly.
 //
 // Other forms of expansion are not supported in this simple API, such as
 // globbing and command substitutions like $(echo foo).
@@ -58,9 +52,13 @@ func Fields(s string, env func(string) string) ([]string, error) {
 		}
 		words = append(words, w)
 	}
-	if env == nil {
-		env = os.Getenv
-	}
-	cfg := &expand.Config{Env: expand.FuncEnviron(env)}
+	cfg := &expand.Config{Env: shellExpandEnv(env)}
 	return expand.Fields(cfg, words...)
+}
+
+func shellExpandEnv(env func(string) string) expand.Environ {
+	if env != nil {
+		return expand.FuncEnviron(env)
+	}
+	return expand.FuncEnviron(func(string) string { return "" })
 }

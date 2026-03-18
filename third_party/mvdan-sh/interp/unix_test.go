@@ -82,6 +82,7 @@ func TestRunnerTerminalStdIO(t *testing.T) {
 }
 
 func TestRunnerTerminalExec(t *testing.T) {
+	t.Skip("host TTY exec coverage removed with virtual-only runner")
 	t.Parallel()
 	tests := []struct {
 		name  string
