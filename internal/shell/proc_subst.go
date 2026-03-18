@@ -5,7 +5,6 @@ import (
 	crand "crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"io"
 	stdfs "io/fs"
 	"os"
 	"path"
@@ -46,11 +45,11 @@ type procSubstEntry struct {
 	mode      stdfs.FileMode
 	modTime   time.Time
 	direction procSubstDirection
-	// pipeReader and pipeWriter form an in-memory virtual pipe.
+	// pipeReader and pipeWriter form a buffered in-memory virtual pipe.
 	// For CmdIn (read): consumer reads from pipeReader, subprocess writes to pipeWriter.
 	// For CmdOut (write): consumer writes to pipeWriter, subprocess reads from pipeReader.
-	pipeReader *io.PipeReader
-	pipeWriter *io.PipeWriter
+	pipeReader *bufferedPipeReader
+	pipeWriter *bufferedPipeWriter
 	manager    *procSubstManager
 
 	mu     sync.Mutex
@@ -64,8 +63,8 @@ type procSubstFS struct {
 
 type procSubstFile struct {
 	entry  *procSubstEntry
-	reader io.ReadCloser
-	writer io.WriteCloser
+	reader *bufferedPipeReader
+	writer *bufferedPipeWriter
 	closed atomic.Bool
 }
 
@@ -117,8 +116,10 @@ func (m *procSubstManager) endpoint(ctx context.Context, ps *syntax.ProcSubst) (
 		return nil, err
 	}
 
-	// Create an in-memory virtual pipe instead of an OS pipe.
-	pipeReader, pipeWriter := io.Pipe()
+	// Create a buffered in-memory virtual pipe instead of an OS pipe.
+	// The buffer allows writes to proceed without blocking (up to buffer size),
+	// matching OS pipe semantics while avoiding host kernel resources.
+	pipeReader, pipeWriter := newBufferedPipe()
 
 	entry := &procSubstEntry{
 		path:       procSubstPath,
