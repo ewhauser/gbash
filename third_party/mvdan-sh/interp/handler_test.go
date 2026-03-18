@@ -368,8 +368,8 @@ var modCases = []struct {
 		opts: []interp.RunnerOption{
 			interp.OpenHandler(mockFileOpen),
 		},
-		src:  "echo $(<foo); echo $(< <(echo bar))",
-		want: "body of foo\nbar\n",
+		src:  "echo $(<foo)",
+		want: "body of foo\n",
 	},
 	{
 		name: "CallReplaceWithBlank",

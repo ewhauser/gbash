@@ -29,10 +29,7 @@ func Expand(s string, env func(string) string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if env == nil {
-		env = os.Getenv
-	}
-	cfg := &expand.Config{Env: expand.FuncEnviron(env)}
+	cfg := &expand.Config{Env: shellExpandEnv(env)}
 	return expand.Document(cfg, word)
 }
 
@@ -58,9 +55,13 @@ func Fields(s string, env func(string) string) ([]string, error) {
 		}
 		words = append(words, w)
 	}
-	if env == nil {
-		env = os.Getenv
-	}
-	cfg := &expand.Config{Env: expand.FuncEnviron(env)}
+	cfg := &expand.Config{Env: shellExpandEnv(env)}
 	return expand.Fields(cfg, words...)
+}
+
+func shellExpandEnv(env func(string) string) expand.Environ {
+	if env != nil {
+		return expand.FuncEnviron(env)
+	}
+	return expand.ListEnviron(os.Environ()...)
 }
