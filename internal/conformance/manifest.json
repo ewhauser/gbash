@@ -334,10 +334,6 @@
           "mode": "xfail",
           "reason": "the [[ parser still rejects operator tokens like ; and & after =~ earlier than bash, so the conditional parse diagnostics and status flow diverge"
         },
-        "oils/regex.test.sh::Fatal error inside [[ =~ ]]": {
-          "mode": "xfail",
-          "reason": "arithmetic expansion errors inside [[ =~ ]] now return status 1, but stderr text still differs from bash"
-        },
         "oils/regex.test.sh::Malformed regex": {
           "mode": "xfail",
           "reason": "malformed regex conditionals still surface parser errors from mvdan/sh rather than bash's conditional-expression diagnostics"
