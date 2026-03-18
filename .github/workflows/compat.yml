@@ -27,18 +27,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
-        with:
-          go-version-file: go.mod
-
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-        with:
-          run_install: false
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          cache: pnpm
-          node-version: "20"
+      - uses: cachix/install-nix-action@v30
 
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
         id: pages
@@ -70,7 +59,7 @@ jobs:
         run: |
           set +e
           if [ -f "$RESULTS_DIR/summary.json" ]; then
-            go run ./scripts/compat-report --summary "$RESULTS_DIR/summary.json" --output "$RESULTS_DIR"
+            nix develop -c go run ./scripts/compat-report --summary "$RESULTS_DIR/summary.json" --output "$RESULTS_DIR"
           fi
           exit 0
 
@@ -105,7 +94,7 @@ jobs:
 
           (
             cd "$RELEASED_SOURCE"
-            pnpm install --frozen-lockfile
+            nix develop -c pnpm install --frozen-lockfile
           )
 
           GBASH_WEBSITE_COMPAT_SUMMARY_PATH="$summary_path" \
@@ -149,7 +138,7 @@ jobs:
           summary_path="$PWD/$RESULTS_DIR/summary.json"
           badge_path="$PWD/$RESULTS_DIR/badge.svg"
 
-          pnpm install --frozen-lockfile
+          nix develop -c pnpm install --frozen-lockfile
           GBASH_WEBSITE_COMPAT_SUMMARY_PATH="$summary_path" \
           GBASH_WEBSITE_COMPAT_BADGE_PATH="$badge_path" \
           ./scripts/export_website_pages.sh "$PWD" "$PAGES_ROOT"
