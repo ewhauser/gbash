@@ -131,7 +131,7 @@ func encodeValue(val reflect.Value) (reflect.Value, string) {
 		if val.String() != "" {
 			return val, ""
 		}
-	case reflect.Uint32:
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		if val.Uint() != 0 {
 			return val, ""
 		}

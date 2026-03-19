@@ -85,3 +85,26 @@ func TestRoundtrip(t *testing.T) {
 		})
 	}
 }
+
+func TestEncodeSubscriptKind(t *testing.T) {
+	t.Parallel()
+
+	node := &syntax.Subscript{
+		Kind: syntax.SubscriptStar,
+		Expr: &syntax.Word{Parts: []syntax.WordPart{
+			&syntax.Lit{Value: "*"},
+		}},
+	}
+
+	var buf bytes.Buffer
+	err := typedjson.Encode(&buf, node)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.IsTrue(buf.Len() > 0))
+
+	decoded, err := typedjson.Decode(bytes.NewReader(buf.Bytes()))
+	qt.Assert(t, qt.IsNil(err))
+
+	sub, ok := decoded.(*syntax.Subscript)
+	qt.Assert(t, qt.IsTrue(ok))
+	qt.Assert(t, qt.Equals(sub.Kind, syntax.SubscriptStar))
+}
