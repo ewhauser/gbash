@@ -69,6 +69,28 @@ func parseCommandWord(t *testing.T, src string) *syntax.Word {
 	return call.Args[1]
 }
 
+func parseCondPattern(t *testing.T, src string) *syntax.Pattern {
+	t.Helper()
+	p := syntax.NewParser()
+	file, err := p.Parse(strings.NewReader("[[ foo == "+src+" ]]\n"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tc, ok := file.Stmts[0].Cmd.(*syntax.TestClause)
+	if !ok {
+		t.Fatalf("unexpected parse shape for %q", src)
+	}
+	bin, ok := tc.X.(*syntax.CondBinary)
+	if !ok {
+		t.Fatalf("unexpected conditional shape for %q", src)
+	}
+	pat, ok := bin.Y.(*syntax.CondPattern)
+	if !ok {
+		t.Fatalf("unexpected pattern operand for %q", src)
+	}
+	return pat.Pattern
+}
+
 func TestConfigNils(t *testing.T) {
 	os.Setenv("EXPAND_GLOBAL", "value")
 	tests := []struct {
@@ -135,6 +157,41 @@ func TestFieldsIdempotency(t *testing.T) {
 				t.Fatalf("wanted %q, got %q", tc.want, got)
 			}
 		}
+	}
+}
+
+func TestPatternASTExpansionPreservesPatternOperators(t *testing.T) {
+	t.Parallel()
+
+	pat := parseCondPattern(t, `foo@(b*(c|d))"$quoted"[0-9]?`)
+	got, err := Pattern(&Config{
+		Env: testEnv{
+			"quoted": {Set: true, Kind: String, Str: "*"},
+		},
+	}, pat)
+	if err != nil {
+		t.Fatalf("did not want error, got %v", err)
+	}
+	const want = `foo@(b*(c|d))\*[0-9]?`
+	if got != want {
+		t.Fatalf("wanted %q, got %q", want, got)
+	}
+}
+
+func TestLiteralParameterPatternOperatorsUsePatternAST(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `${value##?(foo)bar}`)
+	got, err := Literal(&Config{
+		Env: testEnv{
+			"value": {Set: true, Kind: String, Str: "foobar"},
+		},
+	}, word)
+	if err != nil {
+		t.Fatalf("did not want error, got %v", err)
+	}
+	if got != "" {
+		t.Fatalf("wanted empty string, got %q", got)
 	}
 }
 
