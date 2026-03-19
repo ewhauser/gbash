@@ -1075,16 +1075,17 @@ func (r *Runner) trapCallback(ctx context.Context, callback, name string) {
 	r.handlingTrap = true
 
 	oldExit := r.exit
-	if err := r.runShellReader(ctx, strings.NewReader(callback), name+" trap", nil); err != nil {
-		r.errf(name+"trap: %v\n", err)
-		// ignore errors in the callback
-		r.exit = oldExit
+	defer func() {
+		r.exit = oldExit // traps on EXIT or ERR should not modify the result
 		r.handlingTrap = false
-		return
-	}
-	r.exit = oldExit // traps on EXIT or ERR should not modify the result
+	}()
 
-	r.handlingTrap = false
+	if err := r.runShellReader(ctx, strings.NewReader(callback), name+" trap", nil); err != nil {
+		var status ExitStatus
+		if !errors.As(err, &status) {
+			r.errf(name+"trap: %v\n", err)
+		}
+	}
 }
 
 func (r *Runner) aliasResolver(name string) (syntax.AliasSpec, bool) {

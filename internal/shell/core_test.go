@@ -39,6 +39,42 @@ func TestCoreRunExpandsAliasesAcrossCompleteCommands(t *testing.T) {
 	}
 }
 
+func TestCoreRunAliasTrailingBlankDoesNotReachRedirectionTargets(t *testing.T) {
+	t.Parallel()
+
+	registry := newShellTestRegistry(t)
+	fsys := newShellTestFS(t, "echo", "printf", "test")
+	var stdout strings.Builder
+
+	result, err := Run(context.Background(), &Execution{
+		Script: strings.Join([]string{
+			"shopt -s expand_aliases",
+			"alias pre='echo '",
+			"alias target='bad'",
+			"pre > target",
+			"test -f target",
+			`printf 'target=%d\n' "$?"`,
+			"test -f bad",
+			`printf 'bad=%d\n' "$?"`,
+			"",
+		}, "\n"),
+		Env:      map[string]string{"PATH": "/bin"},
+		Registry: registry,
+		FS:       fsys,
+		Stdout:   &stdout,
+		Stderr:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := stdout.String(), "target=0\nbad=1\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if result.ShellExited {
+		t.Fatalf("ShellExited = true, want false")
+	}
+}
+
 func TestCoreRunPreservesLineContinuationsAcrossChunks(t *testing.T) {
 	t.Parallel()
 

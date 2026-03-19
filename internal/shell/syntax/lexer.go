@@ -236,10 +236,10 @@ func (p *Parser) nextKeepSpaces() {
 		if p.expandCommandAlias() {
 			return
 		}
-		switch p.tok {
-		case _Lit, _LitWord:
-			p.aliasBlankNext = false
-		}
+		// A trailing-blank alias only grants one more token the chance to
+		// expand as a command alias. Any non-space token consumes that chance,
+		// even when the token itself cannot be alias-expanded.
+		p.aliasBlankNext = false
 	}
 }
 
@@ -425,10 +425,10 @@ skipSpace:
 		if p.expandCommandAlias() {
 			return
 		}
-		switch p.tok {
-		case _Lit, _LitWord:
-			p.aliasBlankNext = false
-		}
+		// A trailing-blank alias only grants one more token the chance to
+		// expand as a command alias. Any non-space token consumes that chance,
+		// even when the token itself cannot be alias-expanded.
+		p.aliasBlankNext = false
 	}
 }
 

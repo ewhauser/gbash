@@ -70,12 +70,21 @@ func (r *Runner) runChunked(ctx context.Context, reader io.Reader, name, topLeve
 		restoreFrame = nil
 		framePushed = false
 	}
+	finish := func(err error) error {
+		popFrame()
+		if runExitTrap {
+			r.trapCallback(ctx, r.callbackExit, "exit")
+		}
+		if err != nil {
+			return err
+		}
+		return r.currentRunError()
+	}
 
 	for {
 		line, readErr := input.ReadString('\n')
 		if readErr != nil && readErr != io.EOF {
-			popFrame()
-			return readErr
+			return finish(readErr)
 		}
 		if line == "" && readErr == io.EOF && pending.Len() == 0 {
 			break
@@ -97,8 +106,7 @@ func (r *Runner) runChunked(ctx context.Context, reader io.Reader, name, topLeve
 			if chunkParseIncomplete(err, parser) && readErr != io.EOF {
 				continue
 			}
-			popFrame()
-			return shiftChunkError(err, chunkStartOffset, chunkStartLine)
+			return finish(shiftChunkError(err, chunkStartOffset, chunkStartLine))
 		}
 		shiftChunkPositions(file, chunkStartOffset, chunkStartLine)
 		if len(file.Stmts) == 0 {
@@ -114,8 +122,7 @@ func (r *Runner) runChunked(ctx context.Context, reader io.Reader, name, topLeve
 			var transformErr error
 			synthetic, transformErr = transform(file)
 			if transformErr != nil {
-				popFrame()
-				return transformErr
+				return finish(transformErr)
 			}
 		}
 
@@ -132,8 +139,7 @@ func (r *Runner) runChunked(ctx context.Context, reader io.Reader, name, topLeve
 		if err != nil {
 			var status ExitStatus
 			if !errors.As(err, &status) {
-				popFrame()
-				return err
+				return finish(err)
 			}
 		}
 		if r.Exited() || readErr == io.EOF {
@@ -141,11 +147,7 @@ func (r *Runner) runChunked(ctx context.Context, reader io.Reader, name, topLeve
 		}
 	}
 
-	popFrame()
-	if runExitTrap {
-		r.trapCallback(ctx, r.callbackExit, "exit")
-	}
-	return r.currentRunError()
+	return finish(nil)
 }
 
 func chunkParseIncomplete(err error, parser *syntax.Parser) bool {
