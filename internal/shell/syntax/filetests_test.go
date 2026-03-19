@@ -4880,6 +4880,28 @@ var fileTests = []fileTestCase{
 	),
 	fileTest(
 		[]string{
+			"declare -A foo=([x]=y [z]+=q)",
+			"declare -A foo=([x]= y [z]+= q)",
+		},
+		langFile(&DeclClause{
+			Variant: lit("declare"),
+			Operands: declOperands(
+				declFlag("-A"),
+				declAssign(&Assign{
+					Ref: ref("foo", nil),
+					Array: &ArrayExpr{
+						Mode: ArrayExprAssociative,
+						Elems: []*ArrayElem{
+							arrKeyed(subWord("x"), litWord("y")),
+							arrKeyedAppend(subWord("z"), litWord("q")),
+						},
+					},
+				}),
+			),
+		}, LangBash),
+	),
+	fileTest(
+		[]string{
 			"a=([x]= [y]=)",
 			"a=(\n[x]=\n[y]=\n)",
 		},

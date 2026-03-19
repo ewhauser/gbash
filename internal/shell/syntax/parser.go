@@ -604,6 +604,9 @@ type Parser struct {
 	aliasActive     map[string]int
 	aliasSource     *AliasExpansion
 	tokAliasChain   []*AliasExpansion
+
+	declArrayMode    ArrayExprMode
+	declArrayModeSet bool
 }
 
 type aliasInputState struct {
@@ -660,6 +663,8 @@ func (p *Parser) reset() {
 	p.aliasInputStack = p.aliasInputStack[:0]
 	p.aliasSource = nil
 	p.tokAliasChain = nil
+	p.declArrayMode = ArrayExprInherit
+	p.declArrayModeSet = false
 	if p.aliasActive != nil {
 		clear(p.aliasActive)
 	}
@@ -779,18 +784,26 @@ const (
 )
 
 type saveState struct {
-	quote       quoteState
-	buriedHdocs int
+	quote            quoteState
+	buriedHdocs      int
+	declArrayMode    ArrayExprMode
+	declArrayModeSet bool
 }
 
 func (p *Parser) preNested(quote quoteState) (s saveState) {
 	s.quote, s.buriedHdocs = p.quote, p.buriedHdocs
+	s.declArrayMode, s.declArrayModeSet = p.declArrayMode, p.declArrayModeSet
 	p.buriedHdocs, p.quote = len(p.heredocs), quote
+	if quote != arrayElems {
+		p.declArrayMode = ArrayExprInherit
+		p.declArrayModeSet = false
+	}
 	return s
 }
 
 func (p *Parser) postNested(s saveState) {
 	p.quote, p.buriedHdocs = s.quote, s.buriedHdocs
+	p.declArrayMode, p.declArrayModeSet = s.declArrayMode, s.declArrayModeSet
 }
 
 func aliasEndsWithBlank(src string) bool {
@@ -2706,6 +2719,9 @@ func (p *Parser) finishAssign(as *Assign) *Assign {
 			// For explicit [key]= and [key]+= elements, a spaced word starts
 			// the next array element rather than extending the current value.
 			spacedNextElem := ae.Index != nil && p.spaced
+			if p.declArrayModeSet && p.declArrayMode == ArrayExprAssociative {
+				spacedNextElem = false
+			}
 			if !spacedNextElem {
 				ae.Value = p.getWord()
 			}
@@ -3889,8 +3905,13 @@ func (p *Parser) testExprUnary() TestExpr {
 func (p *Parser) declClause(s *Stmt) {
 	ds := &DeclClause{Variant: p.lit(p.pos, p.val)}
 	arrayMode := ArrayExprInherit
+	oldDeclArrayMode, oldDeclArrayModeSet := p.declArrayMode, p.declArrayModeSet
+	defer func() {
+		p.declArrayMode, p.declArrayModeSet = oldDeclArrayMode, oldDeclArrayModeSet
+	}()
 	p.next()
 	for !p.stopToken() && !p.peekRedir() {
+		p.declArrayMode, p.declArrayModeSet = arrayMode, true
 		if op := p.declOperand(); op != nil {
 			switch op := op.(type) {
 			case *DeclFlag:
