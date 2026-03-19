@@ -166,6 +166,8 @@ func parseODMatches(inv *Invocation, matches *ParsedCommand) (odOptions, error) 
 		lineBytes: 16,
 		radix:     odRadixOctal,
 	}
+	formatValues := matches.Values("format")
+	formatIndex := 0
 
 	for _, name := range matches.OptionOrder() {
 		switch name {
@@ -207,10 +209,14 @@ func parseODMatches(inv *Invocation, matches *ParsedCommand) (odOptions, error) 
 				opts.stringMinLength = &n
 			}
 		case "format":
-			formats, err := parseODTypeString(matches.Value(name))
+			if formatIndex >= len(formatValues) {
+				return odOptions{}, exitf(inv, 1, "od: missing format specification")
+			}
+			formats, err := parseODTypeString(formatValues[formatIndex])
 			if err != nil {
 				return odOptions{}, exitf(inv, 1, "od: %v", err)
 			}
+			formatIndex++
 			opts.formats = append(opts.formats, formats...)
 			opts.offsetParsingOff = true
 		case "output-duplicates":
@@ -715,22 +721,18 @@ func newODOutputInfo(lineBytes int, formats []odFormat, outputDuplicates bool) o
 			blockSize = format.byteSize
 		}
 	}
-	blockWidth := 1
-	for _, format := range formats {
-		width := format.printWidth * (blockSize / format.byteSize)
-		if width > blockWidth {
-			blockWidth = width
-		}
-	}
-
 	out := odOutputInfo{
 		lineBytes:        lineBytes,
-		printWidthLine:   blockWidth * (lineBytes / blockSize),
+		printWidthLine:   1,
 		byteSizeBlock:    blockSize,
 		outputDuplicates: outputDuplicates,
 		formats:          make([]odSpacedFormat, 0, len(formats)),
 	}
 	for _, format := range formats {
+		blockWidth := format.printWidth * (blockSize / format.byteSize)
+		if width := blockWidth * (lineBytes / blockSize); width > out.printWidthLine {
+			out.printWidthLine = width
+		}
 		out.formats = append(out.formats, odSpacedFormat{
 			format:       format,
 			spacing:      odAlignment(format, blockSize, blockWidth),

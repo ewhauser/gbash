@@ -65,6 +65,7 @@ func (r *Runner) fillExpandConfig(ctx context.Context) {
 				return err
 			}
 			r2 := r.subshell(false)
+			r2.opts[optVerbose] = false
 			r2.stdout = w
 			r2.stmts(ctx, cs.Stmts)
 			r2.exit.exiting = false // subshells don't exit the parent shell
@@ -407,7 +408,53 @@ func (r *Runner) stmt(ctx context.Context, st *syntax.Stmt) {
 	r.lastExit = r.exit
 }
 
+func (r *Runner) sourceForNode(node syntax.Node) string {
+	if node == nil || r.currentChunkSource == "" {
+		return ""
+	}
+	startOffset := node.Pos().Offset()
+	endOffset := node.End().Offset()
+	if endOffset < startOffset || startOffset < r.currentChunkSourceBase {
+		return ""
+	}
+	start := int(startOffset - r.currentChunkSourceBase)
+	end := int(endOffset - r.currentChunkSourceBase)
+	if start < 0 || end < start || end > len(r.currentChunkSource) {
+		return ""
+	}
+	return r.currentChunkSource[start:end]
+}
+
+func (r *Runner) verboseStmtSource(st *syntax.Stmt) string {
+	src := r.sourceForNode(st)
+	if src == "" {
+		return ""
+	}
+	end := int(st.End().Offset() - r.currentChunkSourceBase)
+	if end >= 0 && end < len(r.currentChunkSource) && r.currentChunkSource[end] == '\n' {
+		src += "\n"
+	}
+	return src
+}
+
+func (r *Runner) printVerbose(st *syntax.Stmt) {
+	if !r.opts[optVerbose] {
+		return
+	}
+	src := r.verboseStmtSource(st)
+	if src == "" {
+		return
+	}
+	if !strings.HasSuffix(src, "\n") {
+		src += "\n"
+	}
+	io.WriteString(r.stderr, src)
+}
+
 func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
+	if r.currentChunkSource == "" {
+		r.printVerbose(st)
+	}
 	oldIn, oldOut, oldErr := r.stdin, r.stdout, r.stderr
 	procSubstStart := len(r.bgProcs)
 	closers := make([]io.Closer, 0, len(st.Redirs))
@@ -720,6 +767,20 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 	case *syntax.FuncDecl:
 		r.setFunc(cm.Name.Value, cm.Body)
 	case *syntax.ArithmCmd:
+		if tracingEnabled {
+			if src := r.sourceForNode(cm); src != "" {
+				if strings.HasPrefix(src, "((") && strings.HasSuffix(src, "))") {
+					trace.string("(( ")
+					trace.string(src[2 : len(src)-2])
+					trace.string(" ))")
+				} else {
+					trace.string(src)
+				}
+			} else {
+				trace.expr(cm)
+			}
+			trace.newLineFlush()
+		}
 		r.exit.oneIf(r.arithmCmd(cm.X) == 0)
 	case *syntax.LetClause:
 		var val int
@@ -762,6 +823,12 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			}
 		}
 	case *syntax.TestClause:
+		if tracingEnabled {
+			trace.string("[[ ")
+			trace.string(r.traceCondExpr(cm.X, trace))
+			trace.string(" ]]")
+			trace.newLineFlush()
+		}
 		if r.bashCond(ctx, cm.X) == "" && r.exit.ok() {
 			// to preserve exit status code 2 for regex errors, etc
 			r.exit.code = 1
@@ -772,6 +839,9 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		valType := ""
 		declQuery := "" // "-f" or "-p" for query mode
 		allowPlusFlags := false
+		builtinTraceFields := []string{cm.Variant.Value}
+		var leadingTraceLines []string
+		var trailingTraceLines []string
 		switch cm.Variant.Value {
 		case "declare":
 			// When used in a function, "declare" acts as "local"
@@ -804,6 +874,9 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				}
 				r.exit.code = 1
 				return false
+			}
+			if tracingEnabled && !isAssign {
+				builtinTraceFields = append(builtinTraceFields, name)
 			}
 			if declQuery == "-f" {
 				// declare -f name: print function definition.
@@ -954,12 +1027,31 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			}
 			if vr.Kind == expand.NameRef && as.Ref != nil && as.Ref.Index == nil {
 				r.setVar(name, vr)
+				if tracingEnabled {
+					builtinTraceFields = append(builtinTraceFields, traceAssignFieldRaw(as.Ref, vr, as.Append))
+				}
 				return true
 			}
 			if err := r.setVarByRef(r.lookupVar(as.Ref.Name.Value), as.Ref, vr, as.Append); err != nil {
 				r.errf("%v\n", err)
 				r.exit.code = 1
 				return false
+			}
+			if tracingEnabled {
+				switch {
+				case cm.Variant.Value == "readonly":
+					builtinTraceFields = append(builtinTraceFields, traceAssignFieldRaw(as.Ref, vr, as.Append))
+					if as.Array != nil {
+						trailingTraceLines = append(trailingTraceLines, r.traceArrayAssign(as))
+					} else if as.Value != nil {
+						trailingTraceLines = append(trailingTraceLines, r.traceAssignString(as.Ref, vr, as.Append))
+					}
+				case (cm.Variant.Value == "declare" || cm.Variant.Value == "typeset") && as.Array != nil:
+					leadingTraceLines = append(leadingTraceLines, r.traceArrayAssign(as))
+					builtinTraceFields = append(builtinTraceFields, name)
+				default:
+					builtinTraceFields = append(builtinTraceFields, traceAssignFieldRaw(as.Ref, vr, as.Append))
+				}
 			}
 			return true
 		}
@@ -989,6 +1081,9 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 							r.exit.code = 2
 							return false
 						}
+					}
+					if tracingEnabled {
+						builtinTraceFields = append(builtinTraceFields, name)
 					}
 					return true
 				}
@@ -1054,6 +1149,18 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		for _, operand := range cm.Operands {
 			if !processOperand(operand) {
 				return
+			}
+		}
+		if tracingEnabled {
+			for _, line := range leadingTraceLines {
+				trace.string(line)
+				trace.newLineFlush()
+			}
+			trace.call(builtinTraceFields[0], builtinTraceFields[1:]...)
+			trace.newLineFlush()
+			for _, line := range trailingTraceLines {
+				trace.string(line)
+				trace.newLineFlush()
 			}
 		}
 	case *syntax.TimeClause:
