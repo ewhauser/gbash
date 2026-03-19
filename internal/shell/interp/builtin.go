@@ -269,7 +269,7 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 					&syntax.Lit{Value: sb.String()},
 				}},
 			}
-			vr := r.assignVal(prev, as, "")
+			vr, _ := r.assignVal(prev, as, "")
 			if err := r.setVarByRef(prev, destRef, vr); err != nil {
 				return failf(2, "printf: %v\n", err)
 			}

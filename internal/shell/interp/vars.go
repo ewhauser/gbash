@@ -571,7 +571,26 @@ func (r *Runner) associativeArrayKey(index *syntax.Subscript) string {
 	return sb.String()
 }
 
-func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType string) expand.Variable {
+func hasAssociativeMixedCompoundArrayElems(elems []expandedArrayElem) bool {
+	hasKeyed := false
+	hasSequential := false
+	for _, elem := range elems {
+		switch elem.kind {
+		case syntax.ArrayElemSequential:
+			if len(elem.fields) > 0 {
+				hasSequential = true
+			}
+		case syntax.ArrayElemKeyed, syntax.ArrayElemKeyedAppend:
+			hasKeyed = true
+		}
+		if hasKeyed && hasSequential {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType string) (expand.Variable, bool) {
 	targetName, targetPrev := r.resolvedCompoundArrayTarget(prev, as.Ref)
 	mode := resolveArrayExprMode(targetPrev, as, valType)
 	elems := r.expandCompoundArrayElems(cloneArrayElemsWithSubscriptMode(as.Array.Elems, subscriptModeFromArrayExprMode(mode)))
@@ -589,6 +608,10 @@ func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType st
 	}()
 
 	if mode == syntax.ArrayExprAssociative {
+		if hasAssociativeMixedCompoundArrayElems(elems) {
+			r.exit.code = 1
+			return targetPrev, false
+		}
 		pendingKey := ""
 		hasPendingKey := false
 		flushPending := func() {
@@ -637,7 +660,7 @@ func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType st
 			}
 		}
 		flushPending()
-		return shadowEnv.shadow
+		return shadowEnv.shadow, true
 	}
 
 	nextIndex := len(shadowEnv.shadow.List)
@@ -659,12 +682,12 @@ func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType st
 			break
 		}
 	}
-	return shadowEnv.shadow
+	return shadowEnv.shadow, true
 }
 
 // TODO: make assignVal and [setVar] consistent with the [expand.WriteEnviron] interface
 
-func (r *Runner) assignVal(prev expand.Variable, as *syntax.Assign, valType string) expand.Variable {
+func (r *Runner) assignVal(prev expand.Variable, as *syntax.Assign, valType string) (expand.Variable, bool) {
 	prev.Set = true
 	if as.Value != nil {
 		s := r.literal(as.Value)
@@ -674,7 +697,7 @@ func (r *Runner) assignVal(prev expand.Variable, as *syntax.Assign, valType stri
 				prev.Kind = expand.NameRef
 			}
 			prev.Str = s
-			return prev
+			return prev, true
 		}
 		switch prev.Kind {
 		case expand.String, expand.Unknown:
@@ -688,7 +711,7 @@ func (r *Runner) assignVal(prev expand.Variable, as *syntax.Assign, valType stri
 		case expand.Associative:
 			// TODO
 		}
-		return prev
+		return prev, true
 	}
 	if as.Array == nil {
 		// don't return the zero value, as that's an unset variable
@@ -697,7 +720,7 @@ func (r *Runner) assignVal(prev expand.Variable, as *syntax.Assign, valType stri
 			prev.Kind = expand.NameRef
 		}
 		prev.Str = ""
-		return prev
+		return prev, true
 	}
 	return r.assignArray(prev, as, valType)
 }

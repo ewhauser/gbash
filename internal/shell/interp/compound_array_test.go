@@ -94,3 +94,52 @@ printf 'append=%s,%s,%s\n' "${append@a}" "${append[k]}" "${append[new]}"
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
 }
+
+func TestCompoundAssociativeArrayMixedFormsFail(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+declare -A assoc=([old]=keep)
+assoc=([j]=1 2 3 4)
+printf 'status=%s count=%s old=%s\n' "$?" "${#assoc[@]}" "${assoc[old]}"
+printf 'after\n'
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const want = "" +
+		"status=1 count=1 old=keep\n" +
+		"after\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestCommandPrefixAssignmentFailureRestoresEarlierVars(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+TMP=orig
+readonly LOCK=keep
+unset NEW
+declare -A assoc=([old]=keep)
+TMP=1 NEW=2 LOCK=bad printf 'inner\n'
+printf 'status=%s tmp=%s new=%s lock=%s count=%s old=%s\n' "$?" "$TMP" "${NEW-unset}" "$LOCK" "${#assoc[@]}" "${assoc[old]}"
+printf 'after\n'
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const want = "" +
+		"status=1 tmp=orig new=unset lock=keep count=1 old=keep\n" +
+		"after\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	if stderr != "LOCK: readonly variable\n" {
+		t.Fatalf("stderr = %q, want %q", stderr, "LOCK: readonly variable\n")
+	}
+}

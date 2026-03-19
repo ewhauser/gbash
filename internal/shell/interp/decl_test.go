@@ -1,6 +1,12 @@
 package interp
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"testing"
+
+	"github.com/ewhauser/gbash/internal/shell/syntax"
+)
 
 func TestDeclOperands(t *testing.T) {
 	t.Parallel()
@@ -64,5 +70,63 @@ printf 'scalar-array=%s|%s|%s|%s\n' "${#direct_scalar[@]}" "${direct_scalar[0]}"
 	}
 	if stderr != "declare: `': not a valid identifier\n" {
 		t.Fatalf("stderr = %q, want %q", stderr, "declare: `': not a valid identifier\n")
+	}
+}
+
+func TestDeclPrefixAssignValidationFailureSkipsBuiltin(t *testing.T) {
+	t.Parallel()
+
+	litWord := func(value string) *syntax.Word {
+		return &syntax.Word{Parts: []syntax.WordPart{&syntax.Lit{Value: value}}}
+	}
+
+	var stdout, stderr bytes.Buffer
+	runner, err := NewRunner(&RunnerConfig{
+		Dir:    "/tmp",
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner error = %v", err)
+	}
+	runner.Reset()
+
+	call := &syntax.CallExpr{
+		Assigns: []*syntax.Assign{{
+			Ref: &syntax.VarRef{Name: &syntax.Lit{Value: "bad"}},
+			Array: &syntax.ArrayExpr{
+				Mode: syntax.ArrayExprAssociative,
+				Elems: []*syntax.ArrayElem{
+					{
+						Kind:  syntax.ArrayElemKeyed,
+						Index: literalSubscript(syntax.SubscriptExpr, syntax.SubscriptAssociative, "k"),
+						Value: litWord("1"),
+					},
+					{
+						Kind:  syntax.ArrayElemSequential,
+						Value: litWord("2"),
+					},
+				},
+			},
+		}},
+		Args: []*syntax.Word{
+			litWord("declare"),
+			litWord("kept=ok"),
+		},
+	}
+
+	runner.cmd(context.Background(), call)
+
+	if runner.exit.code != 1 {
+		t.Fatalf("exit code = %d, want 1", runner.exit.code)
+	}
+	if got := runner.lookupVar("kept"); got.IsSet() {
+		t.Fatalf("declare executed, kept = %#v", got)
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 }

@@ -475,8 +475,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 	case *syntax.CallExpr:
 		args := cm.Args
 		if decl := prefixAssignDeclClause(args, cm.Assigns); decl != nil {
-			r.expandAssignsForSideEffects(cm.Assigns)
-			if r.exit.fatalExit || r.exit.exiting {
+			if !r.expandAssignsForSideEffects(cm.Assigns) {
 				return
 			}
 			r.cmd(ctx, decl)
@@ -485,8 +484,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		// Check for declaration builtins before expanding args to avoid
 		// double expansion of command substitutions in decl arguments.
 		if decl := callExprDeclClause(args); decl != nil {
-			r.expandAssignsForSideEffects(cm.Assigns)
-			if r.exit.fatalExit || r.exit.exiting {
+			if !r.expandAssignsForSideEffects(cm.Assigns) {
 				return
 			}
 			r.cmd(ctx, decl)
@@ -503,7 +501,10 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				// TODO: there is likely a better way to do this.
 				prev.Local = false
 
-				vr := r.assignVal(prev, as, "")
+				vr, ok := r.assignVal(prev, as, "")
+				if !ok || r.exit.fatalExit || r.exit.exiting {
+					return
+				}
 				// Preserve and apply variable attributes from the previous declaration.
 				vr.Integer = prev.Integer
 				vr.Lower = prev.Lower
@@ -550,7 +551,8 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		}
 
 		restores := r.runCallAssigns(cm.Assigns)
-		if !r.exit.ok() {
+		if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
+			r.restoreCallAssigns(restores)
 			break
 		}
 
@@ -558,9 +560,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		trace.newLineFlush()
 
 		r.call(ctx, cm.Args[0].Pos(), fields)
-		for _, restore := range restores {
-			r.setVar(restore.name, restore.vr)
-		}
+		r.restoreCallAssigns(restores)
 	case *syntax.BinaryCmd:
 		switch cm.Op {
 		case syntax.AndStmt, syntax.OrStmt:
@@ -865,17 +865,21 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					vr.Kind = expand.KeepValue
 				}
 			} else {
+				var ok bool
 				if valType == "+a" || valType == "+A" {
 					// +a/+A with a value: treat as string assignment.
-					vr = r.assignVal(vr, as, "")
+					vr, ok = r.assignVal(vr, as, "")
 				} else {
-					vr = r.assignVal(vr, as, valType)
+					vr, ok = r.assignVal(vr, as, valType)
 					if valType == "-a" && as.Value != nil && as.Array == nil && as.Ref != nil && as.Ref.Index == nil {
 						vr.Kind = expand.Indexed
 						vr.List = []string{vr.Str}
 						vr.Str = ""
 						vr.Map = nil
 					}
+				}
+				if !ok || r.exit.fatalExit || r.exit.exiting {
+					return false
 				}
 				// For integer append in declare context, redo as arithmetic addition.
 				if as.Append && as.Value != nil && vr.Kind == expand.String {
@@ -1131,15 +1135,24 @@ type restoreVar struct {
 	vr   expand.Variable
 }
 
+func (r *Runner) restoreCallAssigns(restores []restoreVar) {
+	for _, restore := range restores {
+		r.setVar(restore.name, restore.vr)
+	}
+}
+
 // expandAssignsForSideEffects expands assignment values to trigger side effects
 // (like command substitutions) without persisting the assignments. This is used
 // for prefix assignments before declaration builtins, where bash runs command
 // substitutions but does not actually set the variables.
-func (r *Runner) expandAssignsForSideEffects(assigns []*syntax.Assign) {
+func (r *Runner) expandAssignsForSideEffects(assigns []*syntax.Assign) bool {
 	for _, as := range assigns {
 		// Just expand the value to trigger side effects; don't set the variable.
-		r.assignVal(r.lookupVar(as.Ref.Name.Value), as, "")
+		if _, ok := r.assignVal(r.lookupVar(as.Ref.Name.Value), as, ""); !ok || r.exit.fatalExit || r.exit.exiting {
+			return false
+		}
 	}
+	return true
 }
 
 func (r *Runner) runCallAssigns(assigns []*syntax.Assign) []restoreVar {
@@ -1148,7 +1161,10 @@ func (r *Runner) runCallAssigns(assigns []*syntax.Assign) []restoreVar {
 		name := as.Ref.Name.Value
 		prev := r.lookupVar(name)
 
-		vr := r.assignVal(prev, as, "")
+		vr, ok := r.assignVal(prev, as, "")
+		if !ok || r.exit.fatalExit || r.exit.exiting {
+			return restores
+		}
 		// Inline command vars are always exported.
 		vr.Exported = true
 
@@ -1158,12 +1174,15 @@ func (r *Runner) runCallAssigns(assigns []*syntax.Assign) []restoreVar {
 			r.exit.code = 1
 			return restores
 		}
-		restores = append(restores, restoreVar{resolvedRef.Name.Value, resolvedPrev})
 		if err := r.setVarByRef(prev, as.Ref, vr); err != nil {
 			r.errf("%v\n", err)
 			r.exit.code = 1
 			return restores
 		}
+		if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
+			return restores
+		}
+		restores = append(restores, restoreVar{resolvedRef.Name.Value, resolvedPrev})
 	}
 	return restores
 }
