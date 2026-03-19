@@ -73,6 +73,7 @@ func (m *core) Interact(ctx context.Context, exec *Execution) (*InteractiveResul
 				_, _ = io.WriteString(exec.Stdout, continuationPrompt)
 				continue
 			}
+			err = attachParseErrorSourceLine(err, rawScript)
 			if code, ok := compilationExitStatus(err); ok {
 				exitCode = code
 				writeCompilationError(exec.Stderr, err)

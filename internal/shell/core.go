@@ -72,11 +72,7 @@ type resolvedCommand struct {
 	args    []string
 }
 
-type core struct {
-	parser    *syntax.Parser
-	parserMu  sync.Mutex
-	parseFunc func(string, string) (*syntax.File, error)
-}
+type core struct{}
 
 var defaultShellCore = newShellCore()
 
@@ -85,9 +81,7 @@ var internalHelperCommands = map[string]struct{}{
 }
 
 func newShellCore() *core {
-	return &core{
-		parser: syntax.NewParser(),
-	}
+	return &core{}
 }
 
 func Run(ctx context.Context, exec *Execution) (*RunResult, error) {
@@ -102,23 +96,6 @@ func Interact(ctx context.Context, exec *Execution) (*InteractiveResult, error) 
 	return defaultShellCore.Interact(ctx, exec)
 }
 
-func (m *core) parseProgram(name, script string) (*syntax.File, error) {
-	var (
-		program *syntax.File
-		err     error
-	)
-	if m.parseFunc != nil {
-		program, err = m.parseFunc(name, script)
-	} else {
-		m.parserMu.Lock()
-		defer m.parserMu.Unlock()
-		program, err = m.parser.Parse(strings.NewReader(script), name)
-	}
-	if err != nil {
-		return program, attachParseErrorSourceLine(err, script)
-	}
-	return program, nil
-}
 func (m *core) Run(ctx context.Context, exec *Execution) (result *RunResult, runErr error) {
 	if exec == nil {
 		exec = &Execution{}

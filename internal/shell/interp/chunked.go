@@ -106,6 +106,7 @@ func (r *Runner) runChunked(ctx context.Context, reader io.Reader, name, topLeve
 			if chunkParseIncomplete(err, parser) && readErr != io.EOF {
 				continue
 			}
+			err = attachChunkParseErrorSourceLine(err, pending.String())
 			return finish(shiftChunkError(err, chunkStartOffset, chunkStartLine))
 		}
 		shiftChunkPositions(file, chunkStartOffset, chunkStartLine)
@@ -161,6 +162,22 @@ func chunkParseIncomplete(err error, parser *syntax.Parser) bool {
 	return errors.As(err, &parseErr) && strings.HasPrefix(parseErr.Text, "unclosed here-document")
 }
 
+func attachChunkParseErrorSourceLine(err error, script string) error {
+	var parseErr syntax.ParseError
+	if !errors.As(err, &parseErr) {
+		return err
+	}
+	if parseErr.SourceLine != "" {
+		return err
+	}
+	sourceLine := chunkSourceLineAt(script, parseErr.Pos.Line())
+	if sourceLine == "" {
+		return err
+	}
+	parseErr.SourceLine = sourceLine
+	return parseErr
+}
+
 var posType = reflect.TypeFor[syntax.Pos]()
 
 func shiftChunkPositions(node syntax.Node, offsetBase, lineBase uint) {
@@ -191,6 +208,18 @@ func lineContinues(line string) bool {
 		backslashes++
 	}
 	return backslashes%2 == 1
+}
+
+func chunkSourceLineAt(script string, lineNum uint) string {
+	if lineNum == 0 {
+		return ""
+	}
+	lines := strings.Split(script, "\n")
+	idx := int(lineNum) - 1
+	if idx < 0 || idx >= len(lines) {
+		return ""
+	}
+	return lines[idx]
 }
 
 func shiftValuePositions(val reflect.Value, offsetBase, lineDelta uint) {
