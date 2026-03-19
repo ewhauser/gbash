@@ -300,17 +300,36 @@ const (
 	SubscriptStar
 )
 
+type SubscriptMode uint8
+
+const (
+	SubscriptAuto SubscriptMode = iota
+	SubscriptIndexed
+	SubscriptAssociative
+)
+
+type VarRefContext uint8
+
+const (
+	VarRefDefault VarRefContext = iota
+	VarRefVarSet
+)
+
 // Subscript represents a bracketed shell subscript, such as [i], [$key],
 // [@], or [*].
 //
 // Expr can still be a string-like word or a zsh-specific expression such as a
 // comma slice. The [Kind] field distinguishes the all-elements selectors from
 // generic expression subscripts without forcing runtime consumers to reparse
-// [@] or [*] from a generic word.
+// [@] or [*] from a generic word. [Mode] records whether a generic expression
+// subscript should be interpreted with indexed-array arithmetic or
+// associative-array string-key semantics; zero means the parser did not know
+// yet and later resolution must decide.
 type Subscript struct {
 	Left, Right Pos
 
 	Kind SubscriptKind
+	Mode SubscriptMode
 	Expr ArithmExpr
 }
 
@@ -333,8 +352,9 @@ func (s *Subscript) AllElements() bool {
 // VarRef represents a reference to a shell variable, optionally with an array
 // index or associative-array key.
 type VarRef struct {
-	Name  *Lit       // must be a valid name
-	Index *Subscript // [i], ["k"], [@], [*]
+	Name    *Lit          // must be a valid name
+	Index   *Subscript    // [i], ["k"], [@], [*]
+	Context VarRefContext // default or -v-specific interpretation rules
 }
 
 func (r *VarRef) Pos() Pos { return r.Name.Pos() }

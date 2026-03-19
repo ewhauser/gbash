@@ -32,15 +32,21 @@ var=foo
 printf -v $var %s 'hello there'
 a=(a b c)
 printf -v 'a[1]' %s 'foo'
+declare -A assoc=([k]=v)
+key=k
+printf -v 'assoc[$key]' %s 'bar'
+declare -n mapref=assoc
+printf -v 'mapref[$key]' %s 'baz'
 printf '%s\n' "$foo"
 printf '%s\n' "${a[@]}"
+printf '%s\n' "${assoc[k]}"
 printf -v 'a[' %s 'foo'
 printf 'status=%d\n' "$?"
 `)
 	if err != nil {
 		t.Fatalf("Run error = %v", err)
 	}
-	const want = "hello there\na\nfoo\nc\nstatus=2\n"
+	const want = "hello there\na\nfoo\nc\nbaz\nstatus=2\n"
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}

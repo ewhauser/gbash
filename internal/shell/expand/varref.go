@@ -12,12 +12,35 @@ func parseVarRef(src string) (*syntax.VarRef, error) {
 	return p.VarRef(strings.NewReader(src))
 }
 
+func cloneSubscript(index *syntax.Subscript) *syntax.Subscript {
+	if index == nil {
+		return nil
+	}
+	dup := *index
+	return &dup
+}
+
 func cloneVarRef(ref *syntax.VarRef) *syntax.VarRef {
 	if ref == nil {
 		return nil
 	}
 	dup := *ref
+	dup.Index = cloneSubscript(ref.Index)
 	return &dup
+}
+
+func resolveSubscriptAuto(kind ValueKind, index *syntax.Subscript) *syntax.Subscript {
+	if index == nil || index.AllElements() || index.Mode != syntax.SubscriptAuto {
+		return index
+	}
+	dup := cloneSubscript(index)
+	switch kind {
+	case Associative:
+		dup.Mode = syntax.SubscriptAssociative
+	default:
+		dup.Mode = syntax.SubscriptIndexed
+	}
+	return dup
 }
 
 type InvalidIdentifierError struct {
@@ -34,6 +57,9 @@ func (v Variable) ResolveRef(env Environ, ref *syntax.VarRef) (*syntax.VarRef, V
 	resolved := cloneVarRef(ref)
 	for range maxNameRefDepth {
 		if v.Kind != NameRef {
+			if resolved != nil {
+				resolved.Index = resolveSubscriptAuto(v.Kind, resolved.Index)
+			}
 			return resolved, v, nil
 		}
 		target, err := parseVarRef(v.Str)
@@ -45,9 +71,12 @@ func (v Variable) ResolveRef(env Environ, ref *syntax.VarRef) (*syntax.VarRef, V
 				return nil, Variable{}, InvalidIdentifierError{Ref: v.Str}
 			}
 			target = &syntax.VarRef{
-				Name:  target.Name,
-				Index: resolved.Index,
+				Name:    target.Name,
+				Index:   cloneSubscript(resolved.Index),
+				Context: resolved.Context,
 			}
+		} else if resolved != nil {
+			target.Context = resolved.Context
 		}
 		resolved = target
 		v = env.Get(target.Name.Value)

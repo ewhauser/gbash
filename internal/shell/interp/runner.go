@@ -982,6 +982,14 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 						r.exit.code = 1
 						return false
 					}
+					subMode := subscriptModeFromArrayExprMode(declArrayModeFromValueType(valType))
+					switch parsed := parsed.(type) {
+					case *syntax.DeclName:
+						stampVarRefSubscriptMode(parsed.Ref, subMode)
+					case *syntax.DeclAssign:
+						stampVarRefSubscriptMode(parsed.Assign.Ref, subMode)
+						stampArrayExprSubscriptModes(parsed.Assign.Array, subMode)
+					}
 					if as, ok := parsed.(*syntax.DeclAssign); ok && as.Assign.Array != nil {
 						if mode := declArrayModeFromValueType(valType); mode != syntax.ArrayExprInherit {
 							as.Assign.Array.Mode = mode
