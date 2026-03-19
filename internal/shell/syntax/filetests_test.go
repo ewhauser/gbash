@@ -81,6 +81,12 @@ func litWords(strs ...string) []*Word {
 	}
 	return l
 }
+func braceExp(words ...*Word) *BraceExp {
+	return &BraceExp{Elems: words}
+}
+func braceSeq(words ...*Word) *BraceExp {
+	return &BraceExp{Sequence: true, Elems: words}
+}
 
 func litAssigns(pairs ...string) []*Assign {
 	l := make([]*Assign, len(pairs))
@@ -4294,7 +4300,10 @@ var fileTests = []fileTestCase{
 		langFile(&DeclClause{
 			Variant: lit("local"),
 			Operands: declOperands(
-				declDynamicWord(litWord("{a,b}_c=1")),
+				declDynamicWord(word(
+					braceExp(litWord("a"), litWord("b")),
+					lit("_c=1"),
+				)),
 			),
 		}, LangBash|LangMirBSDKorn|LangZsh),
 		langFile(litStmt("local", "{a,b}_c=1"), LangPOSIX),
@@ -4985,6 +4994,43 @@ var fileTests = []fileTestCase{
 			litParamExp("k"),
 		)), LangBash|LangMirBSDKorn),
 	),
+	fileTest(
+		[]string{"echo a{b,c}d"},
+		langFile(call(litWord("echo"), word(
+			lit("a"),
+			braceExp(litWord("b"), litWord("c")),
+			lit("d"),
+		)), langBashLike|LangMirBSDKorn|LangZsh),
+		langFile(litCall("echo", "a{b,c}d"), LangPOSIX),
+	),
+	fileTest(
+		[]string{"echo {'a',$b,{c,d}}"},
+		langFile(call(litWord("echo"), word(
+			braceExp(
+				word(sglQuoted("a")),
+				word(litParamExp("b")),
+				word(braceExp(litWord("c"), litWord("d"))),
+			),
+		)), langBashLike|LangMirBSDKorn|LangZsh),
+		langFile(call(litWord("echo"), word(
+			lit("{"),
+			sglQuoted("a"),
+			lit(","),
+			litParamExp("b"),
+			lit(",{c,d}}"),
+		)), LangPOSIX),
+	),
+	fileTest(
+		[]string{"echo {1..5..2}"},
+		langFile(call(litWord("echo"), word(
+			braceSeq(litWord("1"), litWord("5"), litWord("2")),
+		)), langBashLike|LangMirBSDKorn|LangZsh),
+		langFile(litCall("echo", "{1..5..2}"), LangPOSIX),
+	),
+	fileTest(
+		[]string{"echo {a,b"},
+		langFile(call(litWord("echo"), litWord("{a,b"))),
+	),
 	// Zsh glob qualifiers are parsed as part of the word.
 	fileTest(
 		[]string{"echo *(.)"},
@@ -5017,7 +5063,10 @@ var fileTests = []fileTestCase{
 	),
 	fileTest(
 		[]string{`echo {go.mod,shfmt}(N*)`},
-		langFile(call(litWord("echo"), word(lit("{go.mod,shfmt}"), lit("(N*)"))), LangZsh),
+		langFile(call(litWord("echo"), word(
+			braceExp(litWord("go.mod"), litWord("shfmt")),
+			lit("(N*)"),
+		)), LangZsh),
 	),
 	fileTest(
 		[]string{"echo $var(Nms-3)"},
@@ -5436,6 +5485,9 @@ func (c sanityChecker) visit(node Node) bool {
 			c.checkPos(node, node.Left, `"`)
 		}
 		c.checkPos(node, node.Right, `"`)
+	case *BraceExp:
+		c.checkPos(node, node.Lbrace, "{")
+		c.checkPos(node, node.Rbrace, "}")
 	case *Pattern:
 	case *PatternAny:
 		c.checkPos(node, node.Asterisk, "*")

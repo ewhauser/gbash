@@ -763,7 +763,7 @@
 						},
 						"Parts": [
 							{
-								"Type": "Lit",
+								"Type": "BraceExp",
 								"Pos": {
 									"Offset": 58,
 									"Line": 6,
@@ -774,17 +774,94 @@
 									"Line": 6,
 									"Col": 17
 								},
-								"ValuePos": {
+								"Lbrace": {
 									"Offset": 58,
 									"Line": 6,
 									"Col": 8
 								},
-								"ValueEnd": {
-									"Offset": 67,
+								"Rbrace": {
+									"Offset": 66,
 									"Line": 6,
-									"Col": 17
+									"Col": 16
 								},
-								"Value": "{bar,baz}"
+								"Elems": [
+									{
+										"Pos": {
+											"Offset": 59,
+											"Line": 6,
+											"Col": 9
+										},
+										"End": {
+											"Offset": 62,
+											"Line": 6,
+											"Col": 12
+										},
+										"Parts": [
+											{
+												"Type": "Lit",
+												"Pos": {
+													"Offset": 59,
+													"Line": 6,
+													"Col": 9
+												},
+												"End": {
+													"Offset": 62,
+													"Line": 6,
+													"Col": 12
+												},
+												"ValuePos": {
+													"Offset": 59,
+													"Line": 6,
+													"Col": 9
+												},
+												"ValueEnd": {
+													"Offset": 62,
+													"Line": 6,
+													"Col": 12
+												},
+												"Value": "bar"
+											}
+										]
+									},
+									{
+										"Pos": {
+											"Offset": 63,
+											"Line": 6,
+											"Col": 13
+										},
+										"End": {
+											"Offset": 66,
+											"Line": 6,
+											"Col": 16
+										},
+										"Parts": [
+											{
+												"Type": "Lit",
+												"Pos": {
+													"Offset": 63,
+													"Line": 6,
+													"Col": 13
+												},
+												"End": {
+													"Offset": 66,
+													"Line": 6,
+													"Col": 16
+												},
+												"ValuePos": {
+													"Offset": 63,
+													"Line": 6,
+													"Col": 13
+												},
+												"ValueEnd": {
+													"Offset": 66,
+													"Line": 6,
+													"Col": 16
+												},
+												"Value": "baz"
+											}
+										]
+									}
+								]
 							}
 						]
 					}

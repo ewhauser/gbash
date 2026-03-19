@@ -707,10 +707,12 @@ func FieldsSeq(cfg *Config, words ...*syntax.Word) iter.Seq2[string, error] {
 	dir := cfg.envGet("PWD")
 	return func(yield func(string, error) bool) {
 		for _, word := range words {
-			word := *word // make a copy, since SplitBraces replaces the Parts slice
-			afterBraces := []*syntax.Word{&word}
-			if syntax.SplitBraces(&word) {
-				afterBraces = Braces(&word)
+			afterBraces := []*syntax.Word{word}
+			if slices.ContainsFunc(word.Parts, func(part syntax.WordPart) bool {
+				_, ok := part.(*syntax.BraceExp)
+				return ok
+			}) {
+				afterBraces = Braces(word)
 			}
 			for _, word2 := range afterBraces {
 				wfields, err := cfg.wordFields(word2.Parts)
@@ -762,6 +764,27 @@ const (
 	quoteHeredoc
 	quoteSingle
 )
+
+func (cfg *Config) braceFieldParts(br *syntax.BraceExp, ql quoteLevel, fieldFn func(*syntax.Word, quoteLevel) ([]fieldPart, error)) ([]fieldPart, error) {
+	var sb strings.Builder
+	sb.WriteByte('{')
+	for i, elem := range br.Elems {
+		if i > 0 {
+			if br.Sequence {
+				sb.WriteString("..")
+			} else {
+				sb.WriteByte(',')
+			}
+		}
+		field, err := fieldFn(elem, ql)
+		if err != nil {
+			return nil, err
+		}
+		sb.WriteString(cfg.fieldJoin(field))
+	}
+	sb.WriteByte('}')
+	return []fieldPart{{val: sb.String()}}, nil
+}
 
 func (cfg *Config) wordField(wps []syntax.WordPart, ql quoteLevel) ([]fieldPart, error) {
 	var field []fieldPart
@@ -838,6 +861,14 @@ func (cfg *Config) wordField(wps []syntax.WordPart, ql quoteLevel) ([]fieldPart,
 				return nil, err
 			}
 			field = append(field, fieldPart{val: strconv.Itoa(n)})
+		case *syntax.BraceExp:
+			parts, err := cfg.braceFieldParts(wp, ql, func(word *syntax.Word, ql quoteLevel) ([]fieldPart, error) {
+				return cfg.wordField(word.Parts, ql)
+			})
+			if err != nil {
+				return nil, err
+			}
+			field = append(field, parts...)
 		case *syntax.ProcSubst:
 			procPath, err := cfg.ProcSubst(wp)
 			if err != nil {
@@ -994,6 +1025,14 @@ func (cfg *Config) wordFields(wps []syntax.WordPart) ([][]fieldPart, error) {
 				return nil, err
 			}
 			curField = append(curField, fieldPart{val: strconv.Itoa(n)})
+		case *syntax.BraceExp:
+			parts, err := cfg.braceFieldParts(wp, quoteNone, func(word *syntax.Word, ql quoteLevel) ([]fieldPart, error) {
+				return cfg.wordField(word.Parts, ql)
+			})
+			if err != nil {
+				return nil, err
+			}
+			curField = append(curField, parts...)
 		case *syntax.ProcSubst:
 			procPath, err := cfg.ProcSubst(wp)
 			if err != nil {

@@ -344,6 +344,12 @@ func (cfg *Config) paramArgField(word *syntax.Word, ql quoteLevel) ([]fieldPart,
 				return nil, err
 			}
 			field = append(field, fieldPart{val: strconv.Itoa(n)})
+		case *syntax.BraceExp:
+			parts, err := cfg.braceFieldParts(wp, ql, cfg.paramArgField)
+			if err != nil {
+				return nil, err
+			}
+			field = append(field, parts...)
 		case *syntax.ProcSubst:
 			path, err := cfg.ProcSubst(wp)
 			if err != nil {

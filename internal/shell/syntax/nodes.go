@@ -641,7 +641,7 @@ func (w *Word) Lit() string {
 // WordPart represents all nodes that can form part of a word.
 //
 // These are [*Lit], [*SglQuoted], [*DblQuoted], [*ParamExp], [*CmdSubst], [*ArithmExp],
-// [*ProcSubst], and [*ExtGlob].
+// [*ProcSubst], [*ExtGlob], and [*BraceExp].
 type WordPart interface {
 	Node
 	wordPartNode()
@@ -1368,19 +1368,27 @@ type LetClause struct {
 func (l *LetClause) Pos() Pos { return l.Let }
 func (l *LetClause) End() Pos { return l.Exprs[len(l.Exprs)-1].End() }
 
-// BraceExp represents a Bash brace expression, such as "{a,f}" or "{1..10}".
+// BraceExp represents a brace expression, such as "{a,f}" or "{1..10}".
 //
-// This node will only appear as a result of [SplitBraces].
+// This node will only appear with [LangBash], [LangBats], [LangMirBSDKorn],
+// and [LangZsh].
 type BraceExp struct {
-	Sequence bool // {x..y[..incr]} instead of {x,y[,...]}
-	Elems    []*Word
+	Lbrace, Rbrace Pos
+	Sequence       bool // {x..y[..incr]} instead of {x,y[,...]}
+	Elems          []*Word
 }
 
 func (b *BraceExp) Pos() Pos {
+	if b.Lbrace.IsValid() {
+		return b.Lbrace
+	}
 	return posAddCol(b.Elems[0].Pos(), -1)
 }
 
 func (b *BraceExp) End() Pos {
+	if b.Rbrace.IsValid() {
+		return posAddCol(b.Rbrace, 1)
+	}
 	return posAddCol(wordLastEnd(b.Elems), 1)
 }
 

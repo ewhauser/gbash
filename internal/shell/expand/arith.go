@@ -78,6 +78,21 @@ func writeLiteral(buf *bytes.Buffer, part syntax.WordPart) {
 		buf.WriteString("$((")
 		writeArithExpr(buf, p.X)
 		buf.WriteString("))")
+	case *syntax.BraceExp:
+		buf.WriteByte('{')
+		for i, elem := range p.Elems {
+			if i > 0 {
+				if p.Sequence {
+					buf.WriteString("..")
+				} else {
+					buf.WriteByte(',')
+				}
+			}
+			for _, inner := range elem.Parts {
+				writeLiteral(buf, inner)
+			}
+		}
+		buf.WriteByte('}')
 	}
 }
 

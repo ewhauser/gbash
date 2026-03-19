@@ -55,7 +55,7 @@ That means the roadmap should focus less on adding more top-level command nodes 
 - [x] P1: Add dedicated heredoc delimiter metadata instead of treating delimiters as generic words
 - [x] P1: Move alias expansion earlier and preserve alias provenance in parse results
 - [x] P1: Make compound array assignment semantics explicit in the AST
-- [ ] P2: Promote brace expansion from a post-parse rewrite to a stable syntax node
+- [x] P2: Promote brace expansion from a post-parse rewrite to a stable syntax node
 - [x] P2: Restrict function bodies to compound commands in the AST and validation layer
 - [ ] P2: Revisit whether a standalone `LValue` node is still worth the churn now that `Assign.Ref` and `Append` are explicit
 
@@ -486,16 +486,17 @@ Compound assignment is one of Bash's highest-density syntax/semantics areas. Mak
 
 ### 9. Stable brace expansion node
 
-Status: P2
+Status: Done
 
-#### Problem
+`BraceExp` is now a stable parse result for ordinary shell words in Bash-like, mksh, and zsh modes. The parser builds brace structure while assembling word parts, preserving `{` and `}` positions on the node and leaving invalid or incomplete candidates as plain literal text.
 
-Brace expansion is currently introduced after parsing by mutating words with `SplitBraces`. That works, but it weakens provenance and makes brace behavior less visible to the syntax tree.
+Field-expanding contexts such as argv and loop word lists still expand parsed `BraceExp` nodes. Literalizing contexts such as assignments, here-doc/document rendering, redirects, arithmetic literal rendering, and parameter-operator arguments now stringify the node back to `{...}` instead of rejecting it or mutating the AST.
 
-#### Current implementation signals
+#### Implementation notes
 
-- `BraceExp` only appears after `SplitBraces`
-- brace parsing is performed as a post-parse literal rewrite
+- `syntax.Parse`, `WordsSeq`, and ordinary word parsing can emit `BraceExp`
+- `expand.FieldsSeq` consumes parsed brace nodes directly
+- non-field expansion paths preserve brace source text literally
 
 #### Conformance signals
 
@@ -504,19 +505,9 @@ Relevant families:
 - `oils/brace-expansion.test.sh`
 - cases where brace expansion should be disabled in other contexts
 
-#### Proposed change
-
-Either:
-
-- keep the current execution behavior but parse brace expansion into a stable node earlier
-
-or:
-
-- preserve raw brace source metadata when `SplitBraces` rewrites the word
-
 #### Why this matters
 
-This is a cleanup item rather than a critical blocker, but it would make brace behavior easier to reason about and debug.
+Brace behavior is now visible in the AST without a post-parse rewrite, which makes parser provenance, printing, walking, typed JSON roundtrips, and downstream expansion behavior easier to reason about and debug.
 
 ### 10. Function bodies should be compound commands
 

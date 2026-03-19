@@ -116,6 +116,7 @@ Key AST design points:
 - `DeclClause.Operands []DeclOperand` holds declaration operands (typed as `DeclFlag`, `DeclName`, `DeclAssign`, or `DeclDynamicWord`).
 - `TestClause.X CondExpr` holds `[[ ]]` conditionals. The `CondExpr` interface has typed operand wrappers: `CondWord` (generic), `CondVarRef` (for `-v`/`-R`), `CondPattern` (for `==`/`=`/`!=`, wrapping `*Pattern`), and `CondRegex` (for `=~`).
 - Pattern-sensitive contexts now share `Pattern` / `PatternPart`: `CaseItem.Patterns`, `CondPattern.Pattern`, `Replace.Orig`, `Expansion.Pattern`, and `ExtGlob.Patterns`.
+- Brace expansion is parser-owned: `WordPart` can now contain `BraceExp` directly in ordinary parsed words, with invalid brace candidates left as plain literals. Expansion changes touching braces usually span parser construction in `syntax` plus context-sensitive handling in `expand` so argv/field contexts expand braces while literal/document/redirect-style paths render them back to source text.
 - `Redirect.HdocDelim *HeredocDelim` is the only AST shape for `<<` and `<<-` delimiters. Use `Redirect.Word` only for ordinary redirect targets and here-strings. `HeredocDelim` preserves original parts plus cooked delimiter text, quote presence, and whether the body expands.
 
 When you touch variable references, array indexing, declaration builtins, namerefs, `printf -v`, `test -v`, `[[ -v ]]`, `${var[...]}`, or compound array literals, expect follow-on edits in all three layers:
@@ -129,6 +130,11 @@ When you touch pattern semantics, expect the same three-layer sweep:
 - `syntax`: `nodes.go`, `parser.go`, `printer.go`, `walk.go`, typedjson, and filetests
 - `expand`: pattern rendering plus parameter expansion helpers
 - `interp`: `[[ ... ]]`, `case`, and any other runtime pattern consumers
+
+When you touch brace semantics, expect at least a two-layer sweep:
+
+- `syntax`: parser-owned `BraceExp` construction, printer/walk/typedjson plumbing, and language-sensitive filetests
+- `expand`: `Fields`/argv expansion versus literal/document/redirect/parameter-argument stringification
 
 For declaration-specific work, the intended flow is:
 
