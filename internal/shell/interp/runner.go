@@ -553,7 +553,8 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		}
 
 		restores := r.runCallAssigns(cm.Assigns)
-		if !r.exit.ok() {
+		if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
+			r.restoreCallAssigns(restores)
 			break
 		}
 
@@ -561,9 +562,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		trace.newLineFlush()
 
 		r.call(ctx, cm.Args[0].Pos(), fields)
-		for _, restore := range restores {
-			r.setVar(restore.name, restore.vr)
-		}
+		r.restoreCallAssigns(restores)
 	case *syntax.BinaryCmd:
 		switch cm.Op {
 		case syntax.AndStmt, syntax.OrStmt:
@@ -1138,6 +1137,12 @@ type restoreVar struct {
 	vr   expand.Variable
 }
 
+func (r *Runner) restoreCallAssigns(restores []restoreVar) {
+	for _, restore := range restores {
+		r.setVar(restore.name, restore.vr)
+	}
+}
+
 // expandAssignsForSideEffects expands assignment values to trigger side effects
 // (like command substitutions) without persisting the assignments. This is used
 // for prefix assignments before declaration builtins, where bash runs command
@@ -1170,12 +1175,15 @@ func (r *Runner) runCallAssigns(assigns []*syntax.Assign) []restoreVar {
 			r.exit.code = 1
 			return restores
 		}
-		restores = append(restores, restoreVar{resolvedRef.Name.Value, resolvedPrev})
 		if err := r.setVarByRef(prev, as.Ref, vr); err != nil {
 			r.errf("%v\n", err)
 			r.exit.code = 1
 			return restores
 		}
+		if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
+			return restores
+		}
+		restores = append(restores, restoreVar{resolvedRef.Name.Value, resolvedPrev})
 	}
 	return restores
 }
