@@ -37,6 +37,26 @@ func subscriptLit(sub *syntax.Subscript) string {
 	}
 }
 
+func subscriptWord(sub *syntax.Subscript) (*syntax.Word, bool) {
+	if sub == nil {
+		return nil, false
+	}
+	word, ok := sub.Expr.(*syntax.Word)
+	return word, ok
+}
+
+func resolvedSubscriptMode(sub *syntax.Subscript) syntax.SubscriptMode {
+	if sub == nil || sub.AllElements() {
+		return syntax.SubscriptAuto
+	}
+	switch sub.Mode {
+	case syntax.SubscriptIndexed, syntax.SubscriptAssociative:
+		return sub.Mode
+	default:
+		panic("expand: unresolved subscript mode")
+	}
+}
+
 func indirectSpecialParam(name string) bool {
 	switch name {
 	case "@", "*", "#", "?", "-", "$", "!":
@@ -818,45 +838,59 @@ func (cfg *Config) varInd(vr Variable, idx *syntax.Subscript) (string, error) {
 	if idx == nil {
 		return vr.String(), nil
 	}
-	switch vr.Kind {
-	case String:
-		n, err := Arithm(cfg, idx.Expr)
-		if err != nil {
-			return "", err
-		}
-		if n == 0 {
-			return vr.Str, nil
-		}
-	case Indexed:
-		switch subscriptLit(idx) {
-		case "*", "@":
+	if idx.AllElements() {
+		switch vr.Kind {
+		case Indexed:
 			return strings.Join(vr.List, " "), nil
-		}
-		i, err := Arithm(cfg, idx.Expr)
-		if err != nil {
-			return "", err
-		}
-		if i < 0 {
-			return "", fmt.Errorf("negative array index")
-		}
-		if i < len(vr.List) {
-			return vr.List[i], nil
-		}
-	case Associative:
-		switch lit := subscriptLit(idx); lit {
-		case "@", "*":
+		case Associative:
 			// Iterate values in bash-compatible key order.
 			keys := sortedMapKeys(vr.Map)
 			strs := make([]string, len(keys))
 			for i, k := range keys {
 				strs[i] = vr.Map[k]
 			}
-			if lit == "*" {
+			if idx.Kind == syntax.SubscriptStar {
 				return cfg.ifsJoin(strs), nil
 			}
 			return strings.Join(strs, " "), nil
+		default:
+			return "", nil
 		}
-		val, err := Literal(cfg, idx.Expr.(*syntax.Word))
+	}
+
+	switch resolvedSubscriptMode(idx) {
+	case syntax.SubscriptIndexed:
+		switch vr.Kind {
+		case String:
+			n, err := Arithm(cfg, idx.Expr)
+			if err != nil {
+				return "", err
+			}
+			if n == 0 {
+				return vr.Str, nil
+			}
+			return "", nil
+		case Indexed:
+			i, err := Arithm(cfg, idx.Expr)
+			if err != nil {
+				return "", err
+			}
+			if i < 0 {
+				return "", fmt.Errorf("negative array index")
+			}
+			if i < len(vr.List) {
+				return vr.List[i], nil
+			}
+		}
+	case syntax.SubscriptAssociative:
+		if vr.Kind != Associative {
+			return "", nil
+		}
+		word, ok := subscriptWord(idx)
+		if !ok {
+			return "", nil
+		}
+		val, err := Literal(cfg, word)
 		if err != nil {
 			return "", err
 		}

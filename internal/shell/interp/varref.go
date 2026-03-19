@@ -2,6 +2,7 @@ package interp
 
 import (
 	"bytes"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -15,30 +16,53 @@ func parseVarRef(src string) (*syntax.VarRef, error) {
 	return p.VarRef(strings.NewReader(src))
 }
 
-func literalSubscript(kind syntax.SubscriptKind, lit string) *syntax.Subscript {
+func literalSubscript(kind syntax.SubscriptKind, mode syntax.SubscriptMode, lit string) *syntax.Subscript {
 	return &syntax.Subscript{
 		Kind: kind,
+		Mode: mode,
 		Expr: &syntax.Word{Parts: []syntax.WordPart{
 			&syntax.Lit{Value: lit},
 		}},
 	}
 }
 
-func subscriptLit(sub *syntax.Subscript) string {
+func emptyAssociativeSubscript() *syntax.Subscript {
+	return &syntax.Subscript{
+		Kind: syntax.SubscriptExpr,
+		Mode: syntax.SubscriptAssociative,
+		Expr: &syntax.Word{Parts: []syntax.WordPart{
+			&syntax.DblQuoted{},
+		}},
+	}
+}
+
+func resolvedSubscriptMode(sub *syntax.Subscript) syntax.SubscriptMode {
+	if sub == nil || sub.AllElements() {
+		return syntax.SubscriptAuto
+	}
+	switch sub.Mode {
+	case syntax.SubscriptIndexed, syntax.SubscriptAssociative:
+		return sub.Mode
+	default:
+		panic("interp: unresolved subscript mode")
+	}
+}
+
+func subscriptLiteralKey(sub *syntax.Subscript) (string, bool) {
 	if sub == nil {
-		return ""
+		return "", false
 	}
 	switch sub.Kind {
 	case syntax.SubscriptAt:
-		return "@"
+		return "@", true
 	case syntax.SubscriptStar:
-		return "*"
+		return "*", true
 	default:
-		word, ok := sub.Expr.(*syntax.Word)
+		word, ok := subscriptWord(sub)
 		if !ok {
-			return ""
+			return "", false
 		}
-		return word.Lit()
+		return word.Lit(), true
 	}
 }
 
@@ -68,26 +92,42 @@ func (r *Runner) resolveVarRef(ref *syntax.VarRef) (*syntax.VarRef, expand.Varia
 }
 
 func (r *Runner) strictVarRef(src string) (*syntax.VarRef, error) {
-	return parseVarRef(src)
+	return r.strictVarRefWithContext(src, syntax.VarRefDefault)
+}
+
+func (r *Runner) strictVarRefWithContext(src string, context syntax.VarRefContext) (*syntax.VarRef, error) {
+	ref, err := parseVarRef(src)
+	if ref != nil {
+		ref.Context = context
+	}
+	return ref, err
 }
 
 func (r *Runner) looseVarRef(src string) *syntax.VarRef {
-	ref, err := r.strictVarRef(src)
+	return r.looseVarRefWithContext(src, syntax.VarRefDefault)
+}
+
+func (r *Runner) looseVarRefWithContext(src string, context syntax.VarRefContext) *syntax.VarRef {
+	ref, err := r.strictVarRefWithContext(src, context)
 	if err == nil {
 		return ref
 	}
-	return &syntax.VarRef{Name: &syntax.Lit{Value: src}}
+	return &syntax.VarRef{Name: &syntax.Lit{Value: src}, Context: context}
 }
 
 func (r *Runner) looseVarRefWord(word *syntax.Word) *syntax.VarRef {
+	return r.looseVarRefWordWithContext(word, syntax.VarRefDefault)
+}
+
+func (r *Runner) looseVarRefWordWithContext(word *syntax.Word, context syntax.VarRefContext) *syntax.VarRef {
 	var buf bytes.Buffer
 	printer := syntax.NewPrinter()
 	if err := printer.Print(&buf, word); err == nil {
-		if ref, err := r.strictVarRef(buf.String()); err == nil {
+		if ref, err := r.strictVarRefWithContext(buf.String(), context); err == nil {
 			return ref
 		}
 	}
-	return &syntax.VarRef{Name: &syntax.Lit{Value: r.literal(word)}}
+	return &syntax.VarRef{Name: &syntax.Lit{Value: r.literal(word)}, Context: context}
 }
 
 func (r *Runner) refIsSet(ref *syntax.VarRef) bool {
@@ -98,16 +138,42 @@ func (r *Runner) refIsSet(ref *syntax.VarRef) bool {
 	if ref == nil || ref.Index == nil {
 		return vr.IsSet()
 	}
-	switch vr.Kind {
-	case expand.String:
-		return vr.IsSet() && r.arithm(ref.Index.Expr) == 0
-	case expand.Indexed:
-		index := r.arithm(ref.Index.Expr)
-		if index < 0 {
-			index = len(vr.List) + index
+	if ref.Index.AllElements() {
+		if vr.Kind == expand.Associative && ref.Context == syntax.VarRefVarSet {
+			key, ok := subscriptLiteralKey(ref.Index)
+			if !ok {
+				return false
+			}
+			_, ok = vr.Map[key]
+			return ok
 		}
-		return index >= 0 && index < len(vr.List)
-	case expand.Associative:
+		switch vr.Kind {
+		case expand.Indexed:
+			return len(vr.List) > 0
+		case expand.Associative:
+			return len(vr.Map) > 0
+		default:
+			return vr.IsSet()
+		}
+	}
+	switch resolvedSubscriptMode(ref.Index) {
+	case syntax.SubscriptIndexed:
+		switch vr.Kind {
+		case expand.String:
+			return vr.IsSet() && r.arithm(ref.Index.Expr) == 0
+		case expand.Indexed:
+			index := r.arithm(ref.Index.Expr)
+			if index < 0 {
+				index = len(vr.List) + index
+			}
+			return index >= 0 && index < len(vr.List)
+		default:
+			return false
+		}
+	case syntax.SubscriptAssociative:
+		if vr.Kind != expand.Associative {
+			return false
+		}
 		word, ok := subscriptWord(ref.Index)
 		if !ok {
 			return false
@@ -123,6 +189,28 @@ func (r *Runner) refIsNameRef(ref *syntax.VarRef) bool {
 	return ref != nil && ref.Index == nil && r.lookupVar(ref.Name.Value).Kind == expand.NameRef
 }
 
+func arrayDefaultIndex(kind expand.ValueKind) *syntax.Subscript {
+	switch kind {
+	case expand.Indexed:
+		return literalSubscript(syntax.SubscriptExpr, syntax.SubscriptIndexed, "0")
+	case expand.Associative:
+		return emptyAssociativeSubscript()
+	default:
+		return nil
+	}
+}
+
+func indexedSubscriptTargetList(prev expand.Variable) []string {
+	switch prev.Kind {
+	case expand.String:
+		return []string{prev.Str}
+	case expand.Indexed:
+		return slices.Clone(prev.List)
+	default:
+		return nil
+	}
+}
+
 func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand.Variable) error {
 	ref, prev, err := prev.ResolveRef(r.writeEnv, ref)
 	if err != nil {
@@ -133,19 +221,7 @@ func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand
 	index := ref.Index
 
 	if vr.Kind == expand.String && index == nil {
-		// When assigning a string to an array, fall back to the
-		// zero value for the index.
-		switch prev.Kind {
-		case expand.Indexed:
-			index = literalSubscript(syntax.SubscriptExpr, "0")
-		case expand.Associative:
-			index = &syntax.Subscript{
-				Kind: syntax.SubscriptExpr,
-				Expr: &syntax.Word{Parts: []syntax.WordPart{
-					&syntax.DblQuoted{},
-				}},
-			}
-		}
+		index = arrayDefaultIndex(prev.Kind)
 	}
 	if index == nil {
 		r.setVar(name, vr)
@@ -154,18 +230,32 @@ func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand
 
 	valStr := vr.Str
 
-	var list []string
-	switch prev.Kind {
-	case expand.String:
-		list = append(list, prev.Str)
-	case expand.Indexed:
-		list = slices.Clone(prev.List)
-	case expand.Associative:
+	switch {
+	case index.AllElements():
+		if prev.Kind == expand.Associative {
+			key, ok := subscriptLiteralKey(index)
+			if !ok {
+				return fmt.Errorf("bad array subscript")
+			}
+			prev.Kind = expand.Associative
+			prev.List = nil
+			prev.Map = maps.Clone(prev.Map)
+			if prev.Map == nil {
+				prev.Map = make(map[string]string)
+			}
+			prev.Map[key] = valStr
+			r.setVar(name, prev)
+			return nil
+		}
+		return fmt.Errorf("bad array subscript")
+	case resolvedSubscriptMode(index) == syntax.SubscriptAssociative:
 		word, ok := subscriptWord(index)
 		if !ok {
 			return nil
 		}
 		key := r.literal(word)
+		prev.Kind = expand.Associative
+		prev.List = nil
 		prev.Map = maps.Clone(prev.Map)
 		if prev.Map == nil {
 			prev.Map = make(map[string]string)
@@ -173,14 +263,25 @@ func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand
 		prev.Map[key] = valStr
 		r.setVar(name, prev)
 		return nil
+	case resolvedSubscriptMode(index) == syntax.SubscriptIndexed:
+		list := indexedSubscriptTargetList(prev)
+		key := r.arithm(index.Expr)
+		if key < 0 {
+			key = len(list) + key
+		}
+		if key < 0 {
+			return fmt.Errorf("negative array index")
+		}
+		for len(list) < key+1 {
+			list = append(list, "")
+		}
+		list[key] = valStr
+		prev.Kind = expand.Indexed
+		prev.Map = nil
+		prev.List = list
+		r.setVar(name, prev)
+		return nil
+	default:
+		return nil
 	}
-	key := r.arithm(index.Expr)
-	for len(list) < key+1 {
-		list = append(list, "")
-	}
-	list[key] = valStr
-	prev.Kind = expand.Indexed
-	prev.List = list
-	r.setVar(name, prev)
-	return nil
 }

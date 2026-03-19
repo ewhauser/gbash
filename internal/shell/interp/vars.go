@@ -302,71 +302,6 @@ func (r *Runner) evalIntegerAttr(s string) int {
 	return r.arithm(expr)
 }
 
-func (r *Runner) setVarWithIndex(prev expand.Variable, name string, index syntax.ArithmExpr, vr expand.Variable) {
-	prev.Set = true
-	if name2, var2 := prev.Resolve(r.writeEnv); name2 != "" {
-		name = name2
-		prev = var2
-	}
-
-	if vr.Kind == expand.String && index == nil {
-		// When assigning a string to an array, fall back to the
-		// zero value for the index.
-		switch prev.Kind {
-		case expand.Indexed:
-			index = &syntax.Word{Parts: []syntax.WordPart{
-				&syntax.Lit{Value: "0"},
-			}}
-		case expand.Associative:
-			index = &syntax.Word{Parts: []syntax.WordPart{
-				&syntax.DblQuoted{},
-			}}
-		}
-	}
-	if index == nil {
-		r.setVar(name, vr)
-		return
-	}
-
-	// from the syntax package, we know that value must be a string if index
-	// is non-nil; nested arrays are forbidden.
-	valStr := vr.Str
-
-	var list []string
-	switch prev.Kind {
-	case expand.String:
-		list = append(list, prev.Str)
-	case expand.Indexed:
-		// TODO: only clone when inside a subshell and getting a var from outside for the first time
-		list = slices.Clone(prev.List)
-	case expand.Associative:
-		// if the existing variable is already an AssocArray, try our
-		// best to convert the key to a string
-		w, ok := index.(*syntax.Word)
-		if !ok {
-			return
-		}
-		k := r.literal(w)
-
-		// TODO: only clone when inside a subshell and getting a var from outside for the first time
-		prev.Map = maps.Clone(prev.Map)
-		if prev.Map == nil {
-			prev.Map = make(map[string]string)
-		}
-		prev.Map[k] = valStr
-		r.setVar(name, prev)
-		return
-	}
-	k := r.arithm(index)
-	for len(list) < k+1 {
-		list = append(list, "")
-	}
-	list[k] = valStr
-	prev.Kind = expand.Indexed
-	prev.List = list
-	r.setVar(name, prev)
-}
-
 func (r *Runner) setFunc(name string, body *syntax.Stmt) {
 	if r.funcs == nil {
 		r.funcs = make(map[string]*syntax.Stmt, 4)
@@ -427,6 +362,71 @@ type expandedArrayElem struct {
 	index  *syntax.Subscript
 	fields []string
 	value  string
+}
+
+func subscriptModeFromArrayExprMode(mode syntax.ArrayExprMode) syntax.SubscriptMode {
+	switch mode {
+	case syntax.ArrayExprIndexed:
+		return syntax.SubscriptIndexed
+	case syntax.ArrayExprAssociative:
+		return syntax.SubscriptAssociative
+	default:
+		return syntax.SubscriptAuto
+	}
+}
+
+func cloneSubscript(index *syntax.Subscript) *syntax.Subscript {
+	if index == nil {
+		return nil
+	}
+	dup := *index
+	return &dup
+}
+
+func stampSubscriptMode(index *syntax.Subscript, mode syntax.SubscriptMode) *syntax.Subscript {
+	if index == nil || index.AllElements() || mode == syntax.SubscriptAuto || index.Mode == mode {
+		return index
+	}
+	dup := cloneSubscript(index)
+	dup.Mode = mode
+	return dup
+}
+
+func stampVarRefSubscriptMode(ref *syntax.VarRef, mode syntax.SubscriptMode) {
+	if ref == nil {
+		return
+	}
+	ref.Index = stampSubscriptMode(ref.Index, mode)
+}
+
+func stampArrayExprSubscriptModes(array *syntax.ArrayExpr, mode syntax.SubscriptMode) {
+	if array == nil {
+		return
+	}
+	for _, elem := range array.Elems {
+		if elem == nil || elem.Kind == syntax.ArrayElemSequential {
+			continue
+		}
+		elem.Index = stampSubscriptMode(elem.Index, mode)
+	}
+}
+
+func cloneArrayElemsWithSubscriptMode(elems []*syntax.ArrayElem, mode syntax.SubscriptMode) []*syntax.ArrayElem {
+	if mode == syntax.SubscriptAuto || len(elems) == 0 {
+		return elems
+	}
+	cloned := make([]*syntax.ArrayElem, len(elems))
+	for i, elem := range elems {
+		if elem == nil {
+			continue
+		}
+		dup := *elem
+		if elem.Kind != syntax.ArrayElemSequential {
+			dup.Index = stampSubscriptMode(elem.Index, mode)
+		}
+		cloned[i] = &dup
+	}
+	return cloned
 }
 
 func declArrayModeFromValueType(valType string) syntax.ArrayExprMode {
@@ -558,6 +558,9 @@ func (r *Runner) associativeArrayKey(index *syntax.Subscript) string {
 	if index == nil {
 		return ""
 	}
+	if !index.AllElements() && resolvedSubscriptMode(index) != syntax.SubscriptAssociative {
+		panic("interp: associative array key requires associative subscript mode")
+	}
 	if word, ok := index.Expr.(*syntax.Word); ok {
 		return r.literal(word)
 	}
@@ -571,7 +574,7 @@ func (r *Runner) associativeArrayKey(index *syntax.Subscript) string {
 func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType string) expand.Variable {
 	targetName, targetPrev := r.resolvedCompoundArrayTarget(prev, as.Ref)
 	mode := resolveArrayExprMode(targetPrev, as, valType)
-	elems := r.expandCompoundArrayElems(as.Array.Elems)
+	elems := r.expandCompoundArrayElems(cloneArrayElemsWithSubscriptMode(as.Array.Elems, subscriptModeFromArrayExprMode(mode)))
 	vr := compoundArrayBase(targetPrev, mode, as.Append)
 	origEnv := r.writeEnv
 	shadowEnv := &shadowWriteEnviron{

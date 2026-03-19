@@ -91,6 +91,7 @@ func TestEncodeSubscriptKind(t *testing.T) {
 
 	node := &syntax.Subscript{
 		Kind: syntax.SubscriptStar,
+		Mode: syntax.SubscriptAssociative,
 		Expr: &syntax.Word{Parts: []syntax.WordPart{
 			&syntax.Lit{Value: "*"},
 		}},
@@ -107,6 +108,29 @@ func TestEncodeSubscriptKind(t *testing.T) {
 	sub, ok := decoded.(*syntax.Subscript)
 	qt.Assert(t, qt.IsTrue(ok))
 	qt.Assert(t, qt.Equals(sub.Kind, syntax.SubscriptStar))
+	qt.Assert(t, qt.Equals(sub.Mode, syntax.SubscriptAssociative))
+}
+
+func TestEncodeVarRefContext(t *testing.T) {
+	t.Parallel()
+
+	node := &syntax.VarRef{
+		Name:    &syntax.Lit{Value: "assoc"},
+		Index:   &syntax.Subscript{Kind: syntax.SubscriptExpr, Mode: syntax.SubscriptAssociative, Expr: &syntax.Word{Parts: []syntax.WordPart{&syntax.Lit{Value: "k"}}}},
+		Context: syntax.VarRefVarSet,
+	}
+
+	var buf bytes.Buffer
+	err := typedjson.Encode(&buf, node)
+	qt.Assert(t, qt.IsNil(err))
+
+	decoded, err := typedjson.Decode(bytes.NewReader(buf.Bytes()))
+	qt.Assert(t, qt.IsNil(err))
+
+	ref, ok := decoded.(*syntax.VarRef)
+	qt.Assert(t, qt.IsTrue(ok))
+	qt.Assert(t, qt.Equals(ref.Context, syntax.VarRefVarSet))
+	qt.Assert(t, qt.Equals(ref.Index.Mode, syntax.SubscriptAssociative))
 }
 
 func TestEncodeHeredocDelimiter(t *testing.T) {
@@ -147,7 +171,7 @@ func TestEncodeArrayModes(t *testing.T) {
 		Mode: syntax.ArrayExprAssociative,
 		Elems: []*syntax.ArrayElem{{
 			Kind:  syntax.ArrayElemKeyedAppend,
-			Index: &syntax.Subscript{Kind: syntax.SubscriptExpr, Expr: &syntax.Word{Parts: []syntax.WordPart{&syntax.Lit{Value: "k"}}}},
+			Index: &syntax.Subscript{Kind: syntax.SubscriptExpr, Mode: syntax.SubscriptAssociative, Expr: &syntax.Word{Parts: []syntax.WordPart{&syntax.Lit{Value: "k"}}}},
 			Value: &syntax.Word{Parts: []syntax.WordPart{&syntax.Lit{Value: "v"}}},
 		}},
 	}
@@ -164,4 +188,5 @@ func TestEncodeArrayModes(t *testing.T) {
 	qt.Assert(t, qt.Equals(arr.Mode, syntax.ArrayExprAssociative))
 	qt.Assert(t, qt.Equals(len(arr.Elems), 1))
 	qt.Assert(t, qt.Equals(arr.Elems[0].Kind, syntax.ArrayElemKeyedAppend))
+	qt.Assert(t, qt.Equals(arr.Elems[0].Index.Mode, syntax.SubscriptAssociative))
 }

@@ -870,6 +870,12 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					vr = r.assignVal(vr, as, "")
 				} else {
 					vr = r.assignVal(vr, as, valType)
+					if valType == "-a" && as.Value != nil && as.Array == nil && as.Ref != nil && as.Ref.Index == nil {
+						vr.Kind = expand.Indexed
+						vr.List = []string{vr.Str}
+						vr.Str = ""
+						vr.Map = nil
+					}
 				}
 				// For integer append in declare context, redo as arithmetic addition.
 				if as.Append && as.Value != nil && vr.Kind == expand.String {
@@ -981,6 +987,14 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 						r.errf("%s: `%s': not a valid identifier\n", cm.Variant.Value, field)
 						r.exit.code = 1
 						return false
+					}
+					subMode := subscriptModeFromArrayExprMode(declArrayModeFromValueType(valType))
+					switch parsed := parsed.(type) {
+					case *syntax.DeclName:
+						stampVarRefSubscriptMode(parsed.Ref, subMode)
+					case *syntax.DeclAssign:
+						stampVarRefSubscriptMode(parsed.Assign.Ref, subMode)
+						stampArrayExprSubscriptModes(parsed.Assign.Array, subMode)
 					}
 					if as, ok := parsed.(*syntax.DeclAssign); ok && as.Assign.Array != nil {
 						if mode := declArrayModeFromValueType(valType); mode != syntax.ArrayExprInherit {

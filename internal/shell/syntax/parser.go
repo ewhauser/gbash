@@ -2510,7 +2510,7 @@ func patternExpOp(op ParExpOperator) bool {
 func (p *Parser) eitherIndex() *Subscript {
 	old := p.quote
 	lpos := p.pos
-	sub := &Subscript{Left: lpos, Kind: SubscriptExpr}
+	sub := &Subscript{Left: lpos, Kind: SubscriptExpr, Mode: SubscriptAuto}
 	p.quote = paramExpArithm
 	p.next()
 	switch p.tok {
@@ -2541,6 +2541,43 @@ func (p *Parser) eitherIndex() *Subscript {
 	}
 	p.matchedArithm(lpos, leftBrack, rightBrack)
 	return sub
+}
+
+func subscriptModeFromArrayExprMode(mode ArrayExprMode) SubscriptMode {
+	switch mode {
+	case ArrayExprIndexed:
+		return SubscriptIndexed
+	case ArrayExprAssociative:
+		return SubscriptAssociative
+	default:
+		return SubscriptAuto
+	}
+}
+
+func stampSubscriptMode(index *Subscript, mode SubscriptMode) {
+	if index == nil || index.AllElements() || mode == SubscriptAuto {
+		return
+	}
+	index.Mode = mode
+}
+
+func stampVarRefSubscriptMode(ref *VarRef, mode SubscriptMode) {
+	if ref == nil {
+		return
+	}
+	stampSubscriptMode(ref.Index, mode)
+}
+
+func stampArrayExprSubscriptModes(array *ArrayExpr, mode SubscriptMode) {
+	if array == nil {
+		return
+	}
+	for _, elem := range array.Elems {
+		if elem == nil || elem.Kind == ArrayElemSequential {
+			continue
+		}
+		stampSubscriptMode(elem.Index, mode)
+	}
 }
 
 func (p *Parser) zshSubFlags() *FlagsArithm {
@@ -3547,6 +3584,7 @@ func condWordAsVarRef(word *Word) *VarRef {
 		Left:  left.Pos(),
 		Right: right.Pos(),
 		Kind:  SubscriptExpr,
+		Mode:  SubscriptAuto,
 		Expr:  &Word{Parts: parts},
 	}
 	if len(parts) == 1 {
@@ -3570,12 +3608,13 @@ func (p *Parser) followCondWord(tok token, pos Pos) *CondWord {
 	return &CondWord{Word: w}
 }
 
-func (p *Parser) followCondVarRefOrWord(tok token, pos Pos) CondExpr {
+func (p *Parser) followCondVarRefOrWord(tok token, pos Pos, context VarRefContext) CondExpr {
 	w := p.followWordTok(tok, pos)
 	if w == nil {
 		return nil
 	}
 	if ref := condWordAsVarRef(w); ref != nil {
+		ref.Context = context
 		return &CondVarRef{Ref: ref}
 	}
 	return &CondWord{Word: w}
@@ -3735,7 +3774,11 @@ func (p *Parser) condExprUnary() CondExpr {
 		u := &CondUnary{OpPos: p.pos, Op: UnTestOperator(p.tok)}
 		p.next()
 		if u.Op == TsVarSet || u.Op == TsRefVar {
-			u.X = p.followCondVarRefOrWord(token(u.Op), u.OpPos)
+			context := VarRefDefault
+			if u.Op == TsVarSet {
+				context = VarRefVarSet
+			}
+			u.X = p.followCondVarRefOrWord(token(u.Op), u.OpPos, context)
 		} else {
 			u.X = p.followCondWord(token(u.Op), u.OpPos)
 		}
@@ -3892,13 +3935,20 @@ func (p *Parser) declClause(s *Stmt) {
 	p.next()
 	for !p.stopToken() && !p.peekRedir() {
 		if op := p.declOperand(); op != nil {
+			subMode := subscriptModeFromArrayExprMode(arrayMode)
 			switch op := op.(type) {
 			case *DeclFlag:
 				arrayMode = declArrayModeFromFlagWord(op.Word, arrayMode)
 			case *DeclAssign:
+				if op.Assign != nil {
+					stampVarRefSubscriptMode(op.Assign.Ref, subMode)
+				}
 				if op.Assign != nil && op.Assign.Array != nil {
 					op.Assign.Array.Mode = arrayMode
+					stampArrayExprSubscriptModes(op.Assign.Array, subMode)
 				}
+			case *DeclName:
+				stampVarRefSubscriptMode(op.Ref, subMode)
 			}
 			ds.Operands = append(ds.Operands, op)
 		} else {

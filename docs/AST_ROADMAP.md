@@ -132,7 +132,7 @@ The important part was making references typed. A standalone `LValue` node is no
 
 ### 2. Typed subscript AST
 
-Status: landed core node, runtime follow-up remains
+Status: landed
 
 #### Problem
 
@@ -149,8 +149,10 @@ The current AST cannot preserve those distinctions.
 #### Current implementation signals
 
 - `VarRef.Index`, `ParamExp.Index`, and `ArrayElem.Index` now use `*Subscript`
-- `Subscript.Kind` already distinguishes generic expression selectors from `[@]` and `[*]`
-- indexed vs associative interpretation still mostly lives in expand/interp, so selector semantics are not fully typed yet
+- `Subscript.Kind` distinguishes generic expression selectors from `[@]` and `[*]`
+- `Subscript.Mode` now carries indexed vs associative interpretation for generic selectors
+- `VarRef.Context` now preserves `-v`-specific interpretation through parse and nameref resolution
+- `expand.ResolveRef` is the single place that resolves `SubscriptAuto` after nameref following
 
 #### Conformance signals
 
@@ -162,10 +164,15 @@ Relevant examples:
 
 #### Proposed AST change
 
-Build on the current `Subscript` node instead of replacing it. The remaining work is to preserve more selector semantics, especially:
+Done. The shipped shape builds on the current `Subscript` node instead of replacing it:
 
-- indexed vs associative interpretation
-- `-v`-specific validation
+- `Subscript.Mode` distinguishes `Auto`, indexed, and associative interpretation for generic selectors
+- `VarRef.Context` distinguishes ordinary refs from `-v` refs
+- declaration parsing and compound-array execution stamp explicit selector mode as soon as array mode is known
+- nameref resolution preserves `VarRef.Context` and resolves `SubscriptAuto` once, centrally
+
+Future subscript work, if needed, is narrower:
+
 - side-effectful arithmetic subscripts
 - slice-specific structure where generic `Expr` is still too coarse
 

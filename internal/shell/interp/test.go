@@ -75,12 +75,12 @@ func (r *Runner) bashTest(ctx context.Context, expr syntax.TestExpr, classic boo
 				return ""
 			}
 			if classic {
-				if r.refIsSet(r.looseVarRef(r.document(word))) {
+				if r.refIsSet(r.looseVarRefWithContext(r.document(word), syntax.VarRefVarSet)) {
 					return "1"
 				}
 				return ""
 			}
-			if r.refIsSet(r.looseVarRefWord(word)) {
+			if r.refIsSet(r.looseVarRefWordWithContext(word, syntax.VarRefVarSet)) {
 				return "1"
 			}
 			return ""
@@ -159,7 +159,7 @@ func (r *Runner) bashCond(ctx context.Context, expr syntax.CondExpr) string {
 					return "1"
 				}
 			case *syntax.CondWord:
-				if r.refIsSet(r.looseVarRefWord(operand.Word)) {
+				if r.refIsSet(r.looseVarRefWordWithContext(operand.Word, syntax.VarRefVarSet)) {
 					return "1"
 				}
 			}

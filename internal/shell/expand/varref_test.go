@@ -47,6 +47,9 @@ func TestResolveRef(t *testing.T) {
 	if got := subscriptLit(ref.Index); got != "1" {
 		t.Fatalf("resolved index = %q, want 1", got)
 	}
+	if got := ref.Index.Mode; got != syntax.SubscriptIndexed {
+		t.Fatalf("resolved mode = %v, want %v", got, syntax.SubscriptIndexed)
+	}
 	if vr.Kind != Indexed {
 		t.Fatalf("resolved kind = %v, want Indexed", vr.Kind)
 	}
@@ -57,5 +60,40 @@ func TestResolveRef(t *testing.T) {
 	}
 	if _, ok := err.(InvalidIdentifierError); !ok {
 		t.Fatalf("ResolveRef elem[1] error = %T, want InvalidIdentifierError", err)
+	}
+}
+
+func TestResolveRefPreservesContextAndAssociativeMode(t *testing.T) {
+	t.Parallel()
+
+	env := testEnv{
+		"assoc": {
+			Set:  true,
+			Kind: Associative,
+			Map:  map[string]string{"k": "v"},
+		},
+		"ref": {
+			Set:  true,
+			Kind: NameRef,
+			Str:  "assoc",
+		},
+	}
+
+	ref, vr, err := env.Get("ref").ResolveRef(env, &syntax.VarRef{
+		Name:    &syntax.Lit{Value: "ref"},
+		Index:   &syntax.Subscript{Kind: syntax.SubscriptExpr, Mode: syntax.SubscriptAuto, Expr: &syntax.Word{Parts: []syntax.WordPart{&syntax.Lit{Value: "k"}}}},
+		Context: syntax.VarRefVarSet,
+	})
+	if err != nil {
+		t.Fatalf("ResolveRef assoc error = %v", err)
+	}
+	if vr.Kind != Associative {
+		t.Fatalf("resolved kind = %v, want Associative", vr.Kind)
+	}
+	if got := ref.Context; got != syntax.VarRefVarSet {
+		t.Fatalf("resolved context = %v, want %v", got, syntax.VarRefVarSet)
+	}
+	if got := ref.Index.Mode; got != syntax.SubscriptAssociative {
+		t.Fatalf("resolved mode = %v, want %v", got, syntax.SubscriptAssociative)
 	}
 }

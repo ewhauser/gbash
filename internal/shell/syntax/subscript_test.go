@@ -11,10 +11,11 @@ func TestVarRefSubscriptKinds(t *testing.T) {
 	tests := []struct {
 		src  string
 		kind SubscriptKind
+		mode SubscriptMode
 	}{
-		{src: "a[1]", kind: SubscriptExpr},
-		{src: "a[@]", kind: SubscriptAt},
-		{src: "a[*]", kind: SubscriptStar},
+		{src: "a[1]", kind: SubscriptExpr, mode: SubscriptAuto},
+		{src: "a[@]", kind: SubscriptAt, mode: SubscriptAuto},
+		{src: "a[*]", kind: SubscriptStar, mode: SubscriptAuto},
 	}
 
 	for _, tc := range tests {
@@ -28,6 +29,9 @@ func TestVarRefSubscriptKinds(t *testing.T) {
 			}
 			if ref.Index.Kind != tc.kind {
 				t.Fatalf("VarRef(%q) kind = %v, want %v", tc.src, ref.Index.Kind, tc.kind)
+			}
+			if ref.Index.Mode != tc.mode {
+				t.Fatalf("VarRef(%q) mode = %v, want %v", tc.src, ref.Index.Mode, tc.mode)
 			}
 		})
 	}
@@ -61,5 +65,51 @@ func TestParseSubscriptKinds(t *testing.T) {
 	}
 	if got := name.Ref.Index.Kind; got != SubscriptStar {
 		t.Fatalf("declare subscript kind = %v, want %v", got, SubscriptStar)
+	}
+}
+
+func TestParseSubscriptModesAndContexts(t *testing.T) {
+	t.Parallel()
+
+	src := strings.Join([]string{
+		"declare -A foo=([a]=b)",
+		"declare -A foo[a]=",
+		"declare -a bar[1]=",
+		"[[ -v assoc[$key] ]]",
+		"[[ -R ref ]]",
+	}, "\n")
+	file, err := NewParser().Parse(strings.NewReader(src), "")
+	if err != nil {
+		t.Fatalf("Parse error = %v", err)
+	}
+
+	declAssoc := file.Stmts[0].Cmd.(*DeclClause)
+	as0 := declAssoc.Operands[1].(*DeclAssign).Assign
+	if got := as0.Array.Elems[0].Index.Mode; got != SubscriptAssociative {
+		t.Fatalf("declare -A array elem mode = %v, want %v", got, SubscriptAssociative)
+	}
+
+	declAssocRef := file.Stmts[1].Cmd.(*DeclClause)
+	as1 := declAssocRef.Operands[1].(*DeclAssign).Assign
+	if got := as1.Ref.Index.Mode; got != SubscriptAssociative {
+		t.Fatalf("declare -A ref mode = %v, want %v", got, SubscriptAssociative)
+	}
+
+	declIndexedRef := file.Stmts[2].Cmd.(*DeclClause)
+	as2 := declIndexedRef.Operands[1].(*DeclAssign).Assign
+	if got := as2.Ref.Index.Mode; got != SubscriptIndexed {
+		t.Fatalf("declare -a ref mode = %v, want %v", got, SubscriptIndexed)
+	}
+
+	testVarSet := file.Stmts[3].Cmd.(*TestClause)
+	ref := testVarSet.X.(*CondUnary).X.(*CondVarRef).Ref
+	if got := ref.Context; got != VarRefVarSet {
+		t.Fatalf("[[ -v ]] ref context = %v, want %v", got, VarRefVarSet)
+	}
+
+	testRefVar := file.Stmts[4].Cmd.(*TestClause)
+	ref = testRefVar.X.(*CondUnary).X.(*CondVarRef).Ref
+	if got := ref.Context; got != VarRefDefault {
+		t.Fatalf("[[ -R ]] ref context = %v, want %v", got, VarRefDefault)
 	}
 }

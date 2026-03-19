@@ -58,9 +58,18 @@ func litHeredocDelim(s string) *HeredocDelim { return heredocDelim(lit(s)) }
 func sub(expr ArithmExpr) *Subscript {
 	return &Subscript{Kind: SubscriptExpr, Expr: expr}
 }
+func subMode(mode SubscriptMode, expr ArithmExpr) *Subscript {
+	return &Subscript{Kind: SubscriptExpr, Mode: mode, Expr: expr}
+}
 func subWord(s string) *Subscript { return sub(litWord(s)) }
-func subAt() *Subscript           { return &Subscript{Kind: SubscriptAt, Expr: litWord("@")} }
-func subStar() *Subscript         { return &Subscript{Kind: SubscriptStar, Expr: litWord("*")} }
+func subIndexed(expr ArithmExpr) *Subscript {
+	return subMode(SubscriptIndexed, expr)
+}
+func subAssociative(expr ArithmExpr) *Subscript {
+	return subMode(SubscriptAssociative, expr)
+}
+func subAt() *Subscript   { return &Subscript{Kind: SubscriptAt, Expr: litWord("@")} }
+func subStar() *Subscript { return &Subscript{Kind: SubscriptStar, Expr: litWord("*")} }
 func litRef(name string) *VarRef {
 	return &VarRef{Name: lit(name)}
 }
@@ -74,6 +83,11 @@ func ref(name string, index ArithmExpr) *VarRef {
 func refSub(name string, index *Subscript) *VarRef {
 	return &VarRef{Name: lit(name), Index: index}
 }
+func refContext(context VarRefContext, ref *VarRef) *VarRef {
+	ref.Context = context
+	return ref
+}
+func refVarSet(ref *VarRef) *VarRef { return refContext(VarRefVarSet, ref) }
 func litWords(strs ...string) []*Word {
 	l := make([]*Word, 0, len(strs))
 	for _, s := range strs {
@@ -4038,11 +4052,11 @@ var fileTests = []fileTestCase{
 	),
 	fileTest(
 		[]string{`[[ -v assoc[$key] ]]`},
-		langFile(&TestClause{X: condUnary(TsVarSet, condVarRef(refSub("assoc", sub(word(litParamExp("key"))))))}, LangBash|LangMirBSDKorn|LangZsh),
+		langFile(&TestClause{X: condUnary(TsVarSet, condVarRef(refVarSet(refSub("assoc", sub(word(litParamExp("key")))))))}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
 		[]string{`[[ -v assoc['k'] ]]`},
-		langFile(&TestClause{X: condUnary(TsVarSet, condVarRef(refSub("assoc", sub(word(sglQuoted("k"))))))}, LangBash|LangMirBSDKorn|LangZsh),
+		langFile(&TestClause{X: condUnary(TsVarSet, condVarRef(refVarSet(refSub("assoc", sub(word(sglQuoted("k")))))))}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
 		[]string{`[[ -v assoc[k]z ]]`},
@@ -4233,7 +4247,7 @@ var fileTests = []fileTestCase{
 		[]string{"[[ -o a && -v b ]]"},
 		langFile(&TestClause{X: condBinary(AndTest,
 			condUnary(TsOptSet, litCondWord("a")),
-			condUnary(TsVarSet, condVarRef(litRef("b"))),
+			condUnary(TsVarSet, condVarRef(refVarSet(litRef("b")))),
 		)}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
@@ -4399,7 +4413,7 @@ var fileTests = []fileTestCase{
 					Array: &ArrayExpr{
 						Mode: ArrayExprAssociative,
 						Elems: []*ArrayElem{
-							arrKeyed(subWord("a"), litWord("b")),
+							arrKeyed(subAssociative(litWord("a")), litWord("b")),
 						},
 					},
 				}),
