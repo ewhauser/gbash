@@ -156,6 +156,9 @@ func (p *Printer) Print(w io.Writer, node Node) error {
 	case *VarRef:
 		p.line = node.Pos().Line()
 		p.varRef(node)
+	case *Subscript:
+		p.line = node.Pos().Line()
+		p.subscript(node)
 	case WordPart:
 		p.line = node.Pos().Line()
 		p.wordPart(node, nil)
@@ -718,15 +721,26 @@ func (p *Printer) dblQuoted(dq *DblQuoted) {
 	p.w.WriteByte('"')
 }
 
-func (p *Printer) wroteIndex(index ArithmExpr) bool {
+func (p *Printer) subscript(index *Subscript) {
+	p.w.WriteByte('[')
+	switch index.Kind {
+	case SubscriptAt:
+		p.w.WriteByte('@')
+	case SubscriptStar:
+		p.w.WriteByte('*')
+	default:
+		// Note that e.g. foo[1,3]=$bar in Zsh does not allow any spaces around
+		// the comma, as that breaks the assignment word.
+		p.arithmExpr(index.Expr, true, false)
+	}
+	p.w.WriteByte(']')
+}
+
+func (p *Printer) wroteIndex(index *Subscript) bool {
 	if index == nil {
 		return false
 	}
-	p.w.WriteByte('[')
-	// Note that e.g. foo[1,3]=$bar in Zsh does not allow any spaces around the comma,
-	// as that breaks the assignment word.
-	p.arithmExpr(index, true, false)
-	p.w.WriteByte(']')
+	p.subscript(index)
 	return true
 }
 

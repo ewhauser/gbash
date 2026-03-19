@@ -44,7 +44,7 @@ func TestResolveRef(t *testing.T) {
 	if got := ref.Name.Value; got != "arr" {
 		t.Fatalf("resolved name = %q, want arr", got)
 	}
-	if got := nodeLit(ref.Index); got != "1" {
+	if got := subscriptLit(ref.Index); got != "1" {
 		t.Fatalf("resolved index = %q, want 1", got)
 	}
 	if vr.Kind != Indexed {

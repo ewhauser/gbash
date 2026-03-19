@@ -19,10 +19,23 @@ func lits(strs ...string) []*Lit {
 }
 func word(ps ...WordPart) *Word { return &Word{Parts: ps} }
 func litWord(s string) *Word    { return word(lit(s)) }
+func sub(expr ArithmExpr) *Subscript {
+	return &Subscript{Kind: SubscriptExpr, Expr: expr}
+}
+func subWord(s string) *Subscript { return sub(litWord(s)) }
+func subAt() *Subscript           { return &Subscript{Kind: SubscriptAt, Expr: litWord("@")} }
+func subStar() *Subscript         { return &Subscript{Kind: SubscriptStar, Expr: litWord("*")} }
 func litRef(name string) *VarRef {
 	return &VarRef{Name: lit(name)}
 }
 func ref(name string, index ArithmExpr) *VarRef {
+	var s *Subscript
+	if index != nil {
+		s = sub(index)
+	}
+	return &VarRef{Name: lit(name), Index: s}
+}
+func refSub(name string, index *Subscript) *VarRef {
 	return &VarRef{Name: lit(name), Index: index}
 }
 func litWords(strs ...string) []*Word {
@@ -2576,7 +2589,7 @@ var fileTests = []fileTestCase{
 		},
 		langFile(&ParamExp{
 			Param: lit("foo"),
-			Index: litWord("1"),
+			Index: subWord("1"),
 		}, LangBash|LangMirBSDKorn|LangZsh),
 		langErr2("1:6: arrays are a bash/mksh/zsh feature; tried parsing as LANG", LangPOSIX),
 	),
@@ -2585,18 +2598,18 @@ var fileTests = []fileTestCase{
 		langFile(&ParamExp{
 			Short: true,
 			Param: lit("foo"),
-			Index: litWord("1"),
+			Index: subWord("1"),
 		}, LangZsh),
 	),
 	fileTest(
 		[]string{`${foo[1,3]}`, `${foo[ 1 , 3 ]}`},
 		langFile(&ParamExp{
 			Param: lit("foo"),
-			Index: &BinaryArithm{
+			Index: sub(&BinaryArithm{
 				Op: Comma,
 				X:  litWord("1"),
 				Y:  litWord("3"),
-			},
+			}),
 		}, LangBash|LangMirBSDKorn|LangZsh),
 		langErr2("1:6: arrays are a bash/mksh/zsh feature; tried parsing as LANG", LangPOSIX),
 	),
@@ -2604,14 +2617,14 @@ var fileTests = []fileTestCase{
 		[]string{`${foo[1,-1]}`},
 		langFile(&ParamExp{
 			Param: lit("foo"),
-			Index: &BinaryArithm{
+			Index: sub(&BinaryArithm{
 				Op: Comma,
 				X:  litWord("1"),
 				Y: &UnaryArithm{
 					Op: Minus,
 					X:  litWord("1"),
 				},
-			},
+			}),
 		}, LangBash|LangMirBSDKorn|LangZsh),
 		langErr2("1:6: arrays are a bash/mksh/zsh feature; tried parsing as LANG", LangPOSIX),
 	),
@@ -2620,21 +2633,21 @@ var fileTests = []fileTestCase{
 		langFile(&ParamExp{
 			Short: true,
 			Param: lit("foo"),
-			Index: &BinaryArithm{
+			Index: sub(&BinaryArithm{
 				Op: Comma,
 				X:  litWord("1"),
 				Y:  litWord("3"),
-			},
+			}),
 		}, LangZsh),
 	),
 	fileTest(
 		[]string{`${signals[(i)QUIT]}`},
 		langFile(&ParamExp{
 			Param: lit("signals"),
-			Index: &FlagsArithm{
+			Index: sub(&FlagsArithm{
 				Flags: lit("i"),
 				X:     litWord("QUIT"),
-			},
+			}),
 		}, LangZsh),
 		langErr2("1:11: subscript flags are a zsh feature; tried parsing as LANG", LangBash|LangMirBSDKorn),
 	),
@@ -2642,10 +2655,10 @@ var fileTests = []fileTestCase{
 		[]string{`${ZSH_VERSION[(s:.:w)2]}`},
 		langFile(&ParamExp{
 			Param: lit("ZSH_VERSION"),
-			Index: &FlagsArithm{
+			Index: sub(&FlagsArithm{
 				Flags: lit("s:.:w"),
 				X:     litWord("2"),
-			},
+			}),
 		}, LangZsh),
 	),
 	fileTest(
@@ -2653,26 +2666,26 @@ var fileTests = []fileTestCase{
 		langFile(&ParamExp{
 			Short: true,
 			Param: lit("foo"),
-			Index: &FlagsArithm{
+			Index: sub(&FlagsArithm{
 				Flags: lit("r"),
 				X:     litWord("pattern"),
-			},
+			}),
 		}, LangZsh),
 	),
 	fileTest(
 		[]string{`${array[(i)]}`},
 		langFile(&ParamExp{
 			Param: lit("array"),
-			Index: &FlagsArithm{
+			Index: sub(&FlagsArithm{
 				Flags: lit("i"),
-			},
+			}),
 		}, LangZsh),
 	),
 	fileTest(
 		[]string{`${foo[(r)ab,(r)cd]}`},
 		langFile(&ParamExp{
 			Param: lit("foo"),
-			Index: &BinaryArithm{
+			Index: sub(&BinaryArithm{
 				Op: Comma,
 				X: &FlagsArithm{
 					Flags: lit("r"),
@@ -2682,31 +2695,31 @@ var fileTests = []fileTestCase{
 					Flags: lit("r"),
 					X:     litWord("cd"),
 				},
-			},
+			}),
 		}, LangZsh),
 	),
 	fileTest(
 		[]string{`${foo[-1]}`},
 		langFile(&ParamExp{
 			Param: lit("foo"),
-			Index: &UnaryArithm{
+			Index: sub(&UnaryArithm{
 				Op: Minus,
 				X:  litWord("1"),
-			},
+			}),
 		}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
 		[]string{`${foo[@]}`},
 		langFile(&ParamExp{
 			Param: lit("foo"),
-			Index: litWord("@"),
+			Index: subAt(),
 		}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
 		[]string{`${foo[*]-etc}`},
 		langFile(&ParamExp{
 			Param: lit("foo"),
-			Index: litWord("*"),
+			Index: subStar(),
 			Exp: &Expansion{
 				Op:   DefaultUnset,
 				Word: litWord("etc"),
@@ -2717,21 +2730,21 @@ var fileTests = []fileTestCase{
 		[]string{`${foo[bar]}`},
 		langFile(&ParamExp{
 			Param: lit("foo"),
-			Index: litWord("bar"),
+			Index: subWord("bar"),
 		}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
 		[]string{`${foo[$bar]}`},
 		langFile(&ParamExp{
 			Param: lit("foo"),
-			Index: word(litParamExp("bar")),
+			Index: sub(word(litParamExp("bar"))),
 		}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
 		[]string{`${foo[${bar}]}`},
 		langFile(&ParamExp{
 			Param: lit("foo"),
-			Index: word(&ParamExp{Param: lit("bar")}),
+			Index: sub(word(&ParamExp{Param: lit("bar")})),
 		}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
@@ -3031,7 +3044,7 @@ var fileTests = []fileTestCase{
 			word(&ParamExp{
 				Excl:  true,
 				Param: lit("bar"),
-				Index: litWord("@"),
+				Index: subAt(),
 			}),
 		), LangBash|LangMirBSDKorn),
 		langErr2("1:1: `${!foo}` is a bash/mksh feature; tried parsing as LANG", LangPOSIX),
@@ -3143,7 +3156,7 @@ var fileTests = []fileTestCase{
 			X: word(&ParamExp{
 				Short: true,
 				Param: lit("arr"),
-				Index: litWord("0"),
+				Index: subWord("0"),
 			}),
 		}), LangBash|LangMirBSDKorn|LangZsh),
 	),
@@ -3154,7 +3167,7 @@ var fileTests = []fileTestCase{
 			X: word(&ParamExp{
 				Short: true,
 				Param: lit("arr"),
-				Index: litWord("0"),
+				Index: subWord("0"),
 			}),
 		}), LangBash|LangMirBSDKorn|LangZsh),
 	),
@@ -3322,7 +3335,7 @@ var fileTests = []fileTestCase{
 			X: word(&ParamExp{
 				Short: true,
 				Param: lit("a"),
-				Index: litWord("i"),
+				Index: subWord("i"),
 			}),
 			Y: litWord("4"),
 		}), LangBash|LangMirBSDKorn|LangZsh),
@@ -4393,7 +4406,7 @@ var fileTests = []fileTestCase{
 				{
 					Ref: ref("foo", nil),
 					Array: &ArrayExpr{Elems: []*ArrayElem{{
-						Index: litWord("a"),
+						Index: subWord("a"),
 						Value: litWord("b"),
 					}}},
 				},
@@ -4414,7 +4427,7 @@ var fileTests = []fileTestCase{
 		langFile(&DeclClause{
 			Variant: lit("declare"),
 			Args: []*Assign{{
-				Ref:   ref("foo", litWord("*")),
+				Ref:   refSub("foo", subStar()),
 				Naked: true,
 			}},
 		}, LangBash),
@@ -4794,7 +4807,7 @@ var fileTests = []fileTestCase{
 		[]string{`echo ${a["x y"]}`},
 		langFile(call(litWord("echo"), word(&ParamExp{
 			Param: lit("a"),
-			Index: word(dblQuoted(lit("x y"))),
+			Index: sub(word(dblQuoted(lit("x y")))),
 		})), LangBash),
 	),
 	fileTest(
@@ -4816,7 +4829,7 @@ var fileTests = []fileTestCase{
 			X: word(&ParamExp{
 				Short: true,
 				Param: lit("a"),
-				Index: word(dblQuoted(lit("x y"))),
+				Index: sub(word(dblQuoted(lit("x y")))),
 			}),
 			Y: litWord("b"),
 		}), LangBash|LangMirBSDKorn|LangZsh),
@@ -4829,7 +4842,7 @@ var fileTests = []fileTestCase{
 		langFile(&CallExpr{Assigns: []*Assign{{
 			Ref: litRef("a"),
 			Array: &ArrayExpr{Elems: []*ArrayElem{{
-				Index: word(dblQuoted(lit("x y"))),
+				Index: sub(word(dblQuoted(lit("x y")))),
 				Value: litWord("b"),
 			}}},
 		}}}, LangBash),
@@ -4842,8 +4855,8 @@ var fileTests = []fileTestCase{
 		langFile(&CallExpr{Assigns: []*Assign{{
 			Ref: litRef("a"),
 			Array: &ArrayExpr{Elems: []*ArrayElem{
-				{Index: litWord("x")},
-				{Index: litWord("y")},
+				{Index: subWord("x")},
+				{Index: subWord("y")},
 			}},
 		}}}, LangBash),
 	),

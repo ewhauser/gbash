@@ -354,8 +354,11 @@ func (r *Runner) setFunc(name string, body *syntax.Stmt) {
 	r.setFuncInternal(name, r.currentInternal())
 }
 
-func stringIndex(index syntax.ArithmExpr) bool {
-	w, ok := index.(*syntax.Word)
+func stringIndex(index *syntax.Subscript) bool {
+	if index == nil {
+		return false
+	}
+	w, ok := index.Expr.(*syntax.Word)
 	if !ok || len(w.Parts) != 1 {
 		return false
 	}
@@ -414,7 +417,7 @@ func (r *Runner) assignVal(prev expand.Variable, as *syntax.Assign, valType stri
 	if valType == "-A" {
 		amap := make(map[string]string, len(elems))
 		for _, elem := range elems {
-			k := r.literal(elem.Index.(*syntax.Word))
+			k := r.literal(elem.Index.Expr.(*syntax.Word))
 			amap[k] = r.literal(elem.Value)
 		}
 		if !as.Append {
@@ -434,7 +437,7 @@ func (r *Runner) assignVal(prev expand.Variable, as *syntax.Assign, valType stri
 	for i, elem := range elems {
 		if elem.Index != nil {
 			// Index resets our index with a literal value.
-			index = r.arithm(elem.Index)
+			index = r.arithm(elem.Index.Expr)
 			elemValues[i].values = []string{r.literal(elem.Value)}
 		} else {
 			// Implicit index, advancing for every word.

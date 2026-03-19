@@ -15,6 +15,41 @@ func parseVarRef(src string) (*syntax.VarRef, error) {
 	return p.VarRef(strings.NewReader(src))
 }
 
+func literalSubscript(kind syntax.SubscriptKind, lit string) *syntax.Subscript {
+	return &syntax.Subscript{
+		Kind: kind,
+		Expr: &syntax.Word{Parts: []syntax.WordPart{
+			&syntax.Lit{Value: lit},
+		}},
+	}
+}
+
+func subscriptLit(sub *syntax.Subscript) string {
+	if sub == nil {
+		return ""
+	}
+	switch sub.Kind {
+	case syntax.SubscriptAt:
+		return "@"
+	case syntax.SubscriptStar:
+		return "*"
+	default:
+		word, ok := sub.Expr.(*syntax.Word)
+		if !ok {
+			return ""
+		}
+		return word.Lit()
+	}
+}
+
+func subscriptWord(sub *syntax.Subscript) (*syntax.Word, bool) {
+	if sub == nil {
+		return nil, false
+	}
+	word, ok := sub.Expr.(*syntax.Word)
+	return word, ok
+}
+
 func printVarRef(ref *syntax.VarRef) string {
 	if ref == nil {
 		return ""
@@ -65,15 +100,15 @@ func (r *Runner) refIsSet(ref *syntax.VarRef) bool {
 	}
 	switch vr.Kind {
 	case expand.String:
-		return vr.IsSet() && r.arithm(ref.Index) == 0
+		return vr.IsSet() && r.arithm(ref.Index.Expr) == 0
 	case expand.Indexed:
-		index := r.arithm(ref.Index)
+		index := r.arithm(ref.Index.Expr)
 		if index < 0 {
 			index = len(vr.List) + index
 		}
 		return index >= 0 && index < len(vr.List)
 	case expand.Associative:
-		word, ok := ref.Index.(*syntax.Word)
+		word, ok := subscriptWord(ref.Index)
 		if !ok {
 			return false
 		}
@@ -102,13 +137,14 @@ func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand
 		// zero value for the index.
 		switch prev.Kind {
 		case expand.Indexed:
-			index = &syntax.Word{Parts: []syntax.WordPart{
-				&syntax.Lit{Value: "0"},
-			}}
+			index = literalSubscript(syntax.SubscriptExpr, "0")
 		case expand.Associative:
-			index = &syntax.Word{Parts: []syntax.WordPart{
-				&syntax.DblQuoted{},
-			}}
+			index = &syntax.Subscript{
+				Kind: syntax.SubscriptExpr,
+				Expr: &syntax.Word{Parts: []syntax.WordPart{
+					&syntax.DblQuoted{},
+				}},
+			}
 		}
 	}
 	if index == nil {
@@ -125,7 +161,7 @@ func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand
 	case expand.Indexed:
 		list = slices.Clone(prev.List)
 	case expand.Associative:
-		word, ok := index.(*syntax.Word)
+		word, ok := subscriptWord(index)
 		if !ok {
 			return nil
 		}
@@ -138,7 +174,7 @@ func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand
 		r.setVar(name, prev)
 		return nil
 	}
-	key := r.arithm(index)
+	key := r.arithm(index.Expr)
 	for len(list) < key+1 {
 		list = append(list, "")
 	}

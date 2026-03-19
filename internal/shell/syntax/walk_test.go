@@ -16,6 +16,7 @@ func TestWalk(t *testing.T) {
 		"*syntax.Comment":      false,
 		"*syntax.Stmt":         false,
 		"*syntax.VarRef":       false,
+		"*syntax.Subscript":    false,
 		"*syntax.Assign":       false,
 		"*syntax.Redirect":     false,
 		"*syntax.CallExpr":     false,

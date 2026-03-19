@@ -910,7 +910,7 @@ func (cfg *Config) quotedElemFields(pe *syntax.ParamExp) ([]string, bool, error)
 		case syntax.NamesPrefix: // "${!prefix*}"
 			return nil, false, nil
 		}
-		switch nodeLit(pe.Index) {
+		switch subscriptLit(pe.Index) {
 		case "@": // "${!name[@]}"
 			switch vr := cfg.Env.Get(name); vr.Kind {
 			case Indexed:
@@ -936,8 +936,8 @@ func (cfg *Config) quotedElemFields(pe *syntax.ParamExp) ([]string, bool, error)
 	}
 
 	hasElems := len(elems) > 0
-	isAt := pe.Param.Value == "@" || nodeLit(pe.Index) == "@"
-	isStar := pe.Param.Value == "*" || nodeLit(pe.Index) == "*"
+	isAt := pe.Param.Value == "@" || subscriptLit(pe.Index) == "@"
+	isStar := pe.Param.Value == "*" || subscriptLit(pe.Index) == "*"
 	null := !hasElems
 	if isAt && len(elems) == 1 && elems[0] == "" {
 		null = true
@@ -1011,7 +1011,7 @@ func (cfg *Config) quotedArrayFields(pe *syntax.ParamExp) ([]string, []string, b
 	if ref != nil {
 		index = ref.Index
 	}
-	switch nodeLit(index) {
+	switch subscriptLit(index) {
 	case "@": // "${name[@]}"
 		switch vr.Kind {
 		case Indexed:

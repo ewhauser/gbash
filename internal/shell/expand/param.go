@@ -23,6 +23,20 @@ func nodeLit(node syntax.Node) string {
 	return ""
 }
 
+func subscriptLit(sub *syntax.Subscript) string {
+	if sub == nil {
+		return ""
+	}
+	switch sub.Kind {
+	case syntax.SubscriptAt:
+		return "@"
+	case syntax.SubscriptStar:
+		return "*"
+	default:
+		return nodeLit(sub.Expr)
+	}
+}
+
 // fnv1Hash computes the FNV-1 hash for a string.
 // This matches bash's internal hash function for associative arrays.
 func fnv1Hash(s string) uint32 {
@@ -123,9 +137,16 @@ func (cfg *Config) paramExpState(pe *syntax.ParamExp) (paramExpState, error) {
 	index := pe.Index
 	switch state.name {
 	case "@", "*":
-		index = &syntax.Word{Parts: []syntax.WordPart{
-			&syntax.Lit{Value: state.name},
-		}}
+		kind := syntax.SubscriptAt
+		if state.name == "*" {
+			kind = syntax.SubscriptStar
+		}
+		index = &syntax.Subscript{
+			Kind: kind,
+			Expr: &syntax.Word{Parts: []syntax.WordPart{
+				&syntax.Lit{Value: state.name},
+			}},
+		}
 	}
 
 	switch state.name {
@@ -158,7 +179,7 @@ func (cfg *Config) paramExpState(pe *syntax.ParamExp) (paramExpState, error) {
 		}
 	}
 
-	switch nodeLit(index) {
+	switch subscriptLit(index) {
 	case "@", "*":
 		switch state.vr.Kind {
 		case Unknown:
@@ -465,7 +486,7 @@ func (cfg *Config) paramExp(pe *syntax.ParamExp, ql quoteLevel) (string, error) 
 	case pe.Length:
 		n := len(elems)
 		switch {
-		case name == "@", name == "*", nodeLit(pe.Index) == "@", nodeLit(pe.Index) == "*":
+		case name == "@", name == "*", subscriptLit(pe.Index) == "@", subscriptLit(pe.Index) == "*":
 		default:
 			n = utf8.RuneCountInString(str)
 		}
@@ -725,13 +746,13 @@ func removePattern(str, pat string, fromEnd, shortest bool) string {
 	return str
 }
 
-func (cfg *Config) varInd(vr Variable, idx syntax.ArithmExpr) (string, error) {
+func (cfg *Config) varInd(vr Variable, idx *syntax.Subscript) (string, error) {
 	if idx == nil {
 		return vr.String(), nil
 	}
 	switch vr.Kind {
 	case String:
-		n, err := Arithm(cfg, idx)
+		n, err := Arithm(cfg, idx.Expr)
 		if err != nil {
 			return "", err
 		}
@@ -739,11 +760,11 @@ func (cfg *Config) varInd(vr Variable, idx syntax.ArithmExpr) (string, error) {
 			return vr.Str, nil
 		}
 	case Indexed:
-		switch nodeLit(idx) {
+		switch subscriptLit(idx) {
 		case "*", "@":
 			return strings.Join(vr.List, " "), nil
 		}
-		i, err := Arithm(cfg, idx)
+		i, err := Arithm(cfg, idx.Expr)
 		if err != nil {
 			return "", err
 		}
@@ -754,7 +775,7 @@ func (cfg *Config) varInd(vr Variable, idx syntax.ArithmExpr) (string, error) {
 			return vr.List[i], nil
 		}
 	case Associative:
-		switch lit := nodeLit(idx); lit {
+		switch lit := subscriptLit(idx); lit {
 		case "@", "*":
 			// Iterate values in bash-compatible key order.
 			keys := sortedMapKeys(vr.Map)
@@ -767,7 +788,7 @@ func (cfg *Config) varInd(vr Variable, idx syntax.ArithmExpr) (string, error) {
 			}
 			return strings.Join(strs, " "), nil
 		}
-		val, err := Literal(cfg, idx.(*syntax.Word))
+		val, err := Literal(cfg, idx.Expr.(*syntax.Word))
 		if err != nil {
 			return "", err
 		}

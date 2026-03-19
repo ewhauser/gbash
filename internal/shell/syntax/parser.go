@@ -1782,18 +1782,40 @@ func (p *Parser) paramExpExp() *Expansion {
 	return &Expansion{Op: op, Word: p.getWord()}
 }
 
-func (p *Parser) eitherIndex() ArithmExpr {
+func (p *Parser) eitherIndex() *Subscript {
 	old := p.quote
 	lpos := p.pos
+	sub := &Subscript{Left: lpos, Kind: SubscriptExpr}
 	p.quote = paramExpArithm
 	p.next()
-	if p.tok == star || p.tok == at {
-		p.tok, p.val = _LitWord, p.tok.String()
+	switch p.tok {
+	case star:
+		sub.Kind = SubscriptStar
+		sub.Expr = p.wordOne(p.lit(p.pos, star.String()))
+		p.next()
+	case at:
+		sub.Kind = SubscriptAt
+		sub.Expr = p.wordOne(p.lit(p.pos, at.String()))
+		p.next()
+	default:
+		if p.tok == _LitWord && (p.val == "@" || p.val == "*") {
+			if p.val == "@" {
+				sub.Kind = SubscriptAt
+			} else {
+				sub.Kind = SubscriptStar
+			}
+			sub.Expr = p.wordOne(p.lit(p.pos, p.val))
+			p.next()
+			break
+		}
+		sub.Expr = p.followArithm(leftBrack, lpos)
 	}
-	expr := p.followArithm(leftBrack, lpos)
 	p.quote = old
+	if p.tok == rightBrack {
+		sub.Right = p.pos
+	}
 	p.matchedArithm(lpos, leftBrack, rightBrack)
-	return expr
+	return sub
 }
 
 func (p *Parser) zshSubFlags() *FlagsArithm {
