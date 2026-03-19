@@ -870,6 +870,12 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					vr = r.assignVal(vr, as, "")
 				} else {
 					vr = r.assignVal(vr, as, valType)
+					if valType == "-a" && as.Value != nil && as.Array == nil && as.Ref != nil && as.Ref.Index == nil {
+						vr.Kind = expand.Indexed
+						vr.List = []string{vr.Str}
+						vr.Str = ""
+						vr.Map = nil
+					}
 				}
 				// For integer append in declare context, redo as arithmetic addition.
 				if as.Append && as.Value != nil && vr.Kind == expand.String {

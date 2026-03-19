@@ -50,11 +50,15 @@ printf 'flagged=%s\n' "${compound_array[*]}"
 declare +a 'string_arr=(2 3)'
 declare +A 'string_assoc=([k]=v)'
 printf 'plus=%s|%s\n' "$string_arr" "$string_assoc"
+declare -a direct_scalar=4
+spec='dyn_scalar=5'
+declare -a "$spec"
+printf 'scalar-array=%s|%s|%s|%s\n' "${#direct_scalar[@]}" "${direct_scalar[0]}" "${#dyn_scalar[@]}" "${dyn_scalar[0]}"
 `)
 	if err != nil {
 		t.Fatalf("Run error = %v", err)
 	}
-	const want = "array=1 2 3\nassoc=x\nsplit=1,2\nprefix=unset kept=ok\nalias=works\nliteral=$HOME\nspaced=1 2\nquoted=\"1 2\"\ncmd=$(printf hacked)\narr=3|hacked|abcd|homex len=4\nempty=1\nscalar=(1 2)\nflagged=1 2\nplus=(2 3)|([k]=v)\n"
+	const want = "array=1 2 3\nassoc=x\nsplit=1,2\nprefix=unset kept=ok\nalias=works\nliteral=$HOME\nspaced=1 2\nquoted=\"1 2\"\ncmd=$(printf hacked)\narr=3|hacked|abcd|homex len=4\nempty=1\nscalar=(1 2)\nflagged=1 2\nplus=(2 3)|([k]=v)\nscalar-array=1|4|1|5\n"
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
