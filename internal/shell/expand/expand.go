@@ -914,8 +914,10 @@ func (cfg *Config) quotedElemFields(pe *syntax.ParamExp) ([]string, bool, error)
 				if err != nil {
 					return nil, false, err
 				}
-				if fields, _, ok := cfg.quotedArrayFields(target); ok {
-					return fields, true, nil
+				if quotedIndirectArrayTarget(target) {
+					if fields, _, ok := cfg.quotedArrayFields(target); ok {
+						return fields, true, nil
+					}
 				}
 			}
 		}
@@ -985,6 +987,19 @@ func (cfg *Config) quotedElemFields(pe *syntax.ParamExp) ([]string, bool, error)
 		return nil, false, nil
 	default:
 		return fields, true, nil
+	}
+}
+
+func quotedIndirectArrayTarget(pe *syntax.ParamExp) bool {
+	switch pe.Param.Value {
+	case "@", "*":
+		return true
+	}
+	switch subscriptLit(pe.Index) {
+	case "@", "*":
+		return true
+	default:
+		return false
 	}
 }
 

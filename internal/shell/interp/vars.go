@@ -153,6 +153,24 @@ func (r *Runner) lookupVar(name string) expand.Variable {
 		panic("variable name must not be empty")
 	}
 	var vr expand.Variable
+	if i, ok := positionalParamIndex(name); ok {
+		switch {
+		case i == 0:
+			vr.Kind = expand.String
+			if r.filename != "" {
+				vr.Str = r.filename
+			} else {
+				vr.Str = "gosh"
+			}
+			vr.Set = true
+			return vr
+		case i-1 < len(r.Params):
+			vr.Kind = expand.String
+			vr.Str = r.Params[i-1]
+			vr.Set = true
+			return vr
+		}
+	}
 	switch name {
 	case "#":
 		vr.Kind, vr.Str = expand.String, strconv.Itoa(len(r.Params))
@@ -196,18 +214,6 @@ func (r *Runner) lookupVar(name string) expand.Variable {
 		if stack := r.funcNameStack(); len(stack) > 0 {
 			vr.Kind, vr.List = expand.Indexed, stack
 		}
-	case "0":
-		vr.Kind = expand.String
-		if r.filename != "" {
-			vr.Str = r.filename
-		} else {
-			vr.Str = "gosh"
-		}
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		if i := int(name[0] - '1'); i < len(r.Params) {
-			vr.Kind = expand.String
-			vr.Str = r.Params[i]
-		}
 	}
 	if vr.Kind != expand.Unknown {
 		vr.Set = true
@@ -217,6 +223,22 @@ func (r *Runner) lookupVar(name string) expand.Variable {
 		return vr
 	}
 	return expand.Variable{}
+}
+
+func positionalParamIndex(name string) (int, bool) {
+	if name == "" {
+		return 0, false
+	}
+	for _, r := range name {
+		if r < '0' || r > '9' {
+			return 0, false
+		}
+	}
+	i, err := strconv.Atoi(name)
+	if err != nil {
+		return 0, false
+	}
+	return i, true
 }
 
 func (r *Runner) envGet(name string) string {

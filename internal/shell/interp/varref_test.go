@@ -104,6 +104,23 @@ printf '%s\n' "${!name}"
 	}
 }
 
+func TestIndirectExpansionSupportsMultiDigitPositionalRefs(t *testing.T) {
+	t.Parallel()
+
+	stdout, _, err := runInterpScript(t, `
+set -- zero one two three four five six seven eight nine ten eleven
+name=10
+printf '%s\n' "${10}"
+printf '%s\n' "${!name}"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "nine\nnine\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "nine\nnine\n")
+	}
+}
+
 func TestIndirectExpansionPreservesQuotedAllElementsTargets(t *testing.T) {
 	t.Parallel()
 
