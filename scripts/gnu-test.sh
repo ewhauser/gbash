@@ -8,6 +8,7 @@ GNU_CACHE_DIR=${GNU_CACHE_DIR:-"$REPO_ROOT/.cache/gnu"}
 GNU_RESULTS_DIR=${GNU_RESULTS_DIR:-"$REPO_ROOT/.cache/gnu/results/docker-latest"}
 GNU_GBASH_BIN=${GNU_GBASH_BIN:-"$GNU_CACHE_DIR/bin/gbash"}
 GNU_SOURCE_DIR=${GNU_SOURCE_DIR:-/opt/gnu/coreutils-9.10}
+GNU_CLEANUP_INTERVAL=${GNU_CLEANUP_INTERVAL:-0}
 
 resolve_repo_path() {
   local path=$1
@@ -358,6 +359,17 @@ status_from_trs() {
   awk -F': ' '/^:test-result:/ { print $2; exit }' "$trs_path"
 }
 
+cleanup_between_tests() {
+  local workdir=$1
+  echo "=== PERIODIC CLEANUP ===" >&2
+  df -h "$workdir" 2>/dev/null | tail -1 >&2 || true
+  find "$workdir/tests" -name "*.log" -type f -delete 2>/dev/null || true
+  find "$workdir/tests" -name "*.trs" -type f -delete 2>/dev/null || true
+  sync 2>/dev/null || true
+  echo "=== CLEANUP COMPLETE ===" >&2
+  df -h "$workdir" 2>/dev/null | tail -1 >&2 || true
+}
+
 run_make_check() {
   local workdir=$1
   local log_path=$2
@@ -365,6 +377,8 @@ run_make_check() {
   local tests=("$@")
   local config_shell=$workdir/src/bash
   local overall_status=0
+  local test_count=0
+  local cleanup_interval=${GNU_CLEANUP_INTERVAL:-0}
 
   : > "$log_path"
   for test_path in "${tests[@]}"; do
@@ -402,6 +416,11 @@ run_make_check() {
       PASS|SKIP|XFAIL) ;;
       *) overall_status=1 ;;
     esac
+
+    test_count=$((test_count + 1))
+    if [[ $cleanup_interval -gt 0 && $((test_count % cleanup_interval)) -eq 0 ]]; then
+      cleanup_between_tests "$workdir"
+    fi
   done
 
   return "$overall_status"

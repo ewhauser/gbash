@@ -54,12 +54,13 @@ jobs:
         id: run-compat
         env:
           RESULTS_DIR: .cache/gnu/results/ci-latest
+          GNU_CLEANUP_INTERVAL: "10"
         run: |
           set +e
           rm -rf "$RESULTS_DIR"
           mkdir -p "$RESULTS_DIR"
-          GNU_RESULTS_DIR="$RESULTS_DIR" make gnu-test
-          rc=$?
+          GNU_RESULTS_DIR="$RESULTS_DIR" GNU_CLEANUP_INTERVAL="$GNU_CLEANUP_INTERVAL" make gnu-test 2>&1 | tee "$RESULTS_DIR/harness.log"
+          rc=${PIPESTATUS[0]}
           echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
           exit 0
 
