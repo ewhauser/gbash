@@ -274,21 +274,56 @@ func (*TimeClause) commandNode()   {}
 func (*CoprocClause) commandNode() {}
 func (*TestDecl) commandNode()     {}
 
+type SubscriptKind uint8
+
+const (
+	SubscriptExpr SubscriptKind = iota
+	SubscriptAt
+	SubscriptStar
+)
+
+// Subscript represents a bracketed shell subscript, such as [i], [$key],
+// [@], or [*].
+//
+// Expr can still be a string-like word or a zsh-specific expression such as a
+// comma slice. The [Kind] field distinguishes the all-elements selectors from
+// generic expression subscripts without forcing runtime consumers to reparse
+// [@] or [*] from a generic word.
+type Subscript struct {
+	Left, Right Pos
+
+	Kind SubscriptKind
+	Expr ArithmExpr
+}
+
+func (s *Subscript) Pos() Pos { return s.Left }
+
+func (s *Subscript) End() Pos {
+	if s.Right.IsValid() {
+		return posAddCol(s.Right, 1)
+	}
+	if s.Expr != nil {
+		return posAddCol(s.Expr.End(), 1)
+	}
+	return posAddCol(s.Left, 1)
+}
+
+func (s *Subscript) AllElements() bool {
+	return s != nil && (s.Kind == SubscriptAt || s.Kind == SubscriptStar)
+}
+
 // VarRef represents a reference to a shell variable, optionally with an array
 // index or associative-array key.
-//
-// Here and elsewhere, Index can mean either an index expression into an indexed
-// array, or a string key into an associative array.
 type VarRef struct {
 	Name  *Lit       // must be a valid name
-	Index ArithmExpr // [i], ["k"]
+	Index *Subscript // [i], ["k"], [@], [*]
 }
 
 func (r *VarRef) Pos() Pos { return r.Name.Pos() }
 
 func (r *VarRef) End() Pos {
 	if r.Index != nil {
-		return posAddCol(r.Index.End(), 1)
+		return r.Index.End()
 	}
 	return r.Name.End()
 }
@@ -642,7 +677,7 @@ type ParamExp struct {
 	// or either of those in a [*DblQuoted]. Only possible with [LangZsh].
 	NestedParam WordPart
 
-	Index ArithmExpr // ${a[i]}, ${a["k"]}, or a ${a[i,j]} slice with [LangZsh]
+	Index *Subscript // ${a[i]}, ${a["k"]}, ${a[@]}, or a ${a[i,j]} slice with [LangZsh]
 
 	// Only one of these is set at a time.
 	// TODO(v4): consider joining these in a single "expansion" field/type,
@@ -677,7 +712,7 @@ func (p *ParamExp) End() Pos {
 	}
 	// In short mode, we can only end in either an index or a simple name.
 	if p.Index != nil {
-		return posAddCol(p.Index.End(), 1)
+		return p.Index.End()
 	}
 	return p.Param.End()
 }
@@ -691,7 +726,8 @@ func (p *ParamExp) nakedIndex() bool {
 // Slice represents a character slicing expression inside a [ParamExp].
 //
 // This node will only appear with [LangBash] and [LangMirBSDKorn].
-// [LangZsh] uses a [BinaryArithm] with [Comma] in [ParamExp.Index] instead.
+// [LangZsh] uses a [BinaryArithm] with [Comma] in [ParamExp.Index.Expr]
+// instead.
 type Slice struct {
 	Offset, Length ArithmExpr
 }
@@ -951,7 +987,7 @@ func (a *ArrayExpr) End() Pos { return posAddCol(a.Rparen, 1) }
 // Value can be nil; for example, declare -A x=([index]=).
 // Finally, neither can be nil; for example, declare -A x=([index]=value)
 type ArrayElem struct {
-	Index    ArithmExpr
+	Index    *Subscript
 	Value    *Word
 	Comments []Comment
 }

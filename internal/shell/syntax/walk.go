@@ -38,6 +38,8 @@ func Walk(node Node, f func(Node) bool) {
 	case *VarRef:
 		walkNilable(node.Name, f)
 		walkNilable(node.Index, f)
+	case *Subscript:
+		walkNilable(node.Expr, f)
 	case *Assign:
 		walkNilable(node.Ref, f)
 		walkNilable(node.Value, f)
