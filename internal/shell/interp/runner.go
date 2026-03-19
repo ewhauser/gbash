@@ -464,7 +464,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		fields := r.fields(args...)
 		if len(fields) == 0 {
 			for _, as := range cm.Assigns {
-				prev := r.lookupVar(as.Name.Value)
+				prev := r.lookupVar(as.Ref.Name.Value)
 				// Here we have a naked "foo=bar", so if we inherited a local var from a parent
 				// function we want to signal that we are modifying the parent var rather than
 				// creating a new local var via "local foo=bar".
@@ -484,7 +484,11 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				} else {
 					r.applyVarAttrs(&vr)
 				}
-				r.setVarWithIndex(prev, as.Name.Value, as.Index, vr)
+				if err := r.setVarByRef(prev, as.Ref, vr); err != nil {
+					r.errf("%v\n", err)
+					r.exit.code = 1
+					continue
+				}
 
 				if !tracingEnabled {
 					continue
@@ -500,7 +504,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					if err != nil { // should never happen
 						panic(err)
 					}
-					trace.stringf("%s=%s", as.Name.Value, val)
+					trace.stringf("%s=%s", printVarRef(as.Ref), val)
 				}
 				trace.newLineFlush()
 			}
@@ -514,6 +518,9 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		}
 
 		restores := r.runCallAssigns(cm.Assigns)
+		if !r.exit.ok() {
+			break
+		}
 
 		trace.call(fields[0], fields[1:]...)
 		trace.newLineFlush()
@@ -749,8 +756,9 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		}
 	assignLoop:
 		for as := range r.flattenAssigns(cm.Args) {
-			if allowPlusFlags || !strings.HasPrefix(as.Name.Value, "+") {
-				fp := flagParser{remaining: []string{as.Name.Value}}
+			name := as.Ref.Name.Value
+			if allowPlusFlags || !strings.HasPrefix(name, "+") {
+				fp := flagParser{remaining: []string{name}}
 				for fp.more() {
 					switch flag := fp.flag(); flag {
 					case "-x", "-r", "-i", "-l", "-u":
@@ -773,7 +781,6 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					continue assignLoop
 				}
 			}
-			name := as.Name.Value
 			if !syntax.ValidName(name) {
 				if allowPlusFlags {
 					r.errf("declare: invalid name %q\n", name)
@@ -835,7 +842,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				}
 				continue
 			}
-			vr := r.lookupVar(as.Name.Value)
+			vr := r.lookupVar(name)
 			if as.Naked {
 				if valType == "-A" {
 					vr.Kind = expand.Associative
@@ -877,7 +884,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 						}
 					}
 					if isInt {
-						oldVal := r.evalIntegerAttr(r.lookupVar(as.Name.Value).String())
+						oldVal := r.evalIntegerAttr(r.lookupVar(name).String())
 						newVal := r.evalIntegerAttr(r.literal(as.Value))
 						vr.Str = strconv.Itoa(oldVal + newVal)
 					}
@@ -917,7 +924,15 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				}
 			}
 			r.applyVarAttrs(&vr)
-			r.setVar(name, vr)
+			if as.Naked {
+				r.setVar(name, vr)
+			} else {
+				if err := r.setVarByRef(r.lookupVar(as.Ref.Name.Value), as.Ref, vr); err != nil {
+					r.errf("%v\n", err)
+					r.exit.code = 1
+					return
+				}
+			}
 		}
 	case *syntax.TimeClause:
 		start := time.Now()
@@ -1007,7 +1022,7 @@ func (r *Runner) flattenAssigns(args []*syntax.Assign) iter.Seq[*syntax.Assign] 
 			// Convert "declare $x" into "declare value".
 			// Don't use syntax.Parser here, as we only want the basic
 			// splitting by '='.
-			if as.Name != nil {
+			if as.Ref != nil {
 				if !yield(as) {
 					return
 				}
@@ -1016,7 +1031,7 @@ func (r *Runner) flattenAssigns(args []*syntax.Assign) iter.Seq[*syntax.Assign] 
 			for _, field := range r.fields(as.Value) {
 				as := &syntax.Assign{}
 				name, val, ok := strings.Cut(field, "=")
-				as.Name = &syntax.Lit{Value: name}
+				as.Ref = &syntax.VarRef{Name: &syntax.Lit{Value: name}}
 				if !ok {
 					as.Naked = true
 				} else {
@@ -1044,14 +1059,14 @@ type restoreVar struct {
 func (r *Runner) expandAssignsForSideEffects(assigns []*syntax.Assign) {
 	for _, as := range assigns {
 		// Just expand the value to trigger side effects; don't set the variable.
-		r.assignVal(r.lookupVar(as.Name.Value), as, "")
+		r.assignVal(r.lookupVar(as.Ref.Name.Value), as, "")
 	}
 }
 
 func (r *Runner) runCallAssigns(assigns []*syntax.Assign) []restoreVar {
 	var restores []restoreVar
 	for _, as := range assigns {
-		name := as.Name.Value
+		name := as.Ref.Name.Value
 		prev := r.lookupVar(name)
 
 		vr := r.assignVal(prev, as, "")
@@ -1059,7 +1074,11 @@ func (r *Runner) runCallAssigns(assigns []*syntax.Assign) []restoreVar {
 		vr.Exported = true
 
 		restores = append(restores, restoreVar{name, prev})
-		r.setVar(name, vr)
+		if err := r.setVarByRef(prev, as.Ref, vr); err != nil {
+			r.errf("%v\n", err)
+			r.exit.code = 1
+			return restores
+		}
 	}
 	return restores
 }
@@ -1101,7 +1120,7 @@ func (r *Runner) reparseCompoundAssign(as *syntax.Assign) *syntax.Assign {
 		return nil
 	}
 	// Parse "name=(elems)" to get a proper Assign with Array populated.
-	src := as.Name.Value + "=" + val
+	src := as.Ref.Name.Value + "=" + val
 	p := syntax.NewParser()
 	file, err := p.Parse(strings.NewReader(src), "")
 	if err != nil || len(file.Stmts) != 1 {

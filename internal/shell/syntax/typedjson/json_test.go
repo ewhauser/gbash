@@ -59,6 +59,7 @@ func TestRoundtrip(t *testing.T) {
 			if *update {
 				err := os.WriteFile(jsonPath, []byte(got), 0o666)
 				qt.Assert(t, qt.IsNil(err))
+				jsonInput = []byte(got)
 			} else {
 				qt.Assert(t, qt.Equals(got, string(jsonInput)))
 			}

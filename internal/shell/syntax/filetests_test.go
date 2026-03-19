@@ -19,6 +19,12 @@ func lits(strs ...string) []*Lit {
 }
 func word(ps ...WordPart) *Word { return &Word{Parts: ps} }
 func litWord(s string) *Word    { return word(lit(s)) }
+func litRef(name string) *VarRef {
+	return &VarRef{Name: lit(name)}
+}
+func ref(name string, index ArithmExpr) *VarRef {
+	return &VarRef{Name: lit(name), Index: index}
+}
 func litWords(strs ...string) []*Word {
 	l := make([]*Word, 0, len(strs))
 	for _, s := range strs {
@@ -32,11 +38,11 @@ func litAssigns(pairs ...string) []*Assign {
 	for i, pair := range pairs {
 		name, val, ok := strings.Cut(pair, "=")
 		if !ok {
-			l[i] = &Assign{Naked: true, Name: lit(name)}
+			l[i] = &Assign{Naked: true, Ref: litRef(name)}
 		} else if val == "" {
-			l[i] = &Assign{Name: lit(name)}
+			l[i] = &Assign{Ref: litRef(name)}
 		} else {
-			l[i] = &Assign{Name: lit(name), Value: litWord(val)}
+			l[i] = &Assign{Ref: litRef(name), Value: litWord(val)}
 		}
 	}
 	return l
@@ -905,9 +911,9 @@ var fileTests = []fileTestCase{
 		[]string{"a=b foo=$bar foo=start$bar"},
 		langFile(&CallExpr{
 			Assigns: []*Assign{
-				{Name: lit("a"), Value: litWord("b")},
-				{Name: lit("foo"), Value: word(litParamExp("bar"))},
-				{Name: lit("foo"), Value: word(
+				{Ref: litRef("a"), Value: litWord("b")},
+				{Ref: litRef("foo"), Value: word(litParamExp("bar"))},
+				{Ref: litRef("foo"), Value: word(
 					lit("start"),
 					litParamExp("bar"),
 				)},
@@ -918,7 +924,7 @@ var fileTests = []fileTestCase{
 		[]string{"a=\"\nbar\""},
 		langFile(&CallExpr{
 			Assigns: []*Assign{{
-				Name:  lit("a"),
+				Ref:   litRef("a"),
 				Value: word(dblQuoted(lit("\nbar"))),
 			}},
 		}),
@@ -4282,7 +4288,7 @@ var fileTests = []fileTestCase{
 			Variant: lit("declare"),
 			Args: []*Assign{
 				{Naked: true, Value: litWord("-f")},
-				{Naked: true, Name: lit("func")},
+				{Naked: true, Ref: litRef("func")},
 			},
 		}, langBashLike|LangZsh),
 	),
@@ -4328,7 +4334,7 @@ var fileTests = []fileTestCase{
 		langFile(&DeclClause{
 			Variant: lit("nameref"),
 			Args: []*Assign{{
-				Name: lit("bar"),
+				Ref: litRef("bar"),
 			}},
 		}, LangBash|LangMirBSDKorn|LangZsh),
 		langFile(litStmt("nameref", "bar="), LangPOSIX),
@@ -4341,7 +4347,7 @@ var fileTests = []fileTestCase{
 				{Naked: true, Value: litWord("-a")},
 				{Naked: true, Value: litWord("+n")},
 				{Naked: true, Value: word(lit("-b"), litParamExp("o"))},
-				{Name: lit("foo"), Value: litWord("bar")},
+				{Ref: litRef("foo"), Value: litWord("bar")},
 			},
 		}, LangBash),
 	),
@@ -4355,7 +4361,7 @@ var fileTests = []fileTestCase{
 			Args: []*Assign{
 				{Naked: true, Value: litWord("-a")},
 				{
-					Name: lit("foo"),
+					Ref: ref("foo", nil),
 					Array: arrValues(
 						litWord("b1"),
 						word(cmdSubst(litStmt("b2"))),
@@ -4372,7 +4378,7 @@ var fileTests = []fileTestCase{
 			Args: []*Assign{
 				{Naked: true, Value: litWord("-a")},
 				{
-					Name:  lit("foo"),
+					Ref:   litRef("foo"),
 					Array: arrValues(litWord("b1")),
 				},
 			},
@@ -4385,7 +4391,7 @@ var fileTests = []fileTestCase{
 			Args: []*Assign{
 				{Naked: true, Value: litWord("-A")},
 				{
-					Name: lit("foo"),
+					Ref: ref("foo", nil),
 					Array: &ArrayExpr{Elems: []*ArrayElem{{
 						Index: litWord("a"),
 						Value: litWord("b"),
@@ -4399,8 +4405,7 @@ var fileTests = []fileTestCase{
 		langFile(&DeclClause{
 			Variant: lit("declare"),
 			Args: []*Assign{{
-				Name:  lit("foo"),
-				Index: litWord("a"),
+				Ref: ref("foo", litWord("a")),
 			}},
 		}, LangBash),
 	),
@@ -4409,8 +4414,7 @@ var fileTests = []fileTestCase{
 		langFile(&DeclClause{
 			Variant: lit("declare"),
 			Args: []*Assign{{
-				Name:  lit("foo"),
-				Index: litWord("*"),
+				Ref:   ref("foo", litWord("*")),
 				Naked: true,
 			}},
 		}, LangBash),
@@ -4420,8 +4424,7 @@ var fileTests = []fileTestCase{
 		langFile(&DeclClause{
 			Variant: lit("declare"),
 			Args: []*Assign{{
-				Name:  lit("foo"),
-				Index: word(dblQuoted(lit("x y"))),
+				Ref:   ref("foo", word(dblQuoted(lit("x y")))),
 				Naked: true,
 			}},
 		}, LangBash),
@@ -4431,8 +4434,7 @@ var fileTests = []fileTestCase{
 		langFile(&DeclClause{
 			Variant: lit("declare"),
 			Args: []*Assign{{
-				Name:  lit("foo"),
-				Index: word(sglQuoted("x y")),
+				Ref:   ref("foo", word(sglQuoted("x y"))),
 				Naked: true,
 			}},
 		}, LangBash),
@@ -4440,7 +4442,7 @@ var fileTests = []fileTestCase{
 	fileTest(
 		[]string{"foo=([)"},
 		langFile(&CallExpr{Assigns: []*Assign{{
-			Name:  lit("foo"),
+			Ref:   litRef("foo"),
 			Array: arrValues(litWord("[")),
 		}}}, LangMirBSDKorn),
 	),
@@ -4454,7 +4456,7 @@ var fileTests = []fileTestCase{
 				Op: AndStmt,
 				X:  litStmt("a"),
 				Y: stmt(&CallExpr{Assigns: []*Assign{{
-					Name:  lit("b"),
+					Ref:   litRef("b"),
 					Array: arrValues(litWord("c")),
 				}}}),
 			},
@@ -4675,7 +4677,7 @@ var fileTests = []fileTestCase{
 				X:    litWord("i"),
 			}),
 			&CallExpr{Assigns: []*Assign{{
-				Name:  lit("foo"),
+				Ref:   litRef("foo"),
 				Array: arrValues(litWord("bar")),
 			}}},
 		), LangBash|LangMirBSDKorn|LangZsh),
@@ -4703,7 +4705,7 @@ var fileTests = []fileTestCase{
 		langFile(&CallExpr{
 			Assigns: []*Assign{{
 				Append: true,
-				Name:   lit("a"),
+				Ref:    litRef("a"),
 				Value:  litWord("1"),
 			}},
 		}, LangBash|LangMirBSDKorn|LangZsh),
@@ -4713,15 +4715,14 @@ var fileTests = []fileTestCase{
 		[]string{"b+=(2 3)"},
 		langFile(&CallExpr{Assigns: []*Assign{{
 			Append: true,
-			Name:   lit("b"),
+			Ref:    litRef("b"),
 			Array:  arrValues(litWords("2", "3")...),
 		}}}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
 		[]string{"a[1]=(b c)"},
 		langFile(&CallExpr{Assigns: []*Assign{{
-			Name:  lit("a"),
-			Index: litWord("1"),
+			Ref:   ref("a", litWord("1")),
 			Array: arrValues(litWords("b", "c")...),
 		}}}, LangZsh),
 	),
@@ -4730,20 +4731,17 @@ var fileTests = []fileTestCase{
 		langFile(litStmt("a[2]=b", "c[-3]=", "d[x]+=e"), LangPOSIX),
 		langFile(&CallExpr{Assigns: []*Assign{
 			{
-				Name:  lit("a"),
-				Index: litWord("2"),
+				Ref:   ref("a", litWord("2")),
 				Value: litWord("b"),
 			},
 			{
-				Name: lit("c"),
-				Index: &UnaryArithm{
+				Ref: ref("c", &UnaryArithm{
 					Op: Minus,
 					X:  litWord("3"),
-				},
+				}),
 			},
 			{
-				Name:   lit("d"),
-				Index:  litWord("x"),
+				Ref:    ref("d", litWord("x")),
 				Append: true,
 				Value:  litWord("e"),
 			},
@@ -4757,12 +4755,11 @@ var fileTests = []fileTestCase{
 	fileTest(
 		[]string{"arr[0,1]=x"},
 		langFile(&CallExpr{Assigns: []*Assign{{
-			Name: lit("arr"),
-			Index: &BinaryArithm{
+			Ref: ref("arr", &BinaryArithm{
 				Op: Comma,
 				X:  litWord("0"),
 				Y:  litWord("1"),
-			},
+			}),
 			Value: litWord("x"),
 		}}}, LangZsh),
 		langFile(lit("arr[0,1]=x"), LangPOSIX),
@@ -4774,8 +4771,7 @@ var fileTests = []fileTestCase{
 		},
 		langFile(&CallExpr{Assigns: []*Assign{{
 			Append: true,
-			Name:   lit("b"),
-			Index:  litWord("i"),
+			Ref:    ref("b", litWord("i")),
 			Value:  litWord("2"),
 		}}}, LangBash|LangMirBSDKorn|LangZsh),
 	),
@@ -4807,10 +4803,9 @@ var fileTests = []fileTestCase{
 			`a[ $"x y" ]=b`,
 		},
 		langFile(&CallExpr{Assigns: []*Assign{{
-			Name: lit("a"),
-			Index: word(&DblQuoted{Dollar: true, Parts: []WordPart{
+			Ref: ref("a", word(&DblQuoted{Dollar: true, Parts: []WordPart{
 				lit("x y"),
-			}}),
+			}})),
 			Value: litWord("b"),
 		}}}, LangBash),
 	),
@@ -4832,7 +4827,7 @@ var fileTests = []fileTestCase{
 			`a=( [ "x y" ]=b)`,
 		},
 		langFile(&CallExpr{Assigns: []*Assign{{
-			Name: lit("a"),
+			Ref: litRef("a"),
 			Array: &ArrayExpr{Elems: []*ArrayElem{{
 				Index: word(dblQuoted(lit("x y"))),
 				Value: litWord("b"),
@@ -4845,7 +4840,7 @@ var fileTests = []fileTestCase{
 			"a=(\n[x]=\n[y]=\n)",
 		},
 		langFile(&CallExpr{Assigns: []*Assign{{
-			Name: lit("a"),
+			Ref: litRef("a"),
 			Array: &ArrayExpr{Elems: []*ArrayElem{
 				{Index: litWord("x")},
 				{Index: litWord("y")},

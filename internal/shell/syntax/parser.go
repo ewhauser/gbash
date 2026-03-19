@@ -475,6 +475,21 @@ func (p *Parser) Arithmetic(r io.Reader) (ArithmExpr, error) {
 	return expr, p.err
 }
 
+// VarRef parses a single shell variable reference, such as "foo", "a[1]", or
+// `assoc["k"]`.
+func (p *Parser) VarRef(r io.Reader) (*VarRef, error) {
+	p.reset()
+	p.f = &File{}
+	p.src = r
+	p.rune()
+	p.next()
+	ref := p.varRef()
+	if p.err == nil && p.tok != _EOF {
+		p.curErr("unexpected token in variable reference: %#q", p.tok)
+	}
+	return ref, p.err
+}
+
 // Parser holds the internal state of the parsing mechanism of a
 // program.
 type Parser struct {
@@ -1867,6 +1882,27 @@ func (p *Parser) hasValidIdent() bool {
 	return p.r == '[' // a[i]=x
 }
 
+func (p *Parser) varRef() *VarRef {
+	if p.tok != _Lit && p.tok != _LitWord {
+		p.curErr("not a valid variable reference: %#q", p.tok)
+		return nil
+	}
+	if !ValidName(p.val) {
+		p.curErr("not a valid variable reference: %q", p.val)
+		return nil
+	}
+	ref := &VarRef{Name: p.lit(p.pos, p.val)}
+	if p.r != '[' {
+		p.next()
+		return ref
+	}
+	// The lexer leaves the opening bracket in p.r for names like a[1].
+	p.rune()
+	p.pos = posAddCol(p.pos, 1)
+	ref.Index = p.eitherIndex()
+	return ref
+}
+
 func (p *Parser) getAssign(needEqual bool) *Assign {
 	as := &Assign{}
 	if p.eqlOffs > 0 { // foo=bar
@@ -1876,9 +1912,9 @@ func (p *Parser) getAssign(needEqual bool) *Assign {
 			as.Append = true
 			nameEnd--
 		}
-		as.Name = p.lit(p.pos, p.val[:nameEnd])
+		as.Ref = &VarRef{Name: p.lit(p.pos, p.val[:nameEnd])}
 		// since we're not using the entire p.val
-		as.Name.ValueEnd = posAddCol(as.Name.ValuePos, nameEnd)
+		as.Ref.Name.ValueEnd = posAddCol(as.Ref.Name.ValuePos, nameEnd)
 		left := p.lit(posAddCol(p.pos, 1), p.val[p.eqlOffs+1:])
 		if left.Value != "" {
 			left.ValuePos = posAddCol(left.ValuePos, p.eqlOffs)
@@ -1886,11 +1922,10 @@ func (p *Parser) getAssign(needEqual bool) *Assign {
 		}
 		p.next()
 	} else { // foo[x]=bar
-		as.Name = p.lit(p.pos, p.val)
-		// hasValidIdent already checks p.r is '['
-		p.rune()
-		p.pos = posAddCol(p.pos, 1)
-		as.Index = p.eitherIndex()
+		as.Ref = p.varRef()
+		if as.Ref == nil {
+			return nil
+		}
 		if p.spaced || p.stopToken() {
 			if needEqual {
 				p.followErr(as.Pos(), "a[b]", assgn)
@@ -2703,7 +2738,7 @@ func (p *Parser) declClause(s *Stmt) {
 		} else if p.tok == _LitWord && ValidName(p.val) {
 			ds.Args = append(ds.Args, &Assign{
 				Naked: true,
-				Name:  p.getLit(),
+				Ref:   &VarRef{Name: p.getLit()},
 			})
 		} else if w := p.getWord(); w != nil {
 			ds.Args = append(ds.Args, &Assign{
@@ -2902,7 +2937,7 @@ loop:
 		ce.Args = nil
 	} else {
 		for _, asgn := range ce.Assigns {
-			if asgn.Index != nil || asgn.Array != nil {
+			if (asgn.Ref != nil && asgn.Ref.Index != nil) || asgn.Array != nil {
 				p.posErr(asgn.Pos(), "inline variables cannot be arrays")
 			}
 		}

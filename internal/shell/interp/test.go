@@ -68,6 +68,38 @@ func (r *Runner) bashTest(ctx context.Context, expr syntax.TestExpr, classic boo
 		}
 		return ""
 	case *syntax.UnaryTest:
+		switch x.Op {
+		case syntax.TsVarSet:
+			word, ok := x.X.(*syntax.Word)
+			if !ok {
+				return ""
+			}
+			if classic {
+				if r.refIsSet(r.looseVarRef(r.document(word))) {
+					return "1"
+				}
+				return ""
+			}
+			if r.refIsSet(r.looseVarRefWord(word)) {
+				return "1"
+			}
+			return ""
+		case syntax.TsRefVar:
+			word, ok := x.X.(*syntax.Word)
+			if !ok {
+				return ""
+			}
+			if classic {
+				if r.refIsNameRef(r.looseVarRef(r.document(word))) {
+					return "1"
+				}
+				return ""
+			}
+			if r.refIsNameRef(r.looseVarRefWord(word)) {
+				return "1"
+			}
+			return ""
+		}
 		if r.unTest(ctx, x.Op, r.bashTest(ctx, x.X, classic)) {
 			return "1"
 		}
@@ -339,9 +371,9 @@ func (r *Runner) unTest(ctx context.Context, op syntax.UnTestOperator, x string)
 		}
 		return false
 	case syntax.TsVarSet:
-		return r.lookupVar(x).IsSet()
+		return r.refIsSet(r.looseVarRef(x))
 	case syntax.TsRefVar:
-		return r.lookupVar(x).Kind == expand.NameRef
+		return r.refIsNameRef(r.looseVarRef(x))
 	case syntax.TsNot:
 		return x == ""
 	case syntax.TsUsrOwn, syntax.TsGrpOwn:

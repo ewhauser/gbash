@@ -274,31 +274,47 @@ func (*TimeClause) commandNode()   {}
 func (*CoprocClause) commandNode() {}
 func (*TestDecl) commandNode()     {}
 
-// Assign represents an assignment to a variable.
+// VarRef represents a reference to a shell variable, optionally with an array
+// index or associative-array key.
 //
 // Here and elsewhere, Index can mean either an index expression into an indexed
 // array, or a string key into an associative array.
+type VarRef struct {
+	Name  *Lit       // must be a valid name
+	Index ArithmExpr // [i], ["k"]
+}
+
+func (r *VarRef) Pos() Pos { return r.Name.Pos() }
+
+func (r *VarRef) End() Pos {
+	if r.Index != nil {
+		return posAddCol(r.Index.End(), 1)
+	}
+	return r.Name.End()
+}
+
+// Assign represents an assignment to a variable.
 //
-// If Index is non-nil, the value will be a word and not an array as nested
+// If [Assign.Ref]'s Index is non-nil, the value will be a word and not an array
+// as nested
 // arrays are not allowed.
 //
-// If Naked is true and Name is nil, the assignment is part of a [DeclClause] and
+// If Naked is true and Ref is nil, the assignment is part of a [DeclClause] and
 // the argument (in the Value field) will be evaluated at run-time. This
 // includes parameter expansions, which may expand to assignments or options.
 type Assign struct {
-	Append bool       // +=
-	Naked  bool       // without '='
-	Name   *Lit       // must be a valid name
-	Index  ArithmExpr // [i], ["k"]
+	Append bool // +=
+	Naked  bool // without '='
+	Ref    *VarRef
 	Value  *Word      // =val
 	Array  *ArrayExpr // =(arr)
 }
 
 func (a *Assign) Pos() Pos {
-	if a.Name == nil {
+	if a.Ref == nil {
 		return a.Value.Pos()
 	}
-	return a.Name.Pos()
+	return a.Ref.Pos()
 }
 
 func (a *Assign) End() Pos {
@@ -308,13 +324,10 @@ func (a *Assign) End() Pos {
 	if a.Array != nil {
 		return a.Array.End()
 	}
-	if a.Index != nil {
-		return posAddCol(a.Index.End(), 2)
-	}
 	if a.Naked {
-		return a.Name.End()
+		return a.Ref.End()
 	}
-	return posAddCol(a.Name.End(), 1)
+	return posAddCol(a.Ref.End(), 1)
 }
 
 // Redirect represents an input/output redirection.

@@ -3082,7 +3082,7 @@
 							"Col": 12
 						},
 						"Naked": true,
-						"Name": {
+						"Ref": {
 							"Pos": {
 								"Offset": 285,
 								"Line": 20,
@@ -3093,17 +3093,29 @@
 								"Line": 20,
 								"Col": 12
 							},
-							"ValuePos": {
-								"Offset": 285,
-								"Line": 20,
-								"Col": 9
-							},
-							"ValueEnd": {
-								"Offset": 288,
-								"Line": 20,
-								"Col": 12
-							},
-							"Value": "foo"
+							"Name": {
+								"Pos": {
+									"Offset": 285,
+									"Line": 20,
+									"Col": 9
+								},
+								"End": {
+									"Offset": 288,
+									"Line": 20,
+									"Col": 12
+								},
+								"ValuePos": {
+									"Offset": 285,
+									"Line": 20,
+									"Col": 9
+								},
+								"ValueEnd": {
+									"Offset": 288,
+									"Line": 20,
+									"Col": 12
+								},
+								"Value": "foo"
+							}
 						}
 					}
 				]

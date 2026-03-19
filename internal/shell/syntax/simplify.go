@@ -29,7 +29,9 @@ type simplifier struct {
 func (s *simplifier) visit(node Node) bool {
 	switch node := node.(type) {
 	case *Assign:
-		node.Index = s.removeParensArithm(node.Index)
+		if node.Ref != nil {
+			node.Ref.Index = s.removeParensArithm(node.Ref.Index)
+		}
 		// Don't inline params, as x[i] and x[$i] mean
 		// different things when x is an associative
 		// array; the first means "i", the second "$i".

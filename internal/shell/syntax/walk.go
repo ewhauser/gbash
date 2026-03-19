@@ -35,10 +35,12 @@ func Walk(node Node, f func(Node) bool) {
 			Walk(node.Cmd, f)
 		}
 		walkList(node.Redirs, f)
-	case *Assign:
+	case *VarRef:
 		walkNilable(node.Name, f)
-		walkNilable(node.Value, f)
 		walkNilable(node.Index, f)
+	case *Assign:
+		walkNilable(node.Ref, f)
+		walkNilable(node.Value, f)
 		walkNilable(node.Array, f)
 	case *Redirect:
 		walkNilable(node.N, f)
