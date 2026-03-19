@@ -22,6 +22,21 @@ shopt -s expand_aliases
 alias e=export
 e alias_var=works
 printf 'alias=%s\n' "$alias_var"
+spec='literal=$HOME'
+declare "$spec"
+printf 'literal=%s\n' "$literal"
+spec='spaced=1 2'
+declare "$spec"
+printf 'spaced=%s\n' "$spaced"
+spec='quoted="1 2"'
+declare "$spec"
+printf 'quoted=%s\n' "$quoted"
+spec='cmd=$(printf hacked)'
+declare "$spec"
+printf 'cmd=%s\n' "$cmd"
+spec='arr=($HOME "$(printf hacked)" plain)'
+declare -a "$spec"
+printf 'arr=%s|%s|%s\n' "${arr[0]}" "${arr[1]}" "${arr[2]}"
 empty=''
 declare "$empty"
 printf 'empty=%s\n' "$?"
@@ -38,7 +53,7 @@ printf 'plus=%s|%s\n' "$string_arr" "$string_assoc"
 	if err != nil {
 		t.Fatalf("Run error = %v", err)
 	}
-	const want = "array=1 2 3\nassoc=x\nsplit=1,2\nprefix=unset kept=ok\nalias=works\nempty=1\nscalar=(1 2)\nflagged=1 2\nplus=(2 3)|([k]=v)\n"
+	const want = "array=1 2 3\nassoc=x\nsplit=1,2\nprefix=unset kept=ok\nalias=works\nliteral=$HOME\nspaced=1 2\nquoted=\"1 2\"\ncmd=$(printf hacked)\narr=$HOME|$(printf hacked)|plain\nempty=1\nscalar=(1 2)\nflagged=1 2\nplus=(2 3)|([k]=v)\n"
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
