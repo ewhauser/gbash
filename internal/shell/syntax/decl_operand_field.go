@@ -14,11 +14,11 @@ import (
 // text after the assignment operator, and array element values are reparsed
 // structurally without re-enabling expansion syntax inside those values.
 func (p *Parser) DeclOperandField(r io.Reader) (DeclOperand, error) {
-	srcBytes, err := io.ReadAll(r)
-	if err != nil {
+	var srcBuilder strings.Builder
+	if _, err := io.Copy(&srcBuilder, r); err != nil {
 		return nil, err
 	}
-	src := string(srcBytes)
+	src := srcBuilder.String()
 
 	p.reset()
 	p.f = &File{}
