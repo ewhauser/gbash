@@ -8,7 +8,7 @@ import (
 	"github.com/ewhauser/gbash/policy"
 )
 
-func compileChunk(program *syntax.File, pol policy.Policy) (map[*syntax.Stmt]*syntax.Stmt, error) {
+func compileChunk(program *syntax.File, pol policy.Policy, loopNamespace string) (map[*syntax.Stmt]*syntax.Stmt, error) {
 	if invalid := validateInterpreterSafety(program); invalid != nil {
 		return nil, invalid
 	}
@@ -16,7 +16,7 @@ func compileChunk(program *syntax.File, pol policy.Policy) (map[*syntax.Stmt]*sy
 		return nil, violation
 	}
 	synthetic := normalizeExecutionProgram(program)
-	if err := instrumentLoopBudgets(program, pol); err != nil {
+	if err := instrumentLoopBudgets(program, pol, loopNamespace); err != nil {
 		return nil, err
 	}
 	return synthetic, nil

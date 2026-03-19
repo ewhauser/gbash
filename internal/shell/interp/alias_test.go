@@ -46,3 +46,22 @@ sayhi outside
 		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }
+
+func TestEmptyAliasRemovesCommandWord(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+shopt -s expand_aliases
+alias a=''
+a echo hello
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if got, want := stdout, "hello\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}

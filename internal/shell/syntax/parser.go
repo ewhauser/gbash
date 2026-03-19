@@ -855,7 +855,7 @@ func (p *Parser) expandCommandAlias() bool {
 		return false
 	}
 	spec, ok := p.aliasResolver(p.val)
-	if !ok || spec.Value == "" {
+	if !ok {
 		return false
 	}
 

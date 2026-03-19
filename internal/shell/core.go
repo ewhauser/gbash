@@ -167,7 +167,7 @@ func (m *core) Run(ctx context.Context, exec *Execution) (result *RunResult, run
 		executionSourceName(exec),
 		effectiveExec.ScriptPath,
 		func(file *syntax.File) (map[*syntax.Stmt]*syntax.Stmt, error) {
-			return compileChunk(file, effectiveExec.Policy)
+			return compileChunk(file, effectiveExec.Policy, budget.nextLoopNamespace())
 		},
 	)
 	if code, ok := compilationExitStatus(runErr); ok {
@@ -1148,6 +1148,7 @@ type executionBudget struct {
 	maxLoopIterations int64
 	count             atomic.Int64
 	disabled          atomic.Int32
+	loopNamespaces    atomic.Int64
 	mu                sync.Mutex
 	loopCounts        map[string]int64
 }
@@ -1200,6 +1201,13 @@ func (b *executionBudget) beforeLoopIteration(ctx context.Context, args []string
 		return nil
 	}
 	return shellFailure(ctx, 126, "%s loop: too many iterations (%d), increase policy.Limits.MaxLoopIterations", loopKind, b.maxLoopIterations)
+}
+
+func (b *executionBudget) nextLoopNamespace() string {
+	if b == nil {
+		return ""
+	}
+	return fmt.Sprintf("chunk%d", b.loopNamespaces.Add(1))
 }
 
 func isInternalHelperCommand(name string) bool {
