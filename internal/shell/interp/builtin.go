@@ -232,16 +232,46 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		if len(args) == 0 {
 			return failf(2, "usage: printf format [arguments]\n")
 		}
+		var destRef *syntax.VarRef
+		if len(args) >= 2 && args[0] == "-v" {
+			var err error
+			destRef, err = r.strictVarRef(args[1])
+			if err != nil {
+				return failf(2, "printf: %v\n", err)
+			}
+			args = args[2:]
+			if len(args) == 0 {
+				return failf(2, "usage: printf format [arguments]\n")
+			}
+		}
 		format, args := args[0], args[1:]
+		var sb strings.Builder
 		for {
 			s, n, err := expand.Format(r.ecfg, format, args)
 			if err != nil {
 				return failf(1, "%v\n", err)
 			}
-			r.out(s)
+			if destRef == nil {
+				r.out(s)
+			} else {
+				sb.WriteString(s)
+			}
 			args = args[n:]
 			if n == 0 || len(args) == 0 {
 				break
+			}
+		}
+		if destRef != nil {
+			prev := r.lookupVar(destRef.Name.Value)
+			as := &syntax.Assign{
+				Ref: destRef,
+				Value: &syntax.Word{Parts: []syntax.WordPart{
+					&syntax.Lit{Value: sb.String()},
+				}},
+			}
+			vr := r.assignVal(prev, as, "")
+			if err := r.setVarByRef(prev, destRef, vr); err != nil {
+				return failf(2, "printf: %v\n", err)
 			}
 		}
 	case "break", "continue":

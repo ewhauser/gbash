@@ -138,7 +138,19 @@ func (cfg *Config) paramExpState(pe *syntax.ParamExp) (paramExpState, error) {
 		state.vr = cfg.Env.Get(state.name)
 	}
 	state.orig = state.vr
-	_, state.vr = state.vr.Resolve(cfg.Env)
+	resolvedRef, resolvedVar, err := state.vr.ResolveRef(cfg.Env, &syntax.VarRef{
+		Name:  pe.Param,
+		Index: index,
+	})
+	if err != nil {
+		return state, err
+	}
+	state.vr = resolvedVar
+	if resolvedRef != nil {
+		index = resolvedRef.Index
+	} else {
+		index = nil
+	}
 	if cfg.NoUnset && !state.vr.IsSet() && !overridingUnset(pe) {
 		return state, UnsetParameterError{
 			Node:    pe,
@@ -480,8 +492,15 @@ func (cfg *Config) paramExp(pe *syntax.ParamExp, ql quoteLevel) (string, error) 
 		case str == "":
 			return "", nil
 		default:
-			vr = cfg.Env.Get(str)
-			strs = append(strs, vr.String())
+			ref, err := parseVarRef(str)
+			if err != nil {
+				return "", fmt.Errorf("invalid indirect expansion")
+			}
+			val, err := cfg.varRef(ref)
+			if err != nil {
+				return "", err
+			}
+			strs = append(strs, val)
 		}
 		if !assocKeys {
 			slices.Sort(strs)

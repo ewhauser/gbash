@@ -1000,9 +1000,18 @@ func (cfg *Config) quotedArrayFields(pe *syntax.ParamExp) ([]string, []string, b
 	}
 
 	name := pe.Param.Value
-	vr := cfg.Env.Get(name)
-	_, vr = vr.Resolve(cfg.Env)
-	switch nodeLit(pe.Index) {
+	ref, vr, err := cfg.Env.Get(name).ResolveRef(cfg.Env, &syntax.VarRef{
+		Name:  pe.Param,
+		Index: pe.Index,
+	})
+	if err != nil {
+		return nil, nil, false
+	}
+	index := pe.Index
+	if ref != nil {
+		index = ref.Index
+	}
+	switch nodeLit(index) {
 	case "@": // "${name[@]}"
 		switch vr.Kind {
 		case Indexed:

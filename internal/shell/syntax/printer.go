@@ -153,6 +153,9 @@ func (p *Printer) Print(w io.Writer, node Node) error {
 	case *Word:
 		p.line = node.Pos().Line()
 		p.word(node)
+	case *VarRef:
+		p.line = node.Pos().Line()
+		p.varRef(node)
 	case WordPart:
 		p.line = node.Pos().Line()
 		p.wordPart(node, nil)
@@ -1491,9 +1494,8 @@ func (p *Printer) assigns(assigns []*Assign) {
 		} else {
 			p.spacePad(a.Pos())
 		}
-		if a.Name != nil {
-			p.writeLit(a.Name.Value)
-			p.wroteIndex(a.Index)
+		if a.Ref != nil {
+			p.varRef(a.Ref)
 			if a.Append {
 				p.w.WriteByte('+')
 			}
@@ -1516,6 +1518,11 @@ func (p *Printer) assigns(assigns []*Assign) {
 		p.wantSpace = spaceRequired
 	}
 	p.decLevel()
+}
+
+func (p *Printer) varRef(ref *VarRef) {
+	p.writeLit(ref.Name.Value)
+	p.wroteIndex(ref.Index)
 }
 
 type wantSpaceState uint8
