@@ -3664,9 +3664,6 @@ func (p *Parser) condRegexRightParenBoundary() bool {
 	switch next := p.peek(); next {
 	case utf8.RuneSelf, ' ', '\t', '\n', ';', '&', '<', '>', ')':
 		return true
-	case '|':
-		_, next2 := p.peekTwo()
-		return next2 == '|'
 	case ']':
 		_, next2 := p.peekTwo()
 		return next2 == ']'
@@ -3679,10 +3676,6 @@ func (p *Parser) condRegexWhitespaceBoundary() bool {
 	switch next, next2, next3 := p.peekThree(); next {
 	case ']':
 		return next2 == ']' && regexClauseDelimiterByte(next3)
-	case '&':
-		return next2 == '&'
-	case '|':
-		return next2 == '|'
 	default:
 		return false
 	}
@@ -3772,14 +3765,11 @@ func (p *Parser) scanCondRegexRaw(start Pos) bool {
 		case ']':
 			p.rune()
 		case ';', '&':
-			if depth == 0 || (p.r == '&' && p.peek() == '&') {
+			if depth == 0 {
 				return true
 			}
 			p.rune()
 		case '|':
-			if p.peek() == '|' {
-				return true
-			}
 			p.rune()
 		case '<', '>':
 			if p.peek() == '(' {

@@ -4099,6 +4099,14 @@ var fileTests = []fileTestCase{
 		langFile(&TestClause{X: condBinary(TsReMatch, litCondWord("a"), litCondRegex(`b\ c|d`))}, LangBash),
 	),
 	fileTest(
+		[]string{`[[ 'a && b' =~ (a && b) ]]`},
+		langFile(&TestClause{X: condBinary(TsReMatch, condWord(sglQuoted("a && b")), litCondRegex("(a && b)"))}, LangBash),
+	),
+	fileTest(
+		[]string{`[[ z =~ a||b ]]`},
+		langFile(&TestClause{X: condBinary(TsReMatch, litCondWord("z"), litCondRegex("a||b"))}, LangBash),
+	),
+	fileTest(
 		[]string{`[[ 'a b' =~ ^)a\ b($ ]]`},
 		langFile(&TestClause{X: condBinary(TsReMatch, condWord(sglQuoted("a b")), condRegex(
 			lit(`^)a\ b(`),

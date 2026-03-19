@@ -36,3 +36,23 @@ printf 'brace_rematch=%d\n' "${#BASH_REMATCH[@]}"
 		t.Fatalf("stderr = %q, want bare-brace regex diagnostic", stderr)
 	}
 }
+
+func TestConditionalRegexGroupedWhitespace(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+[[ 'a && b' =~ (a && b) ]]
+printf 'status=%d rematch=%d\n' "$?" "${#BASH_REMATCH[@]}"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+
+	const wantStdout = "status=0 rematch=2\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
