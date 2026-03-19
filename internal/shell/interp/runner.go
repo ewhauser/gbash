@@ -1166,7 +1166,7 @@ func callExprDeclClause(args []*syntax.Word) *syntax.DeclClause {
 
 func parseDeclOperandField(field string) (syntax.DeclOperand, error) {
 	p := syntax.NewParser(syntax.Variant(syntax.LangBash))
-	return p.DeclOperand(strings.NewReader(field))
+	return p.DeclOperandField(strings.NewReader(field))
 }
 
 func declStringifiedArrayAssign(as *syntax.Assign) *syntax.DeclAssign {
