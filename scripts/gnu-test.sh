@@ -363,8 +363,11 @@ cleanup_between_tests() {
   local workdir=$1
   echo "=== PERIODIC CLEANUP ===" >&2
   df -h "$workdir" 2>/dev/null | tail -1 >&2 || true
-  find "$workdir/tests" -name "*.log" -type f -delete 2>/dev/null || true
-  find "$workdir/tests" -name "*.trs" -type f -delete 2>/dev/null || true
+  # Clean test logs and result files throughout workdir
+  find "$workdir" -name "*.log" -type f -delete 2>/dev/null || true
+  find "$workdir" -name "*.trs" -type f -delete 2>/dev/null || true
+  # Clean Go build cache to prevent accumulation
+  go clean -cache 2>/dev/null || true
   sync 2>/dev/null || true
   echo "=== CLEANUP COMPLETE ===" >&2
   df -h "$workdir" 2>/dev/null | tail -1 >&2 || true

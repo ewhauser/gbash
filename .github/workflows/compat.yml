@@ -54,7 +54,7 @@ jobs:
         id: run-compat
         env:
           RESULTS_DIR: .cache/gnu/results/ci-latest
-          GNU_CLEANUP_INTERVAL: "10"
+          GNU_CLEANUP_INTERVAL: "5"
         run: |
           set +e
           rm -rf "$RESULTS_DIR"
