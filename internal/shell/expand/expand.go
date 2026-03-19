@@ -766,24 +766,23 @@ const (
 )
 
 func (cfg *Config) braceFieldParts(br *syntax.BraceExp, ql quoteLevel, fieldFn func(*syntax.Word, quoteLevel) ([]fieldPart, error)) ([]fieldPart, error) {
-	var sb strings.Builder
-	sb.WriteByte('{')
+	parts := []fieldPart{{val: "{"}}
 	for i, elem := range br.Elems {
 		if i > 0 {
 			if br.Sequence {
-				sb.WriteString("..")
+				parts = append(parts, fieldPart{val: ".."})
 			} else {
-				sb.WriteByte(',')
+				parts = append(parts, fieldPart{val: ","})
 			}
 		}
 		field, err := fieldFn(elem, ql)
 		if err != nil {
 			return nil, err
 		}
-		sb.WriteString(cfg.fieldJoin(field))
+		parts = append(parts, field...)
 	}
-	sb.WriteByte('}')
-	return []fieldPart{{val: sb.String()}}, nil
+	parts = append(parts, fieldPart{val: "}"})
+	return parts, nil
 }
 
 func (cfg *Config) wordField(wps []syntax.WordPart, ql quoteLevel) ([]fieldPart, error) {

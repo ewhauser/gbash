@@ -178,6 +178,22 @@ func TestLiteralPreservesParsedBraceExp(t *testing.T) {
 	}
 }
 
+func TestFieldsPreserveQuotesWhenStringifyingBraceExpInParamArgs(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `${unset:-{'a b',c}}`)
+	got, err := Fields(&Config{
+		Env: testEnv{},
+	}, word)
+	if err != nil {
+		t.Fatalf("did not want error, got %v", err)
+	}
+	want := []string{`{a b,c}`}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("wanted %q, got %q", want, got)
+	}
+}
+
 func TestPatternASTExpansionPreservesPatternOperators(t *testing.T) {
 	t.Parallel()
 
