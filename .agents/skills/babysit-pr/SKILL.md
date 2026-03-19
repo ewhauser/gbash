@@ -28,7 +28,8 @@ Loop until the PR is clean (no unresolved comments AND CI passing):
 - Use a clear commit message describing what was addressed
 
 ### 5) Wait and re-check
-- After pushing, wait for CI to run (check `gh pr checks` periodically)
+- After pushing, sleep for 5 minutes to allow CI to start
+- Then poll `gh pr checks` until all checks have completed (no "pending" or "in_progress" status)
 - Once CI completes, loop back to step 1
 
 ### Exit conditions
