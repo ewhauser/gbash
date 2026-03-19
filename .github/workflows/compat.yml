@@ -58,7 +58,7 @@ jobs:
           set +e
           rm -rf "$RESULTS_DIR"
           mkdir -p "$RESULTS_DIR"
-          GNU_RESULTS_DIR="$RESULTS_DIR" make gnu-test
+          GNU_RESULTS_DIR="$RESULTS_DIR" GNU_UTILS="tty,uname,unexpand,uniq,unlink,vdir,wc,whoami,yes" make gnu-test
           rc=$?
           echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
           exit 0
