@@ -165,3 +165,38 @@ printf 'arr=%s %s\n' "${arr[0]}" "${arr[1]}"
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
 }
+
+func TestAllElementsVarRefsRespectAssociativeKeys(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+typeset -A assoc=([k]=v)
+test -v 'assoc[@]'
+printf 'test-before=%d\n' "$?"
+[[ -v assoc[@] ]]
+printf 'dbracket-before=%d\n' "$?"
+assoc[@]=x
+printf -v 'assoc[*]' %s y
+test -v 'assoc[@]'
+printf 'test-after=%d\n' "$?"
+[[ -v assoc[*] ]]
+printf 'dbracket-after=%d\n' "$?"
+at=@
+star='*'
+printf 'assoc=%s|%s\n' "${assoc[$at]}" "${assoc[$star]}"
+array=(a b)
+printf -v 'array[@]' %s z
+printf 'printf-status=%d array=%s|%s\n' "$?" "${array[0]}" "${array[1]}"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "test-before=1\ndbracket-before=1\ntest-after=0\ndbracket-after=0\nassoc=x|y\nprintf-status=2 array=a|b\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	const wantStderr = "printf: bad array subscript\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	}
+}

@@ -48,6 +48,24 @@ func resolvedSubscriptMode(sub *syntax.Subscript) syntax.SubscriptMode {
 	}
 }
 
+func subscriptLiteralKey(sub *syntax.Subscript) (string, bool) {
+	if sub == nil {
+		return "", false
+	}
+	switch sub.Kind {
+	case syntax.SubscriptAt:
+		return "@", true
+	case syntax.SubscriptStar:
+		return "*", true
+	default:
+		word, ok := subscriptWord(sub)
+		if !ok {
+			return "", false
+		}
+		return word.Lit(), true
+	}
+}
+
 func subscriptWord(sub *syntax.Subscript) (*syntax.Word, bool) {
 	if sub == nil {
 		return nil, false
@@ -121,6 +139,14 @@ func (r *Runner) refIsSet(ref *syntax.VarRef) bool {
 		return vr.IsSet()
 	}
 	if ref.Index.AllElements() {
+		if vr.Kind == expand.Associative && ref.Context == syntax.VarRefVarSet {
+			key, ok := subscriptLiteralKey(ref.Index)
+			if !ok {
+				return false
+			}
+			_, ok = vr.Map[key]
+			return ok
+		}
 		switch vr.Kind {
 		case expand.Indexed:
 			return len(vr.List) > 0
@@ -206,7 +232,22 @@ func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand
 
 	switch {
 	case index.AllElements():
-		return nil
+		if prev.Kind == expand.Associative {
+			key, ok := subscriptLiteralKey(index)
+			if !ok {
+				return fmt.Errorf("bad array subscript")
+			}
+			prev.Kind = expand.Associative
+			prev.List = nil
+			prev.Map = maps.Clone(prev.Map)
+			if prev.Map == nil {
+				prev.Map = make(map[string]string)
+			}
+			prev.Map[key] = valStr
+			r.setVar(name, prev)
+			return nil
+		}
+		return fmt.Errorf("bad array subscript")
 	case resolvedSubscriptMode(index) == syntax.SubscriptAssociative:
 		word, ok := subscriptWord(index)
 		if !ok {
