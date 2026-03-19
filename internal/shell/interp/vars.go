@@ -571,6 +571,25 @@ func (r *Runner) associativeArrayKey(index *syntax.Subscript) string {
 	return sb.String()
 }
 
+func hasAssociativeMixedCompoundArrayElems(elems []expandedArrayElem) bool {
+	hasKeyed := false
+	hasSequential := false
+	for _, elem := range elems {
+		switch elem.kind {
+		case syntax.ArrayElemSequential:
+			if len(elem.fields) > 0 {
+				hasSequential = true
+			}
+		case syntax.ArrayElemKeyed, syntax.ArrayElemKeyedAppend:
+			hasKeyed = true
+		}
+		if hasKeyed && hasSequential {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType string) expand.Variable {
 	targetName, targetPrev := r.resolvedCompoundArrayTarget(prev, as.Ref)
 	mode := resolveArrayExprMode(targetPrev, as, valType)
@@ -589,6 +608,11 @@ func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType st
 	}()
 
 	if mode == syntax.ArrayExprAssociative {
+		if hasAssociativeMixedCompoundArrayElems(elems) {
+			r.exit.code = 1
+			r.exit.exiting = true
+			return targetPrev
+		}
 		pendingKey := ""
 		hasPendingKey := false
 		flushPending := func() {

@@ -504,6 +504,9 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				prev.Local = false
 
 				vr := r.assignVal(prev, as, "")
+				if r.exit.fatalExit || r.exit.exiting {
+					return
+				}
 				// Preserve and apply variable attributes from the previous declaration.
 				vr.Integer = prev.Integer
 				vr.Lower = prev.Lower
@@ -877,6 +880,9 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 						vr.Map = nil
 					}
 				}
+				if r.exit.fatalExit || r.exit.exiting {
+					return false
+				}
 				// For integer append in declare context, redo as arithmetic addition.
 				if as.Append && as.Value != nil && vr.Kind == expand.String {
 					isInt := vr.Integer
@@ -1139,6 +1145,9 @@ func (r *Runner) expandAssignsForSideEffects(assigns []*syntax.Assign) {
 	for _, as := range assigns {
 		// Just expand the value to trigger side effects; don't set the variable.
 		r.assignVal(r.lookupVar(as.Ref.Name.Value), as, "")
+		if r.exit.fatalExit || r.exit.exiting {
+			return
+		}
 	}
 }
 
@@ -1149,6 +1158,9 @@ func (r *Runner) runCallAssigns(assigns []*syntax.Assign) []restoreVar {
 		prev := r.lookupVar(name)
 
 		vr := r.assignVal(prev, as, "")
+		if r.exit.fatalExit || r.exit.exiting {
+			return restores
+		}
 		// Inline command vars are always exported.
 		vr.Exported = true
 
