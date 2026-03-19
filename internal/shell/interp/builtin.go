@@ -244,13 +244,25 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 			return failf(2, "usage: printf format [arguments]\n")
 		}
 		var destRef *syntax.VarRef
-		if len(args) >= 2 && args[0] == "-v" {
+		switch args[0] {
+		case "--":
+			args = args[1:]
+			if len(args) == 0 {
+				return failf(2, "usage: printf format [arguments]\n")
+			}
+		case "-v":
+			if len(args) < 2 {
+				return failf(2, "printf: -v: option requires a variable name\n")
+			}
 			var err error
 			destRef, err = r.strictVarRef(args[1])
 			if err != nil {
-				return failf(2, "printf: %v\n", err)
+				return failf(2, "printf: %q: invalid variable name for -v\n", args[1])
 			}
 			args = args[2:]
+			if len(args) > 0 && args[0] == "--" {
+				args = args[1:]
+			}
 			if len(args) == 0 {
 				return failf(2, "usage: printf format [arguments]\n")
 			}
