@@ -87,3 +87,41 @@ printf '%s\n' "${array[*]}"
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
 }
+
+func TestIndirectExpansionSupportsPositionalRefs(t *testing.T) {
+	t.Parallel()
+
+	stdout, _, err := runInterpScript(t, `
+set -- one two
+name=1
+printf '%s\n' "${!name}"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "one\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "one\n")
+	}
+}
+
+func TestRunCallAssignsRestoresResolvedNameRefTargets(t *testing.T) {
+	t.Parallel()
+
+	stdout, _, err := runInterpScript(t, `
+declare -n ref=foo
+foo=old
+ref=temp printf x >/dev/null
+printf 'foo=%s ref=%s\n' "$foo" "$ref"
+arr=(x y)
+declare -n elem='arr[1]'
+elem=temp printf x >/dev/null
+printf 'arr=%s %s\n' "${arr[0]}" "${arr[1]}"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const want = "foo=old ref=old\narr=x y\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}

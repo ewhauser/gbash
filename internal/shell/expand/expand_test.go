@@ -273,6 +273,24 @@ func TestFieldsQuotedStarSingleEmptyMatchesBash(t *testing.T) {
 	}
 }
 
+func TestLiteralIndirectExpansionAllowsPositionalTarget(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, "${!name}")
+	got, err := Literal(&Config{
+		Env: testEnv{
+			"name": {Set: true, Kind: String, Str: "1"},
+			"1":    {Set: true, Kind: String, Str: "one"},
+		},
+	}, word)
+	if err != nil {
+		t.Fatalf("did not want error, got %v", err)
+	}
+	if got != "one" {
+		t.Fatalf("wanted %q, got %q", "one", got)
+	}
+}
+
 func TestNamesByPrefixSkipsShadowedUnsetVariables(t *testing.T) {
 	cfg := &Config{
 		Env: layeredTestEnv{
