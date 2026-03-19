@@ -1,9 +1,6 @@
 package interp
 
-import (
-	"errors"
-	"testing"
-)
+import "testing"
 
 func TestCompoundArrayAssignments(t *testing.T) {
 	t.Parallel()
@@ -102,16 +99,19 @@ func TestCompoundAssociativeArrayMixedFormsFail(t *testing.T) {
 	t.Parallel()
 
 	stdout, stderr, err := runInterpScript(t, `
-declare -A assoc
+declare -A assoc=([old]=keep)
 assoc=([j]=1 2 3 4)
-printf 'unreached\n'
+printf 'status=%s count=%s old=%s\n' "$?" "${#assoc[@]}" "${assoc[old]}"
+printf 'after\n'
 `)
-	var status ExitStatus
-	if !errors.As(err, &status) || status != 1 {
-		t.Fatalf("Run error = %v, want exit status 1", err)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
 	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
+	const want = "" +
+		"status=1 count=1 old=keep\n" +
+		"after\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
 	if stderr != "" {
 		t.Fatalf("stderr = %q, want empty", stderr)

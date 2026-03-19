@@ -503,8 +503,8 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				// TODO: there is likely a better way to do this.
 				prev.Local = false
 
-				vr := r.assignVal(prev, as, "")
-				if r.exit.fatalExit || r.exit.exiting {
+				vr, ok := r.assignVal(prev, as, "")
+				if !ok || r.exit.fatalExit || r.exit.exiting {
 					return
 				}
 				// Preserve and apply variable attributes from the previous declaration.
@@ -868,11 +868,12 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					vr.Kind = expand.KeepValue
 				}
 			} else {
+				var ok bool
 				if valType == "+a" || valType == "+A" {
 					// +a/+A with a value: treat as string assignment.
-					vr = r.assignVal(vr, as, "")
+					vr, ok = r.assignVal(vr, as, "")
 				} else {
-					vr = r.assignVal(vr, as, valType)
+					vr, ok = r.assignVal(vr, as, valType)
 					if valType == "-a" && as.Value != nil && as.Array == nil && as.Ref != nil && as.Ref.Index == nil {
 						vr.Kind = expand.Indexed
 						vr.List = []string{vr.Str}
@@ -880,7 +881,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 						vr.Map = nil
 					}
 				}
-				if r.exit.fatalExit || r.exit.exiting {
+				if !ok || r.exit.fatalExit || r.exit.exiting {
 					return false
 				}
 				// For integer append in declare context, redo as arithmetic addition.
@@ -1144,8 +1145,7 @@ type restoreVar struct {
 func (r *Runner) expandAssignsForSideEffects(assigns []*syntax.Assign) {
 	for _, as := range assigns {
 		// Just expand the value to trigger side effects; don't set the variable.
-		r.assignVal(r.lookupVar(as.Ref.Name.Value), as, "")
-		if r.exit.fatalExit || r.exit.exiting {
+		if _, ok := r.assignVal(r.lookupVar(as.Ref.Name.Value), as, ""); !ok || r.exit.fatalExit || r.exit.exiting {
 			return
 		}
 	}
@@ -1157,8 +1157,8 @@ func (r *Runner) runCallAssigns(assigns []*syntax.Assign) []restoreVar {
 		name := as.Ref.Name.Value
 		prev := r.lookupVar(name)
 
-		vr := r.assignVal(prev, as, "")
-		if r.exit.fatalExit || r.exit.exiting {
+		vr, ok := r.assignVal(prev, as, "")
+		if !ok || r.exit.fatalExit || r.exit.exiting {
 			return restores
 		}
 		// Inline command vars are always exported.
