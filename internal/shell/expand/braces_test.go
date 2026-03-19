@@ -10,9 +10,10 @@ import (
 	"github.com/ewhauser/gbash/internal/shell/syntax"
 )
 
-func lit(s string) *syntax.Lit                { return &syntax.Lit{Value: s} }
-func word(ps ...syntax.WordPart) *syntax.Word { return &syntax.Word{Parts: ps} }
-func litWord(s string) *syntax.Word           { return word(lit(s)) }
+func litWord(s string) *syntax.Word {
+	return &syntax.Word{Parts: []syntax.WordPart{&syntax.Lit{Value: s}}}
+}
+
 func litWords(strs ...string) []*syntax.Word {
 	l := make([]*syntax.Word, 0, len(strs))
 	for _, s := range strs {
@@ -22,160 +23,157 @@ func litWords(strs ...string) []*syntax.Word {
 }
 
 var braceTests = []struct {
-	in   *syntax.Word
-	want []*syntax.Word
+	src  string
+	want []string
 }{
 	{
-		litWord("a{b"),
-		litWords("a{b"),
+		src:  "a{b",
+		want: []string{"a{b"},
 	},
 	{
-		litWord("a}b"),
-		litWords("a}b"),
+		src:  "a}b",
+		want: []string{"a}b"},
 	},
 	{
-		litWord("{a,b{c,d}"),
-		litWords("{a,bc", "{a,bd"),
+		src:  "{a,b{c,d}",
+		want: []string{"{a,bc", "{a,bd"},
 	},
 	{
-		litWord("{a{b"),
-		litWords("{a{b"),
+		src:  "{a{b",
+		want: []string{"{a{b"},
 	},
 	{
-		litWord("a{}"),
-		litWords("a{}"),
+		src:  "a{}",
+		want: []string{"a{}"},
 	},
 	{
-		litWord("a{b}"),
-		litWords("a{b}"),
+		src:  "a{b}",
+		want: []string{"a{b}"},
 	},
 	{
-		litWord("a{b,c}"),
-		litWords("ab", "ac"),
+		src:  "a{b,c}",
+		want: []string{"ab", "ac"},
 	},
 	{
-		litWord("a{à,世界}"),
-		litWords("aà", "a世界"),
+		src:  "a{à,世界}",
+		want: []string{"aà", "a世界"},
 	},
 	{
-		litWord("a{b,c}d{e,f}g"),
-		litWords("abdeg", "abdfg", "acdeg", "acdfg"),
+		src:  "a{b,c}d{e,f}g",
+		want: []string{"abdeg", "abdfg", "acdeg", "acdfg"},
 	},
 	{
-		litWord("a{b{x,y},c}d"),
-		litWords("abxd", "abyd", "acd"),
+		src:  "a{b{x,y},c}d",
+		want: []string{"abxd", "abyd", "acd"},
 	},
 	{
-		litWord("a{1,2,3,4,5}"),
-		litWords("a1", "a2", "a3", "a4", "a5"),
+		src:  "a{1,2,3,4,5}",
+		want: []string{"a1", "a2", "a3", "a4", "a5"},
 	},
 	{
-		litWord("a{1.."),
-		litWords("a{1.."),
+		src:  "a{1..",
+		want: []string{"a{1.."},
 	},
 	{
-		litWord("a{1..4"),
-		litWords("a{1..4"),
+		src:  "a{1..4",
+		want: []string{"a{1..4"},
 	},
 	{
-		litWord("a{1.4}"),
-		litWords("a{1.4}"),
+		src:  "a{1.4}",
+		want: []string{"a{1.4}"},
 	},
 	{
-		litWord("{a,b}{1..4"),
-		litWords("a{1..4", "b{1..4"),
+		src:  "{a,b}{1..4",
+		want: []string{"a{1..4", "b{1..4"},
 	},
 	{
-		litWord("a{1..4}"),
-		litWords("a1", "a2", "a3", "a4"),
+		src:  "a{1..4}",
+		want: []string{"a1", "a2", "a3", "a4"},
 	},
 	{
-		litWord("a{1..2}b{4..5}c"),
-		litWords("a1b4c", "a1b5c", "a2b4c", "a2b5c"),
+		src:  "a{1..2}b{4..5}c",
+		want: []string{"a1b4c", "a1b5c", "a2b4c", "a2b5c"},
 	},
 	{
-		litWord("a{1..f}"),
-		litWords("a{1..f}"),
+		src:  "a{1..f}",
+		want: []string{"a{1..f}"},
 	},
 	{
-		litWord("a{c..f}"),
-		litWords("ac", "ad", "ae", "af"),
+		src:  "a{c..f}",
+		want: []string{"ac", "ad", "ae", "af"},
 	},
 	{
-		litWord("a{H..K}"),
-		litWords("aH", "aI", "aJ", "aK"),
+		src:  "a{H..K}",
+		want: []string{"aH", "aI", "aJ", "aK"},
 	},
 	{
-		litWord("a{-..f}"),
-		litWords("a{-..f}"),
+		src:  "a{-..f}",
+		want: []string{"a{-..f}"},
 	},
 	{
-		litWord("a{3..-}"),
-		litWords("a{3..-}"),
+		src:  "a{3..-}",
+		want: []string{"a{3..-}"},
 	},
 	{
-		litWord("a{1..10..3}"),
-		litWords("a1", "a4", "a7", "a10"),
+		src:  "a{1..10..3}",
+		want: []string{"a1", "a4", "a7", "a10"},
 	},
 	{
-		litWord("a{1..4..0}"),
-		litWords("a1", "a2", "a3", "a4"),
+		src:  "a{1..4..0}",
+		want: []string{"a1", "a2", "a3", "a4"},
 	},
 	{
-		litWord("a{4..1}"),
-		litWords("a4", "a3", "a2", "a1"),
+		src:  "a{4..1}",
+		want: []string{"a4", "a3", "a2", "a1"},
 	},
 	{
-		litWord("a{4..1..-2}"),
-		litWords("a4", "a2"),
+		src:  "a{4..1..-2}",
+		want: []string{"a4", "a2"},
 	},
 	{
-		litWord("a{4..1..1}"),
-		litWords("a4", "a3", "a2", "a1"),
+		src:  "a{4..1..1}",
+		want: []string{"a4", "a3", "a2", "a1"},
 	},
 	{
-		litWord("{1..005}"),
-		litWords("001", "002", "003", "004", "005"),
+		src:  "{1..005}",
+		want: []string{"001", "002", "003", "004", "005"},
 	},
 	{
-		litWord("{0001..05..2}"),
-		litWords("0001", "0003", "0005"),
+		src:  "{0001..05..2}",
+		want: []string{"0001", "0003", "0005"},
 	},
 	{
-		litWord("{0..1}"),
-		litWords("0", "1"),
+		src:  "{0..1}",
+		want: []string{"0", "1"},
 	},
 	{
-		litWord("a{d..k..3}"),
-		litWords("ad", "ag", "aj"),
+		src:  "a{d..k..3}",
+		want: []string{"ad", "ag", "aj"},
 	},
 	{
-		litWord("a{d..k..n}"),
-		litWords("a{d..k..n}"),
+		src:  "a{d..k..n}",
+		want: []string{"a{d..k..n}"},
 	},
 	{
-		litWord("a{k..d..-2}"),
-		litWords("ak", "ai", "ag", "ae"),
+		src:  "a{k..d..-2}",
+		want: []string{"ak", "ai", "ag", "ae"},
 	},
 	{
-		litWord("{1..1}"),
-		litWords("1"),
+		src:  "{1..1}",
+		want: []string{"1"},
 	},
 }
 
 func TestBraces(t *testing.T) {
 	t.Parallel()
 	for _, tc := range braceTests {
-		t.Run("", func(t *testing.T) {
-			inStr := printWords(tc.in)
-			wantStr := printWords(tc.want...)
-			wantBraceExpParts(t, tc.in, false)
+		t.Run(tc.src, func(t *testing.T) {
+			word := parseCommandWord(t, tc.src)
+			inStr := printWords(word)
+			wantStr := printWords(litWords(tc.want...)...)
+			wantBraceExpParts(t, word, inStr != wantStr)
 
-			inBraces := *tc.in
-			syntax.SplitBraces(&inBraces)
-			wantBraceExpParts(t, &inBraces, inStr != wantStr)
-
-			got := Braces(&inBraces)
+			got := Braces(word)
 			gotStr := printWords(got...)
 			if gotStr != wantStr {
 				t.Fatalf("mismatch in %q\nwant:\n%s\ngot: %s",

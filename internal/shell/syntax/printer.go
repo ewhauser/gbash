@@ -636,6 +636,9 @@ func (p *Printer) comments(comments ...Comment) {
 }
 
 func (p *Printer) wordParts(wps []WordPart, quoted bool) {
+	if len(wps) == 0 {
+		return
+	}
 	// We disallow unquoted escaped newlines between word parts below.
 	// However, we want to allow a leading escaped newline for cases such as:
 	//
@@ -730,6 +733,8 @@ func (p *Printer) wordPart(wp, next WordPart) {
 		}
 		p.arithmExpr(wp.X, false, false)
 		p.w.WriteString("))")
+	case *BraceExp:
+		p.braceExp(wp)
 	case *ExtGlob:
 		p.extGlob(wp)
 	case *ProcSubst:
@@ -741,6 +746,21 @@ func (p *Printer) wordPart(wp, next WordPart) {
 		p.nestedStmts(wp.Stmts, wp.Last, wp.Rparen)
 		p.rightParen(wp.Rparen)
 	}
+}
+
+func (p *Printer) braceExp(br *BraceExp) {
+	p.w.WriteByte('{')
+	for i, elem := range br.Elems {
+		if i > 0 {
+			if br.Sequence {
+				p.w.WriteString("..")
+			} else {
+				p.w.WriteByte(',')
+			}
+		}
+		p.wordParts(elem.Parts, false)
+	}
+	p.w.WriteByte('}')
 }
 
 func (p *Printer) extGlob(eg *ExtGlob) {
@@ -1098,6 +1118,8 @@ func (p *Printer) unquotedWordParts(parts []WordPart) {
 			p.writeLit(wp.Value)
 		case *DblQuoted:
 			p.wordParts(wp.Parts, true)
+		case *BraceExp:
+			p.braceExp(wp)
 		case *Lit:
 			for i := 0; i < len(wp.Value); i++ {
 				if b := wp.Value[i]; b == '\\' {

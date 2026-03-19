@@ -2525,6 +2525,12 @@ var documentTests = []struct {
 			lit("\n\n"),
 		},
 	},
+	{
+		"{a,b}",
+		[]WordPart{
+			lit("{a,b}"),
+		},
+	},
 }
 
 func TestParseDocument(t *testing.T) {

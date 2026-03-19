@@ -147,7 +147,7 @@ func TestFieldsIdempotency(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		word := parseWord(t, tc.src)
+		word := parseCommandWord(t, tc.src)
 		for range 2 {
 			got, err := Fields(nil, word)
 			if err != nil {
@@ -157,6 +157,40 @@ func TestFieldsIdempotency(t *testing.T) {
 				t.Fatalf("wanted %q, got %q", tc.want, got)
 			}
 		}
+	}
+}
+
+func TestLiteralPreservesParsedBraceExp(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `{${x},$y}`)
+	got, err := Literal(&Config{
+		Env: testEnv{
+			"x": {Set: true, Kind: String, Str: "A"},
+			"y": {Set: true, Kind: String, Str: "B"},
+		},
+	}, word)
+	if err != nil {
+		t.Fatalf("did not want error, got %v", err)
+	}
+	if got != "{A,B}" {
+		t.Fatalf("wanted %q, got %q", "{A,B}", got)
+	}
+}
+
+func TestFieldsPreserveQuotesWhenStringifyingBraceExpInParamArgs(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `${unset:-{'a b',c}}`)
+	got, err := Fields(&Config{
+		Env: testEnv{},
+	}, word)
+	if err != nil {
+		t.Fatalf("did not want error, got %v", err)
+	}
+	want := []string{`{a b,c}`}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("wanted %q, got %q", want, got)
 	}
 }
 

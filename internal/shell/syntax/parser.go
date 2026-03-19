@@ -706,7 +706,7 @@ func (p *Parser) wordAnyNumber() *Word {
 	w := &alloc.word
 	w.Parts = p.wordParts(alloc.parts[:0])
 	w.AliasExpansions = append(w.AliasExpansions[:0], p.tokAliasChain...)
-	return w
+	return p.finishWord(w)
 }
 
 func (p *Parser) wordOne(part WordPart) *Word {
@@ -719,7 +719,7 @@ func (p *Parser) wordOne(part WordPart) *Word {
 	w.Parts = alloc.parts[:1]
 	w.Parts[0] = part
 	w.AliasExpansions = append(w.AliasExpansions[:0], p.tokAliasChain...)
-	return w
+	return p.finishWord(w)
 }
 
 func (p *Parser) wordOneWithAliases(part WordPart, aliases []*AliasExpansion) *Word {
@@ -939,6 +939,21 @@ func (p *Parser) unquotedWordPart(buf []byte, wp WordPart, quotes bool) (_ []byt
 			buf, _ = p.unquotedWordPart(buf, wp2, true)
 		}
 		quoted = true
+	case *BraceExp:
+		buf = append(buf, '{')
+		for i, elem := range wp.Elems {
+			if i > 0 {
+				if wp.Sequence {
+					buf = append(buf, '.', '.')
+				} else {
+					buf = append(buf, ',')
+				}
+			}
+			for _, elemPart := range elem.Parts {
+				buf, _ = p.unquotedWordPart(buf, elemPart, quotes)
+			}
+		}
+		buf = append(buf, '}')
 	}
 	return buf, quoted
 }
@@ -1500,6 +1515,30 @@ func (p *Parser) wordParts(wps []WordPart) []WordPart {
 		if p.spaced {
 			return wps
 		}
+	}
+}
+
+func (p *Parser) finishWord(w *Word) *Word {
+	if w == nil || len(w.Parts) == 0 {
+		return w
+	}
+	if p.braceWordPartsAllowed() {
+		w.Parts = splitBraceWordParts(w.Parts)
+	}
+	return w
+}
+
+func (p *Parser) braceWordPartsAllowed() bool {
+	if !p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
+		return false
+	}
+	switch p.quote {
+	case runeByRune, dblQuotes, hdocWord, hdocBody, hdocBodyTabs:
+		return false
+	case arithmExpr, arithmExprLet, arithmExprCmd, paramExpArithm:
+		return false
+	default:
+		return true
 	}
 }
 
@@ -2691,6 +2730,7 @@ func (p *Parser) finishAssign(as *Assign) *Assign {
 			as.Value = w
 		} else {
 			as.Value.Parts = append(as.Value.Parts, w.Parts...)
+			p.finishWord(as.Value)
 		}
 	}
 	return as
@@ -3098,6 +3138,7 @@ func (p *Parser) gotStmtPipe(s *Stmt, binCmd bool) *Stmt {
 			w := p.wordOneWithAliases(name, aliases)
 			if p.lang.in(LangZsh) && !p.spaced {
 				w.Parts = append(w.Parts, p.wordParts(nil)...)
+				p.finishWord(w)
 			}
 			p.callExpr(s, w, false)
 		}
@@ -4061,6 +4102,7 @@ loop:
 			p.next()
 			if p.lang.in(LangZsh) && !p.spaced {
 				w.Parts = append(w.Parts, p.wordParts(nil)...)
+				p.finishWord(w)
 			}
 			ce.Args = append(ce.Args, w)
 		case _Lit:

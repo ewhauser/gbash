@@ -103,6 +103,8 @@ func Walk(node Node, f func(Node) bool) {
 	case *SglQuoted:
 	case *DblQuoted:
 		walkList(node.Parts, f)
+	case *BraceExp:
+		walkList(node.Elems, f)
 	case *Pattern:
 		walkList(node.Parts, f)
 	case *PatternAny:

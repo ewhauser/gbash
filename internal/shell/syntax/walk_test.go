@@ -39,6 +39,7 @@ func TestWalk(t *testing.T) {
 		"*syntax.Lit":              false,
 		"*syntax.SglQuoted":        false,
 		"*syntax.DblQuoted":        false,
+		"*syntax.BraceExp":         false,
 		"*syntax.CmdSubst":         false,
 		"*syntax.ParamExp":         false,
 		"*syntax.PatternAny":       false,
