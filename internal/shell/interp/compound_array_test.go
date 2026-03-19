@@ -52,3 +52,22 @@ printf 'eval3=%s,%s,%s,%s,%s,%s\n' "${a[0]}" "${a[1]}" "${a[2]}" "${a[5]}" "${a[
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
 }
+
+func TestCompoundArrayAssignmentsThroughNameRef(t *testing.T) {
+	t.Parallel()
+
+	stdout, _, err := runInterpScript(t, `
+declare -A map=([k]=v)
+declare -n ref=map
+ref+=(['k']+=x ['new']=y)
+printf 'kind=%s\n' "${map@a}"
+printf 'vals=%s,%s\n' "${map[k]}" "${map[new]}"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const want = "kind=A\nvals=vx,y\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}

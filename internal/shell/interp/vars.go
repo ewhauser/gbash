@@ -473,16 +473,17 @@ func resolveArrayExprMode(prev expand.Variable, as *syntax.Assign, valType strin
 	return syntax.ArrayExprIndexed
 }
 
-func (r *Runner) compoundAssignTargetName(prev expand.Variable, ref *syntax.VarRef) string {
+func (r *Runner) resolvedCompoundArrayTarget(prev expand.Variable, ref *syntax.VarRef) (string, expand.Variable) {
 	if ref == nil {
-		return ""
+		return "", prev
 	}
 	name := ref.Name.Value
 	resolvedRef, _, err := prev.ResolveRef(r.writeEnv, ref)
 	if err == nil && resolvedRef != nil && resolvedRef.Index == nil {
 		name = resolvedRef.Name.Value
+		return name, r.lookupVar(name)
 	}
-	return name
+	return name, prev
 }
 
 func (r *Runner) expandCompoundArrayElems(elems []*syntax.ArrayElem) []expandedArrayElem {
@@ -566,10 +567,10 @@ func (r *Runner) associativeArrayKey(index *syntax.Subscript) string {
 }
 
 func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType string) expand.Variable {
-	mode := resolveArrayExprMode(prev, as, valType)
+	targetName, targetPrev := r.resolvedCompoundArrayTarget(prev, as.Ref)
+	mode := resolveArrayExprMode(targetPrev, as, valType)
 	elems := r.expandCompoundArrayElems(as.Array.Elems)
-	vr := compoundArrayBase(prev, mode, as.Append)
-	targetName := r.compoundAssignTargetName(prev, as.Ref)
+	vr := compoundArrayBase(targetPrev, mode, as.Append)
 	origEnv := r.writeEnv
 	shadowEnv := &shadowWriteEnviron{
 		parent:     origEnv,
