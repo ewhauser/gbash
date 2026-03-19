@@ -1239,7 +1239,11 @@ func (p *Parser) quotedHdocWord() *Word {
 	stop := p.hdocStops[len(p.hdocStops)-1]
 	for ; ; r = p.rune() {
 		if r == utf8.RuneSelf {
-			return nil
+			val := p.endLit()
+			if val == "" {
+				return nil
+			}
+			return p.wordOne(p.lit(pos, val))
 		}
 		for p.quote == hdocBodyTabs && r == '\t' {
 			r = p.rune()

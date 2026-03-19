@@ -1615,6 +1615,28 @@ var fileTests = []fileTestCase{
 		}),
 	),
 	fileTest(
+		[]string{"foo <<${bar}\nbody\n${bar}"},
+		langFile(&Stmt{
+			Cmd: litCall("foo"),
+			Redirs: []*Redirect{{
+				Op:        Hdoc,
+				HdocDelim: heredocDelim(&ParamExp{Param: lit("bar")}),
+				Hdoc:      litWord("body\n"),
+			}},
+		}),
+	),
+	fileTest(
+		[]string{"foo <<$(bar)\nbody\n$(bar)"},
+		langFile(&Stmt{
+			Cmd: litCall("foo"),
+			Redirs: []*Redirect{{
+				Op:        Hdoc,
+				HdocDelim: heredocDelim(cmdSubst(litStmt("bar"))),
+				Hdoc:      litWord("body\n"),
+			}},
+		}),
+	),
+	fileTest(
 		[]string{"foo <<\\EOF\nbar\nEOF"},
 		langFile(&Stmt{
 			Cmd: litCall("foo"),

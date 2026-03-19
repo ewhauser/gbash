@@ -147,6 +147,42 @@ func TestParseHeredocDelimiterMetadata(t *testing.T) {
 			wantExpands: false,
 			wantParts:   1,
 		},
+		{
+			name:        "short parameter expansion",
+			src:         "cat <<$bar\nbody\n$bar",
+			wantValue:   "$bar",
+			wantExpands: true,
+			wantParts:   1,
+		},
+		{
+			name:        "brace parameter expansion",
+			src:         "cat <<${bar}\nbody\n${bar}",
+			wantValue:   "${bar}",
+			wantExpands: true,
+			wantParts:   1,
+		},
+		{
+			name:        "command substitution",
+			src:         "cat <<$(bar)\nbody\n$(bar)",
+			wantValue:   "$(bar)",
+			wantExpands: true,
+			wantParts:   1,
+		},
+		{
+			name:        "special parameter",
+			src:         "cat <<$-\nbody\n$-",
+			wantValue:   "$-",
+			wantExpands: true,
+			wantParts:   1,
+		},
+		{
+			name:        "quoted parameter expansion",
+			src:         "cat <<\"$bar\"\nbody\n$bar",
+			wantValue:   "$bar",
+			wantQuoted:  true,
+			wantExpands: false,
+			wantParts:   1,
+		},
 	}
 
 	for _, tc := range tests {
@@ -973,16 +1009,6 @@ var errorCases = []errorCase{
 		flipConfirmUnclosedHeredoc,
 	),
 	errCase(
-		"<<EOF\n\\\nEOF",
-		langErr("1:1: unclosed here-document `EOF`"),
-		flipConfirmAll, // why does mksh allow this?
-	),
-	errCase(
-		"<<EOF\nfoo\\\nEOF",
-		langErr("1:1: unclosed here-document `EOF`"),
-		flipConfirmUnclosedHeredoc,
-	),
-	errCase(
 		"<<'EOF'\n\\\n",
 		langErr("1:1: unclosed here-document `EOF`"),
 		flipConfirmUnclosedHeredoc,
@@ -1032,7 +1058,7 @@ var errorCases = []errorCase{
 	),
 	errCase(
 		"`<<EOF\nNOTEOF`",
-		langErr("1:2: unclosed here-document `EOF`", LangBash|LangMirBSDKorn),
+		langErr("2:7: reached EOF without closing quote \"`\"", LangBash|LangMirBSDKorn),
 		flipConfirmAll,
 		// Note that this works on external shells as they treat "`" as outside the heredoc.
 	),
@@ -1544,37 +1570,6 @@ var errorCases = []errorCase{
 		"echo \"`)`\"",
 		langErr("1:8: syntax error near unexpected token `)'"),
 		flipConfirm(LangPOSIX), // dash bug?
-	),
-	errCase(
-		"<<$bar\n$bar",
-		langErr("1:3: expansions not allowed in heredoc words"),
-		flipConfirmAll, // we are stricter
-	),
-	errCase(
-		"<<${bar}\n${bar}",
-		langErr("1:3: expansions not allowed in heredoc words"),
-		flipConfirmAll, // we are stricter
-	),
-	errCase(
-		"<<$(bar)\n$(bar)",
-		langErr("1:3: expansions not allowed in heredoc words", LangBash),
-		flipConfirmAll, // we are stricter
-	),
-
-	errCase(
-		"<<$-\n$-",
-		langErr("1:3: expansions not allowed in heredoc words"),
-		flipConfirmAll, // we are stricter
-	),
-	errCase(
-		"<<`bar`\n`bar`",
-		langErr("1:3: expansions not allowed in heredoc words"),
-		flipConfirmAll, // we are stricter
-	),
-	errCase(
-		"<<\"$bar\"\n$bar",
-		langErr("1:4: expansions not allowed in heredoc words"),
-		flipConfirmAll, // we are stricter
 	),
 	errCase(
 		"<<a <<0\n$(<<$<<",

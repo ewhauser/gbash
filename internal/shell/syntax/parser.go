@@ -473,9 +473,16 @@ func (p *Parser) WordsSeq(r io.Reader) iter.Seq2[*Word, error] {
 // Similarly, the here-document word parsed here cannot be ended by any
 // delimiter other than reaching the end of the input.
 func (p *Parser) Document(r io.Reader) (*Word, error) {
+	return p.document(r, NewPos(0, 1, 1))
+}
+
+func (p *Parser) document(r io.Reader, start Pos) (*Word, error) {
 	p.reset()
 	p.f = &File{}
 	p.src = r
+	p.offs = int64(start.Offset())
+	p.line = int64(start.Line())
+	p.col = int64(start.Col())
 	p.rune()
 	p.quote = hdocBody
 	p.hdocStops = [][]byte{[]byte("MVDAN_CC_SH_SYNTAX_EOF")}
@@ -954,6 +961,8 @@ func (p *Parser) unquotedWordPart(buf []byte, wp WordPart, quotes bool) (_ []byt
 			}
 		}
 		buf = append(buf, '}')
+	default:
+		buf = append(buf, wordPartString(wp)...)
 	}
 	return buf, quoted
 }
@@ -996,18 +1005,98 @@ func (p *Parser) doHeredocs() {
 		if i > 0 && p.r == '\n' {
 			p.rune()
 		}
-		if r.HdocDelim != nil && !r.HdocDelim.BodyExpands {
-			r.Hdoc = p.quotedHdocWord()
-		} else {
-			p.next()
-			r.Hdoc = p.getWord()
+		bodyStart := p.nextPos()
+		raw := p.quotedHdocWord()
+		if p.err != nil {
+			break
 		}
-		if stop := p.hdocStops[len(p.hdocStops)-1]; stop != nil {
-			p.posErr(r.Pos(), "unclosed here-document %#q", r.HdocDelim.Value)
+		if r.HdocDelim != nil && r.HdocDelim.BodyExpands && raw != nil {
+			bodyParser := NewParser(Variant(p.lang))
+			r.Hdoc, p.err = bodyParser.document(strings.NewReader(raw.Lit()), bodyStart)
+			if p.err == nil && r.Hdoc != nil {
+				setWordEnd(r.Hdoc, raw.End())
+			}
+		} else {
+			r.Hdoc = raw
+		}
+		if p.err == nil && raw != nil && r.Hdoc == nil {
+			r.Hdoc = raw
+		}
+		if p.err == nil {
+			if stop := p.hdocStops[len(p.hdocStops)-1]; stop != nil {
+				p.posErr(r.Pos(), "unclosed here-document %#q", r.HdocDelim.Value)
+			}
 		}
 		p.hdocStops = p.hdocStops[:len(p.hdocStops)-1]
 	}
 	p.quote = old
+}
+
+func posSubCol(p Pos, n int) Pos {
+	if n <= 0 {
+		return p
+	}
+	offset := p.Offset()
+	line := p.Line()
+	col := p.Col()
+	if int(offset) < n {
+		offset = 0
+	} else {
+		offset -= uint(n)
+	}
+	if int(col) < n {
+		col = 0
+	} else {
+		col -= uint(n)
+	}
+	return NewPos(offset, line, col)
+}
+
+func setWordEnd(w *Word, end Pos) {
+	if w == nil || len(w.Parts) == 0 {
+		return
+	}
+	setWordPartEnd(w.Parts[len(w.Parts)-1], end)
+}
+
+func setWordPartEnd(part WordPart, end Pos) {
+	switch part := part.(type) {
+	case *Lit:
+		part.ValueEnd = end
+	case *SglQuoted:
+		part.Right = posSubCol(end, 1)
+	case *DblQuoted:
+		part.Right = posSubCol(end, 1)
+	case *CmdSubst:
+		part.Right = posSubCol(end, 1)
+	case *ParamExp:
+		if !part.Short {
+			part.Rbrace = posSubCol(end, 1)
+			return
+		}
+		if part.Index != nil {
+			part.Index.Right = posSubCol(end, 1)
+			return
+		}
+		if part.Param != nil {
+			part.Param.ValueEnd = end
+		}
+	case *ArithmExp:
+		width := 2
+		if part.Bracket {
+			width = 1
+		}
+		part.Right = posSubCol(end, width)
+	case *ProcSubst:
+		part.Rparen = posSubCol(end, 1)
+	case *ExtGlob:
+		part.Rparen = posSubCol(end, 1)
+	case *BraceExp:
+		if len(part.Elems) == 0 {
+			return
+		}
+		setWordEnd(part.Elems[len(part.Elems)-1], posSubCol(end, 1))
+	}
 }
 
 func (p *Parser) got(tok token) bool {
@@ -2972,11 +3061,11 @@ func (p *Parser) doRedirect(s *Stmt) {
 	p.next()
 	switch r.Op {
 	case Hdoc, DashHdoc:
-		old := p.quote
-		p.quote, p.forbidNested = hdocWord, true
+		oldQuote, oldForbidNested := p.quote, p.forbidNested
+		p.quote = hdocWord
 		p.heredocs = append(p.heredocs, r)
 		r.HdocDelim = p.heredocDelimFromWord(p.followWordTok(token(r.Op), r.OpPos))
-		p.quote, p.forbidNested = old, false
+		p.quote, p.forbidNested = oldQuote, oldForbidNested
 		if p.tok == _Newl {
 			if len(p.accComs) > 0 {
 				c := p.accComs[0]
