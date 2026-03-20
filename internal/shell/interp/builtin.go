@@ -2446,10 +2446,17 @@ func bashFunctionBody(body *syntax.Stmt) string {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		line = strings.TrimSpace(line)
-		line = strings.TrimSuffix(line, ";")
+		line = trimBashFunctionLine(line)
 		lines[i] = "    " + line + "\n"
 	}
 	return strings.Join(lines, "")
+}
+
+func trimBashFunctionLine(line string) string {
+	if strings.HasSuffix(line, ";;") {
+		return line
+	}
+	return strings.TrimSuffix(line, ";")
 }
 
 // flagParser is used to parse builtin flags.

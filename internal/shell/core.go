@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -77,6 +78,7 @@ type resolvedCommand struct {
 }
 
 const virtualCommandStubPrefix = "# gbash virtual command stub: "
+const maxVirtualCommandStubBytes = 256
 
 type core struct{}
 
@@ -1065,12 +1067,14 @@ func resolveVirtualCommandStub(ctx context.Context, exec *Execution, fullPath st
 		_ = file.Close()
 	}()
 
-	line, err := readCommandFileLine(file)
+	name, ok, err := readVirtualCommandStub(ctx, file)
 	if err != nil {
 		return nil, false, err
 	}
-	name, ok := parseVirtualCommandStub(line)
 	if !ok {
+		return nil, false, nil
+	}
+	if path.Base(fullPath) != name {
 		return nil, false, nil
 	}
 	cmd, ok := lookupRegistryCommand(exec, name)
@@ -1081,6 +1085,23 @@ func resolveVirtualCommandStub(ctx context.Context, exec *Execution, fullPath st
 		command: cmd,
 		name:    name,
 	}, true, nil
+}
+
+func readVirtualCommandStub(ctx context.Context, r io.Reader) (string, bool, error) {
+	reader := commandutil.ReaderWithContext(ctx, r)
+	var buf bytes.Buffer
+	n, err := io.Copy(&buf, io.LimitReader(reader, maxVirtualCommandStubBytes+1))
+	if err != nil {
+		return "", false, err
+	}
+	if n > maxVirtualCommandStubBytes {
+		return "", false, nil
+	}
+	name, ok := parseVirtualCommandStub(strings.TrimSpace(buf.String()))
+	if !ok {
+		return "", false, nil
+	}
+	return name, true, nil
 }
 
 func isExecutableCommandFile(mode stdfs.FileMode) bool {
@@ -1100,29 +1121,13 @@ func defaultScriptInterpreter(exec *Execution) string {
 	return "bash"
 }
 
-func readCommandFileLine(r io.Reader) (string, error) {
-	var data [256]byte
-	n, err := r.Read(data[:])
-	switch {
-	case err == nil:
-	case errors.Is(err, io.EOF):
-	default:
-		return "", err
-	}
-	line := string(data[:n])
-	if idx := strings.IndexByte(line, '\n'); idx >= 0 {
-		line = line[:idx]
-	}
-	return strings.TrimSpace(line), nil
-}
-
 func parseVirtualCommandStub(line string) (string, bool) {
 	name, ok := strings.CutPrefix(line, virtualCommandStubPrefix)
 	if !ok {
 		return "", false
 	}
 	name = strings.TrimSpace(name)
-	if name == "" {
+	if name == "" || strings.ContainsAny(name, "/ \t\r\n") {
 		return "", false
 	}
 	return name, true

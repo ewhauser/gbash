@@ -187,6 +187,18 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
+        "oils/assign-extended.test.sh::eval -- \"$(declare -p arr)\" (restore arrays w/ unset elements)": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior differs from bash"
+        },
+        "oils/assign-extended.test.sh::function name with /": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior differs from bash"
+        },
+        "oils/assign-extended.test.sh::invalid var name": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior differs from bash"
+        },
         "oils/assign-extended.test.sh::syntax error in array assignment": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -1094,10 +1106,6 @@
             "darwin"
           ]
         },
-        "oils/builtin-type-bash.test.sh::type -a -> builtin and file and shell function": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-type-bash.test.sh::type -ap -> builtin": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
@@ -1106,10 +1114,6 @@
           ]
         },
         "oils/builtin-type-bash.test.sh::type -t doesn't find non-executable (like command -v)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-type-bash.test.sh::type prints function source code": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1177,10 +1181,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/command_.test.sh::$PATH lookup": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/command_.test.sh::Command block": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
@@ -1188,23 +1188,7 @@
             "darwin"
           ]
         },
-        "oils/command_.test.sh::File in relative subdirectory and no shebang is executed": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/command_.test.sh::File with no shebang is executed": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/command_.test.sh::File with relative path and no shebang is executed": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/command_.test.sh::Name too long": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/command_.test.sh::Non-executable on $PATH": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

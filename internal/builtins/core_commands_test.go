@@ -324,6 +324,35 @@ printf 'status=%d\n' "$?"
 	}
 }
 
+func TestCommandBuiltinVUpperPreservesCaseTerminators(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: `
+case_fn() {
+  case $1 in
+    a) echo a ;;
+    b) echo b ;;
+  esac
+}
+command -V case_fn
+`,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got := strings.Count(result.Stdout, ";;\n"); got < 2 {
+		t.Fatalf("Stdout = %q, want case terminators preserved", result.Stdout)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
 func TestCommandBuiltinPUsesDefaultPath(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})

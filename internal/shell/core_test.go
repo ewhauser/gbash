@@ -831,6 +831,44 @@ func TestLookupCommandUsesStubBackedPathEntry(t *testing.T) {
 	}
 }
 
+func TestLookupCommandIgnoresStubHeaderInRealScript(t *testing.T) {
+	t.Parallel()
+
+	registry := newShellTestRegistry(t)
+	fsys := gbfs.NewMemory()
+	if err := fsys.MkdirAll(context.Background(), "/tmp/bin", 0o755); err != nil {
+		t.Fatalf("MkdirAll(/tmp/bin) error = %v", err)
+	}
+	file, err := fsys.OpenFile(context.Background(), "/tmp/bin/tr", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		t.Fatalf("OpenFile(/tmp/bin/tr) error = %v", err)
+	}
+	if _, err := io.WriteString(file, virtualCommandStubPrefix+"tr\n"+"echo real script\n"); err != nil {
+		t.Fatalf("WriteString(/tmp/bin/tr) error = %v", err)
+	}
+	_ = file.Close()
+
+	resolved, ok, err := lookupCommand(context.Background(), &Execution{
+		FS:       fsys,
+		Registry: registry,
+	}, "/tmp", expand.ListEnviron("PATH=/tmp/bin"), "tr")
+	if err != nil {
+		t.Fatalf("lookupCommand() error = %v", err)
+	}
+	if !ok {
+		t.Fatalf("lookupCommand() did not resolve command")
+	}
+	if got, want := resolved.name, "bash"; got != want {
+		t.Fatalf("resolved.name = %q, want %q", got, want)
+	}
+	if got, want := resolved.path, "/tmp/bin/tr"; got != want {
+		t.Fatalf("resolved.path = %q, want %q", got, want)
+	}
+	if got, want := resolved.source, "shell-script"; got != want {
+		t.Fatalf("resolved.source = %q, want %q", got, want)
+	}
+}
+
 func newShellTestRegistry(t testing.TB, extras ...commands.Command) *commands.Registry {
 	t.Helper()
 
