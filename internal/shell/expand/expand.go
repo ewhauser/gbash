@@ -187,6 +187,10 @@ func (cfg *Config) reportParamErrorOnce(pe *syntax.ParamExp, err error) {
 	cfg.ReportError(err)
 }
 
+func (cfg *Config) reportNegativeSubstringLength(pe *syntax.ParamExp, length int) {
+	cfg.reportParamErrorOnce(pe, fmt.Errorf(" %d: substring expression < 0", length))
+}
+
 func (cfg *Config) ifsRune(r rune) bool {
 	for _, r2 := range cfg.ifs {
 		if r == r2 {
@@ -392,6 +396,29 @@ func AssignmentLiteral(cfg *Config, word *syntax.Word) (string, error) {
 		return "", err
 	}
 	return cfg.fieldJoin(field), nil
+}
+
+func (cfg *Config) expandAssignmentTildeLiteral(s string, moreFields bool) string {
+	if !strings.ContainsRune(s, '~') {
+		return s
+	}
+	var b strings.Builder
+	for {
+		segment, rest, found := strings.Cut(s, ":")
+		if prefix, suffix, expanded := cfg.expandUser(segment, moreFields); expanded {
+			b.WriteString(prefix)
+			b.WriteString(suffix)
+		} else {
+			b.WriteString(segment)
+		}
+		if !found {
+			break
+		}
+		b.WriteByte(':')
+		s = rest
+		moreFields = false
+	}
+	return b.String()
 }
 
 // Document expands a single shell word as if it were a here-document body.
@@ -1300,7 +1327,9 @@ func (cfg *Config) wordField(wps []syntax.WordPart, ql quoteLevel) ([]fieldPart,
 		switch wp := wp.(type) {
 		case *syntax.Lit:
 			s := wp.Value
-			if i == 0 && (ql == quoteNone || ql == quoteAssign) {
+			if i == 0 && ql == quoteAssign {
+				s = cfg.expandAssignmentTildeLiteral(s, len(wps) > 1)
+			} else if i == 0 && ql == quoteNone {
 				if prefix, rest, expanded := cfg.expandUser(s, len(wps) > 1); expanded {
 					// TODO: return two separate fieldParts,
 					// like in wordFields?
@@ -1871,7 +1900,11 @@ func (cfg *Config) sliceElems(pe *syntax.ParamExp, elems []string, indices []int
 			if err != nil {
 				return elems
 			}
-			if length <= 0 {
+			if length < 0 {
+				cfg.reportNegativeSubstringLength(pe, length)
+				return nil
+			}
+			if length == 0 {
 				return nil
 			}
 			if length < len(elems) {
@@ -1905,6 +1938,10 @@ func (cfg *Config) sliceElems(pe *syntax.ParamExp, elems []string, indices []int
 		length, err := Arithm(cfg, pe.Slice.Length)
 		if err != nil {
 			return elems
+		}
+		if length < 0 {
+			cfg.reportNegativeSubstringLength(pe, length)
+			return nil
 		}
 		elems = elems[:slicePos(length)]
 	}
@@ -1969,6 +2006,26 @@ func findAllIndex(pat, name string, n int) [][]int {
 	expr, err := pattern.Regexp(pat, pattern.ExtendedOperators)
 	if err != nil {
 		return nil
+	}
+	rx := regexp.MustCompile(expr)
+	return rx.FindAllStringIndex(name, n)
+}
+
+func findReplaceIndex(pat, name string, n int) [][]int {
+	anchorStart := strings.HasPrefix(pat, "#")
+	anchorEnd := strings.HasPrefix(pat, "%")
+	if anchorStart || anchorEnd {
+		pat = pat[1:]
+	}
+	expr, err := pattern.Regexp(pat, pattern.ExtendedOperators)
+	if err != nil {
+		return nil
+	}
+	if anchorStart {
+		expr = "^" + expr
+	}
+	if anchorEnd {
+		expr += "$"
 	}
 	rx := regexp.MustCompile(expr)
 	return rx.FindAllStringIndex(name, n)

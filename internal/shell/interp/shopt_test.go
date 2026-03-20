@@ -80,3 +80,19 @@ printf 'print1=%d\n' "$?"
 		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }
+
+func TestShoptInvalidOptionNameMatchesBash(t *testing.T) {
+	t.Parallel()
+
+	_, stderr, err := runInterpScript(t, `
+shopt -s strict_array
+printf 'status=%d\n' "$?"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const want = "shopt: strict_array: invalid shell option name\n"
+	if stderr != want {
+		t.Fatalf("stderr = %q, want %q", stderr, want)
+	}
+}

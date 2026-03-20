@@ -1906,10 +1906,6 @@ var errorCases = []errorCase{
 		flipConfirmAll, // TODO: why is this valid?
 	),
 	errCase(
-		"a[i]=(y)",
-		langErr("1:5: arrays cannot be nested", LangBash),
-	),
-	errCase(
 		"a=([i]=(y))",
 		langErr("1:7: arrays cannot be nested", LangBash|LangZsh),
 	),

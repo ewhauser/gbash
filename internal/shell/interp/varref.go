@@ -119,6 +119,23 @@ func (e strictIndexedSubscriptError) Unwrap() error {
 	return e.err
 }
 
+func trailingOperandExpectedToken(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "<(") || strings.HasPrefix(raw, ">(") {
+		return raw
+	}
+	for i := len(raw) - 1; i >= 0; i-- {
+		switch raw[i] {
+		case '+', '-', '*', '/', '%', '&', '|', '^', '!', '?', ':':
+			return raw[i:]
+		}
+	}
+	return ""
+}
+
 func parseStrictIndexedSubscript(raw string) (syntax.ArithmExpr, error) {
 	if i := strings.IndexByte(raw, '#'); i >= 0 {
 		token := strings.TrimRight(raw[i:], " \t\r\n")
@@ -131,6 +148,9 @@ func parseStrictIndexedSubscript(raw string) (syntax.ArithmExpr, error) {
 	}
 	var parseErr syntax.ParseError
 	if errors.As(err, &parseErr) {
+		if token := trailingOperandExpectedToken(raw); token != "" {
+			return nil, fmt.Errorf("%s: arithmetic syntax error: operand expected (error token is %q)", strings.TrimSpace(raw), token)
+		}
 		if i := strings.IndexByte(raw, '#'); i >= 0 {
 			token := strings.TrimRight(raw[i:], " \t\r\n")
 			return nil, fmt.Errorf("%s: arithmetic syntax error: invalid arithmetic operator (error token is %q)", strings.TrimSpace(raw), token)
@@ -265,7 +285,7 @@ func arrayDefaultIndex(kind expand.ValueKind) *syntax.Subscript {
 	case expand.Indexed:
 		return literalSubscript(syntax.SubscriptExpr, syntax.SubscriptIndexed, "0")
 	case expand.Associative:
-		return emptyAssociativeSubscript()
+		return literalSubscript(syntax.SubscriptExpr, syntax.SubscriptAssociative, "0")
 	default:
 		return nil
 	}

@@ -311,6 +311,9 @@ func (r *Runner) expandErr(err error) {
 	case errMsg == "bad substitution" || strings.Contains(errMsg, ": bad substitution"):
 		r.exit.code = 1
 		r.exit.exiting = fatalExpansionErr
+	case strings.Contains(errMsg, "substring expression < 0"):
+		r.exit.code = 1
+		r.exit.exiting = fatalExpansionErr
 	case errMsg == "invalid indirect expansion":
 		r.exit.code = 1
 	default:
@@ -372,6 +375,17 @@ func (r *Runner) fields(words ...*syntax.Word) []string {
 
 func (r *Runner) literal(word *syntax.Word) string {
 	str, err := expand.Literal(r.ecfg, word)
+	r.expandErr(err)
+	return str
+}
+
+func (r *Runner) assignmentLiteral(word *syntax.Word) string {
+	if r.ecfg == nil {
+		r.fillExpandConfig(context.Background())
+	}
+	cfg := *r.ecfg
+	cfg.StartupHome = ""
+	str, err := expand.AssignmentLiteral(&cfg, word)
 	r.expandErr(err)
 	return str
 }
@@ -1005,7 +1019,11 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			r.outf("%s\n", buf.String())
 		}
 		printDeclaredVar := func(name string, vr expand.Variable) {
-			flags := vr.Flags()
+			declVR := vr
+			if r.hideReadonlyArrayDeclKind(name, declVR) {
+				declVR.Kind = expand.Unknown
+			}
+			flags := declVR.Flags()
 			if flags == "" {
 				flags = "--"
 			} else {
@@ -1267,8 +1285,9 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					targetEnv = ownerEnv
 				}
 			}
-			return runWithWriteEnv(targetEnv, func() bool {
-				vr := declLookupVar(targetEnv, name)
+				return runWithWriteEnv(targetEnv, func() bool {
+					vr := declLookupVar(targetEnv, name)
+					declaredBefore := vr.Declared()
 				if msg := arrayConversionError(name, vr); msg != "" {
 					if r.evalDepth > 0 {
 						declErrf("%s\n", msg)
@@ -1456,6 +1475,12 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				}
 				if !isAssign {
 					r.setVar(name, vr)
+					if declName == "readonly" && !declaredBefore && !vr.IsSet() &&
+						(vr.Kind == expand.Indexed || vr.Kind == expand.Associative) {
+						r.setHiddenReadonlyArrayDecl(name, vr.Kind)
+					} else {
+						r.clearHiddenReadonlyArrayDecl(name)
+					}
 					if nameRefErr != nil {
 						r.errf("%s: %v\n", cm.Variant.Value, nameRefErr)
 						r.exit.code = 1
@@ -1464,6 +1489,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				}
 				if vr.Kind == expand.NameRef && as.Ref != nil && as.Ref.Index == nil {
 					r.setVar(name, vr)
+					r.clearHiddenReadonlyArrayDecl(name)
 					if nameRefErr != nil {
 						r.errf("%s: %v\n", cm.Variant.Value, nameRefErr)
 						r.exit.code = 1
@@ -1482,6 +1508,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					r.exit.code = 1
 					return false
 				}
+				r.clearHiddenReadonlyArrayDecl(name)
 				if tracingEnabled {
 					switch {
 					case cm.Variant.Value == "readonly":
@@ -1823,6 +1850,35 @@ func (r *Runner) lastpipeStmt(stmt *syntax.Stmt) (*syntax.Stmt, bool) {
 	return inner, true
 }
 
+func (r *Runner) setHiddenReadonlyArrayDecl(name string, kind expand.ValueKind) {
+	if name == "" {
+		return
+	}
+	if kind != expand.Indexed && kind != expand.Associative {
+		r.clearHiddenReadonlyArrayDecl(name)
+		return
+	}
+	if r.hiddenReadonlyArrayDecl == nil {
+		r.hiddenReadonlyArrayDecl = make(map[string]expand.ValueKind)
+	}
+	r.hiddenReadonlyArrayDecl[name] = kind
+}
+
+func (r *Runner) clearHiddenReadonlyArrayDecl(name string) {
+	if r.hiddenReadonlyArrayDecl == nil || name == "" {
+		return
+	}
+	delete(r.hiddenReadonlyArrayDecl, name)
+}
+
+func (r *Runner) hideReadonlyArrayDeclKind(name string, vr expand.Variable) bool {
+	if r.hiddenReadonlyArrayDecl == nil || vr.IsSet() || !vr.ReadOnly {
+		return false
+	}
+	kind, ok := r.hiddenReadonlyArrayDecl[name]
+	return ok && kind == vr.Kind
+}
+
 func (r *Runner) trapCallback(ctx context.Context, callback, name string) {
 	if callback == "" {
 		return // nothing to do
@@ -1963,8 +2019,37 @@ func (r *Runner) renderInlineArrayValue(expr *syntax.ArrayExpr) string {
 	if expr == nil {
 		return ""
 	}
+	var b strings.Builder
+	b.WriteByte('(')
+	for i, elem := range expr.Elems {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		switch elem.Kind {
+		case syntax.ArrayElemSequential:
+			b.WriteString(renderInlineArrayNode(elem.Value))
+		case syntax.ArrayElemKeyed, syntax.ArrayElemKeyedAppend:
+			b.WriteString(renderInlineArrayNode(elem.Index))
+			if elem.Kind == syntax.ArrayElemKeyedAppend {
+				b.WriteString("+=")
+			} else {
+				b.WriteByte('=')
+			}
+			b.WriteString(renderInlineArrayNode(elem.Value))
+		default:
+			return ""
+		}
+	}
+	b.WriteByte(')')
+	return b.String()
+}
+
+func renderInlineArrayNode(node syntax.Node) string {
+	if node == nil {
+		return ""
+	}
 	var buf bytes.Buffer
-	if err := syntax.NewPrinter().Print(&buf, expr); err != nil {
+	if err := syntax.NewPrinter(syntax.Minify(true)).Print(&buf, node); err != nil {
 		return ""
 	}
 	return buf.String()

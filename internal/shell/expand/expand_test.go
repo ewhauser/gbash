@@ -145,6 +145,23 @@ func TestAssignmentLiteralConsumesUnquotedBackslashes(t *testing.T) {
 	}
 }
 
+func TestAssignmentLiteralExpandsColonSeparatedTildes(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `~:~:~/src`)
+	got, err := AssignmentLiteral(&Config{
+		Env: testEnv{
+			"HOME": {Set: true, Kind: String, Str: "/live"},
+		},
+	}, word)
+	if err != nil {
+		t.Fatalf("AssignmentLiteral() error = %v", err)
+	}
+	if got != "/live:/live:/live/src" {
+		t.Fatalf("AssignmentLiteral() = %q, want %q", got, "/live:/live:/live/src")
+	}
+}
+
 func parseCondPattern(t *testing.T, src string) *syntax.Pattern {
 	t.Helper()
 	p := syntax.NewParser()

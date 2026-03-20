@@ -1,6 +1,10 @@
 package interp
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ewhauser/gbash/internal/shell/expand"
+)
 
 func TestCompoundArrayAssignments(t *testing.T) {
 	t.Parallel()
@@ -164,5 +168,32 @@ printf 'after\n'
 	}
 	if stderr != "LOCK: readonly variable\n" {
 		t.Fatalf("stderr = %q, want %q", stderr, "LOCK: readonly variable\n")
+	}
+}
+
+func TestCompoundArrayKeyedValuesUseLiveHomeForAssignmentTildes(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir:         "/tmp",
+		StartupHome: "/startup",
+		Env: expand.ListEnviron(
+			"HOME=/home/user",
+		),
+	}, `
+a=([2]=~ [4]=~:~:~)
+printf '%s\n%s\n' "${a[2]}" "${a[4]}"
+declare -A assoc=([home]=~ [hello]=~:~:~)
+printf '%s\n%s\n' "${assoc[home]}" "${assoc[hello]}"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v, stdout=%q stderr=%q", err, stdout, stderr)
+	}
+	const want = "/home/user\n/home/user:/home/user:/home/user\n/home/user\n/home/user:/home/user:/home/user\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }

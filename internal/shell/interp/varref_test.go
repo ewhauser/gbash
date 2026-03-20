@@ -3,11 +3,13 @@ package interp
 import (
 	"bytes"
 	"context"
+	"errors"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/ewhauser/gbash/internal/shell/expand"
+	"github.com/ewhauser/gbash/internal/shell/syntax"
 )
 
 func runInterpScript(t *testing.T, src string) (string, string, error) {
@@ -134,6 +136,7 @@ printf '%s\n' "${assoc[i]-missing}"
 	}
 }
 
+<<<<<<< HEAD
 func TestUnsetRevealsOuterScopedBinding(t *testing.T) {
 	t.Parallel()
 
@@ -206,12 +209,12 @@ func TestUnsetWrongTypeMatchesBash(t *testing.T) {
 	t.Parallel()
 
 	stdout, stderr, err := runInterpScript(t, `
-declare undef
-unset -v 'undef[1]'
-echo undef1=$?
-unset -v 'undef["key"]'
-echo undef_key=$?
-`)
+	declare undef
+	unset -v 'undef[1]'
+	echo undef1=$?
+	unset -v 'undef["key"]'
+	echo undef_key=$?
+	`)
 	if err != nil {
 		t.Fatalf("Run error = %v", err)
 	}
@@ -223,6 +226,56 @@ echo undef_key=$?
 	}
 }
 
+func TestAssociativeScalarAssignmentUsesZeroKey(t *testing.T) {
+	t.Parallel()
+
+	stdout, _, err := runInterpScript(t, `
+typeset -A assoc=([k]=v)
+assoc=99
+printf '%s|%s\n' "${assoc[0]}" "${assoc[k]}"
+assoc+=42
+printf '%s|%s\n' "${assoc[0]}" "${assoc[k]}"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const want = "99|v\n9942|v\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestInlineArrayBindingsReachCommandEnv(t *testing.T) {
+	t.Parallel()
+
+	file, err := syntax.NewParser().Parse(strings.NewReader("A=a B=(b b) C=([k]=v) external\n"), "inline-array-env.sh")
+	if err != nil {
+		t.Fatalf("Parse error = %v", err)
+	}
+
+	var got string
+	runner, err := NewRunner(&RunnerConfig{
+		Dir: "/tmp",
+		ExecHandler: func(ctx context.Context, args []string) error {
+			hc, ok := LookupHandlerContext(ctx)
+			if !ok {
+				t.Fatal("missing handler context")
+			}
+			got = hc.Env.Get("A").String() + "|" + hc.Env.Get("B").String() + "|" + hc.Env.Get("C").String()
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRunner error = %v", err)
+	}
+
+	if err := runner.Run(context.Background(), file); err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if got != "a|(b b)|([k]=v)" {
+		t.Fatalf("env = %q, want %q", got, "a|(b b)|([k]=v)")
+	}
+}
 func TestIndirectExpansionSupportsPositionalRefs(t *testing.T) {
 	t.Parallel()
 
@@ -236,6 +289,92 @@ printf '%s\n' "${!name}"
 	}
 	if stdout != "one\n" {
 		t.Fatalf("stdout = %q, want %q", stdout, "one\n")
+	}
+}
+
+func TestInvalidArrayParamExpansionsFailAsBadSubstitution(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		src    string
+		stderr string
+	}{
+		{
+			name: "multiple subscripts",
+			src: `
+a=('123' '456')
+argv.sh "${a[0]}" "${a[0][0]}"
+`,
+			stderr: "${a[0][0]}: bad substitution\n",
+		},
+		{
+			name: "length plus replacement",
+			src: `
+a=('123' '456')
+echo "${#a[0]}" "${#a[0]/1/xxx}"
+`,
+			stderr: "${#a[0]/1/xxx}: bad substitution\n",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, err := runInterpScript(t, tt.src)
+			var status ExitStatus
+			if !errors.As(err, &status) || status != 1 {
+				t.Fatalf("status err = %v, want exit status 1", err)
+			}
+			if stdout != "" {
+				t.Fatalf("stdout = %q, want empty", stdout)
+			}
+			if stderr != tt.stderr {
+				t.Fatalf("stderr = %q, want %q", stderr, tt.stderr)
+			}
+		})
+	}
+}
+
+func TestArrayMemberCompoundAssignmentFailsAtRuntime(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+a=(1 2)
+a[0]=(3 4)
+echo "status=$?"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "status=1\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "status=1\n")
+	}
+	if stderr != "a[0]: cannot assign list to array member\n" {
+		t.Fatalf("stderr = %q, want %q", stderr, "a[0]: cannot assign list to array member\n")
+	}
+}
+
+func TestSparseArrayPatternReplacementAnchors(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+a=(v{0..9})
+unset -v 'a[2]' 'a[3]' 'a[4]' 'a[7]'
+printf '[%s]\n' "${a[@]/#?}"
+printf '[%s]\n' "${a[@]/%?}"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v, stdout=%q stderr=%q", err, stdout, stderr)
+	}
+	const want = "[0]\n[1]\n[5]\n[6]\n[8]\n[9]\n[v]\n[v]\n[v]\n[v]\n[v]\n[v]\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }
 
@@ -406,6 +545,27 @@ echo after
 	}
 	if runner.exit.exiting {
 		t.Fatal("runner should not mark invalid indirect expansion as exiting here")
+	}
+}
+
+func TestIndirectArrayIndexTildeReportsOperandExpected(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+a=(x y)
+PWD=1
+ref='a[~+]'
+echo ${!ref}
+`)
+	if status, ok := err.(ExitStatus); !ok || status != 1 {
+		t.Fatalf("Run error = %v, want exit status 1", err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	const wantStderr = "~+: arithmetic syntax error: operand expected (error token is \"+\")\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
 	}
 }
 

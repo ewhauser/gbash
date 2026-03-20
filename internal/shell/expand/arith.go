@@ -383,6 +383,15 @@ func arithm(cfg *Config, root, expr syntax.ArithmExpr, depth int) (int, error) {
 			p := syntax.NewParser()
 			if _, err := p.Arithmetic(strings.NewReader(src)); err != nil {
 				var parseErr syntax.ParseError
+				if errors.As(err, &parseErr) {
+					if tokenText, ok := arithParseOperandExpectedToken(src, parseErr); ok {
+						return 0, &ArithmDiagnosticError{
+							Expr:      root,
+							TokenText: tokenText,
+							Message:   "arithmetic syntax error: operand expected",
+						}
+					}
+				}
 				tokenText := src
 				if errors.As(err, &parseErr) {
 					tokenText = arithParseErrorToken(src, parseErr.Pos)
@@ -603,6 +612,16 @@ func arithParseErrorToken(source string, pos syntax.Pos) string {
 	return source[start:]
 }
 
+func arithParseOperandExpectedToken(source string, parseErr syntax.ParseError) (string, bool) {
+	switch {
+	case strings.Contains(parseErr.Text, "must be followed by an expression"),
+		strings.Contains(parseErr.Text, "must follow an expression"):
+		return arithParseErrorToken(source, parseErr.Pos), true
+	default:
+		return "", false
+	}
+}
+
 func arithRuntimeSource(cfg *Config, expr syntax.ArithmExpr) (string, error) {
 	switch expr := expr.(type) {
 	case *syntax.Word:
@@ -658,6 +677,16 @@ func arithmRuntimeParse(cfg *Config, expr syntax.ArithmExpr) (syntax.ArithmExpr,
 	p := syntax.NewParser()
 	parsed, err := p.Arithmetic(strings.NewReader(src))
 	if err != nil {
+		var parseErr syntax.ParseError
+		if errors.As(err, &parseErr) {
+			if tokenText, ok := arithParseOperandExpectedToken(src, parseErr); ok {
+				return nil, false, &ArithmDiagnosticError{
+					ExprText:  src,
+					TokenText: tokenText,
+					Message:   "arithmetic syntax error: operand expected",
+				}
+			}
+		}
 		return nil, false, &ArithmDiagnosticError{
 			ExprText:  src,
 			TokenText: src,
