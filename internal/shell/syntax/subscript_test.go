@@ -149,6 +149,51 @@ func TestParseArrayLikeFirstWordPreservesSpacing(t *testing.T) {
 	}
 }
 
+func TestParseCommandPrefixArrayAssignments(t *testing.T) {
+	t.Parallel()
+
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader("A=a B=(b b) C=([k]=v) envprobe\n"), "")
+	if err != nil {
+		t.Fatalf("Parse error = %v", err)
+	}
+	call := file.Stmts[0].Cmd.(*CallExpr)
+	if got := len(call.Assigns); got != 3 {
+		t.Fatalf("len(Assigns) = %d, want 3", got)
+	}
+	if call.Assigns[0].Value == nil || call.Assigns[0].Array != nil {
+		t.Fatalf("assign 0 = %#v, want scalar assignment", call.Assigns[0])
+	}
+	if call.Assigns[1].Array == nil {
+		t.Fatalf("assign 1 = %#v, want indexed array assignment", call.Assigns[1])
+	}
+	if call.Assigns[2].Array == nil {
+		t.Fatalf("assign 2 = %#v, want associative array assignment", call.Assigns[2])
+	}
+	if got := call.Args[0].Lit(); got != "envprobe" {
+		t.Fatalf("command = %q, want envprobe", got)
+	}
+}
+
+func TestParseArrayMemberCompoundAssignment(t *testing.T) {
+	t.Parallel()
+
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader("a[0]=(3 4)\n"), "")
+	if err != nil {
+		t.Fatalf("Parse error = %v", err)
+	}
+	call := file.Stmts[0].Cmd.(*CallExpr)
+	if got := len(call.Assigns); got != 1 {
+		t.Fatalf("len(Assigns) = %d, want 1", got)
+	}
+	as := call.Assigns[0]
+	if as.Ref == nil || as.Ref.Index == nil {
+		t.Fatalf("assign ref = %#v, want indexed ref", as.Ref)
+	}
+	if as.Array == nil {
+		t.Fatalf("assign = %#v, want compound array value", as)
+	}
+}
+
 func TestTryAssignCandidateRecordsPendingArrayWordAtEOF(t *testing.T) {
 	t.Parallel()
 

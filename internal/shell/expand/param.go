@@ -47,6 +47,9 @@ func subscriptWord(sub *syntax.Subscript) (*syntax.Word, bool) {
 }
 
 func badSubstitution(pe *syntax.ParamExp) error {
+	if pe != nil && pe.Invalid != "" {
+		return fmt.Errorf("%s: bad substitution", pe.Invalid)
+	}
 	src := printNode(pe)
 	if src == "" {
 		return fmt.Errorf("bad substitution")
@@ -1016,6 +1019,12 @@ func (cfg *Config) paramExpSplitValue(pe *syntax.ParamExp) ([]fieldPart, bool, e
 }
 
 func (cfg *Config) paramExpState(pe *syntax.ParamExp) (paramExpState, error) {
+	if pe == nil || pe.Param == nil {
+		return paramExpState{}, badSubstitution(pe)
+	}
+	if pe.Invalid != "" {
+		return paramExpState{}, badSubstitution(pe)
+	}
 	state := paramExpState{
 		name:       pe.Param.Value,
 		callVarInd: true,

@@ -518,10 +518,25 @@ echo "[${a[@]:10:1}][${a[*]:10:1}]"
 #### ${@:offset:length}
 
 set -- v{1..9}
+sh_token='$SH'
+shell_name=$0
+shell_path=$SH
+
+normalize_shell0() {
+  local slice=$1
+  case $slice in
+    "$shell_path"*) slice=$sh_token${slice#"$shell_path"} ;;
+    "$shell_name"*) slice=$sh_token${slice#"$shell_name"} ;;
+    stdin*) slice=$sh_token${slice#stdin} ;;
+  esac
+  printf '%s' "$slice"
+}
 
 {
   echo '==== ${@:offset:length} ===='
-  echo "[${*:0:3}][${*:0:3}]"
+  slice=${*:0:3}
+  slice=$(normalize_shell0 "$slice")
+  echo "[$slice][$slice]"
   echo "[${*:1:3}][${*:1:3}]"
   echo "[${*:3:3}][${*:3:3}]"
   echo "[${*:5:10}][${*:5:10}]"
@@ -530,13 +545,17 @@ set -- v{1..9}
   echo "[${*: -1}][${*: -1}]"
   echo "[${*: -3}][${*: -3}]"
   echo "[${*: -9}][${*: -9}]"
-  echo "[${*: -10}][${*: -10}]"
+  slice=${*: -10}
+  slice=$(normalize_shell0 "$slice")
+  echo "[$slice][$slice]"
   echo "[${*: -11}][${*: -11}]"
   echo "[${*: -3:2}][${*: -3:2}]"
   echo "[${*: -9:4}][${*: -9:4}]"
-  echo "[${*: -10:4}][${*: -10:4}]"
+  slice=${*: -10:4}
+  slice=$(normalize_shell0 "$slice")
+  echo "[$slice][$slice]"
   echo "[${*: -11:4}][${*: -11:4}]"
-} | sed "s:$SH:\$SH:g;s:${SH##*/}:\$SH:g"
+}
 
 ## STDOUT:
 ==== ${@:offset:length} ====

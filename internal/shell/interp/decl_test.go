@@ -740,6 +740,40 @@ declare -pu | filter_query
 	}
 }
 
+func TestReadonlyArrayDeclarationsHideTypeUntilExplicitArrayDecl(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+readonly -a arr
+readonly -A dict
+declare -p arr dict
+declare -pa arr
+declare -pA dict
+
+declare -a arr2
+readonly arr2
+declare -A dict2
+readonly dict2
+declare -p arr2 dict2
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "" +
+		"declare -r arr\n" +
+		"declare -r dict\n" +
+		"declare -r arr\n" +
+		"declare -r dict\n" +
+		"declare -ar arr2\n" +
+		"declare -Ar dict2\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestDeclareUnsetStateAndEvalRoundTrip(t *testing.T) {
 	t.Parallel()
 

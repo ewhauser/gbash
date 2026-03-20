@@ -708,7 +708,7 @@ func (r *Runner) expandCompoundArrayElems(elems []*syntax.ArrayElem) []expandedA
 			}
 		default:
 			if elem.Value != nil {
-				item.value = r.literal(elem.Value)
+				item.value = r.assignmentLiteral(elem.Value)
 			}
 		}
 		expanded = append(expanded, item)
@@ -916,7 +916,15 @@ func (r *Runner) assignVal(prev expand.Variable, as *syntax.Assign, valType stri
 		case expand.Indexed:
 			prev = prev.IndexedSet(0, s, true)
 		case expand.Associative:
-			// TODO
+			prev.Kind = expand.Associative
+			prev.Str = ""
+			prev.List = nil
+			prev.Indices = nil
+			prev.Map = maps.Clone(prev.Map)
+			if prev.Map == nil {
+				prev.Map = make(map[string]string)
+			}
+			prev.Map["0"] += s
 		}
 		return prev, "", true
 	}
@@ -928,6 +936,11 @@ func (r *Runner) assignVal(prev expand.Variable, as *syntax.Assign, valType stri
 		}
 		prev.Str = ""
 		return prev, "", true
+	}
+	if as.Ref != nil && as.Ref.Index != nil {
+		r.errf("%s: cannot assign list to array member\n", printVarRef(as.Ref))
+		r.exit.code = 1
+		return prev, "", false
 	}
 	return r.assignArray(prev, as, valType)
 }

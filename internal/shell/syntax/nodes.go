@@ -863,6 +863,10 @@ type ParamExp struct {
 
 	Index *Subscript // ${a[i]}, ${a["k"]}, ${a[@]}, or a ${a[i,j]} slice with [LangZsh]
 
+	// Invalid preserves the original source for expansions that bash accepts
+	// syntactically but rejects later as a bad substitution.
+	Invalid string
+
 	// Only one of these is set at a time.
 	// TODO(v4): consider joining these in a single "expansion" field/type,
 	// because it should be impossible for multiple to be set at once,

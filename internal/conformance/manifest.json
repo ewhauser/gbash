@@ -83,69 +83,13 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/append.test.sh::Try to append list to element": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-completion.test.sh::compgen -A user": {
           "mode": "xfail",
           "reason": "conformance: gbash uses sandbox-visible passwd data instead of the host account database"
         },
-        "oils/array-assoc.test.sh::bash variable can have an associative array part and a string part": {
-          "mode": "xfail",
-          "reason": "gbash cannot represent bash's mixed scalar-plus-associative variables"
-        },
-        "oils/array-literal.test.sh::Tilde expansions in RHS of [k]=v (BashArray)": {
-          "mode": "xfail",
-          "reason": "gbash still expands ~ in keyed indexed-array literals using the temporary HOME binding unlike bash"
-        },
-        "oils/array-literal.test.sh::Tilde expansions in RHS of [k]=v (BashAssoc)": {
-          "mode": "xfail",
-          "reason": "gbash still expands ~ in keyed associative-array literals using the temporary HOME binding unlike bash"
-        },
-        "oils/array-sparse.test.sh::${@:offset:length}": {
-          "mode": "xfail",
-          "reason": "the pinned harness still hits a sed incompatibility before bash and gbash results can be compared"
-        },
-        "oils/array.test.sh::${mystr[@]} and ${mystr[*]} disallowed with strict_array": {
-          "mode": "xfail",
-          "reason": "gbash still treats string scalars as arrays in strict_array parameter expansions"
-        },
-        "oils/array.test.sh::Arrays can't be used as env bindings": {
-          "mode": "xfail",
-          "reason": "gbash rejects array-valued env bindings instead of decaying them to strings like bash"
-        },
-        "oils/array.test.sh::Associative arrays can't be used as env bindings either": {
-          "mode": "xfail",
-          "reason": "gbash rejects associative-array env bindings instead of stringifying them like bash"
-        },
-        "oils/array.test.sh::Multiple subscripts not allowed": {
-          "mode": "xfail",
-          "reason": "gbash emits a custom parse error instead of bash's bad substitution for chained subscripts"
-        },
-        "oils/array.test.sh::Negative slice length": {
-          "mode": "xfail",
-          "reason": "gbash still accepts negative array slice lengths that bash rejects"
-        },
-        "oils/array.test.sh::Set array item to array": {
-          "mode": "xfail",
-          "reason": "gbash treats nested array assignment as fatal instead of bash's non-fatal member-assignment error"
-        },
-        "oils/array.test.sh::Using an array itself as the index on LHS": {
-          "mode": "xfail",
-          "reason": "gbash still coerces array lvalue subscripts differently from bash"
-        },
-        "oils/array.test.sh::Using an array itself as the index on RHS": {
-          "mode": "xfail",
-          "reason": "gbash's unsupported strict_arith shopt diagnostic text still differs from bash in this array test"
-        },
         "oils/array.test.sh::array with invalid token": {
           "mode": "xfail",
           "reason": "gbash stops invalid array literals earlier than bash's parser"
-        },
-        "oils/array.test.sh::strict_array prevents exporting array": {
-          "mode": "xfail",
-          "reason": "gbash still follows bash's export behavior instead of rejecting array export under strict_array"
         },
         "oils/assign-deferred.test.sh::export a[7]=8": {
           "mode": "xfail",
@@ -199,10 +143,6 @@
           "mode": "xfail",
           "reason": "quoted here-doc content still loses a doubled backslash before read sees it, so this case remains blocked on heredoc handling rather than read itself"
         },
-        "oils/assign.test.sh::\"readonly -a arr\" and \"readonly -A dict\" should not not remove existing arrays": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/assign.test.sh::Env binding not allowed before compound command": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -240,10 +180,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/ble-features.test.sh::[bash_unset] localvar-inherit from tempenv": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/ble-idioms.test.sh::Issue #1069 [59] - Assigning Str to BashArray/BashAssoc should not remove BashArray/BashAssoc": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1750,15 +1686,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/tilde.test.sh::a[x]=foo:~ has tilde expansion": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/tilde.test.sh::temp assignment x=~ env": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/tilde.test.sh::tilde expansion an assignment keyword": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1770,10 +1698,6 @@
           ]
         },
         "oils/tilde.test.sh::x=${undef-~:~}": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/tilde.test.sh::x=foo:~ has tilde expansion": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1802,13 +1726,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/var-op-bash.test.sh::${!var[@]@X}": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
-        "oils/var-op-bash.test.sh::${#var@X} is a parse error": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
           "goos": [
@@ -1866,10 +1783,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/var-op-test.test.sh::op-test for unquoted ${a[*]:-empty} with IFS=": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-ref.test.sh::Bizarre tilde expansion in array index": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

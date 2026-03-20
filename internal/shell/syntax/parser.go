@@ -2904,6 +2904,9 @@ func (p *Parser) paramExp() *ParamExp {
 		pe.Exp = p.paramExpExp()
 	case _EOF:
 	default:
+		if tokRune == '[' && pe.Index != nil {
+			return p.invalidParamExp(pe, old)
+		}
 		if paramNameRune(tokRune) {
 			if pe.Param != nil {
 				p.curErr("%#q cannot be followed by a word", pe.Param.Value)
@@ -2919,6 +2922,28 @@ func (p *Parser) paramExp() *ParamExp {
 	}
 	p.quote = old
 	pe.Rbrace = p.matched(pe.Dollar, dollBrace, rightBrace)
+	return pe
+}
+
+func (p *Parser) invalidParamExp(pe *ParamExp, old quoteState) *ParamExp {
+	if pe == nil {
+		return nil
+	}
+	for p.r != utf8.RuneSelf && p.r != '}' {
+		p.rune()
+	}
+	if p.r == '}' {
+		pe.Rbrace = p.nextPos()
+		pe.Invalid = p.sourceRange(pe.Dollar, posAddCol(pe.Rbrace, 1))
+		p.rune()
+	} else {
+		pe.Invalid = p.sourceFromPos(pe.Dollar)
+		p.quote = old
+		pe.Rbrace = p.matched(pe.Dollar, dollBrace, rightBrace)
+		return pe
+	}
+	p.quote = old
+	p.next()
 	return pe
 }
 
@@ -3517,13 +3542,9 @@ func (p *Parser) finishAssign(as *Assign) *Assign {
 func (p *Parser) getAssignAfterRef(ref *VarRef) *Assign {
 	as := &Assign{Ref: ref}
 	if p.tok == assgnParen {
-		if !p.lang.in(LangZsh) {
-			p.curErr("arrays cannot be nested")
-			return nil
-		}
-		// zsh allows a[i]=(values...).
-		// assgnParen consumed both '=' and '(',
-		// so rewrite as leftParen for array parsing below.
+		// assgnParen consumed both '=' and '(', so rewrite as leftParen for
+		// array parsing below. Bash still parses a[i]=(values...), then rejects
+		// it later during execution.
 		p.tok = leftParen
 		p.pos = posAddCol(p.pos, 1)
 	} else {
@@ -3552,10 +3573,6 @@ func (p *Parser) getAssignAfterRef(ref *VarRef) *Assign {
 func (p *Parser) tryAssignAfterRef(ref *VarRef) (*Assign, bool) {
 	as := &Assign{Ref: ref}
 	if p.tok == assgnParen {
-		if !p.lang.in(LangZsh) {
-			p.curErr("arrays cannot be nested")
-			return nil, false
-		}
 		p.tok = leftParen
 		p.pos = posAddCol(p.pos, 1)
 	} else {
@@ -3624,7 +3641,7 @@ func (p *Parser) tryAssignCandidate(declMode bool) (*Assign, bool) {
 			p.err = nil
 			return nil, false
 		}
-		if !p.spaced && (p.pos.After(ref.End()) || (p.val != "" && p.val[0] == '+') || p.r == '+') {
+		if !p.spaced && (strings.HasSuffix(candidateRaw, "+") || (p.val != "" && p.val[0] == '+') || p.r == '+') {
 			p.followErr(ref.Pos(), "a[b]+", assgn)
 		} else {
 			p.followErr(ref.Pos(), "a[b]", assgn)

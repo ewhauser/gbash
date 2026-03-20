@@ -187,6 +187,10 @@ func (cfg *Config) reportParamErrorOnce(pe *syntax.ParamExp, err error) {
 	cfg.ReportError(err)
 }
 
+func (cfg *Config) reportNegativeSubstringLength(pe *syntax.ParamExp, length int) {
+	cfg.reportParamErrorOnce(pe, fmt.Errorf(" %d: substring expression < 0", length))
+}
+
 func (cfg *Config) ifsRune(r rune) bool {
 	for _, r2 := range cfg.ifs {
 		if r == r2 {
@@ -392,6 +396,57 @@ func AssignmentLiteral(cfg *Config, word *syntax.Word) (string, error) {
 		return "", err
 	}
 	return cfg.fieldJoin(field), nil
+}
+
+// AssignmentWordLiteral expands a single shell word using assignment-word
+// backslash rules without applying assignment-style tilde expansion.
+func AssignmentWordLiteral(cfg *Config, word *syntax.Word) (string, error) {
+	if word == nil {
+		return "", nil
+	}
+	cfg = prepareConfig(cfg)
+	field, err := cfg.wordField(word.Parts, quoteAssignNoTilde)
+	if err != nil {
+		return "", err
+	}
+	return cfg.fieldJoin(field), nil
+}
+
+func (cfg *Config) expandAssignmentTildeLiteral(s string, moreFields bool) string {
+	if !strings.ContainsRune(s, '~') {
+		return s
+	}
+	var b strings.Builder
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		if i < len(s) {
+			if s[i] != ':' || assignmentTildeColonEscaped(s, i) {
+				continue
+			}
+		}
+		segment := s[start:i]
+		if prefix, suffix, expanded := cfg.expandUser(segment, moreFields); expanded {
+			b.WriteString(prefix)
+			b.WriteString(suffix)
+		} else {
+			b.WriteString(segment)
+		}
+		if i == len(s) {
+			break
+		}
+		b.WriteByte(':')
+		start = i + 1
+		moreFields = false
+	}
+	return b.String()
+}
+
+func assignmentTildeColonEscaped(s string, colon int) bool {
+	backslashes := 0
+	for i := colon - 1; i >= 0 && s[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
 }
 
 // Document expands a single shell word as if it were a here-document body.
@@ -1269,6 +1324,7 @@ type quoteLevel uint
 const (
 	quoteNone quoteLevel = iota
 	quoteAssign
+	quoteAssignNoTilde
 	quoteDouble
 	quoteHeredoc
 	quoteSingle
@@ -1300,14 +1356,16 @@ func (cfg *Config) wordField(wps []syntax.WordPart, ql quoteLevel) ([]fieldPart,
 		switch wp := wp.(type) {
 		case *syntax.Lit:
 			s := wp.Value
-			if i == 0 && (ql == quoteNone || ql == quoteAssign) {
+			if i == 0 && ql == quoteAssign {
+				s = cfg.expandAssignmentTildeLiteral(s, len(wps) > 1)
+			} else if i == 0 && ql == quoteNone {
 				if prefix, rest, expanded := cfg.expandUser(s, len(wps) > 1); expanded {
 					// TODO: return two separate fieldParts,
 					// like in wordFields?
 					s = prefix + rest
 				}
 			}
-			if ql == quoteAssign && strings.Contains(s, "\\") {
+			if (ql == quoteAssign || ql == quoteAssignNoTilde) && strings.Contains(s, "\\") {
 				sb := cfg.strBuilder()
 				for i := 0; i < len(s); i++ {
 					b := s[i]
@@ -1871,7 +1929,11 @@ func (cfg *Config) sliceElems(pe *syntax.ParamExp, elems []string, indices []int
 			if err != nil {
 				return elems
 			}
-			if length <= 0 {
+			if length < 0 {
+				cfg.reportNegativeSubstringLength(pe, length)
+				return nil
+			}
+			if length == 0 {
 				return nil
 			}
 			if length < len(elems) {
@@ -1905,6 +1967,10 @@ func (cfg *Config) sliceElems(pe *syntax.ParamExp, elems []string, indices []int
 		length, err := Arithm(cfg, pe.Slice.Length)
 		if err != nil {
 			return elems
+		}
+		if length < 0 {
+			cfg.reportNegativeSubstringLength(pe, length)
+			return nil
 		}
 		elems = elems[:slicePos(length)]
 	}

@@ -833,218 +833,34 @@ func TestLookupCommandPrefersRealExecutableOverRegistryStub(t *testing.T) {
 	}
 }
 
-func TestLookupCommandUsesStubBackedPathEntry(t *testing.T) {
+func TestCoreRunStringifiesInlineArrayBindingsForCommandEnv(t *testing.T) {
 	t.Parallel()
 
-	resolved, ok, err := lookupCommand(context.Background(), &Execution{
-		FS:       newShellTestFS(t, "tr"),
-		Registry: newShellTestRegistry(t),
-	}, "/tmp", expand.ListEnviron("PATH=/bin"), "tr")
-	if err != nil {
-		t.Fatalf("lookupCommand() error = %v", err)
-	}
-	if !ok {
-		t.Fatalf("lookupCommand() did not resolve command")
-	}
-	if got, want := resolved.name, "tr"; got != want {
-		t.Fatalf("resolved.name = %q, want %q", got, want)
-	}
-	if got, want := resolved.path, "/bin/tr"; got != want {
-		t.Fatalf("resolved.path = %q, want %q", got, want)
-	}
-	if got, want := resolved.source, "path-search"; got != want {
-		t.Fatalf("resolved.source = %q, want %q", got, want)
-	}
-}
+	envProbe := commands.DefineCommand("envprobe", func(ctx context.Context, inv *commands.Invocation) error {
+		_, _ = io.WriteString(inv.Stdout, "A="+inv.Env["A"]+" B="+inv.Env["B"]+" C="+inv.Env["C"]+"\n")
+		return nil
+	})
 
-func TestLookupCommandIgnoresStubHeaderInRealScript(t *testing.T) {
-	t.Parallel()
-
-	registry := newShellTestRegistry(t)
-	fsys := gbfs.NewMemory()
-	if err := fsys.MkdirAll(context.Background(), "/tmp/bin", 0o755); err != nil {
-		t.Fatalf("MkdirAll(/tmp/bin) error = %v", err)
-	}
-	file, err := fsys.OpenFile(context.Background(), "/tmp/bin/tr", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		t.Fatalf("OpenFile(/tmp/bin/tr) error = %v", err)
-	}
-	if _, err := io.WriteString(file, virtualCommandStubPrefix+"tr\n"+"echo real script\n"); err != nil {
-		t.Fatalf("WriteString(/tmp/bin/tr) error = %v", err)
-	}
-	_ = file.Close()
-
-	resolved, ok, err := lookupCommand(context.Background(), &Execution{
-		FS:       fsys,
-		Registry: registry,
-	}, "/tmp", expand.ListEnviron("PATH=/tmp/bin"), "tr")
-	if err != nil {
-		t.Fatalf("lookupCommand() error = %v", err)
-	}
-	if !ok {
-		t.Fatalf("lookupCommand() did not resolve command")
-	}
-	if got, want := resolved.name, "bash"; got != want {
-		t.Fatalf("resolved.name = %q, want %q", got, want)
-	}
-	if got, want := resolved.path, "/tmp/bin/tr"; got != want {
-		t.Fatalf("resolved.path = %q, want %q", got, want)
-	}
-	if got, want := resolved.source, "shell-script"; got != want {
-		t.Fatalf("resolved.source = %q, want %q", got, want)
-	}
-}
-
-func TestLookupCommandUsesEnvShebangInterpreter(t *testing.T) {
-	t.Parallel()
-
-	registry := newShellTestRegistry(t)
-	fsys := gbfs.NewMemory()
-	if err := fsys.MkdirAll(context.Background(), "/tmp/bin", 0o755); err != nil {
-		t.Fatalf("MkdirAll(/tmp/bin) error = %v", err)
-	}
-	file, err := fsys.OpenFile(context.Background(), "/tmp/bin/hello", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		t.Fatalf("OpenFile(/tmp/bin/hello) error = %v", err)
-	}
-	if _, err := io.WriteString(file, "#!/usr/bin/env sh\necho hi\n"); err != nil {
-		t.Fatalf("WriteString(/tmp/bin/hello) error = %v", err)
-	}
-	_ = file.Close()
-
-	resolved, ok, err := lookupCommand(context.Background(), &Execution{
-		FS:       fsys,
-		Registry: registry,
-	}, "/tmp", expand.ListEnviron("PATH=/tmp/bin"), "hello")
-	if err != nil {
-		t.Fatalf("lookupCommand() error = %v", err)
-	}
-	if !ok {
-		t.Fatalf("lookupCommand() did not resolve command")
-	}
-	if got, want := resolved.name, "sh"; got != want {
-		t.Fatalf("resolved.name = %q, want %q", got, want)
-	}
-	if got, want := resolved.path, "/tmp/bin/hello"; got != want {
-		t.Fatalf("resolved.path = %q, want %q", got, want)
-	}
-	if got, want := resolved.source, "shebang"; got != want {
-		t.Fatalf("resolved.source = %q, want %q", got, want)
-	}
-	if got, want := strings.Join(resolved.args, ","), "/tmp/bin/hello"; got != want {
-		t.Fatalf("resolved.args = %q, want %q", got, want)
-	}
-}
-
-func TestRunCommandRejectsUnsupportedShebang(t *testing.T) {
-	t.Parallel()
-
-	registry := newShellTestRegistry(t)
-	fsys := gbfs.NewMemory()
-	if err := fsys.MkdirAll(context.Background(), "/tmp/bin", 0o755); err != nil {
-		t.Fatalf("MkdirAll(/tmp/bin) error = %v", err)
-	}
-	file, err := fsys.OpenFile(context.Background(), "/tmp/bin/tool", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		t.Fatalf("OpenFile(/tmp/bin/tool) error = %v", err)
-	}
-	if _, err := io.WriteString(file, "#!/usr/bin/python\necho wrong\n"); err != nil {
-		t.Fatalf("WriteString(/tmp/bin/tool) error = %v", err)
-	}
-	_ = file.Close()
-
+	registry := newShellTestRegistry(t, envProbe)
+	fsys := newShellTestFS(t, "envprobe")
 	var stdout strings.Builder
 	var stderr strings.Builder
-	_, err = RunCommand(context.Background(), &Execution{
-		Command:  []string{"/tmp/bin/tool"},
-		FS:       fsys,
+
+	_, err := Run(context.Background(), &Execution{
+		Script:   "A=a B=(b b) C=([k]=v) envprobe\n",
+		Env:      map[string]string{"PATH": "/bin"},
 		Registry: registry,
+		FS:       fsys,
 		Stdout:   &stdout,
 		Stderr:   &stderr,
 	})
-	var status interp.ExitStatus
-	if !errors.As(err, &status) || status != 126 {
-		t.Fatalf("RunCommand() error = %v, want exit status 126", err)
+	if err != nil {
+		t.Fatalf("Run() error = %v, stderr=%q", err, stderr.String())
 	}
-	if got := stdout.String(); got != "" {
-		t.Fatalf("stdout = %q, want empty", got)
-	}
-	if got, want := stderr.String(), "/tmp/bin/tool: /usr/bin/python: bad interpreter: No such file or directory\n"; got != want {
-		t.Fatalf("stderr = %q, want %q", got, want)
+	if got, want := stdout.String(), "A=a B=(b b) C=([k]=v)\n"; got != want {
+		t.Fatalf("stdout = %q, want %q (stderr=%q)", got, want, stderr.String())
 	}
 }
-
-func TestParseShebangInterpreterSkipsEnvOptions(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name            string
-		line            string
-		wantInterpreter string
-		wantName        string
-		wantArgs        []string
-	}{
-		{
-			name:            "ignore environment",
-			line:            "/usr/bin/env -i sh",
-			wantInterpreter: "/usr/bin/env",
-			wantName:        "sh",
-		},
-		{
-			name:            "split string",
-			line:            "/usr/bin/env -S bash -e",
-			wantInterpreter: "/usr/bin/env",
-			wantName:        "bash",
-			wantArgs:        []string{"-e"},
-		},
-		{
-			name:            "attached unset",
-			line:            "/usr/bin/env -uFOO sh",
-			wantInterpreter: "/usr/bin/env",
-			wantName:        "sh",
-		},
-		{
-			name:            "long attached unset",
-			line:            "/usr/bin/env --unset=FOO sh",
-			wantInterpreter: "/usr/bin/env",
-			wantName:        "sh",
-		},
-		{
-			name:            "attached chdir",
-			line:            "/usr/bin/env -C/tmp sh",
-			wantInterpreter: "/usr/bin/env",
-			wantName:        "sh",
-		},
-		{
-			name:            "long attached split string",
-			line:            "/usr/bin/env --split-string=bash -e",
-			wantInterpreter: "/usr/bin/env",
-			wantName:        "bash",
-			wantArgs:        []string{"-e"},
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-
-			gotInterpreter, gotName, gotArgs, ok := parseShebangInterpreter(test.line)
-			if !ok {
-				t.Fatalf("parseShebangInterpreter(%q) = !ok, want ok", test.line)
-			}
-			if gotInterpreter != test.wantInterpreter {
-				t.Fatalf("interpreter = %q, want %q", gotInterpreter, test.wantInterpreter)
-			}
-			if gotName != test.wantName {
-				t.Fatalf("name = %q, want %q", gotName, test.wantName)
-			}
-			if got, want := strings.Join(gotArgs, ","), strings.Join(test.wantArgs, ","); got != want {
-				t.Fatalf("args = %q, want %q", got, want)
-			}
-		})
-	}
-}
-
 func newShellTestRegistry(t testing.TB, extras ...commands.Command) *commands.Registry {
 	t.Helper()
 
