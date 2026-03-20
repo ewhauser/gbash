@@ -297,7 +297,7 @@ func TestWCCountsWordsFromStdin(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0", result.ExitCode)
 	}
-	if got, want := result.Stdout, "3\n"; got != want {
+	if got, want := result.Stdout, wcExpectedField(3)+"\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
@@ -311,7 +311,7 @@ func TestWCCountsBinaryBytes(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0", result.ExitCode)
 	}
-	if got, want := result.Stdout, "5 /tmp/binary.bin\n"; got != want {
+	if got, want := result.Stdout, wcExpectedField(5)+" /tmp/binary.bin\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
@@ -347,7 +347,8 @@ func TestWCSupportsMaxLineLengthAndTotalModes(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "3 /tmp/a.txt\n9\n3 /tmp/b.txt\n3 total\n"; got != want {
+	want := wcExpectedField(3) + " /tmp/a.txt\n9\n" + wcExpectedField(3) + " /tmp/b.txt\n" + wcExpectedField(3) + " total\n"
+	if got := result.Stdout; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
@@ -451,7 +452,7 @@ func TestWCNonbreakingSpaceWordSeparators(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "2\n"; got != want {
+	if got, want := result.Stdout, wcExpectedField(2)+"\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
@@ -467,7 +468,10 @@ func TestWCUTF8NonbreakingSeparators(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	const want = "2 /tmp/nbsp.txt\n3 /tmp/nbsp.txt\n2 /tmp/wj.txt\n3 /tmp/wj.txt\n"
+	want := wcExpectedField(2) + " /tmp/nbsp.txt\n" +
+		wcExpectedField(3) + " /tmp/nbsp.txt\n" +
+		wcExpectedField(2) + " /tmp/wj.txt\n" +
+		wcExpectedField(3) + " /tmp/wj.txt\n"
 	if got := result.Stdout; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
@@ -484,7 +488,7 @@ func TestWCBytesOnlyUsesRegularFileSizeWithoutReadingWholeFile(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "8388609 /tmp/big.bin\n"; got != want {
+	if got, want := result.Stdout, wcExpectedField(size)+" /tmp/big.bin\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }

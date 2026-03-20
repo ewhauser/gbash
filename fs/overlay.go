@@ -308,6 +308,20 @@ func (o *OverlayFS) MkdirAll(ctx context.Context, name string, perm stdfs.FileMo
 	return o.upper.MkdirAll(ctx, abs, perm)
 }
 
+func (o *OverlayFS) Mkfifo(ctx context.Context, name string, perm stdfs.FileMode) error {
+	abs := o.resolve(name)
+	if _, _, err := o.visibleInfo(ctx, abs); err == nil {
+		return &os.PathError{Op: "mkfifo", Path: abs, Err: stdfs.ErrExist}
+	} else if !errors.Is(err, stdfs.ErrNotExist) {
+		return toPathError("mkfifo", abs, err)
+	}
+	if err := o.upper.Mkfifo(ctx, abs, perm); err != nil {
+		return toPathError("mkfifo", abs, err)
+	}
+	o.clearTombstonesUnder(abs)
+	return nil
+}
+
 func (o *OverlayFS) Remove(ctx context.Context, name string, recursive bool) error {
 	abs := o.resolve(name)
 	if abs == "/" {
@@ -544,3 +558,4 @@ func isDescendantPath(name, parent string) bool {
 }
 
 var _ FileSystem = (*OverlayFS)(nil)
+var _ FIFOFileSystem = (*OverlayFS)(nil)

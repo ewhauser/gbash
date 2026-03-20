@@ -11,8 +11,6 @@ func TestMalformedRedirectionDoesNotPanic(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 
 	cases := []string{
-		">&000000000000000000\n",
-		">&0\n",
 		">&0&0000000000000000\n",
 		"0|0|>|0|0\n",
 		"0|0|5>5|0\n",

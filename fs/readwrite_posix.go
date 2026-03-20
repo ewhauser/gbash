@@ -307,6 +307,21 @@ func (h *ReadWriteFS) MkdirAll(_ context.Context, name string, perm stdfs.FileMo
 	return nil
 }
 
+func (h *ReadWriteFS) Mkfifo(_ context.Context, name string, perm stdfs.FileMode) error {
+	abs := h.resolve(name)
+	target, err := h.resolveLeaf(abs)
+	if err != nil {
+		return h.pathError("mkfifo", abs, err)
+	}
+	if perm == 0 {
+		perm = 0o666
+	}
+	if err := syscall.Mkfifo(target, uint32(perm.Perm())); err != nil {
+		return h.pathError("mkfifo", abs, err)
+	}
+	return nil
+}
+
 func (h *ReadWriteFS) Remove(_ context.Context, name string, recursive bool) error {
 	abs := h.resolve(name)
 	if abs == "/" {
@@ -666,3 +681,4 @@ func (h *ReadWriteFS) pathError(op, name string, err error) error {
 }
 
 var _ FileSystem = (*ReadWriteFS)(nil)
+var _ FIFOFileSystem = (*ReadWriteFS)(nil)

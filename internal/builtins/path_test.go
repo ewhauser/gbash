@@ -64,6 +64,71 @@ func TestTouchSupportsNoCreateAndDateParsing(t *testing.T) {
 	}
 }
 
+func TestMkfifoCreatesNamedPipesAndSupportsReadWriteRedirects(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "umask 027\nmkfifo /home/agent/default.pipe\nmkfifo -m 600 /home/agent/explicit.pipe\nexec 8<> /home/agent/default.pipe\necho first >&8\necho second >&8\nread line1 <&8\nread line2 <&8\nexec 8>&-\nprintf 'line1=%s line2=%s\\n' \"$line1\" \"$line2\"\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "line1=first line2=second\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+
+	defaultInfo, err := session.FileSystem().Lstat(context.Background(), "/home/agent/default.pipe")
+	if err != nil {
+		t.Fatalf("Lstat(default.pipe) error = %v", err)
+	}
+	if defaultInfo.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("default.pipe mode = %v, want named pipe", defaultInfo.Mode())
+	}
+	if got, want := defaultInfo.Mode().Perm(), os.FileMode(0o640); got != want {
+		t.Fatalf("default.pipe perm = %o, want %o", got, want)
+	}
+
+	explicitInfo, err := session.FileSystem().Lstat(context.Background(), "/home/agent/explicit.pipe")
+	if err != nil {
+		t.Fatalf("Lstat(explicit.pipe) error = %v", err)
+	}
+	if explicitInfo.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("explicit.pipe mode = %v, want named pipe", explicitInfo.Mode())
+	}
+	if got, want := explicitInfo.Mode().Perm(), os.FileMode(0o600); got != want {
+		t.Fatalf("explicit.pipe perm = %o, want %o", got, want)
+	}
+}
+
+func TestMkfifoReportsExistingPathsAndInvalidModes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("existing target", func(t *testing.T) {
+		t.Parallel()
+		session := newSession(t, &Config{})
+
+		result := mustExecSession(t, session, "touch /home/agent/existing\nmkfifo /home/agent/existing\n")
+		if result.ExitCode == 0 {
+			t.Fatalf("ExitCode = 0, want non-zero")
+		}
+		if !strings.Contains(result.Stderr, "mkfifo: cannot create fifo '/home/agent/existing': File exists") {
+			t.Fatalf("Stderr = %q, want existing-path error", result.Stderr)
+		}
+	})
+
+	t.Run("invalid mode bits", func(t *testing.T) {
+		t.Parallel()
+		session := newSession(t, &Config{})
+
+		result := mustExecSession(t, session, "mkfifo -m 1777 /home/agent/pipe\n")
+		if result.ExitCode == 0 {
+			t.Fatalf("ExitCode = 0, want non-zero")
+		}
+		if !strings.Contains(result.Stderr, "mkfifo: mode must specify only file permission bits") {
+			t.Fatalf("Stderr = %q, want mode-bits error", result.Stderr)
+		}
+	})
+}
+
 func TestTruncateCreatesAndResizesFiles(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})

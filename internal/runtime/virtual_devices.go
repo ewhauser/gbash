@@ -202,6 +202,21 @@ func (f *virtualDeviceFS) MkdirAll(ctx context.Context, name string, perm stdfs.
 	}
 }
 
+func (f *virtualDeviceFS) Mkfifo(ctx context.Context, name string, perm stdfs.FileMode) error {
+	abs := f.resolve(name)
+	switch {
+	case abs == virtualDeviceDir, abs == virtualNullDevice, strings.HasPrefix(abs, virtualNullDevice+"/"):
+		return &os.PathError{Op: "mkfifo", Path: abs, Err: stdfs.ErrInvalid}
+	default:
+		if isVirtualDeviceChild(abs) {
+			if err := f.ensureVirtualDeviceDir(ctx); err != nil {
+				return err
+			}
+		}
+		return gbfsMkfifo(ctx, f.base, abs, perm)
+	}
+}
+
 func (f *virtualDeviceFS) Remove(ctx context.Context, name string, recursive bool) error {
 	abs := f.resolve(name)
 	if err := rejectVirtualDeviceMutation("remove", abs); err != nil {
@@ -417,4 +432,13 @@ func canWriteVirtualDevice(flag int) bool {
 }
 
 var _ gbfs.FileSystem = (*virtualDeviceFS)(nil)
+
+func gbfsMkfifo(ctx context.Context, fsys gbfs.FileSystem, name string, perm stdfs.FileMode) error {
+	fifoFS, ok := fsys.(gbfs.FIFOFileSystem)
+	if !ok {
+		return &os.PathError{Op: "mkfifo", Path: gbfs.Clean(name), Err: stdfs.ErrPermission}
+	}
+	return fifoFS.Mkfifo(ctx, name, perm)
+}
+
 var _ gbfs.File = (*nullDeviceFile)(nil)

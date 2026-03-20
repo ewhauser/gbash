@@ -155,18 +155,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/assign.test.sh::redirect after assignment builtin (eval redirects after evaluating arguments)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/assign.test.sh::redirect after bare assignment": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/assign.test.sh::redirect after command sub (like case above but without assignment builtin)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/ble-features.test.sh::[bash_unset] function call with tempenv vs tempenv-eval": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -1502,91 +1490,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/quote.test.sh::\\c' is an escape, unlike bash": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect-command.test.sh::Brace group redirect": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
-        "oils/redirect-command.test.sh::Prefix redirect for loop -- not allowed": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect-command.test.sh::Redirect in assignment": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect-command.test.sh::redirect bash extensions:   [[  ((  for ((": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
-        "oils/redirect.test.sh::1>&2- (Bash bug: fail to restore closed fd)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::1>&2- to move file descriptor": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::: 3>&3-": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::<> for read/write named pipes": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::>& and <& are the same": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::>| to clobber": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::Double digit fd (20> file)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::Parsing of x=1> and related cases": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::Parsing of x={myvar} and related cases": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::Redirect echo to stderr, and then redirect all of stdout somewhere.": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
-        "oils/redirect.test.sh::Redirect to file descriptor that's not open": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::can't mention big file descriptor": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::echo foo >&N where N is first unused fd": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::noclobber can still write to non-regular files like /dev/null": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::xtrace not affected by redirects": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

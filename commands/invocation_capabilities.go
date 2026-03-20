@@ -295,6 +295,23 @@ func (fs *CommandFS) MkdirAll(ctx context.Context, name string, perm stdfs.FileM
 	return nil
 }
 
+// Mkfifo creates a named pipe after enforcing write policy.
+func (fs *CommandFS) Mkfifo(ctx context.Context, name string, perm stdfs.FileMode) error {
+	abs, err := fs.prepare(ctx, policy.FileActionWrite, name)
+	if err != nil {
+		return err
+	}
+	fifoFS, ok := fs.raw().(gbfs.FIFOFileSystem)
+	if !ok {
+		return wrapCommandError(&os.PathError{Op: "mkfifo", Path: abs, Err: stdfs.ErrPermission})
+	}
+	if err := fifoFS.Mkfifo(ctx, abs, perm); err != nil {
+		return wrapCommandError(err)
+	}
+	recordFileMutation(fs.trace, "mkfifo", abs, "", "")
+	return nil
+}
+
 // Remove removes name after enforcing remove policy.
 func (fs *CommandFS) Remove(ctx context.Context, name string, recursive bool) error {
 	abs, err := fs.prepare(ctx, policy.FileActionRemove, name)

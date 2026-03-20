@@ -224,3 +224,18 @@ printf 'literal=%%s\n' "$(< %q)"
 		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }
+
+func TestSelfDupRedirectOnClosedFDIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, ": 3>&3\n: 4<&4\necho hello\n")
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "hello\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "hello\n")
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}

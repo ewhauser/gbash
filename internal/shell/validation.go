@@ -114,7 +114,7 @@ func validateSupportedRedirections(program *syntax.File) error {
 		}
 
 		switch redir.Op {
-		case syntax.RdrClob, syntax.AppClob, syntax.RdrAllClob, syntax.AppAllClob:
+		case syntax.AppClob, syntax.RdrAllClob, syntax.AppAllClob:
 			walkErr = &shellValidationError{message: "invalid redirection"}
 			return false
 		}
