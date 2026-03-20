@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+
+	"github.com/ewhauser/gbash/internal/shellstate"
 )
 
 const historyEnvVar = "BASH_HISTORY"
@@ -47,9 +49,13 @@ func (c *History) Spec() CommandSpec {
 	}
 }
 
-func (c *History) RunParsed(_ context.Context, inv *Invocation, matches *ParsedCommand) error {
-	history := parseHistoryEntries(inv)
+func (c *History) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
+	history := parseHistoryEntries(ctx, inv)
 	if matches.Has("clear") {
+		if assignments := shellstate.ShellVarAssignmentsFromContext(ctx); assignments != nil {
+			assignments.Set(historyEnvVar, "[]")
+			return nil
+		}
 		if inv.Env == nil {
 			inv.Env = map[string]string{}
 		}
@@ -77,11 +83,16 @@ func (c *History) RunParsed(_ context.Context, inv *Invocation, matches *ParsedC
 	return nil
 }
 
-func parseHistoryEntries(inv *Invocation) []string {
-	if inv == nil || len(inv.Env) == 0 {
-		return nil
+func parseHistoryEntries(ctx context.Context, inv *Invocation) []string {
+	raw := ""
+	if lookup := shellstate.ShellVarLookupFromContext(ctx); lookup != nil {
+		if value, ok := lookup(historyEnvVar); ok {
+			raw = value
+		}
 	}
-	raw := inv.Env[historyEnvVar]
+	if raw == "" && inv != nil && len(inv.Env) > 0 {
+		raw = inv.Env[historyEnvVar]
+	}
 	if raw == "" {
 		return nil
 	}

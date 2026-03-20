@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io/fs"
+	"strings"
 	"testing"
 
 	"github.com/ewhauser/gbash/internal/shell/syntax"
@@ -202,6 +203,29 @@ declare -a
 	}
 }
 
+func TestExportPUsesEffectiveShadowedBinding(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+foo=global
+f() {
+  local foo=local
+  export foo
+  export -p
+}
+f
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if !strings.Contains(stdout, "declare -x foo=\"local\"\n") {
+		t.Fatalf("stdout = %q, want local exported foo entry", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestDeclareRejectsIndexedAssociativeConversion(t *testing.T) {
 	t.Parallel()
 
@@ -228,6 +252,48 @@ printf 'A=%s,%s,%s\n' "${A[a]}" "${A[b]}" "${A[c]}"
 		"eval: A: cannot convert associative to indexed array\n"
 	if stderr != wantStderr {
 		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	}
+}
+
+func TestDeclareConversionErrorStillProcessesLaterOperands(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+declare -A assoc=([k]=v)
+declare -a assoc arr=ok
+echo status=$?
+echo arr=$arr
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "status=1\narr=ok\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	const wantStderr = "assoc: cannot convert associative to indexed array\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	}
+}
+
+func TestDeclareDynamicFlagOnlyOperandStillPrintsListings(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+declare -a arr=(1 2)
+flag=-a
+declare "$flag"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "declare -a arr=([0]=\"1\" [1]=\"2\")\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }
 

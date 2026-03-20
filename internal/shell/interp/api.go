@@ -791,7 +791,7 @@ func (r *Runner) Reset() {
 		pwd = candidate
 	}
 	r.logicalDir = pwd
-	r.setVarString("PWD", pwd)
+	r.setExportedVarString("PWD", pwd)
 	r.setVarString("IFS", " \t\n")
 	r.setVarString("OPTIND", "1")
 	r.setVarString("PS4", "+ ")

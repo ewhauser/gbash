@@ -230,7 +230,7 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 			vr.List = nil
 			vr.Indices = nil
 			vr.Map = nil
-			if err := r.setVarByRef(prev, destRef, vr, false); err != nil {
+			if err := r.setVarByRef(prev, destRef, vr, false, attrUpdate{}); err != nil {
 				return failf(2, "printf: %v\n", err)
 			}
 			if result.ExitCode != 0 {
@@ -1884,8 +1884,8 @@ func (r *Runner) changeDir(ctx context.Context, cmd, name string) uint8 {
 func (r *Runner) setCurrentDir(newDir, newLogicalDir, oldLogicalDir string) {
 	r.Dir = newDir
 	r.logicalDir = newLogicalDir
-	r.setVarString("OLDPWD", oldLogicalDir)
-	r.setVarString("PWD", newLogicalDir)
+	r.setExportedVarString("OLDPWD", oldLogicalDir)
+	r.setExportedVarString("PWD", newLogicalDir)
 	if len(r.dirStack) == 0 {
 		r.dirStack = append(r.dirStack, newLogicalDir)
 	} else {

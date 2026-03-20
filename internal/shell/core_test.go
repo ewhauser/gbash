@@ -10,9 +10,32 @@ import (
 	"github.com/ewhauser/gbash/commands"
 	gbfs "github.com/ewhauser/gbash/fs"
 	"github.com/ewhauser/gbash/internal/builtins"
+	"github.com/ewhauser/gbash/internal/shell/expand"
 	"github.com/ewhauser/gbash/internal/shellstate"
 	"github.com/ewhauser/gbash/trace"
 )
+
+type testEnvMapEnv []struct {
+	name string
+	vr   expand.Variable
+}
+
+func (e testEnvMapEnv) Get(name string) expand.Variable {
+	for i := len(e) - 1; i >= 0; i-- {
+		if e[i].name == name {
+			return e[i].vr
+		}
+	}
+	return expand.Variable{}
+}
+
+func (e testEnvMapEnv) Each(fn func(name string, vr expand.Variable) bool) {
+	for _, entry := range e {
+		if !fn(entry.name, entry.vr) {
+			return
+		}
+	}
+}
 
 func TestCoreRunExpandsAliasesAcrossCompleteCommands(t *testing.T) {
 	t.Parallel()
@@ -72,6 +95,31 @@ func TestCoreRunAliasTrailingBlankDoesNotReachRedirectionTargets(t *testing.T) {
 	}
 	if result.ShellExited {
 		t.Fatalf("ShellExited = true, want false")
+	}
+}
+
+func TestEnvMapExportsOnlyExportedShellVars(t *testing.T) {
+	t.Parallel()
+
+	got := envMap(testEnvMapEnv{
+		{name: "plain", vr: expand.Variable{Set: true, Kind: expand.String, Str: "value"}},
+		{name: "exported", vr: expand.Variable{Set: true, Exported: true, Kind: expand.String, Str: "value"}},
+		{name: "ref", vr: expand.Variable{Set: true, Exported: true, Kind: expand.NameRef, Str: "target"}},
+		{name: "shadow", vr: expand.Variable{Set: true, Exported: true, Kind: expand.String, Str: "parent"}},
+		{name: "shadow", vr: expand.Variable{Set: true, Kind: expand.String, Str: "local"}},
+	})
+
+	if got["exported"] != "value" {
+		t.Fatalf("exported = %q, want %q", got["exported"], "value")
+	}
+	if got["ref"] != "target" {
+		t.Fatalf("ref = %q, want %q", got["ref"], "target")
+	}
+	if _, ok := got["plain"]; ok {
+		t.Fatalf("plain present in env map: %#v", got)
+	}
+	if _, ok := got["shadow"]; ok {
+		t.Fatalf("shadow present in env map: %#v", got)
 	}
 }
 

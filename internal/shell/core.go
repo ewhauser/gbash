@@ -606,6 +606,13 @@ func (m *core) execHandler(exec *Execution, budget *executionBudget) interp.Exec
 		internal := isInternalHelperCommand(args[0])
 		fromBootstrap := hc.Internal
 		shellVars := shellstate.NewShellVarAssignments()
+		shellVarLookup := shellstate.ShellVarLookup(func(name string) (string, bool) {
+			vr := hc.Env.Get(name)
+			if !vr.IsSet() {
+				return "", false
+			}
+			return vr.String(), true
+		})
 		_, err := m.executeCommand(ctx, exec, &commandExecuteRequest{
 			Argv:          args,
 			VirtualWD:     virtualWD,
@@ -618,7 +625,8 @@ func (m *core) execHandler(exec *Execution, budget *executionBudget) interp.Exec
 			Internal:      internal,
 			FromBootstrap: fromBootstrap,
 			PrepareInvoke: func(callCtx context.Context) context.Context {
-				return shellstate.WithShellVarAssignments(callCtx, shellVars)
+				callCtx = shellstate.WithShellVarAssignments(callCtx, shellVars)
+				return shellstate.WithShellVarLookup(callCtx, shellVarLookup)
 			},
 			SyncEnv: func(callCtx context.Context, before, after map[string]string) error {
 				if syncErr := syncShellVarAssignments(&hc, shellVars); syncErr != nil { //nolint:contextcheck // runner state mutation is intentionally in-process and context-free
@@ -805,11 +813,15 @@ func envMap(env expand.Environ) map[string]string {
 			delete(out, name)
 			return true
 		}
-		if vr.Kind != expand.String && vr.Kind != expand.NameRef {
+		if !vr.Exported || (vr.Kind != expand.String && vr.Kind != expand.NameRef) {
 			delete(out, name)
 			return true
 		}
-		out[name] = vr.String()
+		value := vr.String()
+		if vr.Kind == expand.NameRef {
+			value = vr.Str
+		}
+		out[name] = value
 		return true
 	})
 	return out

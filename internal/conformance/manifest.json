@@ -211,15 +211,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/assign-extended.test.sh::declare -paA": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/assign-extended.test.sh::declare -pg": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/assign-extended.test.sh::declare -pnrx": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -300,10 +292,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/assign.test.sh::local a=loc $var c=loc": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/assign.test.sh::readonly array should not be modified by a+=(1)": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -957,10 +945,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-set.test.sh::set +a stops exporting": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-set.test.sh::set - - and so forth": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -973,15 +957,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-set.test.sh::set -o allexport (long form)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-set.test.sh::set -u with undefined var in interactive shell does NOT exit the interpreter": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-set.test.sh::variables set before set -a are not exported": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -990,10 +966,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/builtin-special.test.sh::Prefix assignments persist after special builtins, like : (set -o posix)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-special.test.sh::Prefix binding for exec is a special case (versus e.g. readonly)": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1355,10 +1327,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-vars.test.sh::Export a local that shadows a global": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-vars.test.sh::Export sets a global variable that persists after export -n": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -1372,10 +1340,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/builtin-vars.test.sh::Unset and scope (bug #653)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-vars.test.sh::Unset exported variable, then define it again.  It's NOT still exported.": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1888,74 +1852,6 @@
           "goos": [
             "linux"
           ]
-        },
-        "oils/nameref.test.sh::-n attribute before it has a value": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::-n attribute on array is hard error, not a warning": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::@ in nameref isn't supported, unlike in ${!ref}": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::Mutually recursive namerefs detected on READ": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::Mutually recursive namerefs detected on WRITE": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::a[@] in nameref": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::assign to empty nameref and invalid nameref": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::assign to invalid ref": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::bad mutation through nameref: ref[0]= where ref is array[0]": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::exported nameref": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::flag -n and +n": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::flag -n combined ${!ref} -- bash INVERTS": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::mutating through nameref: ref=": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::named ref with $# and shopt -s strict_nameref": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::named ref with $# doesn't work": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::named ref with 1 $1 etc.": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nameref.test.sh::readonly nameref doesn't prevent assigning through it": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/nix-idioms.test.sh::${!ref} to undefined array": {
           "mode": "xfail",
@@ -2713,10 +2609,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/var-ref.test.sh::var ref TO array with arbitrary subscripts": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-ref.test.sh::var ref doesn't need cycle detection": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

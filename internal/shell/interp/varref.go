@@ -16,6 +16,17 @@ func parseVarRef(src string) (*syntax.VarRef, error) {
 	return p.VarRef(strings.NewReader(src))
 }
 
+func validateNameRefTarget(src string) error {
+	if src == "" {
+		return nil
+	}
+	ref, err := parseVarRef(src)
+	if err != nil || ref == nil || !syntax.ValidName(ref.Name.Value) {
+		return fmt.Errorf("`%s': invalid variable name for name reference", src)
+	}
+	return nil
+}
+
 func literalSubscript(kind syntax.SubscriptKind, mode syntax.SubscriptMode, lit string) *syntax.Subscript {
 	return &syntax.Subscript{
 		Kind: kind,
@@ -260,10 +271,109 @@ func arrayDefaultIndex(kind expand.ValueKind) *syntax.Subscript {
 	}
 }
 
-func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand.Variable, appendValue bool) error {
-	ref, prev, err := prev.ResolveRef(r.writeEnv, ref)
+type attrUpdate struct {
+	hasLocal    bool
+	local       bool
+	hasExported bool
+	exported    bool
+	hasReadOnly bool
+	readOnly    bool
+	hasInteger  bool
+	integer     bool
+	hasLower    bool
+	lower       bool
+	hasUpper    bool
+	upper       bool
+}
+
+func (u attrUpdate) mergeOntoTarget(vr *expand.Variable, target expand.Variable) {
+	if vr == nil {
+		return
+	}
+	if u.hasLocal {
+		vr.Local = u.local
+	}
+	vr.Exported = target.Exported
+	if u.hasExported {
+		vr.Exported = u.exported
+	}
+	vr.ReadOnly = target.ReadOnly
+	if u.hasReadOnly {
+		vr.ReadOnly = u.readOnly
+	}
+	vr.Integer = target.Integer
+	if u.hasInteger {
+		vr.Integer = u.integer
+	}
+	vr.Lower = target.Lower
+	if u.hasLower {
+		vr.Lower = u.lower
+	}
+	vr.Upper = target.Upper
+	if u.hasUpper {
+		vr.Upper = u.upper
+	}
+}
+
+func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand.Variable, appendValue bool, updates attrUpdate) error {
+	origName := ref.Name.Value
+	origKind := prev.Kind
+	result, err := prev.ResolveRefState(r.writeEnv, ref)
 	if err != nil {
+		var invalid expand.InvalidIdentifierError
+		if errors.As(err, &invalid) {
+			return fmt.Errorf("`%s': not a valid identifier", invalid.Ref)
+		}
 		return err
+	}
+	switch result.Status {
+	case expand.RefTargetInvalid:
+		if ref.Index != nil || vr.Kind != expand.String || appendValue {
+			return fmt.Errorf("`%s': not a valid identifier", result.Target)
+		}
+		r.setVar(origName, vr)
+		return nil
+	case expand.RefTargetEmpty:
+		if ref.Index == nil && vr.Kind == expand.String && !appendValue {
+			next := r.lookupVar(origName)
+			next.Set = true
+			next.Kind = expand.NameRef
+			next.Str = vr.Str
+			next.List = nil
+			next.Indices = nil
+			next.Map = nil
+			r.setVar(origName, next)
+			return nil
+		}
+		if ref.Index == nil {
+			next := r.lookupVar(origName)
+			r.errf("warning: %s: removing nameref attribute\n", origName)
+			vr.Local = next.Local
+			vr.Exported = next.Exported
+			vr.ReadOnly = next.ReadOnly
+			vr.Integer = next.Integer
+			vr.Lower = next.Lower
+			vr.Upper = next.Upper
+			r.setVar(origName, vr)
+			return nil
+		}
+		return fmt.Errorf("`%s': not a valid identifier", printVarRef(ref))
+	case expand.RefTargetCircular:
+		return expand.CircularNameRefError{Name: ref.Name.Value}
+	}
+	ref = result.Ref
+	prev = result.Var
+	if origKind == expand.NameRef {
+		updates.mergeOntoTarget(&vr, prev)
+	}
+	if origKind == expand.NameRef && ref.Index != nil && ref.Index.AllElements() {
+		return fmt.Errorf("`%s': not a valid identifier", printVarRef(ref))
+	}
+	if prev.ReadOnly {
+		if vr.Kind == expand.String && ref.Index == nil && !appendValue {
+			return fmt.Errorf("%s: readonly variable", ref.Name.Value)
+		}
+		return fmt.Errorf("%s: readonly variable", origName)
 	}
 	prev.Set = true
 	name := ref.Name.Value
