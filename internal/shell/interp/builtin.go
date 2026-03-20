@@ -1884,8 +1884,8 @@ func (r *Runner) changeDir(ctx context.Context, cmd, name string) uint8 {
 func (r *Runner) setCurrentDir(newDir, newLogicalDir, oldLogicalDir string) {
 	r.Dir = newDir
 	r.logicalDir = newLogicalDir
-	r.setVarString("OLDPWD", oldLogicalDir)
-	r.setVarString("PWD", newLogicalDir)
+	r.setExportedVarString("OLDPWD", oldLogicalDir)
+	r.setExportedVarString("PWD", newLogicalDir)
 	if len(r.dirStack) == 0 {
 		r.dirStack = append(r.dirStack, newLogicalDir)
 	} else {

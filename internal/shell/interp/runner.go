@@ -1014,7 +1014,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			if msg := arrayConversionError(name, vr); msg != "" {
 				declErrf("%s\n", msg)
 				r.exit.code = 1
-				return false
+				return true
 			}
 			arrayAssignTrace := ""
 			if !isAssign {
@@ -1214,7 +1214,6 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				hadNonFlagOperand = true
 				return processNamedOperand(operand.Assign.Ref, operand.Assign, true)
 			case *syntax.DeclDynamicWord:
-				hadNonFlagOperand = true
 				for _, field := range r.fields(operand.Word) {
 					parsed, err := parseDeclOperandField(field)
 					splitFields := []string{field}
@@ -1402,12 +1401,12 @@ func declaredVarMatches(vr expand.Variable, valType string, modes []string) bool
 func (r *Runner) printDeclaredVars(valType string, modes []string) {
 	names := make([]string, 0, 16)
 	seen := make(map[string]struct{})
-	r.writeEnv.Each(func(name string, vr expand.Variable) bool {
+	r.writeEnv.Each(func(name string, _ expand.Variable) bool {
 		if _, ok := seen[name]; ok {
 			return true
 		}
 		seen[name] = struct{}{}
-		if declaredVarMatches(vr, valType, modes) {
+		if declaredVarMatches(r.lookupVar(name), valType, modes) {
 			names = append(names, name)
 		}
 		return true

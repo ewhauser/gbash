@@ -954,10 +954,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-set.test.sh::set +a stops exporting": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-set.test.sh::set - - and so forth": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -970,15 +966,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-set.test.sh::set -o allexport (long form)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-set.test.sh::set -u with undefined var in interactive shell does NOT exit the interpreter": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-set.test.sh::variables set before set -a are not exported": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -987,10 +975,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/builtin-special.test.sh::Prefix assignments persist after special builtins, like : (set -o posix)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-special.test.sh::Prefix binding for exec is a special case (versus e.g. readonly)": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

@@ -288,6 +288,10 @@ func (r *Runner) setVarString(name, value string) {
 	r.setVar(name, expand.Variable{Set: true, Kind: expand.String, Str: value})
 }
 
+func (r *Runner) setExportedVarString(name, value string) {
+	r.setVar(name, expand.Variable{Set: true, Exported: true, Kind: expand.String, Str: value})
+}
+
 func (r *Runner) setVar(name string, vr expand.Variable) {
 	if r.opts[optAllExport] {
 		vr.Exported = true
