@@ -52,30 +52,93 @@ func (e InvalidIdentifierError) Error() string {
 	return fmt.Sprintf("%q: not a valid identifier", e.Ref)
 }
 
+type CircularNameRefError struct {
+	Name string
+}
+
+func (e CircularNameRefError) Error() string {
+	return fmt.Sprintf("warning: %s: circular name reference", e.Name)
+}
+
+type RefResolutionStatus int
+
+const (
+	RefResolved RefResolutionStatus = iota
+	RefTargetInvalid
+	RefTargetEmpty
+	RefTargetCircular
+)
+
+type RefResolution struct {
+	Ref    *syntax.VarRef
+	Var    Variable
+	Target string
+	Status RefResolutionStatus
+}
+
 // ResolveRef follows nameref variables and returns the effective variable
 // reference plus the final variable value that it points to.
 func (v Variable) ResolveRef(env Environ, ref *syntax.VarRef) (*syntax.VarRef, Variable, error) {
+	result, err := v.ResolveRefState(env, ref)
+	if err != nil {
+		return nil, Variable{}, err
+	}
+	if result.Status == RefTargetCircular {
+		return result.Ref, result.Var, CircularNameRefError{Name: result.Ref.Name.Value}
+	}
+	return result.Ref, result.Var, nil
+}
+
+// ResolveRefState follows nameref variables and reports how resolution ended.
+func (v Variable) ResolveRefState(env Environ, ref *syntax.VarRef) (RefResolution, error) {
 	resolved := cloneVarRef(ref)
 	if resolved != nil && emptySubscript(resolved.Index) {
-		return nil, Variable{}, BadArraySubscriptError{Name: printNode(resolved)}
+		return RefResolution{}, BadArraySubscriptError{Name: printNode(resolved)}
 	}
+	original := cloneVarRef(resolved)
+	seen := make(map[string]struct{})
 	for range maxNameRefDepth {
 		if v.Kind != NameRef {
 			if resolved != nil {
 				resolved.Index = resolveSubscriptAuto(v.Kind, resolved.Index)
 			}
-			return resolved, v, nil
+			return RefResolution{Ref: resolved, Var: v, Status: RefResolved}, nil
 		}
-		target, err := parseVarRef(v.Str)
+		raw := v.Str
+		if raw == "" {
+			return RefResolution{Ref: original, Var: Variable{Kind: String}, Status: RefTargetEmpty}, nil
+		}
+		if _, ok := seen[raw]; ok {
+			return RefResolution{Ref: original, Var: Variable{Set: true, Kind: String}, Target: raw, Status: RefTargetCircular}, nil
+		}
+		seen[raw] = struct{}{}
+		target, err := parseVarRef(raw)
 		if err != nil {
-			return nil, Variable{}, err
+			if raw == "@" || raw == "*" {
+				return RefResolution{Ref: original, Var: Variable{Kind: String}, Target: raw, Status: RefTargetInvalid}, nil
+			}
+			return RefResolution{Ref: original, Var: Variable{Set: true, Kind: String, Str: raw}, Target: raw, Status: RefTargetInvalid}, nil
+		}
+		if !syntax.ValidName(target.Name.Value) {
+			if raw == "@" || raw == "*" {
+				return RefResolution{Ref: original, Var: Variable{Kind: String}, Target: raw, Status: RefTargetInvalid}, nil
+			}
+			return RefResolution{Ref: original, Var: Variable{Set: true, Kind: String, Str: raw}, Target: raw, Status: RefTargetInvalid}, nil
 		}
 		if emptySubscript(target.Index) {
-			return nil, Variable{}, BadArraySubscriptError{Name: printNode(target)}
+			return RefResolution{}, BadArraySubscriptError{Name: printNode(target)}
 		}
 		if resolved != nil && resolved.Index != nil {
 			if target.Index != nil {
-				return nil, Variable{}, InvalidIdentifierError{Ref: v.Str}
+				if resolved.Index.AllElements() && target.Index.AllElements() {
+					return RefResolution{
+						Ref:    original,
+						Var:    Variable{Kind: Indexed},
+						Target: raw,
+						Status: RefResolved,
+					}, nil
+				}
+				return RefResolution{}, InvalidIdentifierError{Ref: raw}
 			}
 			target = &syntax.VarRef{
 				Name:    target.Name,
@@ -88,7 +151,7 @@ func (v Variable) ResolveRef(env Environ, ref *syntax.VarRef) (*syntax.VarRef, V
 		resolved = target
 		v = env.Get(target.Name.Value)
 	}
-	return nil, Variable{}, fmt.Errorf("nameref depth exceeded")
+	return RefResolution{Ref: original, Var: Variable{Set: true, Kind: String}, Status: RefTargetCircular}, nil
 }
 
 func (cfg *Config) resolveVarRef(ref *syntax.VarRef) (*syntax.VarRef, Variable, error) {

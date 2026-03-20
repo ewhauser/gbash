@@ -80,13 +80,13 @@ func (o *overlayEnviron) Get(name string) expand.Variable {
 func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 	normalized := o.normalize(name)
 	prev, inOverlay := o.values[normalized]
-	// Manipulation of a global var inside a function.
-	if o.funcScope && !vr.Local && !prev.Local {
-		// In a function, the parent environment is ours, so it's always read-write.
-		return o.parent.(expand.WriteEnviron).Set(name, vr)
-	}
 	if !inOverlay && o.parent != nil {
 		prev.Variable = o.parent.Get(name)
+	}
+	if o.funcScope && !vr.Local && !inOverlay {
+		// Functions use dynamic scope: writes to non-local names should walk
+		// outward until they reach the defining scope, including caller locals.
+		return o.parent.(expand.WriteEnviron).Set(name, vr)
 	}
 
 	if o.values == nil {
@@ -141,10 +141,21 @@ func execEnv(env expand.Environ) []string {
 					list[i] = ""
 				}
 			}
+			continue
 		}
-		if vr.Exported && vr.Kind == expand.String {
-			list = append(list, name+"="+vr.String())
+		if !vr.Exported || (vr.Kind != expand.String && vr.Kind != expand.NameRef) {
+			for i, kv := range list {
+				if strings.HasPrefix(kv, name+"=") {
+					list[i] = ""
+				}
+			}
+			continue
 		}
+		value := vr.String()
+		if vr.Kind == expand.NameRef {
+			value = vr.Str
+		}
+		list = append(list, name+"="+value)
 	}
 	return list
 }

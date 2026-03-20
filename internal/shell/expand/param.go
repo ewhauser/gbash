@@ -768,17 +768,20 @@ func (cfg *Config) paramExpState(pe *syntax.ParamExp) (paramExpState, error) {
 		Name:  pe.Param,
 		Index: index,
 	}
-	resolvedRef, resolvedVar, err := state.vr.ResolveRef(cfg.Env, &syntax.VarRef{
+	resolution, err := state.vr.ResolveRefState(cfg.Env, &syntax.VarRef{
 		Name:  pe.Param,
 		Index: index,
 	})
 	if err != nil {
 		return state, err
 	}
-	state.vr = resolvedVar
-	if resolvedRef != nil {
-		index = resolvedRef.Index
-		state.ref = resolvedRef
+	state.vr = resolution.Var
+	if resolution.Status == RefTargetCircular {
+		cfg.reportParamErrorOnce(pe, CircularNameRefError{Name: pe.Param.Value})
+	}
+	if resolution.Ref != nil {
+		index = resolution.Ref.Index
+		state.ref = resolution.Ref
 	} else {
 		index = nil
 	}

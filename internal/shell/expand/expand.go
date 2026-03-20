@@ -95,6 +95,8 @@ type Config struct {
 	// A pointer to a parameter expansion node, if we're inside one.
 	// Necessary for ${LINENO}.
 	curParam *syntax.ParamExp
+
+	reportedParamErrors map[*syntax.ParamExp]map[string]struct{}
 }
 
 // UnexpectedCommandError is returned if a command substitution is encountered
@@ -121,16 +123,45 @@ func prepareConfig(cfg *Config) *Config {
 	if vr := cfg.Env.Get("IFS"); vr.IsSet() {
 		cfg.ifs = vr.String()
 	}
+	if cfg.reportedParamErrors == nil {
+		cfg.reportedParamErrors = make(map[*syntax.ParamExp]map[string]struct{})
+	}
 
 	return cfg
 }
 
 func (cfg *Config) swallowNonFatal(err error) bool {
-	if err == nil || cfg.ReportError == nil || !isBadArraySubscript(err) {
+	if err == nil || cfg.ReportError == nil {
+		return false
+	}
+	if !isBadArraySubscript(err) {
+		var circular CircularNameRefError
+		if !errors.As(err, &circular) {
+			return false
+		}
+	}
+	if cfg.ReportError == nil {
 		return false
 	}
 	cfg.ReportError(err)
 	return true
+}
+
+func (cfg *Config) reportParamErrorOnce(pe *syntax.ParamExp, err error) {
+	if cfg.ReportError == nil || pe == nil || err == nil {
+		return
+	}
+	key := err.Error()
+	seen := cfg.reportedParamErrors[pe]
+	if seen == nil {
+		seen = make(map[string]struct{})
+		cfg.reportedParamErrors[pe] = seen
+	}
+	if _, ok := seen[key]; ok {
+		return
+	}
+	seen[key] = struct{}{}
+	cfg.ReportError(err)
 }
 
 func (cfg *Config) ifsRune(r rune) bool {
