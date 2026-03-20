@@ -289,6 +289,33 @@ set -x
 	}
 }
 
+func TestXTraceArrayAssignmentsDoNotReExecuteExpansions(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+set -x
+declare -a a=($(echo side >&2; echo 1))
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	sideLines := 0
+	for _, line := range strings.Split(strings.TrimSpace(stderr), "\n") {
+		if line == "side" {
+			sideLines++
+		}
+	}
+	if got, want := sideLines, 1; got != want {
+		t.Fatalf("stderr = %q, want %d raw side line", stderr, want)
+	}
+	if !strings.Contains(stderr, "+ a=('1')\n") {
+		t.Fatalf("stderr = %q, want traced array assignment", stderr)
+	}
+}
+
 func TestVerbosePrintsRawInputLines(t *testing.T) {
 	t.Parallel()
 

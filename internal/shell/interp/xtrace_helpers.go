@@ -51,27 +51,38 @@ func (r *Runner) traceAssignString(ref *syntax.VarRef, vr expand.Variable, appen
 	return printVarRef(ref) + op + quoteTraceValue(vr.String())
 }
 
-func (r *Runner) traceArrayAssign(as *syntax.Assign) string {
+func traceExpandedArrayAssign(ref *syntax.VarRef, appendAssign bool, elems []expandedArrayElem) string {
 	var b strings.Builder
-	b.WriteString(printVarRef(as.Ref))
-	if as.Append {
+	b.WriteString(printVarRef(ref))
+	if appendAssign {
 		b.WriteByte('+')
 	}
 	b.WriteString("=(")
-	for i, elem := range as.Array.Elems {
-		if i > 0 {
-			b.WriteByte(' ')
-		}
-		if elem.Index != nil {
-			b.WriteString(printSyntaxNode(elem.Index))
-			if elem.Kind == syntax.ArrayElemKeyedAppend {
-				b.WriteString("+=")
-			} else {
-				b.WriteByte('=')
+	first := true
+	for _, elem := range elems {
+		switch elem.kind {
+		case syntax.ArrayElemSequential:
+			for _, field := range elem.fields {
+				if !first {
+					b.WriteByte(' ')
+				}
+				b.WriteString(quoteTraceArrayValue(field))
+				first = false
 			}
-		}
-		if elem.Value != nil {
-			b.WriteString(quoteTraceArrayValue(r.literal(elem.Value)))
+		case syntax.ArrayElemKeyed, syntax.ArrayElemKeyedAppend:
+			if !first {
+				b.WriteByte(' ')
+			}
+			if elem.index != nil {
+				b.WriteString(printSyntaxNode(elem.index))
+				if elem.kind == syntax.ArrayElemKeyedAppend {
+					b.WriteString("+=")
+				} else {
+					b.WriteByte('=')
+				}
+			}
+			b.WriteString(quoteTraceArrayValue(elem.value))
+			first = false
 		}
 	}
 	b.WriteByte(')')

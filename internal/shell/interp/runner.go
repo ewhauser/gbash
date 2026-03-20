@@ -556,7 +556,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				// TODO: there is likely a better way to do this.
 				prev.Local = false
 
-				vr, ok := r.assignVal(prev, as, "")
+				vr, _, ok := r.assignVal(prev, as, "")
 				if !ok || r.exit.fatalExit || r.exit.exiting {
 					return
 				}
@@ -937,6 +937,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				return true
 			}
 			vr := r.lookupVar(name)
+			arrayAssignTrace := ""
 			if !isAssign {
 				if valType == "-A" {
 					vr.Kind = expand.Associative
@@ -956,9 +957,9 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				var ok bool
 				if valType == "+a" || valType == "+A" {
 					// +a/+A with a value: treat as string assignment.
-					vr, ok = r.assignVal(vr, as, "")
+					vr, arrayAssignTrace, ok = r.assignVal(vr, as, "")
 				} else {
-					vr, ok = r.assignVal(vr, as, valType)
+					vr, arrayAssignTrace, ok = r.assignVal(vr, as, valType)
 					if valType == "-a" && as.Value != nil && as.Array == nil && as.Ref != nil && as.Ref.Index == nil {
 						vr.Kind = expand.Indexed
 						vr.List = []string{vr.Str}
@@ -1043,12 +1044,12 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				case cm.Variant.Value == "readonly":
 					builtinTraceFields = append(builtinTraceFields, traceAssignFieldRaw(as.Ref, vr, as.Append))
 					if as.Array != nil {
-						trailingTraceLines = append(trailingTraceLines, r.traceArrayAssign(as))
+						trailingTraceLines = append(trailingTraceLines, arrayAssignTrace)
 					} else if as.Value != nil {
 						trailingTraceLines = append(trailingTraceLines, r.traceAssignString(as.Ref, vr, as.Append))
 					}
 				case (cm.Variant.Value == "declare" || cm.Variant.Value == "typeset") && as.Array != nil:
-					leadingTraceLines = append(leadingTraceLines, r.traceArrayAssign(as))
+					leadingTraceLines = append(leadingTraceLines, arrayAssignTrace)
 					builtinTraceFields = append(builtinTraceFields, name)
 				default:
 					builtinTraceFields = append(builtinTraceFields, traceAssignFieldRaw(as.Ref, vr, as.Append))
@@ -1282,7 +1283,7 @@ func (r *Runner) restoreCallAssigns(restores []restoreVar) {
 func (r *Runner) expandAssignsForSideEffects(assigns []*syntax.Assign) bool {
 	for _, as := range assigns {
 		// Just expand the value to trigger side effects; don't set the variable.
-		if _, ok := r.assignVal(r.lookupVar(as.Ref.Name.Value), as, ""); !ok || r.exit.fatalExit || r.exit.exiting {
+		if _, _, ok := r.assignVal(r.lookupVar(as.Ref.Name.Value), as, ""); !ok || r.exit.fatalExit || r.exit.exiting {
 			return false
 		}
 	}
@@ -1323,7 +1324,7 @@ func (r *Runner) runCallAssigns(assigns []*syntax.Assign) []restoreVar {
 			continue
 		}
 
-		vr, ok := r.assignVal(prev, as, "")
+		vr, _, ok := r.assignVal(prev, as, "")
 		if !ok || r.exit.fatalExit || r.exit.exiting {
 			return restores
 		}
