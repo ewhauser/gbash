@@ -11,7 +11,8 @@ import (
 	"os"
 	"reflect"
 	"regexp"
-	"unicode"
+	resyntax "regexp/syntax"
+	"strings"
 
 	"github.com/ewhauser/gbash/internal/shell/expand"
 	"github.com/ewhauser/gbash/internal/shell/syntax"
@@ -40,12 +41,13 @@ func (r *Runner) bashTest(ctx context.Context, expr syntax.TestExpr, classic boo
 				r.clearBASH_REMATCH()
 				return ""
 			}
-			right, ok := r.testExpandWord(x.Y.(*syntax.Word), expand.Regexp)
+			rightWord := x.Y.(*syntax.Word)
+			right, ok := r.testExpandWord(rightWord, expand.Regexp)
 			if !ok {
 				r.clearBASH_REMATCH()
 				return ""
 			}
-			if r.binTest(ctx, x.Op, left, right) {
+			if r.regexMatch(left, right) {
 				return "1"
 			}
 			return ""
@@ -131,12 +133,13 @@ func (r *Runner) bashCond(ctx context.Context, expr syntax.CondExpr) string {
 				r.clearBASH_REMATCH()
 				return ""
 			}
-			right, ok := r.testExpandWord(x.Y.(*syntax.CondRegex).Word, expand.Regexp)
+			rightWord := x.Y.(*syntax.CondRegex).Word
+			right, ok := r.testExpandWord(rightWord, expand.Regexp)
 			if !ok {
 				r.clearBASH_REMATCH()
 				return ""
 			}
-			if r.binTest(ctx, x.Op, left, right) {
+			if r.regexMatch(left, right) {
 				return "1"
 			}
 			return ""
@@ -202,11 +205,18 @@ func (r *Runner) testExpandWord(word *syntax.Word, expandFunc func(*expand.Confi
 	return "", false
 }
 
-func (r *Runner) failConditionalRegex(format string, args ...any) bool {
+func (r *Runner) failInvalidRegex(expr, reason string) bool {
 	r.clearBASH_REMATCH()
 	r.exit.code = 2
-	fmt.Fprintf(r.stderr, "syntax error in conditional expression: "+format+"\n", args...)
+	if r.legacyBashCompat {
+		return false
+	}
+	fmt.Fprintf(r.stderr, "[[: invalid regular expression %s: %s\n", bashQuoteString(expr), reason)
 	return false
+}
+
+func bashQuoteString(s string) string {
+	return "`" + s + "'"
 }
 
 func (r *Runner) clearBASH_REMATCH() {
@@ -232,28 +242,33 @@ func testExpandErrFatal(err error) bool {
 	}
 }
 
+func (r *Runner) regexMatch(subject, expr string) bool {
+	if bashRegexHasInvalidBareBrace(expr) {
+		return r.failInvalidRegex(expr, "Invalid preceding regular expression")
+	}
+	translated := translateBashRegex(expr)
+	re, err := regexp.Compile(translated)
+	if err != nil {
+		return r.failInvalidRegex(expr, bashRegexCompileErrorReason(err))
+	}
+	m := re.FindStringSubmatch(subject)
+	if m == nil {
+		r.clearBASH_REMATCH()
+		return false
+	}
+	vr := expand.Variable{
+		Set:  true,
+		Kind: expand.Indexed,
+		List: m,
+	}
+	r.setVar("BASH_REMATCH", vr)
+	return true
+}
+
 func (r *Runner) binTest(ctx context.Context, op syntax.BinTestOperator, x, y string) bool {
 	switch op {
 	case syntax.TsReMatch:
-		if bashRegexHasInvalidBareBraces(y) {
-			return r.failConditionalRegex("invalid regular expression")
-		}
-		re, err := regexp.Compile(y)
-		if err != nil {
-			return r.failConditionalRegex("%v", err)
-		}
-		m := re.FindStringSubmatch(x)
-		if m == nil {
-			r.clearBASH_REMATCH()
-			return false
-		}
-		vr := expand.Variable{
-			Set:  true,
-			Kind: expand.Indexed,
-			List: m,
-		}
-		r.setVar("BASH_REMATCH", vr)
-		return true
+		return r.regexMatch(x, y)
 	case syntax.TsNewer:
 		// -nt: True if file1 is newer than file2, or if file1 exists and file2 does not.
 		// Only treat ErrNotExist as "file missing" - other errors (permission, policy) return false.
@@ -316,51 +331,132 @@ func (r *Runner) binTest(ctx context.Context, op syntax.BinTestOperator, x, y st
 	}
 }
 
-func bashRegexHasInvalidBareBraces(expr string) bool {
+func bashRegexCompileErrorReason(err error) string {
+	var syntaxErr *resyntax.Error
+	if !errors.As(err, &syntaxErr) {
+		return err.Error()
+	}
+	switch syntaxErr.Code {
+	case resyntax.ErrUnexpectedParen, resyntax.ErrMissingParen:
+		return "parentheses not balanced"
+	case resyntax.ErrMissingBracket:
+		return "brackets ([ ]) not balanced"
+	case resyntax.ErrMissingRepeatArgument, resyntax.ErrInvalidRepeatOp:
+		return "repetition-operator operand invalid"
+	case resyntax.ErrInvalidRepeatSize:
+		return "invalid repetition count(s)"
+	default:
+		return err.Error()
+	}
+}
+
+func translateBashRegex(expr string) string {
+	var b strings.Builder
 	escaped := false
 	inClass := false
 	for i := 0; i < len(expr); i++ {
 		ch := expr[i]
 		if escaped {
+			b.WriteByte(ch)
 			escaped = false
 			continue
 		}
 		switch ch {
 		case '\\':
+			b.WriteByte(ch)
 			escaped = true
 		case '[':
 			if !inClass {
 				inClass = true
 			}
+			b.WriteByte(ch)
 		case ']':
 			if inClass {
 				inClass = false
 			}
-		case '{':
+			b.WriteByte(ch)
+		default:
+			b.WriteByte(ch)
+		}
+	}
+	return b.String()
+}
+
+func bashRegexHasInvalidBareBrace(expr string) bool {
+	for i := 0; i < len(expr); i++ {
+		if expr[i] != '{' {
+			continue
+		}
+		if bashRegexBraceIsLiteral(expr, i) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func bashRegexBraceIsLiteral(expr string, index int) bool {
+	escaped := false
+	inClass := false
+	for i := 0; i < len(expr); i++ {
+		ch := expr[i]
+		if escaped {
+			if i == index {
+				return true
+			}
+			escaped = false
+			continue
+		}
+		switch ch {
+		case '\\':
+			if i == index {
+				return false
+			}
+			escaped = true
+		case '[':
+			if i == index {
+				return false
+			}
+			if !inClass {
+				inClass = true
+			}
+		case ']':
+			if i == index && inClass {
+				return true
+			}
 			if inClass {
+				inClass = false
+			}
+		case '{':
+			if i != index {
 				continue
+			}
+			if inClass {
+				return true
 			}
 			j := i + 1
 			start := j
-			for j < len(expr) && unicode.IsDigit(rune(expr[j])) {
+			for j < len(expr) && expr[j] >= '0' && expr[j] <= '9' {
 				j++
 			}
 			if j == start {
 				if j < len(expr) && expr[j] == ',' {
 					j++
-					for j < len(expr) && unicode.IsDigit(rune(expr[j])) {
+					for j < len(expr) && expr[j] >= '0' && expr[j] <= '9' {
 						j++
 					}
 				} else {
-					return true
+					return false
 				}
 			} else if j < len(expr) && expr[j] == ',' {
 				j++
-				for j < len(expr) && unicode.IsDigit(rune(expr[j])) {
+				for j < len(expr) && expr[j] >= '0' && expr[j] <= '9' {
 					j++
 				}
 			}
-			if j >= len(expr) || expr[j] != '}' {
+			return j < len(expr) && expr[j] == '}'
+		default:
+			if i == index && inClass {
 				return true
 			}
 		}
