@@ -161,15 +161,15 @@ type Runner struct {
 
 	startupHome string
 
-	origDir    string
-	origParams []string
-	origOpts   runnerOpts
-	origStdin  StdinReader
-	origStdout io.Writer
-	origStderr io.Writer
-	origFDs    map[int]*shellFD
+	origDir     string
+	origParams  []string
+	origOpts    runnerOpts
+	origStdin   StdinReader
+	origStdout  io.Writer
+	origStderr  io.Writer
+	origFDs     map[int]*shellFD
 	fdSnapshots []map[int]*shellFD
-	origStart  time.Time
+	origStart   time.Time
 
 	startTime time.Time
 
