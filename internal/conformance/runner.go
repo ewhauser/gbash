@@ -584,7 +584,6 @@ func gbashEnv(specPath string) map[string]string {
 		env["HOME"] = isolatedGBashWorkspaceRoot
 		env["PATH"] = "/bin"
 		env["PWD"] = isolatedGBashWorkspaceRoot
-		env["REPO_ROOT"] = isolatedGBashWorkspaceRoot
 		env["TMP"] = isolatedGBashWorkspaceRoot + "/tmp"
 		env["TMPDIR"] = isolatedGBashWorkspaceRoot + "/tmp"
 		env["UID"] = strconv.Itoa(os.Getuid())
@@ -598,6 +597,9 @@ func gbashEnv(specPath string) map[string]string {
 	env["PWD"] = "/"
 	env["TMP"] = "/tmp"
 	env["TMPDIR"] = "/tmp"
+	if needsRepoRootEnv(specPath) {
+		env["REPO_ROOT"] = gbashWorkspaceRoot(specPath)
+	}
 	return env
 }
 
@@ -615,7 +617,7 @@ func bashEnv(workspace, specPath string) []string {
 		"TMPDIR=" + filepath.Join(workspace, "tmp"),
 		"GBASH_CONFORMANCE_SED=" + conformanceToolPath("sed"),
 	}
-	if useScopedGlobWorkspace(specPath) {
+	if needsRepoRootEnv(specPath) {
 		values = append(values, "REPO_ROOT="+workspace)
 	}
 	slices.Sort(values)
@@ -654,6 +656,10 @@ func gbashWorkspaceRoot(specPath string) string {
 		return isolatedGBashWorkspaceRoot
 	}
 	return "/"
+}
+
+func needsRepoRootEnv(specPath string) bool {
+	return useScopedGlobWorkspace(specPath) || specPath == "oils/builtin-completion.test.sh"
 }
 
 func useScopedGlobWorkspace(specPath string) bool {

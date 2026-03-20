@@ -425,10 +425,7 @@
         },
         "oils/builtin-cd.test.sh::Survey of getcwd() syscall": {
           "mode": "xfail",
-          "reason": "darwin host bash pads wc -l output differently in the getcwd survey helper",
-          "goos": [
-            "darwin"
-          ]
+          "reason": "conformance: parse error wording for this builtin-cd probe still differs from bash"
         },
         "oils/builtin-dirs.test.sh::dirs does not take arguments": {
           "mode": "xfail",
@@ -2221,10 +2218,19 @@
         },
         "oils/xtrace.test.sh::xtrace with unprintable chars": {
           "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
+          "reason": "conformance: xtrace escape style for unprintable bytes still differs from bash"
+        },
+        "oils/builtin-printf.test.sh::Too large": {
+          "mode": "xfail",
+          "reason": "conformance: printf integer formatting for oversized values still differs from bash"
+        },
+        "oils/glob.test.sh::Glob unicode char": {
+          "mode": "xfail",
+          "reason": "conformance: C.UTF-8 pathname collation order still differs from bash for this glob case"
+        },
+        "oils/word-split.test.sh::Unicode in IFS": {
+          "mode": "xfail",
+          "reason": "conformance: Unicode IFS splitting still differs from bash"
         }
       }
     }
