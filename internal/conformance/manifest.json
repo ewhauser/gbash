@@ -474,23 +474,11 @@
           "mode": "xfail",
           "reason": "gbash's bash-specific parameter operators still diverge from bash in this case"
         },
-        "oils/var-op-bash.test.sh::Case folding - multi code point": {
-          "mode": "xfail",
-          "reason": "gbash's bash-specific parameter operators still diverge from bash in this case"
-        },
-        "oils/var-op-bash.test.sh::Case folding - Unicode characters": {
-          "mode": "xfail",
-          "reason": "gbash's bash-specific parameter operators still diverge from bash in this case"
-        },
         "oils/var-op-bash.test.sh::undef vs. empty string in var ops": {
           "mode": "xfail",
           "reason": "gbash's bash-specific parameter operators still diverge from bash in this case"
         },
         "oils/var-op-len.test.sh::Length operator can't be followed by test operator": {
-          "mode": "xfail",
-          "reason": "gbash's `${#...}` length semantics still diverge from bash in this case"
-        },
-        "oils/var-op-len.test.sh::Unicode string length (UTF-8)": {
           "mode": "xfail",
           "reason": "gbash's `${#...}` length semantics still diverge from bash in this case"
         },
