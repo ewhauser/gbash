@@ -236,6 +236,8 @@ func testExpandErrFatal(err error) bool {
 		return true
 	case errors.As(err, &expand.InvalidIndirectExpansionError{}):
 		return true
+	case errors.As(err, &expand.InvalidVariableNameError{}):
+		return true
 	default:
 		return false
 	}

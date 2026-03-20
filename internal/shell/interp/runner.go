@@ -243,8 +243,10 @@ func (r *Runner) expandErr(err error) {
 		r.exit.exiting = true
 	case errors.As(err, &expand.InvalidIndirectExpansionError{}):
 		r.exit.code = 1
+		r.exit.exiting = true
 	case errors.As(err, &expand.InvalidVariableNameError{}):
 		r.exit.code = 1
+		r.exit.exiting = true
 	default:
 		return // other cases do not exit
 	}
