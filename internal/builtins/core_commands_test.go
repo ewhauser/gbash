@@ -1710,9 +1710,7 @@ func TestBashRcfileRunsForInteractiveCommandString(t *testing.T) {
 	if got, want := result.Stdout, "ready\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
-	if got, want := result.Stderr, "bash: no job control in this shell\n"; got != want {
-		t.Fatalf("Stderr = %q, want %q", got, want)
-	}
+	assertInteractiveShellStderr(t, result.Stderr, "bash")
 }
 
 func TestBashRunsScriptFileAndPassesArgs(t *testing.T) {
@@ -1984,9 +1982,7 @@ func TestBashInteractiveStdinPersistsStateAndStartupOptions(t *testing.T) {
 			t.Fatalf("Stdout = %q, want substring %q", result.Stdout, want)
 		}
 	}
-	if got, want := result.Stderr, "bash: no job control in this shell\n"; got != want {
-		t.Fatalf("Stderr = %q, want %q", got, want)
-	}
+	assertInteractiveShellStderr(t, result.Stderr, "bash")
 }
 
 func TestBashInteractiveCommandStringUsesInteractiveSemantics(t *testing.T) {
@@ -2005,9 +2001,7 @@ func TestBashInteractiveCommandStringUsesInteractiveSemantics(t *testing.T) {
 	if got, want := result.Stdout, "alias-ok\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
-	if got, want := result.Stderr, "bash: no job control in this shell\n"; got != want {
-		t.Fatalf("Stderr = %q, want %q", got, want)
-	}
+	assertInteractiveShellStderr(t, result.Stderr, "bash")
 }
 
 func TestBashInteractiveCommandStringPrefixesBuiltinWarnings(t *testing.T) {
@@ -2026,9 +2020,7 @@ func TestBashInteractiveCommandStringPrefixesBuiltinWarnings(t *testing.T) {
 	if got, want := result.Stdout, "foo\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
-	if got, want := result.Stderr, "bash: no job control in this shell\nbash: compgen: warning: -F option may not work as you expect\n"; got != want {
-		t.Fatalf("Stderr = %q, want %q", got, want)
-	}
+	assertInteractiveShellStderr(t, result.Stderr, "bash", "bash: compgen: warning: -F option may not work as you expect\n")
 }
 
 func TestBashInteractiveScriptUsesInteractiveSemantics(t *testing.T) {
@@ -2047,9 +2039,7 @@ func TestBashInteractiveScriptUsesInteractiveSemantics(t *testing.T) {
 	if got, want := result.Stdout, "alias-ok\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
-	if got, want := result.Stderr, "bash: no job control in this shell\n"; got != want {
-		t.Fatalf("Stderr = %q, want %q", got, want)
-	}
+	assertInteractiveShellStderr(t, result.Stderr, "bash")
 }
 
 func TestShInteractiveCommandStringUsesInteractiveSemantics(t *testing.T) {
@@ -2068,8 +2058,21 @@ func TestShInteractiveCommandStringUsesInteractiveSemantics(t *testing.T) {
 	if got, want := result.Stdout, "alias-ok\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
-	if got, want := result.Stderr, "sh: no job control in this shell\n"; got != want {
-		t.Fatalf("Stderr = %q, want %q", got, want)
+	assertInteractiveShellStderr(t, result.Stderr, "sh")
+}
+
+func assertInteractiveShellStderr(t *testing.T, got, name string, extra ...string) {
+	t.Helper()
+	wantTail := name + ": no job control in this shell\n" + strings.Join(extra, "")
+	if goruntime.GOOS != "linux" {
+		if got != wantTail {
+			t.Fatalf("Stderr = %q, want %q", got, wantTail)
+		}
+		return
+	}
+	pattern := "^" + regexp.QuoteMeta(name) + `: cannot set terminal process group \([0-9]+\): Inappropriate ioctl for device\n` + regexp.QuoteMeta(wantTail) + "$"
+	if !regexp.MustCompile(pattern).MatchString(got) {
+		t.Fatalf("Stderr = %q, want pattern %q", got, pattern)
 	}
 }
 
