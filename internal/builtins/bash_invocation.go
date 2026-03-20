@@ -26,6 +26,7 @@ type BashInvocation struct {
 	Action         string
 	Interactive    bool
 	Source         BashSourceMode
+	Rcfile         string
 	ExecutionName  string
 	CommandString  string
 	ScriptPath     string
@@ -145,6 +146,7 @@ func bashInvocationFromParsed(cfg BashInvocationConfig, matches *ParsedCommand, 
 		out.Action = "version"
 	}
 	out.Interactive = matches.Has("interactive")
+	out.Rcfile = matches.Value("rcfile")
 
 	appendStartup := func(name string) {
 		if matches.Has(name) {

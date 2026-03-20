@@ -197,6 +197,30 @@ func TestCompgenMatchesAcrossBuiltinAndWrapperEntryPoints(t *testing.T) {
 	}
 }
 
+func TestCompgenAcceptsKeywordAndExportActions(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, ""+
+		"export MATCH_ME=1\n"+
+		"compgen -A export MATCH_\n"+
+		"echo ---\n"+
+		"compgen -A keyword wh\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0 (stderr=%q)", result.ExitCode, result.Stderr)
+	}
+	const want = "" +
+		"MATCH_ME\n" +
+		"---\n" +
+		"while\n"
+	if got := result.Stdout; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
 func runBuiltin(tb testing.TB, ctx context.Context, cmd commands.Command, args ...string) (exitCode int) {
 	tb.Helper()
 

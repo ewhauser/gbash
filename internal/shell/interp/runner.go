@@ -236,16 +236,21 @@ func (r *Runner) expandErr(err error) {
 	if err == nil {
 		return
 	}
-	err = expand.WithArithmSource(
-		err,
-		r.currentChunkSource,
-		r.currentChunkSourceBase,
-		r.currentChunkSourceBase+uint(len(r.currentChunkSource)),
+	var (
+		cmdArithErr arithmCommandError
+		divErr      *expand.ArithmDivByZeroError
 	)
+	if r.currentChunkSource != "" && !errors.As(err, &cmdArithErr) && errors.As(err, &divErr) {
+		err = expand.WithArithmSource(
+			err,
+			r.currentChunkSource,
+			r.currentChunkSourceBase,
+			r.currentChunkSourceBase+uint(len(r.currentChunkSource)),
+		)
+	}
 	errMsg := err.Error()
 	fatalExpansionErr := r.commandString && !r.interactive
 	var (
-		cmdArithErr    arithmCommandError
 		unboundVarErr  expand.UnboundVariableError
 		unsetErr       expand.UnsetParameterError
 		indirectErr    expand.InvalidIndirectExpansionError

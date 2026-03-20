@@ -1694,6 +1694,27 @@ func TestBashHelpUsesSpecParser(t *testing.T) {
 	}
 }
 
+func TestBashRcfileRunsForInteractiveCommandString(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "cat > /tmp/rc.sh <<'EOF'\nexport FROM_RCFILE=ready\nEOF\nbash --rcfile /tmp/rc.sh -i -c 'echo ${FROM_RCFILE:-missing}'\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if got, want := result.Stdout, "ready\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, "bash: no job control in this shell\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
 func TestBashRunsScriptFileAndPassesArgs(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
