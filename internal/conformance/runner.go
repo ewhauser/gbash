@@ -22,6 +22,7 @@ import (
 	gbruntime "github.com/ewhauser/gbash/internal/runtime"
 	"github.com/ewhauser/gbash/internal/shell/syntax"
 	"github.com/ewhauser/gbash/internal/testutil"
+	"github.com/ewhauser/gbash/policy"
 )
 
 var bashLinePrefixPattern = regexp.MustCompile(`(?m)^(?:[^:\n]+/)?\w+:(?:[^:\n]+:)* line \d+: `)
@@ -97,7 +98,7 @@ func RunSuite(t *testing.T, cfg *SuiteConfig) {
 						t.Skipf("manifest skip: %s", caseEntry.Reason)
 					}
 
-					result, err := RunCase(t.Context(), cfg, bashPath, specCase)
+					result, err := RunCase(t.Context(), cfg, bashPath, specFile.Path, specCase)
 					if err != nil {
 						t.Fatalf("RunCase() error = %v", err)
 					}
@@ -124,7 +125,7 @@ func RunSuite(t *testing.T, cfg *SuiteConfig) {
 	}
 }
 
-func RunCase(ctx context.Context, cfg *SuiteConfig, bashPath string, specCase SpecCase) (ComparisonResult, error) {
+func RunCase(ctx context.Context, cfg *SuiteConfig, bashPath, specPath string, specCase SpecCase) (ComparisonResult, error) {
 	resolvedCfg := resolvedSuiteConfig(cfg)
 	cfg = &resolvedCfg
 
@@ -146,7 +147,7 @@ func RunCase(ctx context.Context, cfg *SuiteConfig, bashPath string, specCase Sp
 	if err != nil {
 		return ComparisonResult{}, err
 	}
-	gbashResult, err := runGBash(ctx, gbashWorkspace, script)
+	gbashResult, err := runGBash(ctx, specPath, gbashWorkspace, script)
 	if err != nil {
 		return ComparisonResult{}, err
 	}
@@ -161,6 +162,9 @@ func prepareWorkspace(cfg *SuiteConfig) (string, error) {
 	workspace, err := os.MkdirTemp("", "gbash-conformance-*")
 	if err != nil {
 		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(workspace); err == nil && resolved != "" {
+		workspace = resolved
 	}
 
 	for _, relDir := range append([]string{cfg.BinDir}, cfg.FixtureDirs...) {
@@ -263,8 +267,27 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
-func runGBash(ctx context.Context, workspace, script string) (ExecutionResult, error) {
-	rt, err := gbruntime.New(gbruntime.WithFileSystem(virtualWorkspaceFileSystem(workspace)))
+func runGBash(ctx context.Context, specPath, workspace, script string) (ExecutionResult, error) {
+	opts := []gbruntime.Option{
+		gbruntime.WithFileSystem(virtualWorkspaceFileSystem(workspace)),
+	}
+	if specPath == "oils/builtin-cd.test.sh" {
+		opts = append(opts, gbruntime.WithPolicy(policy.NewStatic(&policy.Config{
+			ReadRoots:  []string{"/"},
+			WriteRoots: []string{"/"},
+			Limits: policy.Limits{
+				MaxCommandCount:      10000,
+				MaxGlobOperations:    100000,
+				MaxLoopIterations:    10000,
+				MaxSubstitutionDepth: 50,
+				MaxStdoutBytes:       1 << 20,
+				MaxStderrBytes:       1 << 20,
+				MaxFileBytes:         8 << 20,
+			},
+			SymlinkMode: policy.SymlinkFollow,
+		})))
+	}
+	rt, err := gbruntime.New(opts...)
 	if err != nil {
 		return ExecutionResult{}, err
 	}
@@ -454,6 +477,10 @@ func normalizeOutput(value, workspace string) string {
 	workspace = filepath.ToSlash(workspace)
 	value = strings.ReplaceAll(value, workspace+"/", "/")
 	value = strings.ReplaceAll(value, workspace, "/")
+	if runtime.GOOS == "darwin" {
+		value = strings.ReplaceAll(value, "/private/tmp/", "/tmp/")
+		value = strings.ReplaceAll(value, "/private/tmp\n", "/tmp\n")
+	}
 	return value
 }
 

@@ -91,7 +91,7 @@ func runHelperCase(t *testing.T, specCase SpecCase) ComparisonResult {
 		Name:       "bash",
 		BinDir:     "bin",
 		OracleMode: OracleBash,
-	}, bashPath, specCase)
+	}, bashPath, "", specCase)
 	if err != nil {
 		t.Fatalf("RunCase() error = %v", err)
 	}

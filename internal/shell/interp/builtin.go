@@ -1128,7 +1128,7 @@ func (r *Runner) readLine(ctx context.Context, raw bool) ([]byte, error) {
 }
 
 func (r *Runner) pwdBuiltin(ctx context.Context, args []string) (exit exitStatus) {
-	logical := false
+	logical := true
 	physical := false
 	for len(args) > 0 {
 		switch args[0] {
@@ -1139,9 +1139,17 @@ func (r *Runner) pwdBuiltin(ctx context.Context, args []string) (exit exitStatus
 			physical = true
 			logical = false
 		default:
-			r.errf("pwd: usage: pwd [-LP]\n")
-			exit.code = 2
-			return exit
+			if args[0] == "--" {
+				args = nil
+				continue
+			}
+			if strings.HasPrefix(args[0], "-") && args[0] != "-" {
+				r.errf("pwd: usage: pwd [-LP]\n")
+				exit.code = 2
+				return exit
+			}
+			args = nil
+			continue
 		}
 		args = args[1:]
 	}
@@ -1155,17 +1163,21 @@ func (r *Runner) pwdBuiltin(ctx context.Context, args []string) (exit exitStatus
 }
 
 func (r *Runner) resolvePwd(ctx context.Context, logical, physical bool) (string, error) {
-	useLogical := logical || (!physical && r.envGet("POSIXLY_CORRECT") != "")
-	if physical || !useLogical {
+	if physical {
 		return r.pwdPhysicalPath(ctx)
 	}
-	if candidate, ok := r.pwdLogicalPath(); ok {
-		return candidate, nil
+	if logical {
+		if candidate, ok := r.pwdLogicalPath(); ok {
+			return candidate, nil
+		}
 	}
 	return r.pwdPhysicalPath(ctx)
 }
 
 func (r *Runner) pwdLogicalPath() (string, bool) {
+	if r.logicalDir != "" {
+		return r.logicalDir, true
+	}
 	if candidate := r.envGet("PWD"); r.pwdLooksReasonable(candidate) {
 		return candidate, true
 	}
@@ -1201,36 +1213,213 @@ func (r *Runner) pwdCandidateMatchesDir(candidate string) bool {
 }
 
 func (r *Runner) cdBuiltin(ctx context.Context, args []string) uint8 {
-	target := ""
+	logical := true
 	show := false
-	switch len(args) {
+	operands := make([]string, 0, 1)
+	parsingOptions := true
+	for len(args) > 0 {
+		arg := args[0]
+		args = args[1:]
+		switch {
+		case parsingOptions && arg == "--":
+			parsingOptions = false
+		case parsingOptions && strings.HasPrefix(arg, "-") && arg != "-":
+			for _, opt := range arg[1:] {
+				switch opt {
+				case 'L':
+					logical = true
+				case 'P':
+					logical = false
+				default:
+					r.errf("cd: usage: cd [-L|-P] [dir]\n")
+					return 2
+				}
+			}
+		default:
+			parsingOptions = false
+			operands = append(operands, arg)
+		}
+	}
+
+	target := ""
+	switch len(operands) {
 	case 0:
 		target = r.envGet("HOME")
+		if target == "" {
+			r.errf("cd: HOME not set\n")
+			return 1
+		}
 	case 1:
-		if args[0] == "--" {
-			target = r.envGet("HOME")
-		} else {
-			target = args[0]
-		}
-	case 2:
-		if args[0] != "--" {
-			r.errf("cd: usage: cd [dir]\n")
-			return 2
-		}
-		target = args[1]
+		target = operands[0]
 	default:
-		r.errf("cd: usage: cd [dir]\n")
+		r.errf("cd: too many arguments\n")
 		return 2
 	}
 	if target == "-" {
 		target = r.envGet("OLDPWD")
+		if target == "" {
+			r.errf("cd: OLDPWD not set\n")
+			return 1
+		}
 		show = true
 	}
-	code := r.changeDir(ctx, "cd", target)
-	if code == 0 && show {
-		r.outf("%s\n", r.envGet("PWD"))
+	oldVisible := r.visibleDir()
+	next, code := r.resolveDir(ctx, "cd", target, dirResolveOptions{
+		logical:   logical,
+		useCDPath: true,
+	})
+	if code != 0 {
+		return code
 	}
-	return code
+	r.setCurrentDir(next.physical, next.logical, oldVisible)
+	if show || next.show {
+		r.outf("%s\n", next.logical)
+	}
+	return 0
+}
+
+type dirResolveOptions struct {
+	logical   bool
+	useCDPath bool
+}
+
+type dirResolveResult struct {
+	physical string
+	logical  string
+	show     bool
+}
+
+type dirResolveCandidate struct {
+	operand string
+	print   bool
+}
+
+type dirResolveFailure struct {
+	path    string
+	message string
+}
+
+func (r *Runner) visibleDir() string {
+	if r.logicalDir != "" {
+		return r.logicalDir
+	}
+	return r.Dir
+}
+
+func (r *Runner) resolveDir(ctx context.Context, cmd, name string, opts dirResolveOptions) (dirResolveResult, uint8) {
+	name = cmp.Or(name, ".")
+	for _, candidate := range r.dirResolveCandidates(name, opts.useCDPath) {
+		result, failure := r.resolveDirCandidate(ctx, candidate.operand, opts.logical)
+		if failure == nil {
+			result.show = candidate.print
+			return result, 0
+		}
+		if failure.message == "No such file or directory" {
+			continue
+		}
+		r.errf("%s: %s: %s\n", cmd, failure.path, failure.message)
+		return dirResolveResult{}, 1
+	}
+	r.errf("%s: %s: No such file or directory\n", cmd, name)
+	return dirResolveResult{}, 1
+}
+
+func (r *Runner) dirResolveCandidates(name string, useCDPath bool) []dirResolveCandidate {
+	candidates := make([]dirResolveCandidate, 0, 2)
+	if useCDPath && shouldUseCDPath(name) {
+		for entry := range strings.SplitSeq(r.envGet("CDPATH"), ":") {
+			operand := name
+			if entry != "" {
+				operand = path.Join(entry, name)
+			}
+			candidates = append(candidates, dirResolveCandidate{
+				operand: operand,
+				print:   entry != "",
+			})
+		}
+	}
+	candidates = append(candidates, dirResolveCandidate{operand: name})
+	return candidates
+}
+
+func shouldUseCDPath(name string) bool {
+	return name != "" && !path.IsAbs(name) && !strings.ContainsRune(name, '/') && name[0] != '.'
+}
+
+func (r *Runner) resolveDirCandidate(ctx context.Context, operand string, logical bool) (dirResolveResult, *dirResolveFailure) {
+	if logical {
+		return r.resolveLogicalDirCandidate(ctx, operand)
+	}
+	return r.resolvePhysicalDirCandidate(ctx, operand)
+}
+
+func (r *Runner) resolveLogicalDirCandidate(ctx context.Context, operand string) (dirResolveResult, *dirResolveFailure) {
+	current := r.visibleDir()
+	if path.IsAbs(operand) {
+		current = "/"
+	}
+	for _, part := range strings.Split(operand, "/") {
+		switch part {
+		case "", ".":
+			continue
+		default:
+			next := path.Clean(path.Join(current, part))
+			info, err := r.statHandler(ctx, next, true)
+			if err != nil {
+				return dirResolveResult{}, dirResolveFailureFromError(next, err)
+			}
+			if !info.IsDir() {
+				return dirResolveResult{}, &dirResolveFailure{path: next, message: "Not a directory"}
+			}
+			current = next
+		}
+	}
+	if err := r.access(ctx, current, access_X_OK); err != nil {
+		return dirResolveResult{}, &dirResolveFailure{path: current, message: "Permission denied"}
+	}
+	physical, err := r.realpath(ctx, current)
+	if err != nil {
+		return dirResolveResult{}, dirResolveFailureFromError(current, err)
+	}
+	return dirResolveResult{physical: physical, logical: current}, nil
+}
+
+func (r *Runner) resolvePhysicalDirCandidate(ctx context.Context, operand string) (dirResolveResult, *dirResolveFailure) {
+	current := r.Dir
+	if path.IsAbs(operand) {
+		current = "/"
+	}
+	for _, part := range strings.Split(operand, "/") {
+		switch part {
+		case "", ".":
+			continue
+		default:
+			next := path.Clean(path.Join(current, part))
+			info, err := r.statHandler(ctx, next, true)
+			if err != nil {
+				return dirResolveResult{}, dirResolveFailureFromError(next, err)
+			}
+			if !info.IsDir() {
+				return dirResolveResult{}, &dirResolveFailure{path: next, message: "Not a directory"}
+			}
+			resolved, err := r.realpath(ctx, next)
+			if err != nil {
+				return dirResolveResult{}, dirResolveFailureFromError(next, err)
+			}
+			current = resolved
+		}
+	}
+	if err := r.access(ctx, current, access_X_OK); err != nil {
+		return dirResolveResult{}, &dirResolveFailure{path: current, message: "Permission denied"}
+	}
+	return dirResolveResult{physical: current, logical: current}, nil
+}
+
+func dirResolveFailureFromError(path string, err error) *dirResolveFailure {
+	if errors.Is(err, os.ErrPermission) {
+		return &dirResolveFailure{path: path, message: "Permission denied"}
+	}
+	return &dirResolveFailure{path: path, message: "No such file or directory"}
 }
 
 func (r *Runner) typeBuiltin(ctx context.Context, args []string) (exit exitStatus) {
@@ -1464,7 +1653,7 @@ func (r *Runner) dirsBuiltin(args []string) uint8 {
 	}
 
 	if clearStack {
-		r.dirStack = append(r.dirStack[:0], r.Dir)
+		r.dirStack = append(r.dirStack[:0], r.visibleDir())
 		return 0
 	}
 
@@ -1548,7 +1737,7 @@ func (r *Runner) pushdBuiltin(ctx context.Context, args []string) uint8 {
 		args = nil
 	}
 
-	oldCurrent := r.Dir
+	oldCurrent := r.visibleDir()
 	if operand == "" {
 		if noChdir {
 			return 0
@@ -1584,12 +1773,12 @@ func (r *Runner) pushdBuiltin(ctx context.Context, args []string) uint8 {
 			r.dirStack = newStack
 			return 0
 		}
-		next, code := r.resolveDir(ctx, "pushd", newStack[0])
+		next, code := r.resolveDir(ctx, "pushd", newStack[0], dirResolveOptions{logical: true})
 		if code != 0 {
 			return code
 		}
 		r.dirStack = newStack
-		r.setCurrentDir(next, oldCurrent)
+		r.setCurrentDir(next.physical, next.logical, oldCurrent)
 		return r.dirsBuiltin(nil)
 	}
 
@@ -1601,15 +1790,15 @@ func (r *Runner) pushdBuiltin(ctx context.Context, args []string) uint8 {
 		return r.dirsBuiltin(nil)
 	}
 
-	next, code := r.resolveDir(ctx, "pushd", operand)
+	next, code := r.resolveDir(ctx, "pushd", operand, dirResolveOptions{logical: true})
 	if code != 0 {
 		return code
 	}
 	newStack := make([]string, 0, len(r.dirStack)+1)
-	newStack = append(newStack, next)
+	newStack = append(newStack, next.logical)
 	newStack = append(newStack, r.dirStack...)
 	r.dirStack = newStack
-	r.setCurrentDir(next, oldCurrent)
+	r.setCurrentDir(next.physical, next.logical, oldCurrent)
 	return r.dirsBuiltin(nil)
 }
 
@@ -1660,18 +1849,18 @@ func (r *Runner) popdBuiltin(ctx context.Context, args []string) uint8 {
 		return 1
 	}
 
-	oldCurrent := r.Dir
+	oldCurrent := r.visibleDir()
 	newStack := removeDirStackIndex(r.dirStack, idx)
 	if noChdir {
 		newStack[0] = oldCurrent
 		r.dirStack = newStack
 	} else if idx == 0 {
-		next, code := r.resolveDir(ctx, "popd", newStack[0])
+		next, code := r.resolveDir(ctx, "popd", newStack[0], dirResolveOptions{logical: true})
 		if code != 0 {
 			return code
 		}
 		r.dirStack = newStack
-		r.setCurrentDir(next, oldCurrent)
+		r.setCurrentDir(next.physical, next.logical, oldCurrent)
 	} else {
 		r.dirStack = newStack
 	}
@@ -1679,41 +1868,24 @@ func (r *Runner) popdBuiltin(ctx context.Context, args []string) uint8 {
 }
 
 func (r *Runner) changeDir(ctx context.Context, cmd, name string) uint8 {
-	next, code := r.resolveDir(ctx, cmd, name)
+	oldVisible := r.visibleDir()
+	next, code := r.resolveDir(ctx, cmd, name, dirResolveOptions{logical: true})
 	if code != 0 {
 		return code
 	}
-	r.setCurrentDir(next, r.Dir)
+	r.setCurrentDir(next.physical, next.logical, oldVisible)
 	return 0
 }
 
-func (r *Runner) resolveDir(ctx context.Context, cmd, name string) (string, uint8) {
-	name = cmp.Or(name, ".")
-	apath := r.absPath(name)
-	info, err := r.stat(ctx, apath)
-	if err != nil {
-		r.errf("%s: %s: No such file or directory\n", cmd, name)
-		return "", 1
-	}
-	if !info.IsDir() {
-		r.errf("%s: %s: Not a directory\n", cmd, name)
-		return "", 1
-	}
-	if r.access(ctx, apath, access_X_OK) != nil {
-		r.errf("%s: %s: Permission denied\n", cmd, name)
-		return "", 1
-	}
-	return apath, 0
-}
-
-func (r *Runner) setCurrentDir(newDir, oldDir string) {
+func (r *Runner) setCurrentDir(newDir, newLogicalDir, oldLogicalDir string) {
 	r.Dir = newDir
-	r.setVarString("OLDPWD", oldDir)
-	r.setVarString("PWD", newDir)
+	r.logicalDir = newLogicalDir
+	r.setVarString("OLDPWD", oldLogicalDir)
+	r.setVarString("PWD", newLogicalDir)
 	if len(r.dirStack) == 0 {
-		r.dirStack = append(r.dirStack, newDir)
+		r.dirStack = append(r.dirStack, newLogicalDir)
 	} else {
-		r.dirStack[0] = newDir
+		r.dirStack[0] = newLogicalDir
 	}
 }
 
@@ -1750,6 +1922,8 @@ func (r *Runner) displayDir(dir string, long bool) string {
 	switch {
 	case home == "":
 		return dir
+	case home == "/" && dir == "/":
+		return "/"
 	case dir == home:
 		return "~"
 	case strings.HasPrefix(dir, home+"/"):

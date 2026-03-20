@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -39,6 +40,13 @@ func TestNormalizeOutputAndBashStderr(t *testing.T) {
 	workspace := "/tmp/gbash-conformance-123"
 	if got, want := normalizeOutput("/tmp/gbash-conformance-123/bin/tool\n", workspace), "/bin/tool\n"; got != want {
 		t.Fatalf("normalizeOutput() = %q, want %q", got, want)
+	}
+	privateTmpWant := "/private/tmp/demo\n"
+	if runtime.GOOS == "darwin" {
+		privateTmpWant = "/tmp/demo\n"
+	}
+	if got := normalizeOutput("/private/tmp/demo\n", workspace); got != privateTmpWant {
+		t.Fatalf("normalizeOutput(/private/tmp) = %q, want %q", got, privateTmpWant)
 	}
 	if got, want := normalizeBashStderr("/tmp/x/bash: line 2: parse error\n"), "parse error\n"; got != want {
 		t.Fatalf("normalizeBashStderr() = %q, want %q", got, want)

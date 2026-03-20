@@ -358,12 +358,12 @@ func TestPwdHonorsLogicalAndPhysicalModes(t *testing.T) {
 	want := "" +
 		"/home/agent/c\n" +
 		"/home/agent/a/b\n" +
-		"/home/agent/a/b\n" +
 		"/home/agent/c\n" +
-		"/home/agent/a/b\n" +
-		"/home/agent/a/b\n" +
-		"/home/agent/a/b\n" +
-		"/home/agent/a/b\n"
+		"/home/agent/c\n" +
+		"/home/agent/c\n" +
+		"/home/agent/c\n" +
+		"/home/agent/c\n" +
+		"/home/agent/c\n"
 	if got := result.Stdout; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
