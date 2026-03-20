@@ -604,6 +604,8 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 				printReusable = true
 			case "-q":
 				quiet = true
+			case "--":
+				return failf(2, "shopt: --: invalid option\nshopt: usage: shopt [-pqsu] [-o] [optname ...]\n")
 			default:
 				return failf(2, "shopt: invalid option %q\n", flag)
 			}

@@ -663,10 +663,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-eval-source.test.sh::shopt -u sourcepath toggles PATH lookup": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-eval-source.test.sh::source accepts/ignores --": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -1986,10 +1982,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/nocasematch-match.test.sh::[ matching": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/nocasematch-match.test.sh::[[ equality matching": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -1999,14 +1991,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/nocasematch-match.test.sh::case matching": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nocasematch-match.test.sh::file matching": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/nocasematch-match.test.sh::parameter expansion matching": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -2472,10 +2456,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/sh-options-bash.test.sh::export SHELLOPTS does cross-process tracing with bash": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/sh-options-bash.test.sh::shopt -s progcomp hostcomplete are stubs (bash-completion)": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
