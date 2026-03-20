@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	stdfs "io/fs"
+	"runtime"
 	"slices"
+	"strings"
 )
 
 type Bash struct {
@@ -125,10 +127,79 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 	if err != nil {
 		return err
 	}
+	if result != nil && result.Stderr != "" {
+		result.Stderr = prefixNestedShellCommandNotFound(c.name, result.Stderr)
+	}
 	if err := writeExecutionOutputs(inv, result); err != nil {
 		return err
 	}
 	return exitForExecutionResult(result)
+}
+
+func prefixNestedShellCommandNotFound(name, stderr string) string {
+	prefix := strings.TrimSpace(name)
+	if prefix == "" || stderr == "" {
+		return stderr
+	}
+	lines := strings.SplitAfter(stderr, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimRight(line, "\n")
+		if trimmed == "" || strings.HasPrefix(trimmed, prefix+": ") {
+			continue
+		}
+		targetLine := trimmed
+		if rest, ok := strings.CutPrefix(targetLine, prefix+": "); ok {
+			targetLine = rest
+		}
+		target, ok := strings.CutSuffix(targetLine, ": command not found")
+		if !ok {
+			continue
+		}
+		suffix := line[len(trimmed):]
+		if shouldPrefixNestedCommandNotFound(target) {
+			lines[i] = prefix + ": " + target + ": command not found" + suffix
+		} else {
+			lines[i] = target + ": command not found" + suffix
+		}
+	}
+	return strings.Join(lines, "")
+}
+
+func simpleCommandNotFoundTarget(target string) bool {
+	if target == "" {
+		return false
+	}
+	for _, r := range target {
+		if ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') {
+			continue
+		}
+		switch r {
+		case '_', '-', '.', '/':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func shouldPrefixNestedCommandNotFound(target string) bool {
+	if target == "" || containsControlRune(target) {
+		return false
+	}
+	if simpleCommandNotFoundTarget(target) {
+		return true
+	}
+	return runtime.GOOS == "darwin"
+}
+
+func containsControlRune(s string) bool {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 var _ Command = (*Bash)(nil)

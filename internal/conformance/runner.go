@@ -287,7 +287,7 @@ func runGBash(ctx context.Context, workspace, script string) (ExecutionResult, e
 		errMsg := err.Error()
 		var parseErr syntax.ParseError
 		if errors.As(err, &parseErr) {
-			if parseErr.SourceLine == "" {
+			if parseErr.SourceLine == "" && parseErr.WantsSourceLine() {
 				parseErr.SourceLine = extractSourceLine(script, parseErr.Pos.Line())
 			}
 			errMsg = parseErr.BashError()

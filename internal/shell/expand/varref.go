@@ -13,20 +13,11 @@ func parseVarRef(src string) (*syntax.VarRef, error) {
 }
 
 func cloneSubscript(index *syntax.Subscript) *syntax.Subscript {
-	if index == nil {
-		return nil
-	}
-	dup := *index
-	return &dup
+	return syntax.CloneSubscript(index)
 }
 
 func cloneVarRef(ref *syntax.VarRef) *syntax.VarRef {
-	if ref == nil {
-		return nil
-	}
-	dup := *ref
-	dup.Index = cloneSubscript(ref.Index)
-	return &dup
+	return syntax.CloneVarRef(ref)
 }
 
 func resolveSubscriptAuto(kind ValueKind, index *syntax.Subscript) *syntax.Subscript {

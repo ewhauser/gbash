@@ -5,17 +5,40 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/ewhauser/gbash/internal/shell/expand"
 )
 
 func runInterpScript(t *testing.T, src string) (string, string, error) {
 	t.Helper()
 
+	return runInterpScriptConfig(t, &RunnerConfig{Dir: "/tmp"}, src)
+}
+
+func runInterpScriptConfig(t *testing.T, cfg *RunnerConfig, src string) (string, string, error) {
+	t.Helper()
+
 	var stdout, stderr bytes.Buffer
-	runner, err := NewRunner(&RunnerConfig{
-		Dir:    "/tmp",
-		Stdout: &stdout,
-		Stderr: &stderr,
-	})
+	if cfg == nil {
+		cfg = &RunnerConfig{Dir: "/tmp"}
+	}
+	cfg = &RunnerConfig{
+		Env:              cfg.Env,
+		Dir:              cfg.Dir,
+		Params:           cfg.Params,
+		Interactive:      cfg.Interactive,
+		LegacyBashCompat: cfg.LegacyBashCompat,
+		Stdout:           &stdout,
+		Stderr:           &stderr,
+		CallHandler:      cfg.CallHandler,
+		ExecHandler:      cfg.ExecHandler,
+		OpenHandler:      cfg.OpenHandler,
+		ReadDirHandler:   cfg.ReadDirHandler,
+		StatHandler:      cfg.StatHandler,
+		RealpathHandler:  cfg.RealpathHandler,
+		ProcSubstHandler: cfg.ProcSubstHandler,
+	}
+	runner, err := NewRunner(cfg)
 	if err != nil {
 		t.Fatalf("NewRunner error = %v", err)
 	}
@@ -247,5 +270,79 @@ printf 'test=%d\n' "$?"
 	}
 	if stderr != "" {
 		t.Fatalf("stderr = %q, want %q", stderr, "")
+	}
+}
+
+func TestIndexedAssignQuotedSubscriptIsFatal(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+a['2']=3
+printf 'unreachable\n'
+`)
+	if err == nil {
+		t.Fatal("Run error = nil, want fatal assignment failure")
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if stderr == "" {
+		t.Fatal("stderr = empty, want arithmetic diagnostic")
+	}
+}
+
+func TestIndexedAssignNestedSideEffects(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+echo assign=$(( z[0] = 42 ))
+
+a[a[0]=1]=X
+declare -p a
+
+a[ a[2]=3 ]=Y
+declare -p a
+
+echo ---
+
+a[ a[0]+=1 ]+=X
+declare -p a
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "assign=42\ndeclare -a a=([0]=\"1\" [1]=\"X\")\ndeclare -a a=([0]=\"1\" [1]=\"X\" [2]=\"3\" [3]=\"Y\")\n---\ndeclare -a a=([0]=\"2\" [1]=\"X\" [2]=\"3X\" [3]=\"Y\")\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestArrayAssignmentTildeUsesCurrentShellHome(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Env: expand.ListEnviron("HOME=/"),
+		Dir: "/tmp",
+	}, `
+a=(0 1 2)
+b=(3 4 5)
+
+HOME=/home/spec-test
+a[0 + 1]=  b[2 + 0]=~/src
+
+typeset -p a b
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "declare -a a=([0]=\"0\" [1]=\"\" [2]=\"2\")\ndeclare -a b=([0]=\"3\" [1]=\"4\" [2]=\"/home/spec-test/src\")\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }

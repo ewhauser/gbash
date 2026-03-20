@@ -575,6 +575,11 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				if err := r.setVarByRef(prev, as.Ref, vr, as.Append); err != nil {
 					r.errf("%v\n", err)
 					r.exit.code = 1
+					var strictErr strictIndexedSubscriptError
+					if errors.As(err, &strictErr) {
+						r.exit.exiting = true
+						return
+					}
 					continue
 				}
 
@@ -1098,50 +1103,59 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			case *syntax.DeclDynamicWord:
 				for _, field := range r.fields(operand.Word) {
 					parsed, err := parseDeclOperandField(field)
-					if err != nil {
-						if strings.ContainsAny(field, "[]") {
-							parsed = nil
-							err = nil
-						} else {
-							r.errf("%s: %v\n", cm.Variant.Value, err)
+					splitFields := []string{field}
+					if strings.ContainsAny(field, "[]") && (err != nil || parsed == nil) {
+						splitFields = splitDeclDynamicField(field)
+					}
+					for i, splitField := range splitFields {
+						if i > 0 || len(splitFields) > 1 {
+							parsed, err = parseDeclOperandField(splitField)
+						}
+						if err != nil {
+							if strings.ContainsAny(splitField, "[]") {
+								parsed = nil
+								err = nil
+							} else {
+								r.errf("%s: %v\n", cm.Variant.Value, err)
+								r.exit.code = 1
+								continue
+							}
+						}
+						if parsed == nil {
+							r.errf("%s: `%s': not a valid identifier\n", cm.Variant.Value, splitField)
 							r.exit.code = 1
 							continue
 						}
-					}
-					if parsed == nil {
-						r.errf("%s: `%s': not a valid identifier\n", cm.Variant.Value, field)
-						r.exit.code = 1
-						continue
-					}
-					subMode := subscriptModeFromArrayExprMode(declArrayModeFromValueType(valType))
-					switch parsed := parsed.(type) {
-					case *syntax.DeclName:
-						stampVarRefSubscriptMode(parsed.Ref, subMode)
-					case *syntax.DeclAssign:
-						stampVarRefSubscriptMode(parsed.Assign.Ref, subMode)
-						stampArrayExprSubscriptModes(parsed.Assign.Array, subMode)
-					}
-					if as, ok := parsed.(*syntax.DeclAssign); ok && as.Assign.Array != nil {
-						if mode := declArrayModeFromValueType(valType); mode != syntax.ArrayExprInherit {
-							as.Assign.Array.Mode = mode
+						subMode := subscriptModeFromArrayExprMode(declArrayModeFromValueType(valType))
+						switch parsed := parsed.(type) {
+						case *syntax.DeclName:
+							stampVarRefSubscriptMode(parsed.Ref, subMode)
+						case *syntax.DeclAssign:
+							stampVarRefSubscriptMode(parsed.Assign.Ref, subMode)
+							stampArrayExprSubscriptModes(parsed.Assign.Array, subMode)
 						}
-					}
-					if as, ok := parsed.(*syntax.DeclAssign); ok && as.Assign.Array != nil &&
-						as.Assign.Array.Mode == syntax.ArrayExprInherit {
-						// Bash only keeps runtime-parsed compound assignments structural
-						// when an explicit array attribute is active.
-						parsed = declStringifiedArrayAssign(as.Assign)
-					}
-					if dyn, ok := parsed.(*syntax.DeclDynamicWord); ok {
-						parsed = &syntax.DeclName{
-							Ref: &syntax.VarRef{Name: &syntax.Lit{Value: r.literal(dyn.Word)}},
+						if as, ok := parsed.(*syntax.DeclAssign); ok && as.Assign.Array != nil {
+							if mode := declArrayModeFromValueType(valType); mode != syntax.ArrayExprInherit {
+								as.Assign.Array.Mode = mode
+							}
 						}
-					}
-					if !processOperand(parsed) {
-						return false
-					}
-					if r.exit.fatalExit || r.exit.exiting {
-						return false
+						if as, ok := parsed.(*syntax.DeclAssign); ok && as.Assign.Array != nil &&
+							as.Assign.Array.Mode == syntax.ArrayExprInherit {
+							// Bash only keeps runtime-parsed compound assignments structural
+							// when an explicit array attribute is active.
+							parsed = declStringifiedArrayAssign(as.Assign)
+						}
+						if dyn, ok := parsed.(*syntax.DeclDynamicWord); ok {
+							parsed = &syntax.DeclName{
+								Ref: &syntax.VarRef{Name: &syntax.Lit{Value: r.literal(dyn.Word)}},
+							}
+						}
+						if !processOperand(parsed) {
+							return false
+						}
+						if r.exit.fatalExit || r.exit.exiting {
+							return false
+						}
 					}
 				}
 				return true
@@ -1388,6 +1402,23 @@ func callExprDeclClause(args []*syntax.Word) *syntax.DeclClause {
 func parseDeclOperandField(field string) (syntax.DeclOperand, error) {
 	p := syntax.NewParser(syntax.Variant(syntax.LangBash))
 	return p.DeclOperandField(strings.NewReader(field))
+}
+
+func splitDeclDynamicField(field string) []string {
+	p := syntax.NewParser(syntax.Variant(syntax.LangBash))
+	var words []string
+	err := p.Words(strings.NewReader(field), func(word *syntax.Word) bool {
+		var buf bytes.Buffer
+		if err := syntax.NewPrinter().Print(&buf, word); err != nil {
+			panic(err)
+		}
+		words = append(words, buf.String())
+		return true
+	})
+	if err != nil || len(words) == 0 {
+		return []string{field}
+	}
+	return words
 }
 
 func declStringifiedArrayAssign(as *syntax.Assign) *syntax.DeclAssign {

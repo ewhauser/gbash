@@ -2,6 +2,7 @@ package interp
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -77,6 +78,9 @@ func printVarRef(ref *syntax.VarRef) string {
 	if ref == nil {
 		return ""
 	}
+	if raw := ref.RawText(); raw != "" {
+		return raw
+	}
 	var buf bytes.Buffer
 	printer := syntax.NewPrinter()
 	if err := printer.Print(&buf, ref); err != nil {
@@ -90,6 +94,54 @@ func badArraySubscriptRef(ref *syntax.VarRef, fallback string) string {
 		return printVarRef(ref)
 	}
 	return fallback
+}
+
+type strictIndexedSubscriptError struct {
+	err error
+}
+
+func (e strictIndexedSubscriptError) Error() string {
+	return e.err.Error()
+}
+
+func (e strictIndexedSubscriptError) Unwrap() error {
+	return e.err
+}
+
+func parseStrictIndexedSubscript(raw string) (syntax.ArithmExpr, error) {
+	if i := strings.IndexByte(raw, '#'); i >= 0 {
+		token := strings.TrimRight(raw[i:], " \t\r\n")
+		return nil, fmt.Errorf("%s: arithmetic syntax error: invalid arithmetic operator (error token is %q)", strings.TrimSpace(raw), token)
+	}
+	p := syntax.NewParser(syntax.Variant(syntax.LangBash))
+	expr, err := p.Arithmetic(strings.NewReader(raw))
+	if err == nil {
+		return expr, nil
+	}
+	var parseErr syntax.ParseError
+	if errors.As(err, &parseErr) {
+		if i := strings.IndexByte(raw, '#'); i >= 0 {
+			token := strings.TrimRight(raw[i:], " \t\r\n")
+			return nil, fmt.Errorf("%s: arithmetic syntax error: invalid arithmetic operator (error token is %q)", strings.TrimSpace(raw), token)
+		}
+	}
+	return nil, err
+}
+
+func (r *Runner) strictIndexedSubscript(index *syntax.Subscript) (int, error) {
+	expr := index.Expr
+	if raw := index.RawText(); raw != "" {
+		parsed, err := parseStrictIndexedSubscript(raw)
+		if err != nil {
+			return 0, strictIndexedSubscriptError{err: err}
+		}
+		expr = parsed
+	}
+	n, err := expand.Arithm(r.ecfg, expr)
+	if err != nil {
+		return 0, strictIndexedSubscriptError{err: err}
+	}
+	return n, nil
 }
 
 func (r *Runner) resolveVarRef(ref *syntax.VarRef) (*syntax.VarRef, expand.Variable, error) {
@@ -269,7 +321,17 @@ func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand
 		r.setVar(name, prev)
 		return nil
 	case resolvedSubscriptMode(index) == syntax.SubscriptIndexed:
-		key := r.arithm(index.Expr)
+		key, err := r.strictIndexedSubscript(index)
+		if err != nil {
+			return err
+		}
+		current := r.lookupVar(name)
+		ref, current, err = current.ResolveRef(r.writeEnv, ref)
+		if err != nil {
+			return err
+		}
+		name = ref.Name.Value
+		prev = current
 		if key < 0 {
 			if prev.Kind == expand.Indexed {
 				resolved, ok := prev.IndexedResolve(key)

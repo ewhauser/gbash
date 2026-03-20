@@ -3,6 +3,7 @@ package interp
 import (
 	"bytes"
 	"context"
+	"io/fs"
 	"testing"
 
 	"github.com/ewhauser/gbash/internal/shell/syntax"
@@ -128,5 +129,33 @@ func TestDeclPrefixAssignValidationFailureSkipsBuiltin(t *testing.T) {
 	}
 	if stderr.String() != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestDeclareArrayIndexedSideEffects(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir: "/tmp",
+		ReadDirHandler: func(context.Context, string) ([]fs.DirEntry, error) {
+			return nil, nil
+		},
+	}, `
+declare a[a[0]=1]=X
+declare -p a
+
+declare a[ a[2]=3 ]=Y
+declare -p a
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "declare -a a=([0]=\"1\" [1]=\"X\")\ndeclare -a a=([0]=\"1\" [1]=\"X\" [2]=\"3\")\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	const wantStderr = "declare: `a[': not a valid identifier\ndeclare: `]=Y': not a valid identifier\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
 	}
 }

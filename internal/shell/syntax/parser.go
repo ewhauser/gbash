@@ -9,6 +9,7 @@ import (
 	"io"
 	"iter"
 	"math/bits"
+	"runtime"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -612,6 +613,9 @@ type Parser struct {
 	wordRawBs      []byte
 	captureWordRaw bool
 
+	pendingArrayWord    string
+	pendingArrayWordPos Pos
+
 	aliasResolver   AliasResolver
 	aliasChain      []*AliasExpansion
 	aliasBlankNext  bool
@@ -672,6 +676,8 @@ func (p *Parser) reset() {
 	p.litBs = nil
 	p.wordRawBs = nil
 	p.captureWordRaw = false
+	p.pendingArrayWord = ""
+	p.pendingArrayWordPos = Pos{}
 	p.aliasChain = nil
 	p.aliasBlankNext = false
 	p.aliasInputStack = p.aliasInputStack[:0]
@@ -1404,6 +1410,10 @@ type ParseError struct {
 	SourceLine string
 	// SourceLinePos optionally overrides the line number used for SourceLine.
 	SourceLinePos Pos
+
+	bashText          string
+	bashSecondaryText string
+	noSourceLine      bool
 }
 
 func (e ParseError) Error() string {
@@ -1424,20 +1434,28 @@ func (e ParseError) BashError() string {
 		sourceLinePos = e.SourceLinePos
 	}
 	var first string
+	text := e.Text
+	if e.bashText != "" {
+		text = e.bashText
+	}
 	if e.Filename == "" {
-		first = fmt.Sprintf("line %d: %s", e.Pos.Line(), e.Text)
+		first = fmt.Sprintf("line %d: %s", e.Pos.Line(), text)
 	} else {
-		first = fmt.Sprintf("%s: line %d: %s", e.Filename, e.Pos.Line(), e.Text)
+		first = fmt.Sprintf("%s: line %d: %s", e.Filename, e.Pos.Line(), text)
 	}
 	lines := []string{first}
-	if e.SecondaryText != "" {
+	secondaryText := e.SecondaryText
+	if e.bashSecondaryText != "" {
+		secondaryText = e.bashSecondaryText
+	}
+	if secondaryText != "" {
 		if e.Filename == "" {
-			lines = append(lines, fmt.Sprintf("line %d: %s", secondaryPos.Line(), e.SecondaryText))
+			lines = append(lines, fmt.Sprintf("line %d: %s", secondaryPos.Line(), secondaryText))
 		} else {
-			lines = append(lines, fmt.Sprintf("%s: line %d: %s", e.Filename, secondaryPos.Line(), e.SecondaryText))
+			lines = append(lines, fmt.Sprintf("%s: line %d: %s", e.Filename, secondaryPos.Line(), secondaryText))
 		}
 	}
-	if e.SourceLine == "" {
+	if e.SourceLine == "" || e.noSourceLine {
 		return strings.Join(lines, "\n")
 	}
 	var second string
@@ -1448,6 +1466,10 @@ func (e ParseError) BashError() string {
 	}
 	lines = append(lines, second)
 	return strings.Join(lines, "\n")
+}
+
+func (e ParseError) WantsSourceLine() bool {
+	return !e.noSourceLine
 }
 
 // LangError is returned when the parser encounters code that is only valid in
@@ -1649,8 +1671,7 @@ func (p *Parser) getWord() *Word {
 }
 
 func (p *Parser) getWordRaw() (*Word, string) {
-	p.wordRawBs = append(p.wordRawBs[:0], p.currentTokenCaptureSeed()...)
-	p.captureWordRaw = true
+	p.startWordCapture()
 	w := p.getWord()
 	p.captureWordRaw = false
 	if w == nil {
@@ -1664,6 +1685,35 @@ func (p *Parser) getWordRaw() (*Word, string) {
 	raw := string(p.wordRawBs[:span])
 	p.wordRawBs = p.wordRawBs[:0]
 	return w, raw
+}
+
+func (p *Parser) startWordCapture() {
+	p.wordRawBs = append(p.wordRawBs[:0], p.currentTokenCaptureSeed()...)
+	p.captureWordRaw = true
+}
+
+func (p *Parser) stopWordCapture() string {
+	p.captureWordRaw = false
+	raw := strings.TrimRight(string(p.wordRawBs), " \t\r\n")
+	p.wordRawBs = p.wordRawBs[:0]
+	return raw
+}
+
+func (p *Parser) startCandidateCapture() {
+	p.wordRawBs = append(p.wordRawBs[:0], p.currentTokenSource()...)
+	p.wordRawBs = append(p.wordRawBs, p.currentRuneSource()...)
+	p.captureWordRaw = true
+}
+
+func (p *Parser) stopCandidateCapture(start, end Pos) string {
+	p.captureWordRaw = false
+	span := int(end.Offset() - start.Offset())
+	if span < 0 || span > len(p.wordRawBs) {
+		span = len(p.wordRawBs)
+	}
+	raw := strings.TrimRight(string(p.wordRawBs[:span]), " \t\r\n")
+	p.wordRawBs = p.wordRawBs[:0]
+	return raw
 }
 
 func (p *Parser) currentTokenCaptureSeed() string {
@@ -1702,6 +1752,15 @@ func (p *Parser) sourceFromPos(pos Pos) string {
 		return ""
 	}
 	return string(p.bs[start:])
+}
+
+func (p *Parser) sourceBetween(left, right Pos) string {
+	start := int(left.Offset())
+	end := int(right.Offset())
+	if start < 0 || end < start || end > len(p.bs) {
+		return ""
+	}
+	return string(p.bs[start:end])
 }
 
 func (p *Parser) sourceLineAtPos(pos Pos) string {
@@ -2921,6 +2980,7 @@ func patternExpOp(op ParExpOperator) bool {
 func (p *Parser) eitherIndex() *Subscript {
 	old := p.quote
 	lpos := p.pos
+	innerStart := posAddCol(lpos, 1)
 	sub := &Subscript{Left: lpos, Kind: SubscriptExpr, Mode: SubscriptAuto}
 	p.quote = paramExpArithm
 	p.next()
@@ -2946,10 +3006,24 @@ func (p *Parser) eitherIndex() *Subscript {
 		}
 		sub.Expr = p.followArithm(leftBrack, lpos)
 	}
-	p.quote = old
+	if p.lang.in(langBashLike) && p.tok == hash {
+		for p.tok != rightBrack && p.tok != _EOF && p.tok != _Newl {
+			p.next()
+		}
+		if p.tok == rightBrack {
+			if sub.Expr == nil {
+				raw := p.sourceBetween(innerStart, p.pos)
+				if raw != "" {
+					sub.Expr = p.wordOne(p.lit(innerStart, raw))
+				}
+			}
+		}
+	}
 	if p.tok == rightBrack {
 		sub.Right = p.pos
+		sub.raw = p.sourceBetween(innerStart, p.pos)
 	}
+	p.quote = old
 	p.matchedArithm(lpos, leftBrack, rightBrack)
 	return sub
 }
@@ -3095,6 +3169,7 @@ func (p *Parser) varRef() *VarRef {
 	}
 	ref := &VarRef{Name: p.lit(p.pos, p.val)}
 	if p.r != '[' {
+		ref.raw = ref.Name.Value
 		p.next()
 		return ref
 	}
@@ -3102,7 +3177,85 @@ func (p *Parser) varRef() *VarRef {
 	p.rune()
 	p.pos = posAddCol(p.pos, 1)
 	ref.Index = p.eitherIndex()
+	if ref.Index != nil {
+		switch {
+		case ref.Index.Right.IsValid():
+			ref.raw = p.sourceBetween(ref.Pos(), posAddCol(ref.Index.Right, 1))
+		default:
+			if raw := p.sourceFromPos(ref.Pos()); raw != "" {
+				if close := strings.IndexByte(raw, ']'); close >= 0 {
+					ref.raw = raw[:close+1]
+				}
+			}
+			ref.raw = strings.TrimRight(ref.raw, " \t\r\n")
+			if ref.raw == "" {
+				ref.raw = strings.TrimRight(p.sourceBetween(ref.Pos(), p.pos), " \t\r\n")
+			}
+			if ref.raw == "" {
+				ref.raw = strings.TrimRight(p.sourceFromPos(ref.Pos()), " \t\r\n")
+			}
+		}
+		if left := strings.IndexByte(ref.raw, '['); left >= 0 && strings.HasSuffix(ref.raw, "]") {
+			ref.Index.raw = ref.raw[left+1 : len(ref.raw)-1]
+		}
+	}
 	return ref
+}
+
+func (p *Parser) recordPendingArrayWord(start Pos, fallback string) {
+	end := p.pos
+	consumedCurrent := false
+	if !p.spaced {
+		switch p.tok {
+		case _Lit, _LitWord, _LitRedir:
+			consumedCurrent = true
+			if p.val != "" {
+				end = posAddCol(p.pos, len(p.val))
+			}
+		}
+	}
+	raw := strings.TrimRight(p.sourceBetween(start, end), " \t\r\n")
+	if raw == "" || len(raw) < len(fallback) {
+		raw = fallback
+	}
+	if raw == "" {
+		raw = strings.TrimRight(p.sourceFromPos(start), " \t\r\n")
+	}
+	p.pendingArrayWord = raw
+	p.pendingArrayWordPos = start
+	if consumedCurrent {
+		p.next()
+	}
+}
+
+func (p *Parser) takePendingArrayWord() *Word {
+	if p.pendingArrayWord == "" {
+		return nil
+	}
+	word := p.wordOne(p.lit(p.pendingArrayWordPos, p.pendingArrayWord))
+	p.pendingArrayWord = ""
+	p.pendingArrayWordPos = Pos{}
+	return word
+}
+
+func (p *Parser) normalizeArrayLikeEOFError() {
+	parseErr, ok := p.err.(ParseError)
+	if !ok {
+		return
+	}
+	if p.tok != _EOF && p.tok != _Newl {
+		return
+	}
+	parseErr.bashText = "unexpected EOF while looking for matching `]'"
+	if runtime.GOOS == "darwin" {
+		parseErr.bashSecondaryText = "syntax error: unexpected end of file"
+	} else {
+		parseErr.bashSecondaryText = ""
+	}
+	parseErr.SourceLine = ""
+	parseErr.SourceLinePos = Pos{}
+	parseErr.noSourceLine = true
+	p.err = parseErr
 }
 
 func subscriptHasWhitespace(sub *Subscript) bool {
@@ -3118,6 +3271,46 @@ func subscriptHasWhitespace(sub *Subscript) bool {
 		canonicalLen = len(ArithmExprString(sub.Expr))
 	}
 	return sourceLen > canonicalLen
+}
+
+func varRefSubscriptHasWhitespace(ref *VarRef) bool {
+	if ref == nil || ref.Index == nil {
+		return false
+	}
+	if subscriptHasWhitespace(ref.Index) {
+		return true
+	}
+	raw := ref.RawText()
+	if raw == "" {
+		return false
+	}
+	left := strings.IndexByte(raw, '[')
+	right := strings.LastIndexByte(raw, ']')
+	if left < 0 || right <= left {
+		return false
+	}
+	return strings.IndexAny(raw[left+1:right], " \t\r\n") >= 0
+}
+
+func varRefSubscriptClosed(ref *VarRef) bool {
+	if ref == nil || ref.Index == nil {
+		return false
+	}
+	if ref.Index.Right.IsValid() {
+		return true
+	}
+	return strings.HasSuffix(ref.RawText(), "]")
+}
+
+func varRefRawFromCandidate(candidate string) string {
+	candidate = strings.TrimRight(candidate, " \t\r\n")
+	if candidate == "" {
+		return ""
+	}
+	if close := strings.IndexByte(candidate, ']'); close >= 0 {
+		return candidate[:close+1]
+	}
+	return candidate
 }
 
 func (p *Parser) bracketStartsWithSpace() bool {
@@ -3290,17 +3483,45 @@ func (p *Parser) tryAssignCandidate(declMode bool) (*Assign, bool) {
 		return p.getAssign(), true
 	}
 	saved := *p
+	start := p.pos
+	p.startCandidateCapture()
 	ref := p.varRef()
 	if ref == nil {
+		p.wordRawBs = p.wordRawBs[:0]
+		p.captureWordRaw = false
 		return nil, false
 	}
-	if declMode && ref.Index != nil && subscriptHasWhitespace(ref.Index) {
+	spacedSubscript := varRefSubscriptHasWhitespace(ref)
+	if declMode && spacedSubscript {
+		p.wordRawBs = p.wordRawBs[:0]
+		p.captureWordRaw = false
 		*p = saved
 		p.err = nil
 		return nil, false
 	}
+	finishCandidate := func() string {
+		raw := p.stopCandidateCapture(start, p.pos)
+		if varRefSubscriptClosed(ref) && !strings.Contains(raw, "]") {
+			raw += "]"
+		}
+		if ref.raw == "" {
+			ref.raw = varRefRawFromCandidate(raw)
+		}
+		if ref.Index != nil && ref.Index.raw == "" {
+			rawRef := ref.raw
+			if left := strings.IndexByte(rawRef, '['); left >= 0 && strings.HasSuffix(rawRef, "]") {
+				ref.Index.raw = rawRef[left+1 : len(rawRef)-1]
+			}
+		}
+		return raw
+	}
 	if p.spaced || p.stopToken() {
-		if ref.Index != nil && subscriptHasWhitespace(ref.Index) {
+		candidateRaw := finishCandidate()
+		if !declMode && varRefSubscriptClosed(ref) && spacedSubscript {
+			p.recordPendingArrayWord(start, candidateRaw)
+			return nil, false
+		}
+		if spacedSubscript {
 			*p = saved
 			p.err = nil
 			return nil, false
@@ -3313,8 +3534,13 @@ func (p *Parser) tryAssignCandidate(declMode bool) (*Assign, bool) {
 		return nil, false
 	}
 	as, ok := p.tryAssignAfterRef(ref)
+	candidateRaw := finishCandidate()
 	if !ok && p.err == nil {
-		if ref.Index != nil && subscriptHasWhitespace(ref.Index) {
+		if !declMode && varRefSubscriptClosed(ref) && spacedSubscript {
+			p.recordPendingArrayWord(start, candidateRaw)
+			return nil, false
+		}
+		if spacedSubscript {
 			*p = saved
 			return nil, false
 		}
@@ -3415,6 +3641,17 @@ func (p *Parser) declOperand() DeclOperand {
 	}
 	if p.hasValidIdent() {
 		if p.bracketStartsWithSpace() {
+			start := p.pos
+			saved := *p
+			ref := p.varRef()
+			if ref != nil && varRefSubscriptClosed(ref) && varRefSubscriptHasWhitespace(ref) {
+				p.recordPendingArrayWord(start, ref.RawText())
+				if w := p.takePendingArrayWord(); w != nil {
+					return &DeclDynamicWord{Word: w}
+				}
+				return nil
+			}
+			*p = saved
 			if w := p.getWord(); w != nil {
 				return &DeclDynamicWord{Word: w}
 			}
@@ -5168,7 +5405,10 @@ func (p *Parser) callExpr(s *Stmt, w *Word, assign bool) {
 	if assign {
 		if as, ok := p.tryAssignCandidate(false); ok {
 			ce.Assigns = append(ce.Assigns, as)
+		} else if w := p.takePendingArrayWord(); w != nil {
+			ce.Args = append(ce.Args, w)
 		} else if p.err != nil {
+			p.normalizeArrayLikeEOFError()
 			s.Cmd = ce
 			return
 		}
@@ -5185,7 +5425,12 @@ loop:
 					ce.Assigns = append(ce.Assigns, as)
 					break
 				}
+				if w := p.takePendingArrayWord(); w != nil {
+					ce.Args = append(ce.Args, w)
+					break
+				}
 				if p.err != nil {
+					p.normalizeArrayLikeEOFError()
 					break loop
 				}
 			}
@@ -5210,7 +5455,12 @@ loop:
 					ce.Assigns = append(ce.Assigns, as)
 					break
 				}
+				if w := p.takePendingArrayWord(); w != nil {
+					ce.Args = append(ce.Args, w)
+					break
+				}
 				if p.err != nil {
+					p.normalizeArrayLikeEOFError()
 					break loop
 				}
 			}

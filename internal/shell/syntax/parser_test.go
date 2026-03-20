@@ -637,6 +637,7 @@ func confirmParse(in, cmd string, wantErr bool) func(*testing.T) {
 var cmpOpt = cmp.Options{
 	cmp.FilterValues(func(p1, p2 Pos) bool { return true }, cmp.Ignore()),
 	cmpopts.IgnoreFields(ArithmExp{}, "Source"),
+	cmpopts.IgnoreUnexported(Subscript{}, VarRef{}, ParseError{}),
 }
 
 func sourceLineForTest(src string, lineNum uint) string {

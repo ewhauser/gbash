@@ -22,34 +22,6 @@
           "mode": "xfail",
           "reason": "known gbash divergence from bash semantics in this upstream spec file"
         },
-        "oils/array-assign.test.sh::Are quotes allowed?": {
-          "mode": "xfail",
-          "reason": "gbash does not stop on quoted arithmetic array subscripts where bash treats the assignment as fatal"
-        },
-        "oils/array-assign.test.sh::Tricky parsing - a[ a[0]=1 ]=X  a[ a[0]+=1 ]+=X": {
-          "mode": "xfail",
-          "reason": "gbash still misses bash's nested subscript side effects when array assignments are parsed inside another array index"
-        },
-        "oils/array-assign.test.sh::More fragments like a[  a[5  a[5 +  a[5 + 3]": {
-          "mode": "xfail",
-          "reason": "gbash's parser diagnostics for incomplete array-assignment words still differ from bash"
-        },
-        "oils/array-assign.test.sh::declare builtin doesn't allow spaces": {
-          "mode": "xfail",
-          "reason": "gbash still differs from bash when declare parses spaced nested array-assignment operands"
-        },
-        "oils/array-assign.test.sh::Multiple LHS array words": {
-          "mode": "xfail",
-          "reason": "gbash still applies the statement-local HOME binding during adjacent array-assignment tilde expansion"
-        },
-        "oils/array-assign.test.sh::argv.sh a[1 + 2]=": {
-          "mode": "xfail",
-          "reason": "gbash normalizes spaced array-assignment identifiers in diagnostics instead of preserving bash's original text"
-        },
-        "oils/array-assign.test.sh::file named a[ is  not executed": {
-          "mode": "xfail",
-          "reason": "gbash treats `a[5 # 1]=` as a parse error instead of bash's arithmetic error"
-        },
         "oils/array-assoc.test.sh::BashAssoc ${a[@]@Q}": {
           "mode": "xfail",
           "reason": "gbash's array @Q quoting still differs from bash for associative values containing single quotes"
