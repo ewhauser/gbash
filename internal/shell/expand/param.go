@@ -442,6 +442,8 @@ func decodePromptEscapes(str string) string {
 			sb.WriteByte('\n')
 		case 'r':
 			sb.WriteByte('\r')
+		case '$':
+			sb.WriteByte('$')
 		case '\\':
 			sb.WriteByte('\\')
 		default:

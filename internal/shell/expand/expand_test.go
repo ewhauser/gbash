@@ -425,6 +425,9 @@ func TestDecodePromptEscapesPreservesUnknownSequences(t *testing.T) {
 	if got := decodePromptEscapes(`\\`); got != `\` {
 		t.Fatalf("decodePromptEscapes(backslash) = %q, want %q", got, `\`)
 	}
+	if got := decodePromptEscapes(`\$`); got != `$` {
+		t.Fatalf("decodePromptEscapes(dollar) = %q, want %q", got, `$`)
+	}
 }
 
 func TestSparseArrayDefaultExpansionUsesElementZeroSetness(t *testing.T) {

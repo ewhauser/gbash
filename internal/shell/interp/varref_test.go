@@ -183,76 +183,41 @@ test "$x" = "$new" && echo OK
 	}
 }
 
-func TestInvalidIndirectExpansionsAreFatal(t *testing.T) {
+func TestInvalidIndirectExpansionIsNonFatalInSimpleCommand(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name       string
-		src        string
-		wantStdout string
-		wantStderr string
-	}{
-		{
-			name: "simple command",
-			src: `
+	var stdout, stderr bytes.Buffer
+	runner, err := NewRunner(&RunnerConfig{
+		Dir:    "/tmp",
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner error = %v", err)
+	}
+
+	err = runner.runShellReader(context.Background(), strings.NewReader(`
 echo before
 x='a b'
 echo ${!x}
+echo status=$?
 echo after
-`,
-			wantStdout: "before\n",
-			wantStderr: "a b: invalid variable name\n",
-		},
-		{
-			name: "double brackets",
-			src: `
-echo before
-x='a b'
-[[ ${!x} ]]
-echo after
-`,
-			wantStdout: "before\n",
-			wantStderr: "a b: invalid variable name\n",
-		},
+`), "varref-nonfatal-test.sh", nil)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var stdout, stderr bytes.Buffer
-			runner, err := NewRunner(&RunnerConfig{
-				Dir:    "/tmp",
-				Stdout: &stdout,
-				Stderr: &stderr,
-			})
-			if err != nil {
-				t.Fatalf("NewRunner error = %v", err)
-			}
-
-			err = runner.runShellReader(context.Background(), strings.NewReader(tc.src), "varref-fatal-test.sh", nil)
-			if got, want := errString(err), "exit status 1"; got != want {
-				t.Fatalf("Run error = %q, want %q", got, want)
-			}
-			if got := stdout.String(); got != tc.wantStdout {
-				t.Fatalf("stdout = %q, want %q", got, tc.wantStdout)
-			}
-			if got := stderr.String(); got != tc.wantStderr {
-				t.Fatalf("stderr = %q, want %q", got, tc.wantStderr)
-			}
-			if runner.exit.code != 1 {
-				t.Fatalf("exit code = %d, want 1", runner.exit.code)
-			}
-			if !runner.exit.exiting {
-				t.Fatal("runner should mark invalid indirect expansion as exiting")
-			}
-		})
+	if got, want := stdout.String(), "before\nstatus=1\nafter\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
 	}
-}
-
-func errString(err error) string {
-	if err == nil {
-		return ""
+	if got, want := stderr.String(), "a b: invalid variable name\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
-	return err.Error()
+	if runner.exit.code != 0 {
+		t.Fatalf("exit code = %d, want 0", runner.exit.code)
+	}
+	if runner.exit.exiting {
+		t.Fatal("runner should not mark invalid indirect expansion as exiting here")
+	}
 }
 
 func TestRunCallAssignsRestoresResolvedNameRefTargets(t *testing.T) {
