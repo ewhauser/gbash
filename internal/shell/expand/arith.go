@@ -21,6 +21,17 @@ func arithExprSource(expr syntax.ArithmExpr) string {
 	return buf.String()
 }
 
+func arithExprPrinted(expr syntax.ArithmExpr) string {
+	if expr == nil {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := syntax.NewPrinter().Print(&buf, expr); err == nil {
+		return buf.String()
+	}
+	return arithExprSource(expr)
+}
+
 func bashQuoteErrorToken(s string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 	return `"` + replacer.Replace(s) + `"`
@@ -237,6 +248,9 @@ func ArithmWithSource(cfg *Config, expr syntax.ArithmExpr, source string, source
 		cloned.Source = source
 		cloned.SourceStart = sourceStart
 		cloned.SourceEnd = sourceEnd
+		if cloned.Expr != nil && cloned.ExprText != "" && source != "" && !arithExprUsesExpandedValue(cloned.Expr) {
+			cloned.ExprText = source
+		}
 		return 0, &cloned
 	}
 	var syntaxErr ArithmSyntaxError
@@ -871,6 +885,9 @@ func arithWordDiagnostic(root, tokenExpr syntax.ArithmExpr, exprText, tokenText,
 		return diag
 	}
 	diag.Expr = root
+	if root != tokenExpr && !arithExprUsesExpandedValue(root) {
+		diag.ExprText = arithExprPrinted(root)
+	}
 	return diag
 }
 

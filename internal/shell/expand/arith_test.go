@@ -281,6 +281,25 @@ func TestArithmWithSourcePreservesInvalidConstantExpression(t *testing.T) {
 	}
 }
 
+func TestArithmWithSourcePreservesInvalidConstantExpressionWithoutTrailingNewline(t *testing.T) {
+	t.Parallel()
+
+	exp := parseArithmExpansionScript(t, "echo $((a + 42x))")
+	cfg := &Config{Env: testEnv{}}
+
+	got, err := ArithmWithSource(cfg, exp.X, exp.Source, exp.Left.Offset()+3, exp.Right.Offset())
+	if err == nil {
+		t.Fatal("ArithmWithSource() error = nil, want invalid-constant error")
+	}
+	if got != 0 {
+		t.Fatalf("ArithmWithSource() = %d, want 0", got)
+	}
+	const want = `a + 42x: value too great for base (error token is "42x")`
+	if err.Error() != want {
+		t.Fatalf("ArithmWithSource() error = %q, want %q", err.Error(), want)
+	}
+}
+
 func TestArithmWithSourcePreservesLeadingNewlineInMultilineDiagnostics(t *testing.T) {
 	t.Parallel()
 

@@ -87,10 +87,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/array-assign.test.sh::More fragments like a[  a[5  a[5 +  a[5 + 3]": {
-          "mode": "xfail",
-          "reason": "gbash's parser diagnostics for incomplete array-assignment words still differ from bash"
-        },
         "oils/array-assoc.test.sh::BashAssoc ${a[@]@Q}": {
           "mode": "xfail",
           "reason": "gbash's array @Q quoting still differs from bash for associative values containing single quotes"
@@ -391,19 +387,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/ble-idioms.test.sh::dynamic arith varname: assign": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/ble-idioms.test.sh::dynamic arith varname: copy/add": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/ble-idioms.test.sh::recursive arith: recursion": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/ble-idioms.test.sh::recursive arith: short circuit &&, ||": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -583,27 +567,11 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-bracket.test.sh::No octal, hex, base N conversion - leading 0 is a regular decimal": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-bracket.test.sh::[ -t invalid ]": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-bracket.test.sh::[ a -eq b ]": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-bracket.test.sh::] syntax errors": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-bracket.test.sh::negative octal numbers, etc.": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-bracket.test.sh::no recursive arith [ 1+2 -eq 3 ]": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -2211,18 +2179,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/dbracket.test.sh::Hex literals with -eq": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/dbracket.test.sh::Octal literals with -eq": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/dbracket.test.sh::Quotes don't matter in comparison": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/dbracket.test.sh::[[ && ]] is syntax error": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -2262,10 +2218,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/dbracket.test.sh::negative numbers - zero, decimal, octal, hex, base N": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/dbracket.test.sh::tilde expansion with =~ (confusing)": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
@@ -2282,10 +2234,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/divergence.test.sh::xz package: dirprefix=\"${line##*([}\"": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/dparen.test.sh::literal strings inside (( ))": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -2809,10 +2757,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/paren-ambiguity.test.sh::((gzip example - zdiff package - #2337": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/paren-ambiguity.test.sh::((pkg-config example - postfix package - #2337": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

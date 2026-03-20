@@ -31,6 +31,7 @@ import (
 type Execution struct {
 	Name              string
 	Interpreter       string
+	PassthroughArgs   []string
 	ScriptPath        string
 	Script            string
 	Command           []string
@@ -140,13 +141,9 @@ func (m *core) Run(ctx context.Context, exec *Execution) (result *RunResult, run
 	if err != nil {
 		return nil, err
 	}
-	script := exec.Script
-	if script != "" && !strings.HasSuffix(script, "\n") {
-		script += "\n"
-	}
 	runErr = runner.RunReaderWithMetadata(
 		ctx,
-		strings.NewReader(script),
+		strings.NewReader(exec.Script),
 		executionSourceName(exec),
 		effectiveExec.ScriptPath,
 		func(file *syntax.File) (map[*syntax.Stmt]*syntax.Stmt, error) {
@@ -222,6 +219,7 @@ func (m *core) runnerConfig(exec *Execution, budget *executionBudget) *interp.Ru
 	cfg.Params = runnerParamArgs(exec.StartupOptions, exec.Args)
 	cfg.Interactive = exec.Interactive
 	cfg.LegacyBashCompat = exec.Interpreter == "bash" || exec.Interpreter == "sh"
+	cfg.CommandString = executionUsesCommandString(exec)
 	return cfg
 }
 
@@ -290,6 +288,53 @@ func executionSourceName(exec *Execution) string {
 	default:
 		return "stdin"
 	}
+}
+
+func executionUsesCommandString(exec *Execution) bool {
+	if exec == nil {
+		return false
+	}
+	args := exec.PassthroughArgs
+	if len(args) > 0 && path.Base(strings.TrimSpace(args[0])) == exec.Interpreter {
+		args = args[1:]
+	}
+	switch exec.Interpreter {
+	case "bash", "sh":
+		return hasBashCommandStringPassthroughArg(args)
+	default:
+		return false
+	}
+}
+
+func hasBashCommandStringPassthroughArg(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		switch {
+		case arg == "":
+			continue
+		case arg == "--":
+			return false
+		case arg == "--command" || strings.HasPrefix(arg, "--command="):
+			return true
+		case !strings.HasPrefix(arg, "-") || arg == "-":
+			return false
+		case strings.HasPrefix(arg, "--"):
+			continue
+		}
+		shorts := arg[1:]
+		for j := 0; j < len(shorts); j++ {
+			switch shorts[j] {
+			case 'c':
+				return true
+			case 'o':
+				if j == len(shorts)-1 {
+					i++
+				}
+				j = len(shorts)
+			}
+		}
+	}
+	return false
 }
 
 func attachParseErrorSourceLine(err error, script string) error {

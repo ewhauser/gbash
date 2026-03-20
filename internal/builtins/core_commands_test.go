@@ -1806,6 +1806,69 @@ func TestBashCommandStringPrefixesFatalArithmeticDiagnostic(t *testing.T) {
 	}
 }
 
+func TestBashCommandStringStopsAfterArithmeticExpansionError(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "bash -c 'x=42x; echo before; echo $((x)); echo after'\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if got, want := result.Stdout, "before\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if !strings.Contains(result.Stderr, "value too great for base") {
+		t.Fatalf("Stderr = %q, want arithmetic diagnostic", result.Stderr)
+	}
+}
+
+func TestBashCommandStringStopsAfterBadSubstitution(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "bash -c 'echo before; echo ${foo[]}; echo after'\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if got, want := result.Stdout, "before\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if !strings.Contains(result.Stderr, "bad substitution") {
+		t.Fatalf("Stderr = %q, want bad substitution diagnostic", result.Stderr)
+	}
+}
+
+func TestBashStdinKeepsRunningAfterArithmeticExpansionError(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "cat <<'EOF' | bash\nx=42x\necho before\necho $((x))\necho after\nEOF\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if got, want := result.Stdout, "before\nafter\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if !strings.Contains(result.Stderr, "value too great for base") {
+		t.Fatalf("Stderr = %q, want arithmetic diagnostic", result.Stderr)
+	}
+}
+
 func TestBashDashOpipefailAffectsCommandString(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})

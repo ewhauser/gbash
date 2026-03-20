@@ -1817,6 +1817,9 @@ func (p *Parser) arithmInnerSource(left, right Pos, bracket bool) string {
 	} else {
 		start += 2 // $[
 	}
+	if end > len(p.bs) {
+		end = len(p.bs)
+	}
 	if start < 0 || start > end || end > len(p.bs) {
 		return ""
 	}
@@ -1826,6 +1829,9 @@ func (p *Parser) arithmInnerSource(left, right Pos, bracket bool) string {
 func (p *Parser) arithmCmdSource(left, right Pos) string {
 	start := int(left.Offset()) + 2 // ((
 	end := int(right.Offset())
+	if end > len(p.bs) {
+		end = len(p.bs)
+	}
 	if start < 0 || start > end || end > len(p.bs) {
 		return ""
 	}

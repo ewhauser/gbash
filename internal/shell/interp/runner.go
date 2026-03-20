@@ -237,6 +237,7 @@ func (r *Runner) expandErr(err error) {
 		return
 	}
 	errMsg := err.Error()
+	fatalExpansionErr := r.commandString && !r.interactive
 	var (
 		cmdArithErr    arithmCommandError
 		unboundVarErr  expand.UnboundVariableError
@@ -262,10 +263,13 @@ func (r *Runner) expandErr(err error) {
 		r.exit.code = 1
 	case errors.As(err, &arithSyntaxErr):
 		r.exit.code = 1
+		r.exit.exiting = fatalExpansionErr
 	case errors.As(err, &arithDiagErr):
 		r.exit.code = 1
+		r.exit.exiting = fatalExpansionErr
 	case errMsg == "bad substitution" || strings.Contains(errMsg, ": bad substitution"):
 		r.exit.code = 1
+		r.exit.exiting = fatalExpansionErr
 	case errMsg == "invalid indirect expansion":
 		r.exit.code = 1
 	default:
