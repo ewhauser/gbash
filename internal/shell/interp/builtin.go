@@ -591,6 +591,8 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 	case "shopt":
 		mode := ""
 		posixOpts := false
+		printReusable := false
+		quiet := false
 		fp := flagParser{remaining: args}
 		for fp.more() {
 			switch flag := fp.flag(); flag {
@@ -598,34 +600,44 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 				mode = flag
 			case "-o":
 				posixOpts = true
-			case "-p", "-q":
-				panic(fmt.Sprintf("unhandled shopt flag: %s", flag))
+			case "-p":
+				printReusable = true
+			case "-q":
+				quiet = true
 			default:
-				if flag == "--" {
-					return failf(2, "shopt: --: invalid option\nshopt: usage: shopt [-pqsu] [-o] [optname ...]\n")
-				}
 				return failf(2, "shopt: invalid option %q\n", flag)
 			}
 		}
 		args := fp.args()
 		if len(args) == 0 {
+			if quiet {
+				break
+			}
 			if posixOpts {
 				for i, opt := range &posixOptsTable {
-					r.printOptLine(opt.name, r.opts[i], true)
+					if mode != "" && r.opts[i] != (mode == "-s") {
+						continue
+					}
+					r.printShoptLine(opt.name, r.opts[i], printReusable, true)
 				}
 			} else {
 				for i, opt := range &bashOptsTable {
-					r.printOptLine(opt.name, r.opts[len(posixOptsTable)+i], opt.supported)
+					enabled := r.opts[len(posixOptsTable)+i]
+					if mode != "" && enabled != (mode == "-s") {
+						continue
+					}
+					r.printShoptLine(opt.name, enabled, printReusable, false)
 				}
 			}
 			break
 		}
+		allEnabled := true
 		for _, arg := range args {
-			opt, supported := (*bool)(nil), true
+			opt := (*bool)(nil)
 			if posixOpts {
 				opt = r.posixOptByName(arg)
 			} else {
-				opt, supported = r.bashOptByName(arg)
+				opt, _ = r.bashOptByName(arg)
 			}
 			if opt == nil {
 				return failf(1, "shopt: invalid option name %q\n", arg)
@@ -633,13 +645,19 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 
 			switch mode {
 			case "-s", "-u":
-				if !supported {
-					return failf(1, "shopt: unsupported option %q\n", arg)
-				}
 				*opt = mode == "-s"
 			default: // ""
-				r.printOptLine(arg, *opt, supported)
+				if !*opt {
+					allEnabled = false
+				}
+				if quiet {
+					continue
+				}
+				r.printShoptLine(arg, *opt, printReusable, posixOpts)
 			}
+		}
+		if mode == "" && !allEnabled {
+			exit.code = 1
 		}
 		r.updateExpandOpts()
 
@@ -809,12 +827,27 @@ func mapfileSplit(delim byte, dropDelim bool) bufio.SplitFunc {
 }
 
 func (r *Runner) printOptLine(name string, enabled, supported bool) {
-	state := r.optStatusText(enabled)
-	if supported {
-		r.outf("%s\t%s\n", name, state)
+	r.outf("%s\t%s\n", name, r.optStatusText(enabled))
+}
+
+func (r *Runner) printShoptLine(name string, enabled, reusable, posix bool) {
+	if !reusable {
+		r.printOptLine(name, enabled, true)
 		return
 	}
-	r.outf("%s\t%s\t(%q not supported)\n", name, state, r.optStatusText(!enabled))
+	if posix {
+		flag := "+o"
+		if enabled {
+			flag = "-o"
+		}
+		r.outf("set %s %s\n", flag, name)
+		return
+	}
+	flag := "-u"
+	if enabled {
+		flag = "-s"
+	}
+	r.outf("shopt %s %s\n", flag, name)
 }
 
 const readBuiltinUsage = "read: usage: read [-Eers] [-a array] [-d delim] [-i text] [-n nchars] [-N nchars] [-p prompt] [-t timeout] [-u fd] [name ...]\n"
@@ -1483,7 +1516,8 @@ func (r *Runner) sourceBuiltin(ctx context.Context, pos syntax.Pos, args []strin
 	}
 	sourceName := args[0]
 	sourcePath := args[0]
-	if !strings.ContainsRune(args[0], '/') {
+	sourcepathOpt, _ := r.bashOptByName("sourcepath")
+	if !strings.ContainsRune(args[0], '/') && sourcepathOpt != nil && *sourcepathOpt {
 		if resolved, err := r.lookPath(ctx, r.Dir, r.writeEnv, args[0], false, false); err == nil {
 			sourcePath = resolved
 			sourceName = resolved
