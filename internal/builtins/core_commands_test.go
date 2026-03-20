@@ -353,6 +353,34 @@ command -V case_fn
 	}
 }
 
+func TestCommandBuiltinVUpperPreservesHeredocBody(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: `
+heredoc_fn() {
+  cat <<EOF
+  keep leading space
+EOF
+}
+command -V heredoc_fn
+`,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if want := "cat <<EOF\n  keep leading space\nEOF\n"; !strings.Contains(result.Stdout, want) {
+		t.Fatalf("Stdout = %q, want substring %q", result.Stdout, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
 func TestCommandBuiltinPUsesDefaultPath(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})

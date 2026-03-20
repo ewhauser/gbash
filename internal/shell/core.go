@@ -1000,10 +1000,15 @@ func pathDirs(env expand.Environ, dir string) []string {
 	return dirs
 }
 
-func resolveShebangCommand(ctx context.Context, exec *Execution, fullPath, invokedPath string) (_ *resolvedCommand, ok bool, err error) {
+type shebangResolution struct {
+	resolved    *resolvedCommand
+	interpreter string
+}
+
+func resolveShebangCommand(ctx context.Context, exec *Execution, fullPath, invokedPath string) (_ shebangResolution, ok bool, err error) {
 	file, err := exec.FS.Open(ctx, fullPath)
 	if err != nil {
-		return nil, false, nil
+		return shebangResolution{}, false, nil
 	}
 	defer func() {
 		_ = file.Close()
@@ -1011,39 +1016,48 @@ func resolveShebangCommand(ctx context.Context, exec *Execution, fullPath, invok
 
 	line, ok, err := readShebangLine(file)
 	if err != nil || !ok {
-		return nil, false, err
+		return shebangResolution{}, ok, err
 	}
-	shebangInterpreter, argv, ok := parseShebangInterpreter(line)
+	interpreterPath, shebangInterpreter, argv, ok := parseShebangInterpreter(line)
 	if !ok {
-		return nil, false, nil
+		return shebangResolution{}, true, nil
 	}
 	cmd, ok := lookupRegistryCommand(exec, shebangInterpreter)
 	if !ok {
-		return nil, false, nil
+		return shebangResolution{interpreter: interpreterPath}, true, nil
 	}
 	scriptArg := fullPath
 	if strings.Contains(invokedPath, "/") {
 		scriptArg = invokedPath
 	}
-	return &resolvedCommand{
-		command: cmd,
-		name:    shebangInterpreter,
-		args:    append(argv, scriptArg),
+	return shebangResolution{
+		resolved: &resolvedCommand{
+			command: cmd,
+			name:    shebangInterpreter,
+			args:    append(argv, scriptArg),
+		},
+		interpreter: interpreterPath,
 	}, true, nil
 }
 
 func resolveCommandFile(ctx context.Context, exec *Execution, fullPath string, mode stdfs.FileMode, invokedPath string) (_ *resolvedCommand, ok bool, err error) {
-	if resolved, ok, err := resolveVirtualCommandStub(ctx, exec, fullPath); ok || err != nil {
-		return resolved, ok, err
-	}
 	if !isExecutableCommandFile(mode) {
 		return nil, false, nil
 	}
-	if script, ok, err := resolveShebangCommand(ctx, exec, fullPath, invokedPath); ok || err != nil {
-		if ok {
-			script.source = "shebang"
+	if resolved, ok, err := resolveVirtualCommandStub(ctx, exec, fullPath); ok || err != nil {
+		return resolved, ok, err
+	}
+	if shebang, ok, err := resolveShebangCommand(ctx, exec, fullPath, invokedPath); ok || err != nil {
+		if err != nil {
+			return nil, false, err
 		}
-		return script, ok, err
+		if shebang.resolved != nil {
+			shebang.resolved.source = "shebang"
+			return shebang.resolved, true, nil
+		}
+		if shebang.interpreter != "" {
+			return nil, false, shellFailureToWriter(ctx, handlerState(ctx, exec).Stderr, 126, "%s: %s: bad interpreter: No such file or directory", fullPath, shebang.interpreter)
+		}
 	}
 	shellName := defaultScriptInterpreter(exec)
 	cmd, ok := lookupRegistryCommand(exec, shellName)
@@ -1152,19 +1166,33 @@ func readShebangLine(r io.Reader) (line string, ok bool, err error) {
 	return strings.TrimSpace(line[2:]), true, nil
 }
 
-func parseShebangInterpreter(line string) (name string, args []string, ok bool) {
+func parseShebangInterpreter(line string) (interpreterPath, name string, args []string, ok bool) {
 	fields := strings.Fields(line)
 	if len(fields) == 0 {
-		return "", nil, false
+		return "", "", nil, false
 	}
+	interpreterPath = fields[0]
 	name = path.Base(fields[0])
 	if name == "" || name == "." || name == "/" {
-		return "", nil, false
+		return "", "", nil, false
+	}
+	if name == "env" {
+		if len(fields) < 2 {
+			return interpreterPath, "", nil, false
+		}
+		name = path.Base(fields[1])
+		if name == "" || name == "." || name == "/" {
+			return interpreterPath, "", nil, false
+		}
+		if len(fields) > 2 {
+			args = append(args, fields[2:]...)
+		}
+		return interpreterPath, name, args, true
 	}
 	if len(fields) > 1 {
 		args = append(args, fields[1:]...)
 	}
-	return name, args, true
+	return interpreterPath, name, args, true
 }
 
 func shellFailure(ctx context.Context, code int, format string, args ...any) error {

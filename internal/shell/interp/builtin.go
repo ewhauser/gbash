@@ -2432,24 +2432,32 @@ func bashFunctionBody(body *syntax.Stmt) string {
 		return ""
 	}
 	var buf bytes.Buffer
-	if err := syntax.NewPrinter().Print(&buf, body); err != nil {
+	if err := syntax.NewPrinter(syntax.Indent(4)).Print(&buf, body); err != nil {
 		return ""
 	}
 	text := strings.TrimSpace(buf.String())
-	if strings.HasPrefix(text, "{") && strings.HasSuffix(text, "}") {
-		text = strings.TrimSpace(text[1 : len(text)-1])
-	}
-	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""
 	}
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-		line = trimBashFunctionLine(line)
-		lines[i] = "    " + line + "\n"
+	if strings.HasPrefix(text, "{") && strings.HasSuffix(text, "}") {
+		text = text[1 : len(text)-1]
 	}
-	return strings.Join(lines, "")
+	if text == "" {
+		return ""
+	}
+	if strings.Contains(text, "\n") {
+		text = strings.TrimPrefix(text, "\n")
+		text = strings.TrimSuffix(text, "\n")
+		if text == "" {
+			return ""
+		}
+		return text + "\n"
+	}
+	line := trimBashFunctionLine(strings.TrimSpace(text))
+	if line == "" {
+		return ""
+	}
+	return "    " + line + "\n"
 }
 
 func trimBashFunctionLine(line string) string {

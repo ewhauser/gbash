@@ -2,6 +2,7 @@ package shell
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	gbfs "github.com/ewhauser/gbash/fs"
 	"github.com/ewhauser/gbash/internal/builtins"
 	"github.com/ewhauser/gbash/internal/shell/expand"
+	"github.com/ewhauser/gbash/internal/shell/interp"
 	"github.com/ewhauser/gbash/internal/shellstate"
 	"github.com/ewhauser/gbash/trace"
 )
@@ -866,6 +868,85 @@ func TestLookupCommandIgnoresStubHeaderInRealScript(t *testing.T) {
 	}
 	if got, want := resolved.source, "shell-script"; got != want {
 		t.Fatalf("resolved.source = %q, want %q", got, want)
+	}
+}
+
+func TestLookupCommandUsesEnvShebangInterpreter(t *testing.T) {
+	t.Parallel()
+
+	registry := newShellTestRegistry(t)
+	fsys := gbfs.NewMemory()
+	if err := fsys.MkdirAll(context.Background(), "/tmp/bin", 0o755); err != nil {
+		t.Fatalf("MkdirAll(/tmp/bin) error = %v", err)
+	}
+	file, err := fsys.OpenFile(context.Background(), "/tmp/bin/hello", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		t.Fatalf("OpenFile(/tmp/bin/hello) error = %v", err)
+	}
+	if _, err := io.WriteString(file, "#!/usr/bin/env sh\necho hi\n"); err != nil {
+		t.Fatalf("WriteString(/tmp/bin/hello) error = %v", err)
+	}
+	_ = file.Close()
+
+	resolved, ok, err := lookupCommand(context.Background(), &Execution{
+		FS:       fsys,
+		Registry: registry,
+	}, "/tmp", expand.ListEnviron("PATH=/tmp/bin"), "hello")
+	if err != nil {
+		t.Fatalf("lookupCommand() error = %v", err)
+	}
+	if !ok {
+		t.Fatalf("lookupCommand() did not resolve command")
+	}
+	if got, want := resolved.name, "sh"; got != want {
+		t.Fatalf("resolved.name = %q, want %q", got, want)
+	}
+	if got, want := resolved.path, "/tmp/bin/hello"; got != want {
+		t.Fatalf("resolved.path = %q, want %q", got, want)
+	}
+	if got, want := resolved.source, "shebang"; got != want {
+		t.Fatalf("resolved.source = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(resolved.args, ","), "/tmp/bin/hello"; got != want {
+		t.Fatalf("resolved.args = %q, want %q", got, want)
+	}
+}
+
+func TestRunCommandRejectsUnsupportedShebang(t *testing.T) {
+	t.Parallel()
+
+	registry := newShellTestRegistry(t)
+	fsys := gbfs.NewMemory()
+	if err := fsys.MkdirAll(context.Background(), "/tmp/bin", 0o755); err != nil {
+		t.Fatalf("MkdirAll(/tmp/bin) error = %v", err)
+	}
+	file, err := fsys.OpenFile(context.Background(), "/tmp/bin/tool", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		t.Fatalf("OpenFile(/tmp/bin/tool) error = %v", err)
+	}
+	if _, err := io.WriteString(file, "#!/usr/bin/python\necho wrong\n"); err != nil {
+		t.Fatalf("WriteString(/tmp/bin/tool) error = %v", err)
+	}
+	_ = file.Close()
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+	_, err = RunCommand(context.Background(), &Execution{
+		Command:  []string{"/tmp/bin/tool"},
+		FS:       fsys,
+		Registry: registry,
+		Stdout:   &stdout,
+		Stderr:   &stderr,
+	})
+	var status interp.ExitStatus
+	if !errors.As(err, &status) || status != 126 {
+		t.Fatalf("RunCommand() error = %v, want exit status 126", err)
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+	if got, want := stderr.String(), "/tmp/bin/tool: /usr/bin/python: bad interpreter: No such file or directory\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }
 
