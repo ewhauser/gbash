@@ -154,3 +154,27 @@ lisp='^^([][{}\(\)^@])|^(~@)'
 		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }
+
+func TestConditionalRegexLegacyBashCompatInCommandSubstitution(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runLegacyBashScript(t, `
+bad='^)a\ b($'
+out=$(
+	[[ 'a b' =~ $bad ]]
+	printf 'status=%d rematch=%d' "$?" "${#BASH_REMATCH[@]}"
+)
+printf '%s\n' "$out"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+
+	const wantStdout = "status=2 rematch=0\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}

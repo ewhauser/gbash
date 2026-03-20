@@ -224,3 +224,25 @@ func TestArithmWithSourcePreservesDivisionByZeroSpacing(t *testing.T) {
 		t.Fatalf("ArithmWithSource() error = %q, want %q", err.Error(), want)
 	}
 }
+
+func TestArithmWithSourcePreservesExpandedOperands(t *testing.T) {
+	t.Parallel()
+
+	exp := parseArithmExpansion(t, "$(( $x / $y ))")
+	cfg := &Config{Env: testEnv{
+		"x": {Set: true, Kind: String, Str: "1"},
+		"y": {Set: true, Kind: String, Str: "0"},
+	}}
+
+	got, err := ArithmWithSource(cfg, exp.X, exp.Source, exp.Left.Offset()+3, exp.Right.Offset())
+	if err == nil {
+		t.Fatal("ArithmWithSource() error = nil, want division-by-zero error")
+	}
+	if got != 0 {
+		t.Fatalf("ArithmWithSource() = %d, want 0", got)
+	}
+	const want = `1 / 0 : division by 0 (error token is "0 ")`
+	if err.Error() != want {
+		t.Fatalf("ArithmWithSource() error = %q, want %q", err.Error(), want)
+	}
+}

@@ -863,6 +863,7 @@ func (r *Runner) subshell(background bool) *Runner {
 		internalRun:        r.internalRun,
 		opts:               r.opts,
 		interactive:        r.interactive,
+		legacyBashCompat:   r.legacyBashCompat,
 		exit:               r.exit,
 		lastExit:           r.lastExit,
 

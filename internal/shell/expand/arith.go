@@ -126,6 +126,8 @@ type ArithmDivByZeroError struct {
 	Source      string
 	SourceStart uint
 	SourceEnd   uint
+
+	Replacements []arithDiagnosticReplacement
 }
 
 func (e *ArithmDivByZeroError) Error() string {
@@ -137,10 +139,10 @@ func (e *ArithmDivByZeroError) Error() string {
 	if tokenText == "" {
 		tokenText = arithExprSource(e.Token)
 	}
-	if fromSource, ok := arithExprDiagnosticSource(e.Expr, e.Source, e.SourceStart, e.SourceEnd); ok {
+	if fromSource, ok := arithExprDiagnosticSource(e.Expr, e.Source, e.SourceStart, e.SourceEnd, e.Replacements); ok {
 		exprText = fromSource
 	}
-	if fromSource, ok := arithTokenDiagnosticSource(e.Token, e.Source, e.SourceStart, e.SourceEnd); ok {
+	if fromSource, ok := arithTokenDiagnosticSource(e.Token, e.Source, e.SourceStart, e.SourceEnd, e.Replacements); ok {
 		tokenText = fromSource
 	}
 	return fmt.Sprintf("%s: division by 0 (error token is %q)", exprText, tokenText)
@@ -318,32 +320,48 @@ func containsShellExpansion(w *syntax.Word) bool {
 	return false
 }
 
-func arithExprDiagnosticSource(expr syntax.ArithmExpr, source string, sourceStart, sourceEnd uint) (string, bool) {
-	if arithExprUsesExpandedValue(expr) {
+type arithDiagnosticReplacement struct {
+	Start uint
+	End   uint
+	Text  string
+}
+
+func arithExprDiagnosticSource(expr syntax.ArithmExpr, source string, sourceStart, sourceEnd uint, replacements []arithDiagnosticReplacement) (string, bool) {
+	if arithExprUsesExpandedValue(expr) && len(replacements) == 0 {
 		return "", false
 	}
-	if fromSource, ok := arithSourceSpan(expr, source, sourceStart, sourceEnd, true); ok {
+	if fromSource, ok := arithSourceSpan(expr, source, sourceStart, sourceEnd, true, replacements); ok {
 		return fromSource, true
 	}
 	return "", false
 }
 
-func arithTokenDiagnosticSource(expr syntax.ArithmExpr, source string, sourceStart, sourceEnd uint) (string, bool) {
-	if arithExprUsesExpandedValue(expr) {
+func arithTokenDiagnosticSource(expr syntax.ArithmExpr, source string, sourceStart, sourceEnd uint, replacements []arithDiagnosticReplacement) (string, bool) {
+	if arithExprUsesExpandedValue(expr) && len(replacements) == 0 {
 		return "", false
 	}
-	if fromSource, ok := arithSourceSpan(expr, source, sourceStart, sourceEnd, true); ok {
+	if fromSource, ok := arithSourceSpan(expr, source, sourceStart, sourceEnd, true, replacements); ok {
 		return fromSource, true
 	}
 	return "", false
 }
 
 func arithExprUsesExpandedValue(expr syntax.ArithmExpr) bool {
-	w, ok := expr.(*syntax.Word)
-	return ok && containsShellExpansion(w)
+	switch expr := expr.(type) {
+	case *syntax.Word:
+		return containsShellExpansion(expr)
+	case *syntax.BinaryArithm:
+		return arithExprUsesExpandedValue(expr.X) || arithExprUsesExpandedValue(expr.Y)
+	case *syntax.UnaryArithm:
+		return arithExprUsesExpandedValue(expr.X)
+	case *syntax.ParenArithm:
+		return arithExprUsesExpandedValue(expr.X)
+	default:
+		return false
+	}
 }
 
-func arithSourceSpan(expr syntax.ArithmExpr, source string, sourceStart, sourceEnd uint, includeTrailingSpaces bool) (string, bool) {
+func arithSourceSpan(expr syntax.ArithmExpr, source string, sourceStart, sourceEnd uint, includeTrailingSpaces bool, replacements []arithDiagnosticReplacement) (string, bool) {
 	if source == "" || expr == nil || !expr.Pos().IsValid() || !expr.End().IsValid() {
 		return "", false
 	}
@@ -363,11 +381,40 @@ func arithSourceSpan(expr syntax.ArithmExpr, source string, sourceStart, sourceE
 			case ' ', '\t':
 				relEnd++
 			default:
-				return source[relStart:relEnd], true
+				return arithSourceSpanSegment(source, sourceStart, relStart, relEnd, start, end, replacements), true
 			}
 		}
 	}
-	return source[relStart:relEnd], true
+	return arithSourceSpanSegment(source, sourceStart, relStart, relEnd, start, end, replacements), true
+}
+
+func arithSourceSpanSegment(source string, sourceStart uint, relStart, relEnd int, start, end uint, replacements []arithDiagnosticReplacement) string {
+	if len(replacements) == 0 {
+		return source[relStart:relEnd]
+	}
+	var b strings.Builder
+	cursor := start
+	for _, repl := range replacements {
+		if repl.Start < start || repl.End > end || repl.Start < cursor {
+			continue
+		}
+		b.WriteString(source[int(cursor-sourceStart):int(repl.Start-sourceStart)])
+		b.WriteString(repl.Text)
+		cursor = repl.End
+	}
+	b.WriteString(source[int(cursor-sourceStart):relEnd])
+	return b.String()
+}
+
+func arithDiagnosticReplacementForExpr(expr syntax.ArithmExpr, text string) (arithDiagnosticReplacement, bool) {
+	if expr == nil || !expr.Pos().IsValid() || !expr.End().IsValid() {
+		return arithDiagnosticReplacement{}, false
+	}
+	return arithDiagnosticReplacement{
+		Start: expr.Pos().Offset(),
+		End:   expr.End().Offset(),
+		Text:  text,
+	}, true
 }
 
 // divByZeroError creates a division-by-zero error with source tokens matching bash's format.
@@ -375,22 +422,34 @@ func arithSourceSpan(expr syntax.ArithmExpr, source string, sourceStart, sourceE
 func divByZeroError(expr *syntax.BinaryArithm, evaluatedLeft, evaluatedDivisor int) error {
 	// Build full expression: expand $-style expansions like bash does
 	var leftStr, divisor string
-	if w, ok := expr.X.(*syntax.Word); ok && containsShellExpansion(w) {
+	var replacements []arithDiagnosticReplacement
+	if arithExprUsesExpandedValue(expr.X) {
 		leftStr = strconv.Itoa(evaluatedLeft)
 	} else {
 		leftStr = arithExprSource(expr.X)
 	}
-	if w, ok := expr.Y.(*syntax.Word); ok && containsShellExpansion(w) {
+	if arithExprUsesExpandedValue(expr.X) {
+		if repl, ok := arithDiagnosticReplacementForExpr(expr.X, strconv.Itoa(evaluatedLeft)); ok {
+			replacements = append(replacements, repl)
+		}
+	}
+	if arithExprUsesExpandedValue(expr.Y) {
 		divisor = strconv.Itoa(evaluatedDivisor)
 	} else {
 		divisor = arithExprSource(expr.Y)
 	}
+	if arithExprUsesExpandedValue(expr.Y) {
+		if repl, ok := arithDiagnosticReplacementForExpr(expr.Y, strconv.Itoa(evaluatedDivisor)); ok {
+			replacements = append(replacements, repl)
+		}
+	}
 	fullExpr := leftStr + expr.Op.String() + divisor
 	return &ArithmDivByZeroError{
-		Expr:      expr,
-		Token:     expr.Y,
-		ExprText:  fullExpr,
-		TokenText: divisor,
+		Expr:         expr,
+		Token:        expr.Y,
+		ExprText:     fullExpr,
+		TokenText:    divisor,
+		Replacements: replacements,
 	}
 }
 
