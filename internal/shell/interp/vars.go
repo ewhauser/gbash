@@ -149,6 +149,25 @@ func execEnv(env expand.Environ) []string {
 	return list
 }
 
+func currentScopeVar(env expand.WriteEnviron, name string) (expand.Variable, bool) {
+	switch env := env.(type) {
+	case *overlayEnviron:
+		normalized := env.normalize(name)
+		vr, ok := env.values[normalized]
+		if !ok {
+			return expand.Variable{}, false
+		}
+		return vr.Variable, true
+	case *shadowWriteEnviron:
+		if env.shadowSet && name == env.shadowName {
+			return env.shadow, true
+		}
+		return currentScopeVar(env.parent, name)
+	default:
+		return expand.Variable{}, false
+	}
+}
+
 func (r *Runner) lookupVar(name string) expand.Variable {
 	if name == "" {
 		panic("variable name must not be empty")
@@ -541,6 +560,8 @@ func compoundArrayBase(prev expand.Variable, mode syntax.ArrayExprMode, appendAs
 	case expand.Associative:
 		if prev.Kind == expand.Associative {
 			base.Map = maps.Clone(prev.Map)
+		} else if prev.Kind == expand.String && prev.IsSet() {
+			base.Map = map[string]string{"0": prev.Str}
 		} else {
 			base.Map = make(map[string]string)
 		}
@@ -565,19 +586,10 @@ func (r *Runner) associativeArrayKey(index *syntax.Subscript) string {
 	return sb.String()
 }
 
-func hasAssociativeMixedCompoundArrayElems(elems []expandedArrayElem) bool {
-	hasKeyed := false
-	hasSequential := false
+func associativeArrayHasExplicitKeys(elems []expandedArrayElem) bool {
 	for _, elem := range elems {
 		switch elem.kind {
-		case syntax.ArrayElemSequential:
-			if len(elem.fields) > 0 {
-				hasSequential = true
-			}
 		case syntax.ArrayElemKeyed, syntax.ArrayElemKeyedAppend:
-			hasKeyed = true
-		}
-		if hasKeyed && hasSequential {
 			return true
 		}
 	}
@@ -603,10 +615,8 @@ func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType st
 	}()
 
 	if mode == syntax.ArrayExprAssociative {
-		if hasAssociativeMixedCompoundArrayElems(elems) {
-			r.exit.code = 1
-			return targetPrev, trace, false
-		}
+		hasExplicitKeys := associativeArrayHasExplicitKeys(elems)
+		reportedBareField := false
 		pendingKey := ""
 		hasPendingKey := false
 		flushPending := func() {
@@ -623,6 +633,14 @@ func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType st
 		for _, elem := range elems {
 			switch elem.kind {
 			case syntax.ArrayElemSequential:
+				if hasExplicitKeys {
+					if !reportedBareField && len(elem.fields) > 0 {
+						r.errf("%s: %s: must use subscript when assigning associative array\n", as.Ref.Name.Value, elem.fields[0])
+						r.exit.code = 1
+						reportedBareField = true
+					}
+					continue
+				}
 				for _, field := range elem.fields {
 					if !hasPendingKey {
 						pendingKey = field
@@ -643,7 +661,11 @@ func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType st
 					shadowEnv.shadow.Map = make(map[string]string)
 				}
 				if elem.kind == syntax.ArrayElemKeyedAppend {
-					shadowEnv.shadow.Map[key] += elem.value
+					if as.Append {
+						shadowEnv.shadow.Map[key] += elem.value
+					} else {
+						shadowEnv.shadow.Map[key] = targetPrev.Map[key] + elem.value
+					}
 				} else {
 					shadowEnv.shadow.Map[key] = elem.value
 				}
