@@ -2612,6 +2612,24 @@ func (p *Parser) getPattern(stops ...token) *Pattern {
 	return nil
 }
 
+func (p *Parser) getPatternWithLiteralLeadingSlash(stops ...token) *Pattern {
+	if p.tok != slash {
+		return p.getPattern(stops...)
+	}
+	slashPos := p.pos
+	p.next()
+	parts := splitPatternLit(p.rawLit(slashPos, posAddCol(slashPos, 1), "/"))
+	parts = p.patternParts(parts, stops...)
+	if len(parts) == 0 {
+		return nil
+	}
+	return &Pattern{
+		Start:  parts[0].Pos(),
+		EndPos: parts[len(parts)-1].End(),
+		Parts:  parts,
+	}
+}
+
 func (p *Parser) patternParts(pps []PatternPart, stops ...token) []PatternPart {
 	if p.quote == noState {
 		p.quote = unquotedWordCont
@@ -2792,16 +2810,25 @@ func (p *Parser) paramExp() *ParamExp {
 		p.next()
 		return pe
 	}
-	if p.tok != _EOF && (pe.Length || pe.Width || pe.IsSet) {
-		p.curErr("cannot combine multiple parameter expansion operators")
-	}
 	switch p.tok {
 	case slash, dblSlash: // pattern search and replace
 		p.checkLang(p.pos, langBashLike|LangMirBSDKorn|LangZsh, "search and replace")
 		pe.Repl = &Replace{All: p.tok == dblSlash}
 		p.quote = paramExpRepl
+		switch p.r {
+		case '#':
+			pe.Repl.Anchor = ReplaceAnchorPrefix
+			p.rune()
+		case '%':
+			pe.Repl.Anchor = ReplaceAnchorSuffix
+			p.rune()
+		}
 		p.next()
-		pe.Repl.Orig = p.getPattern(slash, rightBrace)
+		if pe.Repl.Anchor == ReplaceAnchorNone {
+			pe.Repl.Orig = p.getPatternWithLiteralLeadingSlash(slash, rightBrace)
+		} else {
+			pe.Repl.Orig = p.getPattern(slash, rightBrace)
+		}
 		p.quote = paramExpExp
 		if p.got(slash) {
 			pe.Repl.With = p.getWord()
@@ -2837,7 +2864,11 @@ func (p *Parser) paramExp() *ParamExp {
 		colonPos := p.pos
 		p.quote = paramExpArithm
 		if p.next(); p.tok != colon {
-			pe.Slice.Offset = p.followArithm(colon, colonPos)
+			if p.tok == rightBrace && !p.spaced {
+				pe.Slice.MissingOffset = true
+			} else {
+				pe.Slice.Offset = p.followArithm(colon, colonPos)
+			}
 		}
 		colonPos = p.pos
 		if p.got(colon) {

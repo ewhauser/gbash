@@ -5,6 +5,7 @@ package expand
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -51,6 +52,147 @@ func badSubstitution(pe *syntax.ParamExp) error {
 		return fmt.Errorf("bad substitution")
 	}
 	return fmt.Errorf("%s: bad substitution", src)
+}
+
+func invalidParamExpansion(pe *syntax.ParamExp) error {
+	if pe == nil {
+		return nil
+	}
+	if pe.Slice != nil && pe.Slice.MissingOffset {
+		return badSubstitution(pe)
+	}
+	if (pe.Length || pe.Width || pe.IsSet) &&
+		(len(pe.Modifiers) > 0 || pe.Slice != nil || pe.Repl != nil || pe.Names != 0 || pe.Exp != nil) {
+		return badSubstitution(pe)
+	}
+	return nil
+}
+
+type compiledParamPattern struct {
+	rx         *regexp.Regexp
+	byteLocale bool
+}
+
+func encodeByteLocaleString(str string) (string, map[int]int) {
+	offsets := make(map[int]int, len(str)+1)
+	var sb strings.Builder
+	offsets[0] = 0
+	for i := 0; i < len(str); i++ {
+		offsets[sb.Len()] = i
+		sb.WriteRune(rune(str[i]))
+	}
+	offsets[sb.Len()] = len(str)
+	return sb.String(), offsets
+}
+
+func remapParamPatternIndices(locs []int, offsets map[int]int) []int {
+	if locs == nil {
+		return nil
+	}
+	remapped := make([]int, len(locs))
+	for i, loc := range locs {
+		remapped[i] = offsets[loc]
+	}
+	return remapped
+}
+
+func remapParamPatternLocs(locs [][]int, offsets map[int]int) [][]int {
+	if locs == nil {
+		return nil
+	}
+	remapped := make([][]int, len(locs))
+	for i, loc := range locs {
+		remapped[i] = remapParamPatternIndices(loc, offsets)
+	}
+	return remapped
+}
+
+func (m *compiledParamPattern) findAllStringIndex(name string, n int) [][]int {
+	if !m.byteLocale {
+		return m.rx.FindAllStringIndex(name, n)
+	}
+	encoded, offsets := encodeByteLocaleString(name)
+	return remapParamPatternLocs(m.rx.FindAllStringIndex(encoded, n), offsets)
+}
+
+func (m *compiledParamPattern) findStringIndex(name string) []int {
+	if !m.byteLocale {
+		return m.rx.FindStringIndex(name)
+	}
+	encoded, offsets := encodeByteLocaleString(name)
+	return remapParamPatternIndices(m.rx.FindStringIndex(encoded), offsets)
+}
+
+func (m *compiledParamPattern) findStringSubmatchIndex(name string) []int {
+	if !m.byteLocale {
+		return m.rx.FindStringSubmatchIndex(name)
+	}
+	encoded, offsets := encodeByteLocaleString(name)
+	return remapParamPatternIndices(m.rx.FindStringSubmatchIndex(encoded), offsets)
+}
+
+func shouldQuoteParamPattern(pat string, err error) bool {
+	switch pat {
+	case "[", "[]", "[^]]":
+		return true
+	}
+	var synErr pattern.SyntaxError
+	if errors.As(err, &synErr) && synErr.Error() == "[ was not matched with a closing ]" {
+		return true
+	}
+	return err != nil && err.Error() == "[ was not matched with a closing ]"
+}
+
+func (cfg *Config) paramPatternExpr(pat string, mode pattern.Mode) (string, error) {
+	source := pat
+	if cfg.bashByteLocale() {
+		source, _ = encodeByteLocaleString(pat)
+	}
+	expr, err := pattern.Regexp(source, mode)
+	if err == nil && !shouldQuoteParamPattern(pat, nil) {
+		return expr, nil
+	}
+	if err != nil && !shouldQuoteParamPattern(pat, err) {
+		return "", err
+	}
+	quoted := pattern.QuoteMeta(source, pattern.ExtendedOperators)
+	return pattern.Regexp(quoted, mode)
+}
+
+func (cfg *Config) compileParamPattern(expr string) *compiledParamPattern {
+	return &compiledParamPattern{
+		rx:         regexp.MustCompile(expr),
+		byteLocale: cfg.bashByteLocale(),
+	}
+}
+
+func normalizeParamReplacement(with string) string {
+	// In ${x/pat/repl}, a backslash used to quote the slash delimiter does not
+	// survive into the replacement payload.
+	return strings.ReplaceAll(with, `\/`, `/`)
+}
+
+func (cfg *Config) findParamPatternAllIndex(pat, name string, n int, anchor syntax.ReplaceAnchor) ([][]int, error) {
+	expr, err := cfg.paramPatternExpr(pat, pattern.ExtendedOperators)
+	if err != nil {
+		return nil, err
+	}
+	switch anchor {
+	case syntax.ReplaceAnchorPrefix:
+		loc := cfg.compileParamPattern("^(" + expr + ")").findStringSubmatchIndex(name)
+		if loc == nil {
+			return nil, nil
+		}
+		return [][]int{{loc[2], loc[3]}}, nil
+	case syntax.ReplaceAnchorSuffix:
+		loc := cfg.compileParamPattern("(" + expr + ")$").findStringSubmatchIndex(name)
+		if loc == nil {
+			return nil, nil
+		}
+		return [][]int{{loc[2], loc[3]}}, nil
+	default:
+		return cfg.compileParamPattern(expr).findAllStringIndex(name, n), nil
+	}
 }
 
 func (cfg *Config) associativeSubscriptKey(sub *syntax.Subscript) (string, error) {
@@ -525,19 +667,23 @@ func (cfg *Config) transformArrayElems(pe *syntax.ParamExp, state paramExpState,
 		if err != nil {
 			return nil, err
 		}
-		if orig == "" {
+		if orig == "" && pe.Repl.Anchor == syntax.ReplaceAnchorNone {
 			return elems, nil
 		}
 		with, err := Literal(cfg, pe.Repl.With)
 		if err != nil {
 			return nil, err
 		}
+		with = normalizeParamReplacement(with)
 		n := 1
 		if pe.Repl.All {
 			n = -1
 		}
 		for i, elem := range elems {
-			locs := findAllIndex(orig, elem, n)
+			locs, err := cfg.findParamPatternAllIndex(orig, elem, n, pe.Repl.Anchor)
+			if err != nil {
+				return nil, err
+			}
 			sb := cfg.strBuilder()
 			last := 0
 			for _, loc := range locs {
@@ -564,7 +710,10 @@ func (cfg *Config) transformArrayElems(pe *syntax.ParamExp, state paramExpState,
 		suffix := op == syntax.RemSmallSuffix || op == syntax.RemLargeSuffix
 		small := op == syntax.RemSmallPrefix || op == syntax.RemSmallSuffix
 		for i, elem := range elems {
-			elems[i] = removePattern(elem, arg, suffix, small)
+			elems[i], err = cfg.removePattern(elem, arg, suffix, small)
+			if err != nil {
+				return nil, err
+			}
 		}
 	case syntax.UpperFirst, syntax.UpperAll,
 		syntax.LowerFirst, syntax.LowerAll:
@@ -648,6 +797,9 @@ func (cfg *Config) indirectParamArrayFields(state paramExpState) ([][]fieldPart,
 func (cfg *Config) paramExpSplitValue(pe *syntax.ParamExp) ([]fieldPart, bool, error) {
 	if cfg.ifs == "" || pe == nil || pe.Length || pe.Width || pe.IsSet || pe.Excl {
 		return nil, false, nil
+	}
+	if err := invalidParamExpansion(pe); err != nil {
+		return nil, false, err
 	}
 
 	fields0, elems, isArray := cfg.quotedArrayFields(pe)
@@ -734,6 +886,9 @@ func (cfg *Config) paramExpState(pe *syntax.ParamExp) (paramExpState, error) {
 	state := paramExpState{
 		name:       pe.Param.Value,
 		callVarInd: true,
+	}
+	if err := invalidParamExpansion(pe); err != nil {
+		return state, err
 	}
 
 	index := pe.Index
@@ -1110,6 +1265,9 @@ func (cfg *Config) paramExpFields(pe *syntax.ParamExp) ([][]fieldPart, bool, boo
 	if pe.Length || pe.Width || pe.IsSet {
 		return nil, false, false, nil
 	}
+	if err := invalidParamExpansion(pe); err != nil {
+		return nil, false, false, err
+	}
 	oldParam := cfg.curParam
 	cfg.curParam = pe
 	defer func() { cfg.curParam = oldParam }()
@@ -1462,18 +1620,22 @@ func (cfg *Config) paramExp(pe *syntax.ParamExp, ql quoteLevel) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		if orig == "" {
+		if orig == "" && pe.Repl.Anchor == syntax.ReplaceAnchorNone {
 			break // nothing to replace
 		}
 		with, err := Literal(cfg, pe.Repl.With)
 		if err != nil {
 			return "", err
 		}
+		with = normalizeParamReplacement(with)
 		n := 1
 		if pe.Repl.All {
 			n = -1
 		}
-		locs := findAllIndex(orig, str, n)
+		locs, err := cfg.findParamPatternAllIndex(orig, str, n, pe.Repl.Anchor)
+		if err != nil {
+			return "", err
+		}
 		sb := cfg.strBuilder()
 		last := 0
 		for _, loc := range locs {
@@ -1560,7 +1722,10 @@ func (cfg *Config) paramExp(pe *syntax.ParamExp, ql quoteLevel) (string, error) 
 				suffix := op == syntax.RemSmallSuffix || op == syntax.RemLargeSuffix
 				small := op == syntax.RemSmallPrefix || op == syntax.RemSmallSuffix
 				for i, elem := range elems {
-					elems[i] = removePattern(elem, arg, suffix, small)
+					elems[i], err = cfg.removePattern(elem, arg, suffix, small)
+					if err != nil {
+						return "", err
+					}
 				}
 				str = cfg.joinArrayElemsForString(pe, elems)
 			case syntax.UpperFirst, syntax.UpperAll,
@@ -1646,14 +1811,14 @@ func (cfg *Config) paramExp(pe *syntax.ParamExp, ql quoteLevel) (string, error) 
 	return str, nil
 }
 
-func removePattern(str, pat string, fromEnd, shortest bool) string {
+func (cfg *Config) removePattern(str, pat string, fromEnd, shortest bool) (string, error) {
 	mode := pattern.ExtendedOperators
 	if shortest {
 		mode |= pattern.Shortest
 	}
-	expr, err := pattern.Regexp(pat, mode)
+	expr, err := cfg.paramPatternExpr(pat, mode)
 	if err != nil {
-		return str
+		return str, err
 	}
 	switch {
 	case fromEnd && shortest:
@@ -1666,13 +1831,11 @@ func removePattern(str, pat string, fromEnd, shortest bool) string {
 		// simple prefix
 		expr = "^(" + expr + ")"
 	}
-	// no need to check error as Translate returns one
-	rx := regexp.MustCompile(expr)
-	if loc := rx.FindStringSubmatchIndex(str); loc != nil {
+	if loc := cfg.compileParamPattern(expr).findStringSubmatchIndex(str); loc != nil {
 		// remove the original pattern (the submatch)
 		str = str[:loc[2]] + str[loc[3]:]
 	}
-	return str
+	return str, nil
 }
 
 func (cfg *Config) varInd(name string, vr Variable, idx *syntax.Subscript) (string, error) {

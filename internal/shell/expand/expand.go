@@ -1647,6 +1647,9 @@ func (cfg *Config) quotedElemFields(pe *syntax.ParamExp) ([]string, bool, error)
 	if pe == nil || pe.Length || pe.Width || pe.IsSet {
 		return nil, false, nil
 	}
+	if err := invalidParamExpansion(pe); err != nil {
+		return nil, false, err
+	}
 	name := pe.Param.Value
 	if pe.Excl {
 		state, err := cfg.paramExpState(indirectHolderParamExp(pe))

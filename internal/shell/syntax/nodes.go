@@ -913,14 +913,26 @@ func (p *ParamExp) nakedIndex() bool {
 // [LangZsh] uses a [BinaryArithm] with [Comma] in [ParamExp.Index.Expr]
 // instead.
 type Slice struct {
+	// MissingOffset distinguishes `${param:}` from `${param: }`.
+	// Both would otherwise look like an empty arithmetic word.
+	MissingOffset  bool
 	Offset, Length ArithmExpr
 }
 
+type ReplaceAnchor uint8
+
+const (
+	ReplaceAnchorNone ReplaceAnchor = iota
+	ReplaceAnchorPrefix
+	ReplaceAnchorSuffix
+)
+
 // Replace represents a search and replace expression inside a [ParamExp].
 type Replace struct {
-	All  bool
-	Orig *Pattern
-	With *Word
+	Anchor ReplaceAnchor
+	All    bool
+	Orig   *Pattern
+	With   *Word
 }
 
 // Expansion represents string manipulation in a [ParamExp] other than those
