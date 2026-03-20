@@ -43,7 +43,7 @@ test("Bash files supports eager, lazy, and metadata-backed entries", async () =>
 
   const statResult = await bash.exec("stat -c '%a %Y' /home/agent/meta.txt");
   assert.equal(statResult.exitCode, 0);
-  assert.equal(statResult.stdout.trim(), "0640 1704164645");
+  assert.equal(statResult.stdout.trim(), "640 1704164645");
 
   await bash.dispose();
 });
