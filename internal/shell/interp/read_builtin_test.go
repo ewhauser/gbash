@@ -131,3 +131,35 @@ printf 'status=%d\n' "$?"
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 }
+
+func TestReadBuiltinPollNoDataStatus(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	runner, err := NewRunner(&RunnerConfig{
+		Dir:    "/tmp",
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner error = %v", err)
+	}
+
+	pr, pw := runner.newPipe()
+	defer pw.Close()
+	runner.setStdinReader(pr)
+
+	err = runner.runShellReader(context.Background(), strings.NewReader(`
+read -t 0 var
+printf 'status=%d\n' "$?"
+`), "read-poll-test.sh", nil)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout.String() != "status=1\n" {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), "status=1\n")
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}

@@ -547,7 +547,8 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		}
 
 		if err != nil {
-			if !errors.Is(err, io.EOF) && !errors.Is(err, os.ErrDeadlineExceeded) {
+			if !errors.Is(err, io.EOF) && !errors.Is(err, os.ErrDeadlineExceeded) &&
+				!errors.Is(err, errReadBuiltinPollUnavailable) {
 				r.errf("read: %d: read error: %s\n", opts.fd, readBuiltinErrorText(err))
 			}
 			if errors.Is(err, os.ErrDeadlineExceeded) {
@@ -826,6 +827,8 @@ func (r *Runner) printOptLine(name string, enabled, supported bool) {
 
 const readBuiltinUsage = "read: usage: read [-Eers] [-a array] [-d delim] [-i text] [-n nchars] [-N nchars] [-p prompt] [-t timeout] [-u fd] [name ...]\n"
 
+var errReadBuiltinPollUnavailable = errors.New("read poll unavailable")
+
 type readBuiltinOptions struct {
 	raw        bool
 	silent     bool
@@ -1028,6 +1031,9 @@ func (r *Runner) readBuiltinPoll(ctx context.Context, fd *shellFD) error {
 	_, err := fd.PeekByte()
 	if err == nil || errors.Is(err, io.EOF) {
 		return nil
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return errReadBuiltinPollUnavailable
 	}
 	return err
 }
