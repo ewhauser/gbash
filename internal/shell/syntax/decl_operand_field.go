@@ -71,6 +71,7 @@ func literalizeDeclFieldAssign(src string, as *Assign) *Assign {
 		return as
 	}
 	as.Value = &Word{Parts: []WordPart{&Lit{Value: value}}}
+	as.literalValue = true
 	return as
 }
 

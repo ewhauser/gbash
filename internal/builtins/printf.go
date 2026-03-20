@@ -2,7 +2,11 @@ package builtins
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"strings"
+	"syscall"
 
 	"github.com/ewhauser/gbash/internal/printfutil"
 	"github.com/ewhauser/gbash/internal/shellstate"
@@ -23,25 +27,55 @@ func (c *Printf) Run(ctx context.Context, inv *Invocation) error {
 	if err != nil {
 		return exitf(inv, 2, "printf: %v", err)
 	}
-	out, err := printfutil.Format(args[0], args[1:])
-	if err != nil {
-		return exitf(inv, 1, "printf: %v", err)
+	result := printfutil.Format(args[0], args[1:], printfutil.Options{
+		LookupEnv: func(name string) (string, bool) {
+			if inv == nil || inv.Env == nil {
+				return "", false
+			}
+			value, ok := inv.Env[name]
+			return value, ok
+		},
+	})
+	for _, diag := range result.Diagnostics {
+		if inv != nil && inv.Stderr != nil {
+			_, _ = fmt.Fprintf(inv.Stderr, "printf: %s\n", diag)
+		}
 	}
 	if assign {
 		if assignments := shellstate.ShellVarAssignmentsFromContext(ctx); assignments != nil {
-			assignments.Set(varName, out)
-			return nil
+			assignments.Set(varName, result.Output)
+		} else {
+			if inv.Env == nil {
+				inv.Env = make(map[string]string)
+			}
+			inv.Env[varName] = result.Output
 		}
-		if inv.Env == nil {
-			inv.Env = make(map[string]string)
+		if result.ExitCode != 0 {
+			return &ExitError{Code: int(result.ExitCode)}
 		}
-		inv.Env[varName] = out
 		return nil
 	}
-	if _, err := fmt.Fprint(inv.Stdout, out); err != nil {
+	if _, err := io.WriteString(inv.Stdout, result.Output); err != nil {
+		if printfBrokenPipe(err) {
+			if result.ExitCode != 0 {
+				return &ExitError{Code: int(result.ExitCode)}
+			}
+			return nil
+		}
 		return &ExitError{Code: 1, Err: err}
 	}
+	if result.ExitCode != 0 {
+		return &ExitError{Code: int(result.ExitCode)}
+	}
 	return nil
+}
+
+func printfBrokenPipe(err error) bool {
+	if errors.Is(err, io.ErrClosedPipe) || errors.Is(err, syscall.EPIPE) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "broken pipe") || strings.Contains(lower, "closed pipe")
 }
 
 func normalizePrintfArgs(args []string) (varName string, assign bool, normalized []string, err error) {

@@ -74,6 +74,26 @@ printf 'scalar-array=%s|%s|%s|%s\n' "${#direct_scalar[@]}" "${direct_scalar[0]}"
 	}
 }
 
+func TestDeclDynamicQuotedParamQRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+var=foo
+val='"quoted" with spaces and \'
+declare $var="${val@Q}"
+printf '<%s>\n' "$foo"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v, stdout=%q stderr=%q", err, stdout, stderr)
+	}
+	if got, want := stdout, "<'\"quoted\" with spaces and \\'>\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestDeclPrefixAssignValidationFailureSkipsBuiltin(t *testing.T) {
 	t.Parallel()
 

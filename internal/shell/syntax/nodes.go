@@ -406,10 +406,15 @@ func CloneVarRef(ref *VarRef) *VarRef {
 // If [Assign.Ref]'s Index is non-nil, the value will be a word and not an
 // array, as nested arrays are not allowed.
 type Assign struct {
-	Append bool // +=
-	Ref    *VarRef
-	Value  *Word      // =val
-	Array  *ArrayExpr // =(arr)
+	Append       bool // +=
+	Ref          *VarRef
+	Value        *Word      // =val
+	Array        *ArrayExpr // =(arr)
+	literalValue bool
+}
+
+func (a *Assign) LiteralizedValue() bool {
+	return a != nil && a.literalValue
 }
 
 func (a *Assign) Pos() Pos {

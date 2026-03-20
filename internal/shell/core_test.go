@@ -182,7 +182,7 @@ func TestCoreRunUsesShellPrintfBuiltinForFormatting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v, stdout=%q, stderr=%q", err, stdout.String(), stderr.String())
 	}
-	const want = "65|1F|1.2|\"a b\"\n<65|1F|1.2|\"a b\">\n"
+	const want = "65|1F|1.2|a\\ b\n<65|1F|1.2|a\\ b>\n"
 	if got := stdout.String(); got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}

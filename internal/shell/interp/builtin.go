@@ -10,12 +10,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/ewhauser/gbash/internal/printfutil"
@@ -269,27 +271,46 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 			}
 		}
 		format, args := args[0], args[1:]
-		formatted, err := printfutil.Format(format, args)
-		if err != nil {
-			return failf(1, "%v\n", err)
+		result := printfutil.Format(format, args, printfutil.Options{
+			LookupEnv: func(name string) (string, bool) {
+				vr := r.lookupVar(name)
+				if !vr.IsSet() || !vr.Exported || vr.Kind != expand.String {
+					return "", false
+				}
+				return vr.String(), true
+			},
+		})
+		for _, diag := range result.Diagnostics {
+			r.errf("printf: %s\n", diag)
 		}
 		if destRef == nil {
-			r.out(formatted)
+			if _, err := io.WriteString(r.stdout, result.Output); err != nil {
+				if printfBrokenPipe(err) {
+					if result.ExitCode != 0 {
+						exit.code = result.ExitCode
+					}
+					return exit
+				}
+				return failf(1, "%v\n", err)
+			}
+			if result.ExitCode != 0 {
+				exit.code = result.ExitCode
+			}
 		}
 		if destRef != nil {
 			prev := r.lookupVar(destRef.Name.Value)
-			as := &syntax.Assign{
-				Ref: destRef,
-				Value: &syntax.Word{Parts: []syntax.WordPart{
-					&syntax.Lit{Value: formatted},
-				}},
-			}
-			vr, _, ok := r.assignVal(prev, as, "")
-			if !ok || r.exit.fatalExit || r.exit.exiting {
-				return exit
-			}
+			vr := prev
+			vr.Set = true
+			vr.Kind = expand.String
+			vr.Str = result.Output
+			vr.List = nil
+			vr.Indices = nil
+			vr.Map = nil
 			if err := r.setVarByRef(prev, destRef, vr, false); err != nil {
 				return failf(2, "printf: %v\n", err)
+			}
+			if result.ExitCode != 0 {
+				exit.code = result.ExitCode
 			}
 		}
 	case "break", "continue":
@@ -1863,4 +1884,12 @@ func (r *Runner) optStatusText(status bool) string {
 		return "on"
 	}
 	return "off"
+}
+
+func printfBrokenPipe(err error) bool {
+	if errors.Is(err, io.ErrClosedPipe) || errors.Is(err, syscall.EPIPE) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "broken pipe") || strings.Contains(lower, "closed pipe")
 }

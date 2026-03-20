@@ -607,7 +607,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				if prev.Integer && as.Append && vr.Kind == expand.String {
 					// For -i with +=, do arithmetic addition instead of string concat.
 					oldVal := r.evalIntegerAttr(prev.String())
-					newVal := r.evalIntegerAttr(r.literal(as.Value))
+					newVal := r.evalIntegerAttr(r.assignLiteral(as))
 					vr.Str = strconv.Itoa(oldVal + newVal)
 				} else {
 					r.applyVarAttrs(&vr)
@@ -1035,7 +1035,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					}
 					if isInt {
 						oldVal := r.evalIntegerAttr(r.lookupVar(name).String())
-						newVal := r.evalIntegerAttr(r.literal(as.Value))
+						newVal := r.evalIntegerAttr(r.assignLiteral(as))
 						vr.Str = strconv.Itoa(oldVal + newVal)
 					}
 				}

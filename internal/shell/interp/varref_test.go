@@ -206,6 +206,23 @@ test "$x" = "$new" && echo OK
 	}
 }
 
+func TestEvalPrintfQRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+val='"quoted" with spaces and \'
+printf -v foo %q "$val"
+eval "bar=$foo"
+test "$val" = "$bar" && echo OK
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v, stdout=%q stderr=%q", err, stdout, stderr)
+	}
+	if stdout != "OK\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "OK\n")
+	}
+}
+
 func TestInvalidIndirectExpansionIsNonFatalInSimpleCommand(t *testing.T) {
 	t.Parallel()
 

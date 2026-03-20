@@ -687,7 +687,7 @@ func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType st
 func (r *Runner) assignVal(prev expand.Variable, as *syntax.Assign, valType string) (expand.Variable, string, bool) {
 	prev.Set = true
 	if as.Value != nil {
-		s := r.literal(as.Value)
+		s := r.assignLiteral(as)
 		if as.Ref != nil && as.Ref.Index != nil {
 			return expand.Variable{Set: true, Kind: expand.String, Str: s}, "", true
 		}
@@ -720,4 +720,31 @@ func (r *Runner) assignVal(prev expand.Variable, as *syntax.Assign, valType stri
 		return prev, "", true
 	}
 	return r.assignArray(prev, as, valType)
+}
+
+func (r *Runner) assignLiteral(as *syntax.Assign) string {
+	if as == nil || as.Value == nil {
+		return ""
+	}
+	if as.LiteralizedValue() {
+		raw, ok := declFieldScalarLiteral(as.Value)
+		if !ok {
+			panic("interp: literalized assignment missing scalar literal")
+		}
+		return raw
+	}
+	str, err := expand.AssignmentLiteral(r.ecfg, as.Value)
+	r.expandErr(err)
+	return str
+}
+
+func declFieldScalarLiteral(word *syntax.Word) (string, bool) {
+	if word == nil || len(word.Parts) != 1 {
+		return "", false
+	}
+	lit, ok := word.Parts[0].(*syntax.Lit)
+	if !ok {
+		return "", false
+	}
+	return lit.Value, true
 }
