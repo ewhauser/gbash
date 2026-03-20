@@ -1494,7 +1494,10 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 						case "-f", "-F", "-p":
 							declQuery = flag
 						default:
-							r.errf("%s: invalid option %q\n", declName, flag)
+							r.errf("%s: %s: invalid option\n", declName, flag)
+							if usage := declUsage(declName); usage != "" {
+								r.errf("%s", usage)
+							}
 							r.exit.code = 2
 							return false
 						}
@@ -1680,6 +1683,17 @@ func prefixAssignDeclClause(args []*syntax.Word, assigns []*syntax.Assign) *synt
 	return &syntax.DeclClause{
 		Variant:  &syntax.Lit{Value: variant},
 		Operands: operands,
+	}
+}
+
+func declUsage(name string) string {
+	switch name {
+	case "declare":
+		return "declare: usage: declare [-aAfFgiIlnrtux] [name[=value] ...] or declare -p [-aAfFilnrtux] [name ...]\n"
+	case "typeset":
+		return "typeset: usage: typeset [-aAfFgiIlnrtux] name[=value] ... or typeset -p [-aAfFilnrtux] [name ...]\n"
+	default:
+		return ""
 	}
 }
 
