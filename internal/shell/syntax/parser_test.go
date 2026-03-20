@@ -1588,18 +1588,6 @@ var errorCases = []errorCase{
 		langErr("1:11: not a valid parameter expansion operator: `!`", LangBash|LangMirBSDKorn),
 	),
 	errCase(
-		"echo ${#foo:-bar}",
-		langErr("1:12: cannot combine multiple parameter expansion operators", LangBash|LangMirBSDKorn),
-	),
-	errCase(
-		"echo ${%foo:1:3}",
-		langErr("1:12: cannot combine multiple parameter expansion operators", LangMirBSDKorn),
-	),
-	errCase(
-		"echo ${#foo%x}",
-		langErr("1:12: cannot combine multiple parameter expansion operators", LangMirBSDKorn),
-	),
-	errCase(
 		"echo foo\n;",
 		langErr("2:1: syntax error near unexpected token `;'"),
 	),

@@ -107,10 +107,6 @@
           "mode": "xfail",
           "reason": "the pinned harness still hits a sed incompatibility before bash and gbash results can be compared"
         },
-        "oils/array-sparse.test.sh::${a[@]/pat/rep}": {
-          "mode": "xfail",
-          "reason": "gbash still handles anchored sparse-array replacements differently from bash"
-        },
         "oils/array.test.sh::${mystr[@]} and ${mystr[*]} disallowed with strict_array": {
           "mode": "xfail",
           "reason": "gbash still treats string scalars as arrays in strict_array parameter expansions"
@@ -122,10 +118,6 @@
         "oils/array.test.sh::Associative arrays can't be used as env bindings either": {
           "mode": "xfail",
           "reason": "gbash rejects associative-array env bindings instead of stringifying them like bash"
-        },
-        "oils/array.test.sh::Length op, index op, then transform op is not allowed": {
-          "mode": "xfail",
-          "reason": "gbash emits a custom parameter-expansion error instead of bash's bad substitution"
         },
         "oils/array.test.sh::Multiple subscripts not allowed": {
           "mode": "xfail",
@@ -292,10 +284,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/blog1.test.sh::${##2}": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/blog1.test.sh::${#1#'###'}": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1243,10 +1231,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/divergence.test.sh::xz package: dirprefix=\"${line##*([}\"": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/empty-bodies.test.sh::Empty do/done": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -1890,7 +1874,10 @@
         },
         "oils/var-op-bash.test.sh::${#var@X} is a parse error": {
           "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
+          "reason": "conformance: gbash behavior differs from bash",
+          "goos": [
+            "darwin"
+          ]
         },
         "oils/var-op-bash.test.sh::${x@u} U L - upper / lower case (bash 5.1 feature)": {
           "mode": "xfail",
@@ -1919,66 +1906,6 @@
           ]
         },
         "oils/var-op-bash.test.sh::undef vs. empty string in var ops": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-len.test.sh::Length operator can't be followed by test operator": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-patsub.test.sh::${v//} is empty search and replacement": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-patsub.test.sh::Chromium from http://www.oilshell.org/blog/2016/11/07.html": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-patsub.test.sh::Replace fixed strings": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-patsub.test.sh::Right Anchored Pattern replacement with %": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-patsub.test.sh::Substitute one unicode character (UTF-8)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-patsub.test.sh::Synthesized ${x///} bug (similar to above)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-patsub.test.sh::When LC_ALL=C, pattern ? doesn't match multibyte character": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-patsub.test.sh::patsub with [^]]": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-slice.test.sh::Cannot take length of substring slice": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-slice.test.sh::Permutations of implicit begin and length": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-strip.test.sh::Append using replacement of %": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-strip.test.sh::Prepend using replacement of #": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-strip.test.sh::strip unquoted and quoted [": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-op-strip.test.sh::strip unquoted and quoted []": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

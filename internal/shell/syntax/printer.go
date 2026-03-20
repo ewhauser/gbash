@@ -813,6 +813,29 @@ func (p *Printer) wroteIndex(index *Subscript) bool {
 	return true
 }
 
+func arithmExprIsEmptyWord(expr ArithmExpr) bool {
+	word, ok := expr.(*Word)
+	if !ok || len(word.Parts) != 1 {
+		return false
+	}
+	lit, ok := word.Parts[0].(*Lit)
+	return ok && lit.Value == ""
+}
+
+func omitReplacementSeparator(repl *Replace) bool {
+	if repl == nil || repl.With != nil {
+		return false
+	}
+	if repl.Anchor == ReplaceAnchorNone && repl.Orig == nil {
+		return true
+	}
+	if repl.Anchor != ReplaceAnchorNone || repl.Orig == nil || len(repl.Orig.Parts) != 1 {
+		return false
+	}
+	lit, ok := repl.Orig.Parts[0].(*Lit)
+	return ok && lit.Value == "/"
+}
+
 func (p *Printer) paramExp(pe *ParamExp) {
 	if pe.nakedIndex() { // arr[x]
 		p.writeLit(pe.Param.Value)
@@ -857,7 +880,11 @@ func (p *Printer) paramExp(pe *ParamExp) {
 		}
 	case pe.Slice != nil:
 		p.w.WriteByte(':')
-		p.arithmExpr(pe.Slice.Offset, true, true)
+		if arithmExprIsEmptyWord(pe.Slice.Offset) {
+			p.w.WriteByte(' ')
+		} else {
+			p.arithmExpr(pe.Slice.Offset, true, true)
+		}
 		if pe.Slice.Length != nil {
 			p.w.WriteByte(':')
 			p.arithmExpr(pe.Slice.Length, true, false)
@@ -867,12 +894,20 @@ func (p *Printer) paramExp(pe *ParamExp) {
 			p.w.WriteByte('/')
 		}
 		p.w.WriteByte('/')
+		switch pe.Repl.Anchor {
+		case ReplaceAnchorPrefix:
+			p.w.WriteByte('#')
+		case ReplaceAnchorSuffix:
+			p.w.WriteByte('%')
+		}
 		if pe.Repl.Orig != nil {
 			p.pattern(pe.Repl.Orig)
 		}
-		p.w.WriteByte('/')
-		if pe.Repl.With != nil {
-			p.word(pe.Repl.With)
+		if !omitReplacementSeparator(pe.Repl) {
+			p.w.WriteByte('/')
+			if pe.Repl.With != nil {
+				p.word(pe.Repl.With)
+			}
 		}
 	case pe.Names != 0:
 		p.writeLit(pe.Names.String())

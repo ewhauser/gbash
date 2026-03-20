@@ -2930,6 +2930,24 @@ var fileTests = []fileTestCase{
 		}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
+		[]string{`${foo:}`},
+		langFile(&ParamExp{
+			Param: lit("foo"),
+			Slice: &Slice{
+				MissingOffset: true,
+			},
+		}, LangBash|LangMirBSDKorn),
+	),
+	fileTest(
+		[]string{`${foo: }`},
+		langFile(&ParamExp{
+			Param: lit("foo"),
+			Slice: &Slice{
+				Offset: litWord(""),
+			},
+		}, LangBash|LangMirBSDKorn|LangZsh),
+	),
+	fileTest(
 		[]string{`${foo:a:b}`},
 		langFile(&ParamExp{
 			Param: lit("foo"),
@@ -3052,10 +3070,42 @@ var fileTests = []fileTestCase{
 		}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
-		[]string{`${foo///}`, `${foo//}`},
+		[]string{`${foo//}`},
 		langFile(&ParamExp{
 			Param: lit("foo"),
 			Repl:  &Replace{All: true},
+		}, LangBash|LangMirBSDKorn|LangZsh),
+	),
+	fileTest(
+		[]string{`${foo///}`},
+		langFile(&ParamExp{
+			Param: lit("foo"),
+			Repl: &Replace{
+				All:  true,
+				Orig: litPattern("/"),
+			},
+		}, LangBash|LangMirBSDKorn|LangZsh),
+	),
+	fileTest(
+		[]string{`${foo////c}`},
+		langFile(&ParamExp{
+			Param: lit("foo"),
+			Repl: &Replace{
+				All:  true,
+				Orig: litPattern("/"),
+				With: litWord("c"),
+			},
+		}, LangBash|LangMirBSDKorn|LangZsh),
+	),
+	fileTest(
+		[]string{`${HOST_PATH////\\/}`},
+		langFile(&ParamExp{
+			Param: lit("HOST_PATH"),
+			Repl: &Replace{
+				All:  true,
+				Orig: litPattern("/"),
+				With: litWord(`\\/`),
+			},
 		}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
@@ -3069,14 +3119,78 @@ var fileTests = []fileTestCase{
 		[]string{`${foo//#/}`, `${foo//#}`},
 		langFile(&ParamExp{
 			Param: lit("foo"),
-			Repl:  &Replace{All: true, Orig: litPattern("#")},
+			Repl:  &Replace{All: true, Anchor: ReplaceAnchorPrefix},
 		}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
-		[]string{`${foo//[42]/}`},
+		[]string{`${foo/#bar/baz}`},
+		langFile(&ParamExp{
+			Param: lit("foo"),
+			Repl: &Replace{
+				Anchor: ReplaceAnchorPrefix,
+				Orig:   litPattern("bar"),
+				With:   litWord("baz"),
+			},
+		}, LangBash|LangMirBSDKorn|LangZsh),
+	),
+	fileTest(
+		[]string{`${foo/%bar/baz}`},
+		langFile(&ParamExp{
+			Param: lit("foo"),
+			Repl: &Replace{
+				Anchor: ReplaceAnchorSuffix,
+				Orig:   litPattern("bar"),
+				With:   litWord("baz"),
+			},
+		}, LangBash|LangMirBSDKorn|LangZsh),
+	),
+	fileTest(
+		[]string{`${foo/#/baz}`},
+		langFile(&ParamExp{
+			Param: lit("foo"),
+			Repl: &Replace{
+				Anchor: ReplaceAnchorPrefix,
+				With:   litWord("baz"),
+			},
+		}, LangBash|LangMirBSDKorn|LangZsh),
+	),
+	fileTest(
+		[]string{`${foo/%/baz}`},
+		langFile(&ParamExp{
+			Param: lit("foo"),
+			Repl: &Replace{
+				Anchor: ReplaceAnchorSuffix,
+				With:   litWord("baz"),
+			},
+		}, LangBash|LangMirBSDKorn|LangZsh),
+	),
+	fileTest(
+		[]string{`${foo//[42]/}`, `${foo//[42]}`},
 		langFile(&ParamExp{
 			Param: lit("foo"),
 			Repl:  &Replace{All: true, Orig: litPattern("[42]")},
+		}, LangBash|LangMirBSDKorn|LangZsh),
+	),
+	fileTest(
+		[]string{`${#foo:1:3}`},
+		langFile(&ParamExp{
+			Length: true,
+			Param:  lit("foo"),
+			Slice: &Slice{
+				Offset: litWord("1"),
+				Length: litWord("3"),
+			},
+		}, LangBash|LangMirBSDKorn|LangZsh),
+	),
+	fileTest(
+		[]string{`${#foo:-bar}`},
+		langFile(&ParamExp{
+			Length: true,
+			Param:  lit("foo"),
+			Exp: &Expansion{
+				Op:   DefaultUnsetOrNull,
+				Word: litWord("bar"),
+			},
 		}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
