@@ -152,6 +152,8 @@ type Runner struct {
 
 	opts runnerOpts
 
+	startupHome string
+
 	origDir    string
 	origParams []string
 	origOpts   runnerOpts
@@ -283,6 +285,11 @@ const (
 type RunnerConfig struct {
 	Env expand.Environ
 
+	// StartupHome overrides the home directory used for plain current-user
+	// tilde expansion. Callers should only populate this from a trusted
+	// sandbox boundary.
+	StartupHome string
+
 	// Dir is the authoritative virtual current directory.
 	Dir string
 
@@ -390,6 +397,7 @@ func NewRunner(cfg *RunnerConfig) (*Runner, error) {
 	}
 	r := newRunnerBase()
 	r.Env = cfg.Env
+	r.startupHome = cfg.StartupHome
 	r.Dir = cfg.Dir
 	r.callHandler = cfg.CallHandler
 	r.execHandler = cfg.ExecHandler
@@ -659,6 +667,7 @@ func (r *Runner) Reset() {
 		egid:             r.egid,
 		pid:              r.pid,
 		ppid:             r.ppid,
+		startupHome:      r.startupHome,
 
 		// These can be set by functions like [Dir] or [Params], but
 		// builtins can overwrite them; reset the fields to whatever the
