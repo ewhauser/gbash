@@ -231,11 +231,10 @@ func testExpandErrFatal(err error) bool {
 	if err == nil {
 		return false
 	}
-	errMsg := err.Error()
 	switch {
 	case errors.As(err, &expand.UnsetParameterError{}):
 		return true
-	case errMsg == "invalid indirect expansion":
+	case errors.As(err, &expand.InvalidIndirectExpansionError{}):
 		return true
 	default:
 		return false
