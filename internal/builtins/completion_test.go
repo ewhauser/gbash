@@ -143,6 +143,60 @@ func TestCompoptPersistsAcrossInteractiveEntries(t *testing.T) {
 	}
 }
 
+func TestCompletionWrappersShareStateWithShellBuiltins(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, ""+
+		"complete -W 'foo bar' cmd\n"+
+		"/bin/complete -p cmd\n"+
+		"compopt -o nospace cmd\n"+
+		"/bin/complete -p cmd\n"+
+		"/bin/compopt +o nospace cmd\n"+
+		"complete -p cmd\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0 (stderr=%q)", result.ExitCode, result.Stderr)
+	}
+	const want = "" +
+		"complete -W 'foo bar' cmd\n" +
+		"complete -o nospace -W 'foo bar' cmd\n" +
+		"complete -W 'foo bar' cmd\n"
+	if got := result.Stdout; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
+func TestCompgenMatchesAcrossBuiltinAndWrapperEntryPoints(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, ""+
+		"compgen -A builtin g\n"+
+		"echo ---\n"+
+		"builtin compgen -A builtin g\n"+
+		"echo ---\n"+
+		"command compgen -A builtin g\n"+
+		"echo ---\n"+
+		"/bin/compgen -A builtin g\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0 (stderr=%q)", result.ExitCode, result.Stderr)
+	}
+	const want = "" +
+		"getopts\n" +
+		"---\n" +
+		"getopts\n" +
+		"---\n" +
+		"getopts\n" +
+		"---\n" +
+		"getopts\n"
+	if got := result.Stdout; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func runBuiltin(tb testing.TB, ctx context.Context, cmd commands.Command, args ...string) (exitCode int) {
 	tb.Helper()
 

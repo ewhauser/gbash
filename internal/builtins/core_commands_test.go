@@ -1685,7 +1685,7 @@ func TestBashHelpUsesSpecParser(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	want := "usage: bash [-i] [-aefnux] [-o option] [-c command_string [name [arg ...]]] [-s] [script [arg ...]]\nusage: sh [-i] [-aefnux] [-o option] [-c command_string [name [arg ...]]] [-s] [script [arg ...]]\n"
+	want := "usage: bash [-i] [-aefnux] [-o option] [--rcfile file] [-c command_string [name [arg ...]]] [-s] [script [arg ...]]\nusage: sh [-i] [-aefnux] [-o option] [--rcfile file] [-c command_string [name [arg ...]]] [-s] [script [arg ...]]\n"
 	if got := result.Stdout; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
@@ -1963,8 +1963,8 @@ func TestBashInteractiveStdinPersistsStateAndStartupOptions(t *testing.T) {
 			t.Fatalf("Stdout = %q, want substring %q", result.Stdout, want)
 		}
 	}
-	if got := result.Stderr; got != "" {
-		t.Fatalf("Stderr = %q, want empty", got)
+	if got, want := result.Stderr, "bash: no job control in this shell\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }
 
@@ -1984,8 +1984,29 @@ func TestBashInteractiveCommandStringUsesInteractiveSemantics(t *testing.T) {
 	if got, want := result.Stdout, "alias-ok\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
-	if got := result.Stderr; got != "" {
-		t.Fatalf("Stderr = %q, want empty", got)
+	if got, want := result.Stderr, "bash: no job control in this shell\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
+func TestBashInteractiveCommandStringPrefixesBuiltinWarnings(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "bash -ic '_f(){ COMPREPLY=(foo); }\ncompgen -F _f'\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if got, want := result.Stdout, "foo\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, "bash: no job control in this shell\nbash: compgen: warning: -F option may not work as you expect\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }
 
@@ -2005,8 +2026,8 @@ func TestBashInteractiveScriptUsesInteractiveSemantics(t *testing.T) {
 	if got, want := result.Stdout, "alias-ok\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
-	if got := result.Stderr; got != "" {
-		t.Fatalf("Stderr = %q, want empty", got)
+	if got, want := result.Stderr, "bash: no job control in this shell\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }
 
@@ -2026,8 +2047,8 @@ func TestShInteractiveCommandStringUsesInteractiveSemantics(t *testing.T) {
 	if got, want := result.Stdout, "alias-ok\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
-	if got := result.Stderr; got != "" {
-		t.Fatalf("Stderr = %q, want empty", got)
+	if got, want := result.Stderr, "sh: no job control in this shell\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }
 

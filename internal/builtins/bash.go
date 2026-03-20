@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+
+	"github.com/ewhauser/gbash/internal/completionutil"
 )
 
 type Bash struct {
@@ -66,6 +68,9 @@ func (c *Bash) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCo
 		})
 	case "version":
 		return RenderSimpleVersion(inv.Stdout, c.name)
+	}
+	if parsed.Interactive && inv.Stderr != nil {
+		_, _ = fmt.Fprintf(inv.Stderr, "%s: no job control in this shell\n", c.name)
 	}
 	if parsed.Interactive && parsed.Source == BashSourceStdin {
 		if inv.Interact == nil {
@@ -133,6 +138,7 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 	}
 	if result != nil && result.Stderr != "" {
 		result.Stderr = prefixNestedShellCommandNotFound(c.name, result.Stderr)
+		result.Stderr = prefixNestedShellBuiltinWarnings(c.name, result.Stderr)
 	}
 	if err := writeExecutionOutputs(inv, result); err != nil {
 		return err
@@ -165,6 +171,27 @@ func prefixNestedShellCommandNotFound(name, stderr string) string {
 		} else {
 			lines[i] = target + ": command not found" + suffix
 		}
+	}
+	return strings.Join(lines, "")
+}
+
+func prefixNestedShellBuiltinWarnings(name, stderr string) string {
+	prefix := strings.TrimSpace(name)
+	if prefix == "" || stderr == "" {
+		return stderr
+	}
+	lines := strings.SplitAfter(stderr, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimRight(line, "\n")
+		if trimmed == "" || strings.HasPrefix(trimmed, prefix+": ") {
+			continue
+		}
+		cmdName, rest, ok := strings.Cut(trimmed, ": ")
+		if !ok || !completionutil.IsBuiltinName(cmdName) || !strings.HasPrefix(rest, "warning:") {
+			continue
+		}
+		suffix := line[len(trimmed):]
+		lines[i] = prefix + ": " + trimmed + suffix
 	}
 	return strings.Join(lines, "")
 }
