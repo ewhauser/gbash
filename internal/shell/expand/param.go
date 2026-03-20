@@ -136,11 +136,17 @@ func shouldQuoteParamPattern(pat string, err error) bool {
 	case "[", "[]", "[^]]":
 		return true
 	}
-	var synErr pattern.SyntaxError
-	if errors.As(err, &synErr) && synErr.Error() == "[ was not matched with a closing ]" {
-		return true
+	var synErr *pattern.SyntaxError
+	if errors.As(err, &synErr) {
+		switch synErr.Error() {
+		case "[ was not matched with a closing ]":
+			return true
+		}
+		if strings.HasPrefix(synErr.Error(), "invalid range: ") {
+			return true
+		}
 	}
-	return err != nil && err.Error() == "[ was not matched with a closing ]"
+	return err != nil && (err.Error() == "[ was not matched with a closing ]" || strings.HasPrefix(err.Error(), "invalid range: "))
 }
 
 func (cfg *Config) paramPatternExpr(pat string, mode pattern.Mode) (string, error) {

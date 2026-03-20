@@ -216,6 +216,17 @@ func TestParamPatternBracketEdgeCases(t *testing.T) {
 	if got != "ab^cd^" {
 		t.Fatalf("Literal([^]]) = %q, want %q", got, "ab^cd^")
 	}
+
+	got, err = literalExpand(t, testEnv{
+		"pat": {Set: true, Kind: String, Str: `[z-a]`},
+		"s":   {Set: true, Kind: String, Str: "fooz"},
+	}, `${s//$pat}`)
+	if err != nil {
+		t.Fatalf("Literal([z-a]) error = %v", err)
+	}
+	if got != "fooz" {
+		t.Fatalf("Literal([z-a]) = %q, want %q", got, "fooz")
+	}
 }
 
 func TestInvalidParamExpansionsFailAtExpansionTime(t *testing.T) {
