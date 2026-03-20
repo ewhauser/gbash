@@ -1,6 +1,9 @@
 package runtime
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRedirectRegressionSupportsOverwriteAppendAndInputRedirection(t *testing.T) {
 	t.Parallel()
@@ -131,6 +134,28 @@ func TestPipelineRegressionLastpipeDoesNotUnwrapUserSubshellTail(t *testing.T) {
 	}
 	if got, want := result.Stdout, "inner:x\nouter:<>\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestSourceRegressionRespectsShoptSourcepath(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/tmp/pathbin/lib.sh", []byte("printf 'frompath\\n'\n"))
+
+	result := mustExecSession(t, session, ""+
+		"PATH=/tmp/pathbin\n"+
+		"shopt -u sourcepath\n"+
+		"if source lib.sh; then echo off=ok; else echo off=fail; fi\n"+
+		"shopt -s sourcepath\n"+
+		"if source lib.sh; then echo on=ok; else echo on=fail; fi\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "off=fail\nfrompath\non=ok\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if !strings.Contains(result.Stderr, "lib.sh") {
+		t.Fatalf("Stderr = %q, want source failure mentioning lib.sh", result.Stderr)
 	}
 }
 
