@@ -1092,13 +1092,6 @@
             "darwin"
           ]
         },
-        "oils/builtin-type-bash.test.sh::type -P does not find directories (regression)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "linux"
-          ]
-        },
         "oils/builtin-type-bash.test.sh::type -a -> builtin": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
