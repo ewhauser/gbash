@@ -43,7 +43,6 @@ func (r *Runner) fillExpandConfig(ctx context.Context) {
 	r.ecfg = &expand.Config{
 		Env:         expandEnv{r},
 		StartupHome: r.startupHome,
-		TildeEnv:    r.Env,
 		ReportError: func(err error) {
 			r.expandErr(err)
 		},

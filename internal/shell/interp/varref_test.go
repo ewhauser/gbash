@@ -320,7 +320,7 @@ declare -p a
 	}
 }
 
-func TestArrayAssignmentTildeUsesBaseEnvHome(t *testing.T) {
+func TestArrayAssignmentTildeUsesCurrentShellHome(t *testing.T) {
 	t.Parallel()
 
 	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
@@ -338,7 +338,7 @@ typeset -p a b
 	if err != nil {
 		t.Fatalf("Run error = %v", err)
 	}
-	const wantStdout = "declare -a a=([0]=\"0\" [1]=\"\" [2]=\"2\")\ndeclare -a b=([0]=\"3\" [1]=\"4\" [2]=\"/src\")\n"
+	const wantStdout = "declare -a a=([0]=\"0\" [1]=\"\" [2]=\"2\")\ndeclare -a b=([0]=\"3\" [1]=\"4\" [2]=\"/home/spec-test/src\")\n"
 	if stdout != wantStdout {
 		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
 	}

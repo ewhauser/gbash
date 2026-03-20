@@ -1636,6 +1636,24 @@ func TestBashCommandNotFoundFromCommandStringUsesInvocationPrefix(t *testing.T) 
 	}
 }
 
+func TestBashScriptCommandNotFoundLeavesComplexTargetsUnprefixed(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'echo\\rTEST\\n' > myscript\nbash myscript\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 127 {
+		t.Fatalf("ExitCode = %d, want 127; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stderr, "echo\rTEST: command not found\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
 func TestShRunsScriptFromStdin(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
