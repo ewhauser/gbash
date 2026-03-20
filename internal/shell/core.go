@@ -809,19 +809,15 @@ func envPairs(env map[string]string) []string {
 func envMap(env expand.Environ) map[string]string {
 	out := make(map[string]string)
 	env.Each(func(name string, vr expand.Variable) bool {
-		if !vr.IsSet() {
+		if !vr.IsSet() || !vr.Exported {
 			delete(out, name)
 			return true
 		}
-		if !vr.Exported || (vr.Kind != expand.String && vr.Kind != expand.NameRef) {
+		if vr.Kind != expand.String {
 			delete(out, name)
 			return true
 		}
-		value := vr.String()
-		if vr.Kind == expand.NameRef {
-			value = vr.Str
-		}
-		out[name] = value
+		out[name] = vr.String()
 		return true
 	})
 	return out

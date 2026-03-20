@@ -130,10 +130,10 @@ func (o *overlayEnviron) Each(f func(name string, vr expand.Variable) bool) {
 func execEnv(env expand.Environ) []string {
 	list := make([]string, 0, 64)
 	for name, vr := range env.Each {
-		if !vr.IsSet() {
+		if !vr.IsSet() || !vr.Exported || vr.Kind != expand.String {
 			// If a variable is set globally but unset in the
-			// runner, we need to ensure it's not part of the final
-			// list. Seems like zeroing the element is enough.
+			// runner, or no longer exported, we need to ensure it's not part
+			// of the final list. Seems like zeroing the element is enough.
 			// This is a linear search, but this scenario should be
 			// rare, and the number of variables shouldn't be large.
 			for i, kv := range list {
@@ -143,19 +143,7 @@ func execEnv(env expand.Environ) []string {
 			}
 			continue
 		}
-		if !vr.Exported || (vr.Kind != expand.String && vr.Kind != expand.NameRef) {
-			for i, kv := range list {
-				if strings.HasPrefix(kv, name+"=") {
-					list[i] = ""
-				}
-			}
-			continue
-		}
-		value := vr.String()
-		if vr.Kind == expand.NameRef {
-			value = vr.Str
-		}
-		list = append(list, name+"="+value)
+		list = append(list, name+"="+vr.String())
 	}
 	return list
 }
@@ -176,6 +164,55 @@ func currentScopeVar(env expand.WriteEnviron, name string) (expand.Variable, boo
 		return currentScopeVar(env.parent, name)
 	default:
 		return expand.Variable{}, false
+	}
+}
+
+func currentScopeVars(env expand.WriteEnviron, f func(name string, vr expand.Variable) bool) {
+	switch env := env.(type) {
+	case *overlayEnviron:
+		for _, vr := range env.values {
+			if !f(vr.Name, vr.Variable) {
+				return
+			}
+		}
+	case *shadowWriteEnviron:
+		if env.shadowSet && !f(env.shadowName, env.shadow) {
+			return
+		}
+		currentScopeVars(env.parent, f)
+	}
+}
+
+func localScopeEnv(env expand.WriteEnviron) expand.WriteEnviron {
+	switch env := env.(type) {
+	case *overlayEnviron:
+		if env.funcScope {
+			return env
+		}
+		parent, ok := env.parent.(expand.WriteEnviron)
+		if !ok {
+			return env
+		}
+		return localScopeEnv(parent)
+	case *shadowWriteEnviron:
+		return localScopeEnv(env.parent)
+	default:
+		return env
+	}
+}
+
+func globalWriteEnv(env expand.WriteEnviron) expand.WriteEnviron {
+	switch env := env.(type) {
+	case *overlayEnviron:
+		parent, ok := env.parent.(expand.WriteEnviron)
+		if !ok {
+			return env
+		}
+		return globalWriteEnv(parent)
+	case *shadowWriteEnviron:
+		return globalWriteEnv(env.parent)
+	default:
+		return env
 	}
 }
 
