@@ -555,90 +555,14 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-cd.test.sh::CDPATH is respected": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-cd.test.sh::Survey of getcwd() syscall": {
           "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
+          "reason": "darwin host bash pads wc -l output differently in the getcwd survey helper",
           "goos": [
             "darwin"
           ]
         },
-        "oils/builtin-cd.test.sh::Test the current directory after 'cd ..' involving symlinks": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-cd.test.sh::arguments to pwd": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-cd.test.sh::cd - without OLDPWD": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-cd.test.sh::cd BAD/..": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-cd.test.sh::cd to relative path with -L and -P": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-cd.test.sh::cd to symlink with -L and -P": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-cd.test.sh::cd with 2 or more args - with strict_arg_parse": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-cd.test.sh::cd with 2 or more args is allowed (strict_arg_parse disabled)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-cd.test.sh::pwd errors out on args with strict_arg_parse": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-cd.test.sh::pwd in symlinked dir on shell initialization": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-cd.test.sh::pwd with symlink and -P": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-cd.test.sh::remove pwd dir": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-dirs.test.sh::cd replaces the lowest entry on the directory stack!": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-dirs.test.sh::dirs -c to clear the stack": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-dirs.test.sh::dirs -p to print one entry per line": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-dirs.test.sh::dirs -v to print numbered stack, one entry per line": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-dirs.test.sh::dirs builtin": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-dirs.test.sh::dirs does not take arguments": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-dirs.test.sh::dirs test of path alias `..`": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -647,10 +571,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/builtin-dirs.test.sh::pushd does not take more than one argument": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-dirs.test.sh::pushd/popd": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

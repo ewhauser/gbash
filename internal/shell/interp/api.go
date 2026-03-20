@@ -51,6 +51,10 @@ type Runner struct {
 	// absolute path.
 	Dir string
 
+	// logicalDir is the shell's internal logical cwd. Unlike the exported PWD
+	// variable, it is not mutated by ordinary shell variable assignments.
+	logicalDir string
+
 	// tempDir is either $TMPDIR from [Runner.Env] or a deterministic virtual
 	// default.
 	tempDir string
@@ -177,8 +181,8 @@ type Runner struct {
 
 	inRedirectWord int
 
-	// Most scripts don't use pushd/popd, so make space for the initial PWD
-	// without requiring an extra allocation.
+	// Most scripts don't use pushd/popd, so make space for the initial visible
+	// cwd without requiring an extra allocation.
 	dirStack     []string
 	dirBootstrap [1]string
 
@@ -786,12 +790,13 @@ func (r *Runner) Reset() {
 	if candidate := r.writeEnv.Get("PWD").String(); r.pwdCandidateMatchesDir(candidate) {
 		pwd = candidate
 	}
+	r.logicalDir = pwd
 	r.setVarString("PWD", pwd)
 	r.setVarString("IFS", " \t\n")
 	r.setVarString("OPTIND", "1")
 	r.setVarString("PS4", "+ ")
 
-	r.dirStack = append(r.dirStack, pwd)
+	r.dirStack = append(r.dirStack, r.logicalDir)
 	r.syncStandardFDs()
 
 	r.didReset = true
@@ -886,6 +891,7 @@ func (r *Runner) subshell(background bool) *Runner {
 	// sensitive ones like [errgroup.Group], and to do deep copies of slices.
 	r2 := &Runner{
 		Dir:                    r.Dir,
+		logicalDir:             r.logicalDir,
 		tempDir:                r.tempDir,
 		Params:                 r.Params,
 		callHandler:            r.callHandler,
