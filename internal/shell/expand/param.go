@@ -93,8 +93,11 @@ func indirectPositionalParam(name string) bool {
 }
 
 func looseIndirectVarRef(name string) (*syntax.VarRef, error) {
+	if ref, err := parseVarRef(name); err == nil {
+		return ref, nil
+	}
 	if !strings.Contains(name, "[") {
-		return parseVarRef(name)
+		return nil, InvalidVariableNameError{Ref: name}
 	}
 	left := strings.IndexByte(name, '[')
 	if left <= 0 || !strings.HasSuffix(name, "]") {

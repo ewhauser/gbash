@@ -892,21 +892,41 @@ func TestFieldsUnquotedIndirectAllElementsTargets(t *testing.T) {
 	}
 }
 
-func TestFieldsQuotedIndirectNamerefTargetStaysSingleField(t *testing.T) {
+func TestFieldsQuotedIndirectNamerefArrayTargetPreservesElements(t *testing.T) {
 	t.Parallel()
 
 	word := parseCommandWord(t, "\"${!name}\"")
 	got, err := Fields(&Config{
 		Env: testEnv{
-			"name": {Set: true, Kind: String, Str: "ref"},
-			"ref":  {Set: true, Kind: NameRef, Str: "arr[@]"},
+			"name": {Set: true, Kind: String, Str: "ref[@]"},
+			"ref":  {Set: true, Kind: NameRef, Str: "arr"},
 			"arr":  {Set: true, Kind: Indexed, List: []string{"a b", "c"}},
 		},
 	}, word)
 	if err != nil {
 		t.Fatalf("did not want error, got %v", err)
 	}
-	want := []string{"a b c"}
+	want := []string{"a b", "c"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("wanted %q, got %q", want, got)
+	}
+}
+
+func TestFieldsIndirectWhitespaceArithmeticSubscript(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, "\"${!name}\"")
+	got, err := Fields(&Config{
+		Env: testEnv{
+			"name": {Set: true, Kind: String, Str: "arr[i + 1]"},
+			"i":    {Set: true, Kind: String, Str: "0"},
+			"arr":  {Set: true, Kind: Indexed, List: []string{"zero", "one", "two"}},
+		},
+	}, word)
+	if err != nil {
+		t.Fatalf("did not want error, got %v", err)
+	}
+	want := []string{"one"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("wanted %q, got %q", want, got)
 	}
