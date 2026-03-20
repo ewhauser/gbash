@@ -239,10 +239,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/ble-features.test.sh::[bash_unset] local-unset / dynamic-unset for localvar": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/ble-features.test.sh::[bash_unset] local-unset / dynamic-unset for localvar (mutated from tempenv)": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -735,10 +731,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-special.test.sh::set is special and fails whole script, even if using || true": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-times.test.sh::times shows two formatted lines": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -1059,10 +1051,6 @@
           ]
         },
         "oils/builtin-type-bash.test.sh::type -t doesn't find non-executable (like command -v)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-type-bash.test.sh::type prints function source code": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

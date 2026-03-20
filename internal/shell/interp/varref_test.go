@@ -177,6 +177,31 @@ level1
 	}
 }
 
+func TestUnsetCurrentScopeLocalPreservesShadow(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+x=global
+f() {
+  local x=local
+  unset x
+  printf 'value=%s\n' "${x-unset}"
+  declare -p x
+  local -p x
+}
+f
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if got, want := stdout, "value=unset\ndeclare -- x\ndeclare -- x\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestUnsetWrongTypeMatchesBash(t *testing.T) {
 	t.Parallel()
 

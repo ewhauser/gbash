@@ -102,6 +102,9 @@ func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 		return fmt.Errorf("readonly variable")
 	}
 	if !vr.IsSet() { // unsetting
+		// Same-scope unsets keep a local shadow so later lookups don't reveal
+		// the next outer binding inside the same function scope.
+		vr.Local = prev.Local || vr.Local
 		o.values[normalized] = namedVariable{name, vr}
 		return nil
 	}
@@ -289,13 +292,12 @@ func (r *Runner) optionFlags() string {
 }
 
 func (r *Runner) printSetVar(name string, vr expand.Variable) {
+	if !vr.IsSet() {
+		return
+	}
 	switch vr.Kind {
 	case expand.Indexed:
 		r.outf("declare -a %s", name)
-		if !vr.IsSet() {
-			r.out("\n")
-			return
-		}
 		r.out("=(")
 		for i, index := range vr.IndexedIndices() {
 			if i > 0 {
@@ -307,10 +309,6 @@ func (r *Runner) printSetVar(name string, vr expand.Variable) {
 		r.out(")\n")
 	case expand.Associative:
 		r.outf("declare -A %s", name)
-		if !vr.IsSet() {
-			r.out("\n")
-			return
-		}
 		r.out("=(")
 		first := true
 		for _, k := range expand.AssociativeKeys(vr.Map) {
@@ -326,10 +324,6 @@ func (r *Runner) printSetVar(name string, vr expand.Variable) {
 		}
 		r.out(")\n")
 	default:
-		if !vr.IsSet() {
-			r.outf("%s\n", name)
-			return
-		}
 		r.outf("%s=%s\n", name, bashDeclPlainValue(vr.String()))
 	}
 }
@@ -342,7 +336,7 @@ func (r *Runner) printSetVars() {
 	})
 	names := make([]string, 0, len(seen))
 	for name, vr := range seen {
-		if !vr.Declared() {
+		if !vr.Declared() || !vr.IsSet() {
 			continue
 		}
 		names = append(names, name)

@@ -93,6 +93,39 @@ printf '<%s>|<%s>\n' "$foo" "$bar"
 	}
 }
 
+func TestBareSetSkipsUnsetDeclarations(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+declare foo
+declare -a arr
+export ex
+saved=$(set)
+foo_seen=0
+arr_seen=0
+ex_seen=0
+while IFS= read -r line; do
+  case $line in
+    foo|foo=*) foo_seen=1 ;;
+    'declare -a arr'*) arr_seen=1 ;;
+    'declare -x ex'*) ex_seen=1 ;;
+  esac
+done <<EOF
+$saved
+EOF
+printf '%s|%s|%s\n' "$foo_seen" "$arr_seen" "$ex_seen"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if got, want := stdout, "0|0|0\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestSetRejectsUnknownOptionNameLikeBash(t *testing.T) {
 	t.Parallel()
 
