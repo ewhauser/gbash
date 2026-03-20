@@ -2,278 +2,381 @@ package printfutil
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
-	"unicode/utf8"
+	"time"
 )
 
-// Format applies gbash's current printf formatting semantics, including
-// repeated format reuse, Bash-style quoted character coercions for numeric
-// conversions, and \c stop handling for %b and literal escapes.
-func Format(format string, args []string) (string, error) {
-	var b strings.Builder
-	index := 0
-	verbs := countVerbs(format)
-	if verbs == 0 {
-		literal, _, err := DecodeEscapes(format)
-		return literal, err
-	}
-	if len(args) == 0 {
-		args = []string{}
-	}
-	for first := true; first || index < len(args); first = false {
-		chunk, consumed, stop, err := formatOnce(format, args[index:])
-		if err != nil {
-			return "", err
-		}
-		b.WriteString(chunk)
-		if stop {
-			break
-		}
-		if consumed == 0 {
-			break
-		}
-		index += consumed
-	}
-	return b.String(), nil
+type Options struct {
+	LookupEnv func(name string) (string, bool)
+	Now       func() time.Time
+	StartTime time.Time
 }
 
-func countVerbs(format string) int {
-	count := 0
-	for i := 0; i < len(format); i++ {
-		switch format[i] {
-		case '\\':
-			if i+1 < len(format) {
-				i++
-			}
-		case '%':
-			if i+1 < len(format) && format[i+1] == '%' {
-				i++
-				continue
-			}
-			count++
-			for i+1 < len(format) && !isVerb(format[i+1]) {
-				i++
-			}
-			if i+1 < len(format) {
-				i++
-			}
-		}
-	}
-	return count
+type Result struct {
+	Output      string
+	ExitCode    uint8
+	Diagnostics []string
 }
 
-func formatOnce(format string, args []string) (chunk string, consumed int, stop bool, err error) {
-	var b strings.Builder
-	for i := 0; i < len(format); i++ {
+type formatSpec struct {
+	verb             byte
+	timeLayout       string
+	leftJustify      bool
+	forceSign        bool
+	spaceSign        bool
+	alternate        bool
+	zeroPad          bool
+	width            int
+	widthSet         bool
+	widthFromArg     bool
+	precision        int
+	precisionSet     bool
+	precisionFromArg bool
+}
+
+type formatToken struct {
+	literal string
+	spec    *formatSpec
+	stop    bool
+}
+
+type parsedFormat struct {
+	tokens    []formatToken
+	verbs     int
+	hardStop  bool
+	diagLines []string
+}
+
+type formatter struct {
+	opts        Options
+	args        []string
+	index       int
+	out         strings.Builder
+	exitCode    uint8
+	diagnostics []string
+}
+
+func Format(format string, args []string, opts Options) Result {
+	parsed := parseFormat(format)
+	f := formatter{
+		opts: normalizeOptions(opts),
+		args: append([]string(nil), args...),
+	}
+	for _, diag := range parsed.diagLines {
+		f.addDiagnostic(diag)
+	}
+
+	for {
+		stop := f.run(parsed.tokens)
+		if stop || parsed.hardStop || parsed.verbs == 0 || f.index >= len(f.args) {
+			break
+		}
+	}
+
+	return Result{
+		Output:      f.out.String(),
+		ExitCode:    f.exitCode,
+		Diagnostics: append([]string(nil), f.diagnostics...),
+	}
+}
+
+func normalizeOptions(opts Options) Options {
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
+	return opts
+}
+
+func parseFormat(format string) parsedFormat {
+	parsed := parsedFormat{
+		tokens: make([]formatToken, 0, 8),
+	}
+	var literal strings.Builder
+	flushLiteral := func() {
+		if literal.Len() == 0 {
+			return
+		}
+		parsed.tokens = append(parsed.tokens, formatToken{literal: literal.String()})
+		literal.Reset()
+	}
+
+	for i := 0; i < len(format); {
 		switch format[i] {
 		case '\\':
-			decoded, advance, stop, err := decodeEscapeAtWithStop(format, i)
-			if err != nil {
-				return "", 0, false, err
+			text, next, stop, diag := decodeEscape(format, i, escapeModeOuter)
+			if diag != "" {
+				parsed.diagLines = append(parsed.diagLines, diag)
+				parsed.hardStop = true
 			}
-			b.WriteString(decoded)
-			i = advance
+			literal.WriteString(text)
+			i = next
 			if stop {
-				return b.String(), consumed, true, nil
+				flushLiteral()
+				parsed.tokens = append(parsed.tokens, formatToken{stop: true})
+				return parsed
 			}
 		case '%':
+			flushLiteral()
 			if i+1 < len(format) && format[i+1] == '%' {
-				b.WriteByte('%')
-				i++
+				literal.WriteByte('%')
+				i += 2
 				continue
 			}
-			start := i
-			for i+1 < len(format) && !isVerb(format[i+1]) {
-				i++
+			spec, next, diag, hardStop := parseSpec(format, i)
+			if diag != "" {
+				parsed.diagLines = append(parsed.diagLines, diag)
+				parsed.hardStop = hardStop
+				return parsed
 			}
-			if i+1 >= len(format) {
-				return "", 0, false, fmt.Errorf("invalid format string")
-			}
-			i++
-			spec := format[start : i+1]
-			verb := format[i]
-			var arg string
-			if consumed < len(args) {
-				arg = args[consumed]
-			}
-			consumed++
-			formatted, stop, err := applySpec(spec, verb, arg)
-			if err != nil {
-				return "", 0, false, err
-			}
-			b.WriteString(formatted)
-			if stop {
-				return b.String(), consumed, true, nil
-			}
+			parsed.tokens = append(parsed.tokens, formatToken{spec: spec})
+			parsed.verbs++
+			i = next
 		default:
-			b.WriteByte(format[i])
+			literal.WriteByte(format[i])
+			i++
 		}
 	}
-	return b.String(), consumed, false, nil
+	flushLiteral()
+	return parsed
 }
 
-func applySpec(spec string, verb byte, arg string) (formatted string, stop bool, err error) {
-	switch verb {
+func parseSpec(format string, start int) (*formatSpec, int, string, bool) {
+	spec := &formatSpec{}
+	i := start + 1
+
+	for i < len(format) {
+		switch format[i] {
+		case '-':
+			spec.leftJustify = true
+		case '+':
+			spec.forceSign = true
+		case ' ':
+			spec.spaceSign = true
+		case '#':
+			spec.alternate = true
+		case '0':
+			spec.zeroPad = true
+		default:
+			goto width
+		}
+		i++
+	}
+
+width:
+	if i < len(format) && format[i] == '*' {
+		spec.widthFromArg = true
+		spec.widthSet = true
+		i++
+	} else {
+		width, next, ok := readDigits(format, i)
+		if ok {
+			spec.width = width
+			spec.widthSet = true
+			i = next
+		}
+	}
+
+	if i < len(format) && format[i] == '.' {
+		i++
+		spec.precisionSet = true
+		if i < len(format) && format[i] == '*' {
+			spec.precisionFromArg = true
+			i++
+		} else {
+			precision, next, ok := readDigits(format, i)
+			if ok {
+				spec.precision = precision
+				i = next
+			} else {
+				spec.precision = 0
+			}
+		}
+	}
+
+	if i >= len(format) {
+		return nil, len(format), fmt.Sprintf("`%s': missing format character", format[start:]), true
+	}
+	if format[i] == '(' {
+		end := strings.IndexByte(format[i+1:], ')')
+		if end < 0 || i+1+end+1 >= len(format) {
+			return nil, len(format), fmt.Sprintf("`%s': missing format character", format[start:]), true
+		}
+		end += i + 1
+		if format[end+1] != 'T' {
+			return nil, end + 1, fmt.Sprintf("`%c': invalid format character", format[end+1]), true
+		}
+		spec.verb = 'T'
+		spec.timeLayout = format[i+1 : end]
+		return spec, end + 2, "", false
+	}
+	if isSupportedVerb(format[i]) {
+		spec.verb = format[i]
+		return spec, i + 1, "", false
+	}
+	for j := i + 1; j < len(format); j++ {
+		if isSupportedVerb(format[j]) {
+			return nil, j, fmt.Sprintf("`%c': invalid format character", format[i]), true
+		}
+		if format[j] == '\\' || format[j] == '%' {
+			break
+		}
+	}
+	return nil, len(format), fmt.Sprintf("`%s': missing format character", format[start:]), true
+}
+
+func readDigits(s string, start int) (int, int, bool) {
+	end := start
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	if end == start {
+		return 0, start, false
+	}
+	value, _ := strconv.Atoi(s[start:end])
+	return value, end, true
+}
+
+func isSupportedVerb(ch byte) bool {
+	return strings.ContainsRune("bqcsdiouxXefFgGT", rune(ch))
+}
+
+func (f *formatter) run(tokens []formatToken) bool {
+	for _, token := range tokens {
+		switch {
+		case token.stop:
+			return true
+		case token.spec == nil:
+			f.out.WriteString(token.literal)
+		default:
+			if f.applySpec(*token.spec) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (f *formatter) nextArg() (string, bool) {
+	if f.index >= len(f.args) {
+		return "", false
+	}
+	arg := f.args[f.index]
+	f.index++
+	return arg, true
+}
+
+func (f *formatter) addDiagnostic(message string) {
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	f.diagnostics = append(f.diagnostics, message)
+	if f.exitCode == 0 {
+		f.exitCode = 1
+	}
+}
+
+func (f *formatter) applySpec(spec formatSpec) bool {
+	if spec.widthFromArg {
+		arg, present := f.nextArg()
+		width, ok, diag := parseWidthArg(arg, present)
+		if diag != "" {
+			f.addDiagnostic(diag)
+		}
+		if ok {
+			if width < 0 {
+				spec.leftJustify = true
+				width = -width
+			}
+			spec.width = width
+			spec.widthSet = true
+		} else {
+			spec.width = 0
+			spec.widthSet = true
+		}
+	}
+	if spec.precisionFromArg {
+		arg, present := f.nextArg()
+		precision, ok, diag := parseWidthArg(arg, present)
+		if diag != "" {
+			f.addDiagnostic(diag)
+		}
+		switch {
+		case ok && precision >= 0:
+			spec.precision = precision
+			spec.precisionSet = true
+		case ok && precision < 0:
+			spec.precisionSet = false
+		default:
+			spec.precision = 0
+			spec.precisionSet = true
+		}
+	}
+
+	arg, present := f.nextArg()
+	switch spec.verb {
+	case 's':
+		f.out.WriteString(applyStringFormat(arg, spec))
+	case 'q':
+		f.out.WriteString(applyStringFormat(quoteShell(arg), spec))
 	case 'b':
-		decoded, stop, err := DecodeEscapes(arg)
-		if err != nil {
-			return "", false, err
+		decoded, stop, diag := decodeEscapeString(arg, escapeModePercentB)
+		if diag != "" {
+			f.addDiagnostic(diag)
 		}
-		if stop {
-			return decoded, true, nil
-		}
-		return fmt.Sprintf(spec[:len(spec)-1]+"s", decoded), false, nil
-	case 's', 'q':
-		return fmt.Sprintf(spec, arg), false, nil
+		f.out.WriteString(applyStringFormat(decoded, spec))
+		return stop
 	case 'c':
-		return fmt.Sprintf(spec, charArg(arg)), false, nil
-	case 'd', 'i', 'o', 'u', 'x', 'X':
-		value := parseIntArg(arg)
-		if verb == 'i' {
-			return fmt.Sprintf(spec[:len(spec)-1]+"d", value), false, nil
+		var text string
+		if present && arg != "" {
+			text = string([]byte{arg[0]})
+		} else {
+			text = string([]byte{0})
 		}
-		if verb == 'u' {
-			return fmt.Sprintf(spec[:len(spec)-1]+"d", uint64(value)), false, nil
+		f.out.WriteString(applyStringFormat(text, spec))
+	case 'd', 'i':
+		text, diag := formatSigned(arg, present, spec)
+		if diag != "" {
+			f.addDiagnostic(diag)
 		}
-		return fmt.Sprintf(spec, value), false, nil
+		f.out.WriteString(text)
+	case 'u', 'o', 'x', 'X':
+		text, diag := formatUnsigned(arg, present, spec)
+		if diag != "" {
+			f.addDiagnostic(diag)
+		}
+		f.out.WriteString(text)
 	case 'e', 'E', 'f', 'F', 'g', 'G':
-		value := parseFloatArg(arg)
-		return fmt.Sprintf(spec, value), false, nil
-	default:
-		return "", false, fmt.Errorf("unsupported format verb %%%c", verb)
+		text, diag := formatFloat(arg, present, spec)
+		if diag != "" {
+			f.addDiagnostic(diag)
+		}
+		f.out.WriteString(text)
+	case 'T':
+		text, diag := formatTime(arg, present, spec, f.opts)
+		if diag != "" {
+			f.addDiagnostic(diag)
+		}
+		f.out.WriteString(text)
 	}
+	return false
 }
 
-func charArg(arg string) rune {
-	if arg == "" {
-		return 0
+func applyStringFormat(value string, spec formatSpec) string {
+	if spec.precisionSet && spec.precision < len(value) {
+		value = value[:spec.precision]
 	}
-	r, size := utf8.DecodeRuneInString(arg)
-	if r == utf8.RuneError && size == 1 {
-		return rune(arg[0])
-	}
-	return r
-}
-
-func parseIntArg(arg string) int64 {
-	if value, ok := parseQuotedCharArg(arg); ok {
+	if !spec.widthSet || spec.width <= len(value) {
 		return value
 	}
-	value, _ := strconv.ParseInt(arg, 0, 64)
-	return value
-}
-
-func parseFloatArg(arg string) float64 {
-	if value, ok := parseQuotedCharArg(arg); ok {
-		return float64(value)
+	pad := " "
+	if spec.zeroPad && !spec.leftJustify && runtime.GOOS != "linux" {
+		pad = "0"
 	}
-	value, _ := strconv.ParseFloat(arg, 64)
-	return value
-}
-
-func parseQuotedCharArg(arg string) (int64, bool) {
-	if len(arg) < 2 {
-		return 0, false
+	padding := strings.Repeat(pad, spec.width-len(value))
+	if spec.leftJustify {
+		return value + padding
 	}
-	if arg[0] != '\'' && arg[0] != '"' {
-		return 0, false
-	}
-	r, size := utf8.DecodeRuneInString(arg[1:])
-	if r == utf8.RuneError && size == 1 {
-		return int64(arg[1]), true
-	}
-	if size == 0 {
-		return 0, false
-	}
-	return int64(r), true
-}
-
-func isVerb(ch byte) bool {
-	return strings.ContainsRune("bqcsdiouxXefFgG", rune(ch))
-}
-
-func DecodeEscapes(s string) (decoded string, stop bool, err error) {
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		if s[i] != '\\' {
-			b.WriteByte(s[i])
-			continue
-		}
-		decoded, advance, stop, err := decodeEscapeAtWithStop(s, i)
-		if err != nil {
-			return "", false, err
-		}
-		b.WriteString(decoded)
-		i = advance
-		if stop {
-			return b.String(), true, nil
-		}
-	}
-	return b.String(), false, nil
-}
-
-func decodeEscapeAtWithStop(s string, i int) (decoded string, advance int, stop bool, err error) {
-	if i+1 >= len(s) {
-		return "\\", i, false, nil
-	}
-	switch s[i+1] {
-	case 'a':
-		return "\a", i + 1, false, nil
-	case 'b':
-		return "\b", i + 1, false, nil
-	case 'c':
-		return "", i + 1, true, nil
-	case 'f':
-		return "\f", i + 1, false, nil
-	case 'n':
-		return "\n", i + 1, false, nil
-	case 'r':
-		return "\r", i + 1, false, nil
-	case 't':
-		return "\t", i + 1, false, nil
-	case 'v':
-		return "\v", i + 1, false, nil
-	case '\\':
-		return "\\", i + 1, false, nil
-	case 'x':
-		end := i + 2
-		for end < len(s) && end < i+4 && IsHexDigit(s[end]) {
-			end++
-		}
-		if end == i+2 {
-			return "", i, false, fmt.Errorf("invalid hex escape")
-		}
-		value, err := strconv.ParseUint(s[i+2:end], 16, 8)
-		if err != nil {
-			return "", i, false, err
-		}
-		return string([]byte{byte(value)}), end - 1, false, nil
-	case '1', '2', '3', '4', '5', '6', '7':
-		end := i + 1
-		for end < len(s) && end < i+4 && s[end] >= '0' && s[end] <= '7' {
-			end++
-		}
-		value, err := strconv.ParseUint(s[i+1:end], 8, 8)
-		if err != nil {
-			return "", i, false, err
-		}
-		return string([]byte{byte(value)}), end - 1, false, nil
-	case '0':
-		end := i + 2
-		for end < len(s) && end < i+5 && s[end] >= '0' && s[end] <= '7' {
-			end++
-		}
-		value, err := strconv.ParseUint(s[i+1:end], 8, 8)
-		if err != nil {
-			return "", i, false, err
-		}
-		return string([]byte{byte(value)}), end - 1, false, nil
-	default:
-		return string(s[i+1]), i + 1, false, nil
-	}
-}
-
-func IsHexDigit(ch byte) bool {
-	return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
+	return padding + value
 }

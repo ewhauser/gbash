@@ -1,6 +1,20 @@
 package builtins_test
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/ewhauser/gbash/internal/builtins"
+)
+
+type errWriter struct {
+	err error
+}
+
+func (w errWriter) Write(p []byte) (int, error) {
+	return 0, w.err
+}
 
 func TestPrintfSupportsBashNumericCharConstants(t *testing.T) {
 	t.Parallel()
@@ -32,5 +46,22 @@ func TestPrintfCharacterFormatUsesFirstCharacter(t *testing.T) {
 	}
 	if got, want := result.Stdout, " 41 36 27 00\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestPrintfWriteFailureReturnsExitStatusOne(t *testing.T) {
+	t.Parallel()
+
+	cmd := builtins.NewPrintf()
+	err := cmd.Run(context.Background(), &builtins.Invocation{
+		Args:   []string{"%s", "hi"},
+		Stdout: errWriter{err: errors.New("sink failed")},
+	})
+	var exitErr *builtins.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("error = %T %v, want *ExitError", err, err)
+	}
+	if exitErr.Code != 1 {
+		t.Fatalf("ExitError.Code = %d, want 1", exitErr.Code)
 	}
 }

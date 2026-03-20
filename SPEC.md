@@ -81,7 +81,7 @@ The shell core may also apply small AST normalizations when the in-tree parser o
 
 Process substitution is supported as a sandbox-native shell feature. The shell core must provision runtime-owned opaque pipe paths under the sandbox namespace and must not rely on host FIFOs, host-visible `TMPDIR` paths, or host path semantics to implement `<(...)` and `>(...)`.
 
-Registry-backed replacements for Bash builtins should preserve shell-visible Bash coercions when practical. One compatibility requirement is that numeric `printf` conversions accept quoted character constants such as `"'A"` and `"\"B"`.
+Registry-backed replacements for Bash builtins should preserve shell-visible Bash coercions when practical. `printf` is a concrete compatibility boundary: numeric conversions must accept quoted character constants such as `"'A"` and `"\"B"`, `%q` and `${var@Q}` must emit Bash-compatible shell-escaped strings, `%b` and bare format-string escapes must honor Bash's escape decoding rules, `%(... )T` must consult only exported `TZ`, and write failures must still surface shell status `1` after any partial output or diagnostics.
 
 Shell builtins that remain implemented inside the in-tree interpreter should preserve the Bash-facing option contracts we depend on for conformance. One current requirement is Bash-compatible `type` resolution and reporting for `-a`, `-f`, `-p`, `-P`, and `-t` across aliases, functions, builtins, keywords, and PATH files.
 

@@ -3,6 +3,7 @@ package interp
 import (
 	"bytes"
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -203,6 +204,82 @@ test "$x" = "$new" && echo OK
 	}
 	if stdout != "OK\n" {
 		t.Fatalf("stdout = %q, want %q", stdout, "OK\n")
+	}
+}
+
+func TestEvalPrintfQRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+val='"quoted" with spaces and \'
+printf -v foo %q "$val"
+eval "bar=$foo"
+test "$val" = "$bar" && echo OK
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v, stdout=%q stderr=%q", err, stdout, stderr)
+	}
+	if stdout != "OK\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "OK\n")
+	}
+}
+
+func TestPrintfTimeUsesStickyExportedTZOnLinux(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS != "linux" {
+		t.Skip("bash printf time-format timezone process semantics are Linux-specific in conformance")
+	}
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir: "/tmp",
+		Env: expand.ListEnviron("HOME=/tmp"),
+	}, `
+export TZ=Asia/Tokyo
+printf '%(%Y-%m-%d)T\n' 1557978599
+export TZ=US/Eastern
+printf '%(%Y-%m-%d)T\n' 1557978599
+unset TZ
+printf '%(%Y-%m-%d)T\n' 1557978599
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v, stdout=%q stderr=%q", err, stdout, stderr)
+	}
+	if want := "2019-05-16\n2019-05-16\n2019-05-16\n"; stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestPrintfTimeStickyTZSurvivesCommandSubstitutionOnLinux(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS != "linux" {
+		t.Skip("bash printf time-format timezone process semantics are Linux-specific in conformance")
+	}
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir: "/tmp",
+		Env: expand.ListEnviron("HOME=/tmp"),
+	}, `
+export TZ=Portugal
+tz=$(printf '%(%Y-%m-%d %H:%M:%S)T\n' 1557978599)
+unset TZ
+localtime=$(printf '%(%Y-%m-%d %H:%M:%S)T\n' 1557978599)
+if ! test "$localtime" = "$tz"; then
+  echo not-equal
+fi
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v, stdout=%q stderr=%q", err, stdout, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }
 

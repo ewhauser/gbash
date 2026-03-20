@@ -241,6 +241,21 @@ func Literal(cfg *Config, word *syntax.Word) (string, error) {
 	return cfg.fieldJoin(field), nil
 }
 
+// AssignmentLiteral expands a single shell word using assignment-value
+// semantics. It matches [Literal] except that backslashes in unquoted literal
+// text consume the following byte, as they do in shell assignments.
+func AssignmentLiteral(cfg *Config, word *syntax.Word) (string, error) {
+	if word == nil {
+		return "", nil
+	}
+	cfg = prepareConfig(cfg)
+	field, err := cfg.wordField(word.Parts, quoteAssign)
+	if err != nil {
+		return "", err
+	}
+	return cfg.fieldJoin(field), nil
+}
+
 // Document expands a single shell word as if it were a here-document body.
 // It is similar to [Literal], but without brace expansion, tilde expansion, and
 // globbing.
@@ -944,6 +959,7 @@ type quoteLevel uint
 
 const (
 	quoteNone quoteLevel = iota
+	quoteAssign
 	quoteDouble
 	quoteHeredoc
 	quoteSingle
@@ -975,12 +991,26 @@ func (cfg *Config) wordField(wps []syntax.WordPart, ql quoteLevel) ([]fieldPart,
 		switch wp := wp.(type) {
 		case *syntax.Lit:
 			s := wp.Value
-			if i == 0 && ql == quoteNone {
+			if i == 0 && (ql == quoteNone || ql == quoteAssign) {
 				if prefix, rest, expanded := cfg.expandUser(s, len(wps) > 1); expanded {
 					// TODO: return two separate fieldParts,
 					// like in wordFields?
 					s = prefix + rest
 				}
+			}
+			if ql == quoteAssign && strings.Contains(s, "\\") {
+				sb := cfg.strBuilder()
+				for i := 0; i < len(s); i++ {
+					b := s[i]
+					if b == '\\' {
+						if i++; i >= len(s) {
+							break
+						}
+						b = s[i]
+					}
+					sb.WriteByte(b)
+				}
+				s = sb.String()
 			}
 			if (ql == quoteDouble || ql == quoteHeredoc) && strings.Contains(s, "\\") {
 				sb := cfg.strBuilder()

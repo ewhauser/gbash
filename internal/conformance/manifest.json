@@ -87,10 +87,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/array-assoc.test.sh::BashAssoc ${a[@]@Q}": {
-          "mode": "xfail",
-          "reason": "gbash's array @Q quoting still differs from bash for associative values containing single quotes"
-        },
         "oils/array-assoc.test.sh::Slice of associative array doesn't make sense in bash": {
           "mode": "xfail",
           "reason": "gbash still slices associative-array values differently from bash's hash-order quirk"
@@ -308,10 +304,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/assign.test.sh::Env binding not allowed before compound command": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/assign.test.sh::Env value with escaped <": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1109,70 +1101,18 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-printf.test.sh::%(strftime format)T": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::%(strftime format)T TZ in environ but not in shell's memory": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::%(strftime format)T doesn't respect TZ if not exported": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::%06s is no-op": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "linux"
-          ]
-        },
-        "oils/builtin-printf.test.sh::%10.5(strftime format)T": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::Arbitrary base 64#a is rejected (unlike in shell arithmetic)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::Runtime error for invalid integer": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-printf.test.sh::Unicode char with '": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/builtin-printf.test.sh::bash truncates long strftime string at 128": {
           "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::leading spaces are accepted in value given to %d %X, but not trailing spaces": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::negative numbers with unsigned / octal / hex": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
+          "reason": "darwin bash uses BSD wc, so this portability probe still differs from the linux oracle",
+          "goos": [
+            "darwin"
+          ]
         },
         "oils/builtin-printf.test.sh::printf # flag": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf % escapes": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf %*.*s (width/precision from args)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf %6q (width)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf %b does backslash escaping": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1194,47 +1134,11 @@
             "darwin"
           ]
         },
-        "oils/builtin-printf.test.sh::printf %q": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf -v dynamic scope": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-printf.test.sh::printf -v syntax error": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-printf.test.sh::printf backslash escapes": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-printf.test.sh::printf eE fF gG": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf invalid backslash escape (is ignored)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf invalid format": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf negative integer overflow": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf negative numbers": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf octal backslash escapes": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf positive integer overflow": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1243,10 +1147,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/builtin-printf.test.sh::printf with no args": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::unsigned / octal / hex big": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -3129,23 +3029,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/serialize.test.sh::printf %q newline": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/serialize.test.sh::printf %q quotes": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/serialize.test.sh::printf %q spaces": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/serialize.test.sh::printf %q unicode": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/serialize.test.sh::printf %q unprintable": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -3228,10 +3112,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/tilde.test.sh::No tilde expansion in word that looks like assignment but isn't": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/tilde.test.sh::No ~ expansion in dynamic assignment": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

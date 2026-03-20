@@ -121,6 +121,28 @@ func parseCommandWord(t *testing.T, src string) *syntax.Word {
 	return call.Args[1]
 }
 
+func TestAssignmentLiteralConsumesUnquotedBackslashes(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `foo\ bar\*baz`)
+
+	gotLiteral, err := Literal(nil, word)
+	if err != nil {
+		t.Fatalf("Literal() error = %v", err)
+	}
+	if gotLiteral != `foo\ bar\*baz` {
+		t.Fatalf("Literal() = %q, want %q", gotLiteral, `foo\ bar\*baz`)
+	}
+
+	gotAssign, err := AssignmentLiteral(nil, word)
+	if err != nil {
+		t.Fatalf("AssignmentLiteral() error = %v", err)
+	}
+	if gotAssign != "foo bar*baz" {
+		t.Fatalf("AssignmentLiteral() = %q, want %q", gotAssign, "foo bar*baz")
+	}
+}
+
 func parseCondPattern(t *testing.T, src string) *syntax.Pattern {
 	t.Helper()
 	p := syntax.NewParser()
