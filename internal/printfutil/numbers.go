@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -53,12 +54,12 @@ func formatSigned(arg string, present bool, spec formatSpec) (string, string) {
 		case parsed.value.Cmp(maxInt64Big) > 0:
 			value = math.MaxInt64
 			if diag == "" {
-				diag = fmt.Sprintf("%s: Result too large", arg)
+				diag = overflowDiagnostic(arg)
 			}
 		case parsed.value.Cmp(minInt64Big) < 0:
 			value = math.MinInt64
 			if diag == "" {
-				diag = fmt.Sprintf("%s: Result too large", arg)
+				diag = overflowDiagnostic(arg)
 			}
 		default:
 			value = parsed.value.Int64()
@@ -76,14 +77,14 @@ func formatUnsigned(arg string, present bool, spec formatSpec) (string, string) 
 		case parsed.value.Sign() >= 0 && parsed.value.Cmp(maxUint64Big) > 0:
 			value = math.MaxUint64
 			if diag == "" {
-				diag = fmt.Sprintf("%s: Result too large", arg)
+				diag = overflowDiagnostic(arg)
 			}
 		case parsed.value.Sign() < 0:
 			abs := new(big.Int).Neg(parsed.value)
 			if abs.Cmp(maxUint64Big) > 0 {
 				value = math.MaxUint64
 				if diag == "" {
-					diag = fmt.Sprintf("%s: Result too large", arg)
+					diag = overflowDiagnostic(arg)
 				}
 			} else {
 				mod := new(big.Int).Mod(parsed.value, twoTo64Big)
@@ -326,4 +327,12 @@ func decodeShellCharValue(data []byte) uint32 {
 
 func isContinuation(b byte) bool {
 	return b&0xc0 == 0x80
+}
+
+func overflowDiagnostic(arg string) string {
+	message := "Result too large"
+	if runtime.GOOS == "linux" {
+		message = "Numerical result out of range"
+	}
+	return fmt.Sprintf("%s: %s", arg, message)
 }

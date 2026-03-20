@@ -183,6 +183,9 @@ type Runner struct {
 	// apply to the current shell, and not just the command.
 	keepRedirs bool
 
+	// printfEnv keeps process-level environment state used by printf %T.
+	printfEnv map[string]string
+
 	// Fake signal callbacks
 	callbackErr  string
 	callbackExit string
@@ -891,6 +894,7 @@ func (r *Runner) subshell(background bool) *Runner {
 		suppressXTrace:         r.suppressXTrace,
 		currentChunkSource:     r.currentChunkSource,
 		currentChunkSourceBase: r.currentChunkSourceBase,
+		printfEnv:              maps.Clone(r.printfEnv),
 
 		origStdout: r.origStdout, // used for process substitutions
 	}

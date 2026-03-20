@@ -2,6 +2,7 @@ package printfutil
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -371,7 +372,7 @@ func applyStringFormat(value string, spec formatSpec) string {
 		return value
 	}
 	pad := " "
-	if spec.zeroPad && !spec.leftJustify {
+	if spec.zeroPad && !spec.leftJustify && runtime.GOOS != "linux" {
 		pad = "0"
 	}
 	padding := strings.Repeat(pad, spec.width-len(value))

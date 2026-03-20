@@ -272,13 +272,7 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		}
 		format, args := args[0], args[1:]
 		result := printfutil.Format(format, args, printfutil.Options{
-			LookupEnv: func(name string) (string, bool) {
-				vr := r.lookupVar(name)
-				if !vr.IsSet() || !vr.Exported || vr.Kind != expand.String {
-					return "", false
-				}
-				return vr.String(), true
-			},
+			LookupEnv: r.lookupPrintfEnv,
 		})
 		for _, diag := range result.Diagnostics {
 			r.errf("printf: %s\n", diag)
@@ -1892,4 +1886,25 @@ func printfBrokenPipe(err error) bool {
 	}
 	lower := strings.ToLower(err.Error())
 	return strings.Contains(lower, "broken pipe") || strings.Contains(lower, "closed pipe")
+}
+
+func (r *Runner) lookupPrintfEnv(name string) (string, bool) {
+	vr := r.lookupVar(name)
+	if !vr.IsSet() || !vr.Exported || vr.Kind != expand.String {
+		if runtime.GOOS == "linux" && r.printfEnv != nil {
+			value, ok := r.printfEnv[name]
+			return value, ok
+		}
+		return "", false
+	}
+	if runtime.GOOS == "linux" {
+		if r.printfEnv == nil {
+			r.printfEnv = make(map[string]string)
+		}
+		if value, ok := r.printfEnv[name]; ok {
+			return value, true
+		}
+		r.printfEnv[name] = vr.String()
+	}
+	return vr.String(), true
 }
