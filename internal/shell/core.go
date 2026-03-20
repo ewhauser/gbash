@@ -1177,15 +1177,9 @@ func parseShebangInterpreter(line string) (interpreterPath, name string, args []
 		return "", "", nil, false
 	}
 	if name == "env" {
-		if len(fields) < 2 {
+		name, args, ok = parseEnvShebangInterpreter(fields[1:])
+		if !ok {
 			return interpreterPath, "", nil, false
-		}
-		name = path.Base(fields[1])
-		if name == "" || name == "." || name == "/" {
-			return interpreterPath, "", nil, false
-		}
-		if len(fields) > 2 {
-			args = append(args, fields[2:]...)
 		}
 		return interpreterPath, name, args, true
 	}
@@ -1193,6 +1187,42 @@ func parseShebangInterpreter(line string) (interpreterPath, name string, args []
 		args = append(args, fields[1:]...)
 	}
 	return interpreterPath, name, args, true
+}
+
+func parseEnvShebangInterpreter(fields []string) (name string, args []string, ok bool) {
+	for len(fields) > 0 {
+		switch fields[0] {
+		case "--":
+			fields = fields[1:]
+			goto done
+		case "-i", "--ignore-environment", "-0", "--null", "-v", "--debug":
+			fields = fields[1:]
+			continue
+		case "-u", "--unset", "-C", "--chdir":
+			if len(fields) < 2 {
+				return "", nil, false
+			}
+			fields = fields[2:]
+			continue
+		case "-S", "--split-string":
+			fields = fields[1:]
+			goto done
+		}
+		break
+	}
+
+done:
+	if len(fields) == 0 {
+		return "", nil, false
+	}
+	name = path.Base(fields[0])
+	if name == "" || name == "." || name == "/" {
+		return "", nil, false
+	}
+	if len(fields) > 1 {
+		args = append(args, fields[1:]...)
+	}
+	return name, args, true
 }
 
 func shellFailure(ctx context.Context, code int, format string, args ...any) error {

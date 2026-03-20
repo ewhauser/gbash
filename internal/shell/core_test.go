@@ -950,6 +950,53 @@ func TestRunCommandRejectsUnsupportedShebang(t *testing.T) {
 	}
 }
 
+func TestParseShebangInterpreterSkipsEnvOptions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		line            string
+		wantInterpreter string
+		wantName        string
+		wantArgs        []string
+	}{
+		{
+			name:            "ignore environment",
+			line:            "/usr/bin/env -i sh",
+			wantInterpreter: "/usr/bin/env",
+			wantName:        "sh",
+		},
+		{
+			name:            "split string",
+			line:            "/usr/bin/env -S bash -e",
+			wantInterpreter: "/usr/bin/env",
+			wantName:        "bash",
+			wantArgs:        []string{"-e"},
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			gotInterpreter, gotName, gotArgs, ok := parseShebangInterpreter(test.line)
+			if !ok {
+				t.Fatalf("parseShebangInterpreter(%q) = !ok, want ok", test.line)
+			}
+			if gotInterpreter != test.wantInterpreter {
+				t.Fatalf("interpreter = %q, want %q", gotInterpreter, test.wantInterpreter)
+			}
+			if gotName != test.wantName {
+				t.Fatalf("name = %q, want %q", gotName, test.wantName)
+			}
+			if got, want := strings.Join(gotArgs, ","), strings.Join(test.wantArgs, ","); got != want {
+				t.Fatalf("args = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func newShellTestRegistry(t testing.TB, extras ...commands.Command) *commands.Registry {
 	t.Helper()
 
