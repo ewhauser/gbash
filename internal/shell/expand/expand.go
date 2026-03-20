@@ -1531,12 +1531,6 @@ func (cfg *Config) expandUser(field string, moreFields bool) (prefix, rest strin
 		rest = name[i:]
 		name = name[:i]
 	}
-	normalizeHomeRest := func(home string) (string, string) {
-		if rest != "" && strings.HasPrefix(rest, "/") && strings.HasSuffix(home, "/") {
-			return home, strings.TrimPrefix(rest, "/")
-		}
-		return home, rest
-	}
 	if name == "" {
 		// Current user; try via "HOME", otherwise fall back to the
 		// system's appropriate home dir env var. Don't use os/user, as
