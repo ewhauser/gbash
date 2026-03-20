@@ -139,6 +139,10 @@ func TestEchoSupportsPOSIXLYCorrectMode(t *testing.T) {
 		Script: "POSIXLY_CORRECT=1 echo -n -E 'foo\\n'\n" +
 			"POSIXLY_CORRECT=1 echo -nE 'foo'\n" +
 			"POSIXLY_CORRECT=1 echo -E -n 'foo'\n" +
+			"POSIXLY_CORRECT=1 echo -n '\\u03bc|\\e|\\n'\n" +
+			"POSIXLY_CORRECT=1 echo -n -e '\\u03bc|\\e|\\n'\n" +
+			"POSIXLY_CORRECT=1 echo -n -e -E '\\n'\n" +
+			"POSIXLY_CORRECT=1 echo -n -E -e '\\n'\n" +
 			"POSIXLY_CORRECT=1 echo --version\n",
 	})
 	if err != nil {
@@ -148,7 +152,7 @@ func TestEchoSupportsPOSIXLYCorrectMode(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
 
-	want := "foo\n-nE foo\n-E -n foo\n--version\n"
+	want := "foo\\nfoofoo\\u03bc|\\e|\\nμ|\x1b|\n\\n\n--version\n"
 	if got := result.Stdout; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}

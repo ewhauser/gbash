@@ -108,11 +108,6 @@ func normalizeEchoArgs(inv *Invocation) (args []string, mode string) {
 		}
 	}
 
-	allowOptions := !posixlyCorrect || (len(args) > 0 && args[0] == "-n")
-	if !allowOptions {
-		return append([]string{"--"}, args...), ""
-	}
-
 	normalized := make([]string, 0, len(args)+1)
 	index := 0
 	for index < len(args) && echoIsOption(args[index]) {
@@ -141,9 +136,6 @@ func parseEchoMatches(inv *Invocation, matches *ParsedCommand) (args []string, o
 		_, opts.posixlyCorrect = inv.Env["POSIXLY_CORRECT"]
 	}
 	opts.trailingNewline = true
-	if opts.posixlyCorrect {
-		opts.escape = true
-	}
 	if matches == nil {
 		return args, opts
 	}
@@ -154,9 +146,7 @@ func parseEchoMatches(inv *Invocation, matches *ParsedCommand) (args []string, o
 		case "enable-backslash-escape":
 			opts.escape = true
 		case "disable-backslash-escape":
-			if !opts.posixlyCorrect {
-				opts.escape = false
-			}
+			opts.escape = false
 		}
 	}
 	return args, opts
@@ -184,7 +174,7 @@ func writeEchoOutput(w io.Writer, args []string, opts echoOptions, cLocale bool)
 			}
 		}
 
-		if !opts.escape && !opts.posixlyCorrect {
+		if !opts.escape {
 			if _, err := io.WriteString(w, arg); err != nil {
 				return false, err
 			}
