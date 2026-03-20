@@ -750,6 +750,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				if r.loopStmtsBroken(ctx, cm.Do) {
 					break
 				}
+				trace.refreshPrefixContext()
 			}
 		case *syntax.CStyleLoop:
 			if y.Init != nil {

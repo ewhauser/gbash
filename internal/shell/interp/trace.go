@@ -212,6 +212,14 @@ func (t *tracer) syncPrefixSideEffects() {
 	}
 }
 
+func (t *tracer) refreshPrefixContext() {
+	if t == nil || t.activeRunner == nil {
+		return
+	}
+	t.prefixRunner = t.activeRunner.subshell(true)
+	t.syncedVars = traceVarsSnapshot(t.activeRunner.writeEnv)
+}
+
 func (t *tracer) startLine() {
 	if t == nil || !t.needsPrefix {
 		return

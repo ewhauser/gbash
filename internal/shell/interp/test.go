@@ -45,11 +45,18 @@ func condTracePattern(trace *tracer, value string) string {
 }
 
 func condTraceUnary(op fmt.Stringer, operand string) string {
-	return strings.TrimSpace(fmt.Sprintf("%s %s", op, operand))
+	return fmt.Sprintf("%s %s", op, condTraceOperand(operand))
 }
 
 func condTraceBinary(left string, op fmt.Stringer, right string) string {
-	return strings.TrimSpace(fmt.Sprintf("%s %s %s", left, op, right))
+	return fmt.Sprintf("%s %s %s", condTraceOperand(left), op, condTraceOperand(right))
+}
+
+func condTraceOperand(operand string) string {
+	if operand == "" {
+		return "''"
+	}
+	return operand
 }
 
 // non-empty string is true, empty string is false

@@ -171,6 +171,28 @@ echo x=$x
 	}
 }
 
+func TestXTracePS4RefreshesLoopContextBetweenIterations(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+PS4='<$i> '
+set -x
+for i in a b; do
+  :
+done
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	const wantStderr = "<> for i in a b\n<a> :\n<a> for i in a b\n<b> :\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	}
+}
+
 func TestXTracePS4ErrorsDoNotChangeCommandStatus(t *testing.T) {
 	t.Parallel()
 
@@ -308,6 +330,28 @@ set -x
 	}
 	if got, want := markLines, 1; got != want {
 		t.Fatalf("stderr = %q, want %d raw mark line", stderr, want)
+	}
+}
+
+func TestXTraceDoubleBracketQuotesEmptyOperands(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+empty=
+set -x
+[[ foo == $empty ]]
+[[ $empty == foo ]]
+[[ $empty == $empty ]]
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	const wantStderr = "+ [[ foo == '' ]]\n+ [[ '' == foo ]]\n+ [[ '' == '' ]]\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
 	}
 }
 
