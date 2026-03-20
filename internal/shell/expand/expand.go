@@ -44,6 +44,8 @@ type Config struct {
 	// sandbox boundary.
 	StartupHome string
 
+	// TildeEnv is used for ~ and ~user lookup. If nil, Env is used.
+	TildeEnv Environ
 	// CmdSubst expands a command substitution node, writing its standard
 	// output to the provided [io.Writer].
 	//
@@ -113,6 +115,7 @@ var zeroConfig = &Config{}
 func prepareConfig(cfg *Config) *Config {
 	cfg = cmp.Or(cfg, zeroConfig)
 	cfg.Env = cmp.Or(cfg.Env, FuncEnviron(func(string) string { return "" }))
+	cfg.TildeEnv = cmp.Or(cfg.TildeEnv, cfg.Env)
 
 	cfg.ifs = " \t\n"
 	if vr := cfg.Env.Get("IFS"); vr.IsSet() {
@@ -1528,6 +1531,12 @@ func (cfg *Config) expandUser(field string, moreFields bool) (prefix, rest strin
 		rest = name[i:]
 		name = name[:i]
 	}
+	normalizeHomeRest := func(home string) (string, string) {
+		if rest != "" && strings.HasPrefix(rest, "/") && strings.HasSuffix(home, "/") {
+			return home, strings.TrimPrefix(rest, "/")
+		}
+		return home, rest
+	}
 	if name == "" {
 		// Current user; try via "HOME", otherwise fall back to the
 		// system's appropriate home dir env var. Don't use os/user, as
@@ -1538,13 +1547,13 @@ func (cfg *Config) expandUser(field string, moreFields bool) (prefix, rest strin
 			prefix, rest := joinTildeHome(cfg.StartupHome, rest)
 			return prefix, rest, true
 		}
-		if vr := cfg.Env.Get("HOME"); vr.IsSet() {
+		if vr := cfg.TildeEnv.Get("HOME"); vr.IsSet() {
 			prefix, rest := joinTildeHome(vr.String(), rest)
 			return prefix, rest, true
 		}
 
 		if runtime.GOOS == "windows" {
-			if vr := cfg.Env.Get("USERPROFILE"); vr.IsSet() {
+			if vr := cfg.TildeEnv.Get("USERPROFILE"); vr.IsSet() {
 				prefix, rest := joinTildeHome(vr.String(), rest)
 				return prefix, rest, true
 			}
@@ -1552,7 +1561,7 @@ func (cfg *Config) expandUser(field string, moreFields bool) (prefix, rest strin
 		return "", field, false
 	}
 
-	if vr := cfg.Env.Get("HOME " + name); vr.IsSet() {
+	if vr := cfg.TildeEnv.Get("HOME " + name); vr.IsSet() {
 		prefix, rest := joinTildeHome(vr.String(), rest)
 		return prefix, rest, true
 	}

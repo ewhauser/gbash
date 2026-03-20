@@ -331,6 +331,8 @@ type Subscript struct {
 	Kind SubscriptKind
 	Mode SubscriptMode
 	Expr ArithmExpr
+
+	raw string
 }
 
 func (s *Subscript) Pos() Pos { return s.Left }
@@ -355,6 +357,8 @@ type VarRef struct {
 	Name    *Lit          // must be a valid name
 	Index   *Subscript    // [i], ["k"], [@], [*]
 	Context VarRefContext // default or -v-specific interpretation rules
+
+	raw string
 }
 
 func (r *VarRef) Pos() Pos { return r.Name.Pos() }
@@ -364,6 +368,37 @@ func (r *VarRef) End() Pos {
 		return r.Index.End()
 	}
 	return r.Name.End()
+}
+
+func (s *Subscript) RawText() string {
+	if s == nil {
+		return ""
+	}
+	return s.raw
+}
+
+func (r *VarRef) RawText() string {
+	if r == nil {
+		return ""
+	}
+	return r.raw
+}
+
+func CloneSubscript(sub *Subscript) *Subscript {
+	if sub == nil {
+		return nil
+	}
+	dup := *sub
+	return &dup
+}
+
+func CloneVarRef(ref *VarRef) *VarRef {
+	if ref == nil {
+		return nil
+	}
+	dup := *ref
+	dup.Index = CloneSubscript(ref.Index)
+	return &dup
 }
 
 // Assign represents an assignment to a variable.

@@ -7,6 +7,7 @@ import (
 	"io"
 	stdfs "io/fs"
 	"slices"
+	"strings"
 )
 
 type Bash struct {
@@ -125,10 +126,31 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 	if err != nil {
 		return err
 	}
+	if result != nil && result.Stderr != "" {
+		result.Stderr = prefixNestedShellCommandNotFound(c.name, result.Stderr)
+	}
 	if err := writeExecutionOutputs(inv, result); err != nil {
 		return err
 	}
 	return exitForExecutionResult(result)
+}
+
+func prefixNestedShellCommandNotFound(name, stderr string) string {
+	prefix := strings.TrimSpace(name)
+	if prefix == "" || stderr == "" {
+		return stderr
+	}
+	lines := strings.SplitAfter(stderr, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimRight(line, "\n")
+		if trimmed == "" || strings.HasPrefix(trimmed, prefix+": ") {
+			continue
+		}
+		if strings.HasSuffix(trimmed, ": command not found") {
+			lines[i] = prefix + ": " + line
+		}
+	}
+	return strings.Join(lines, "")
 }
 
 var _ Command = (*Bash)(nil)

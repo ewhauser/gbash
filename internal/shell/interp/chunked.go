@@ -167,7 +167,7 @@ func attachChunkParseErrorSourceLine(err error, script string) error {
 	if !errors.As(err, &parseErr) {
 		return err
 	}
-	if parseErr.SourceLine != "" {
+	if parseErr.SourceLine != "" || !parseErr.WantsSourceLine() {
 		return err
 	}
 	sourceLine := chunkSourceLineAt(script, parseErr.Pos.Line())
