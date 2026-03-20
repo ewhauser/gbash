@@ -280,6 +280,30 @@ func TestUnsetRegressionDoesNotLeakVarsIntoCommandEnv(t *testing.T) {
 	}
 }
 
+func TestPrintfRegressionTZChangeReflectedBetweenCalls(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	// printf %(...)T should see TZ updates between calls.
+	result := mustExecSession(t, session, ""+
+		"export TZ=UTC\n"+
+		"a=$(printf '%(%Z)T' -1)\n"+
+		"export TZ=US/Eastern\n"+
+		"b=$(printf '%(%Z)T' -1)\n"+
+		"printf '%s %s\\n' \"$a\" \"$b\"\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	got := result.Stdout
+	// First call should use UTC, second should use the updated TZ.
+	if !strings.HasPrefix(got, "UTC ") {
+		t.Fatalf("Stdout = %q, want first field to be UTC", got)
+	}
+	if strings.HasPrefix(got, "UTC UTC") {
+		t.Fatalf("Stdout = %q, TZ change was not reflected (stale cache)", got)
+	}
+}
+
 func TestProcessSubstitutionRegressionSupportsInputOutputAndPipePredicates(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})

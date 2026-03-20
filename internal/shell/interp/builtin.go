@@ -2594,20 +2594,7 @@ func printfBrokenPipe(err error) bool {
 func (r *Runner) lookupPrintfEnv(name string) (string, bool) {
 	vr := r.lookupVar(name)
 	if !vr.IsSet() || !vr.Exported || vr.Kind != expand.String {
-		if runtime.GOOS == "linux" && r.printfEnv != nil {
-			value, ok := r.printfEnv[name]
-			return value, ok
-		}
 		return "", false
-	}
-	if runtime.GOOS == "linux" {
-		if r.printfEnv == nil {
-			r.printfEnv = make(map[string]string)
-		}
-		if value, ok := r.printfEnv[name]; ok {
-			return value, true
-		}
-		r.printfEnv[name] = vr.String()
 	}
 	return vr.String(), true
 }
