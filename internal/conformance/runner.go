@@ -29,6 +29,8 @@ import (
 var bashLinePrefixPattern = regexp.MustCompile(`(?m)^(?:[^:\n]+/)?\w+:(?:[^:\n]+:)* line \d+: `)
 var bashShellPrefixPattern = regexp.MustCompile(`^(?:[^:\n]+/)?[A-Za-z0-9_-]*sh: `)
 var bashAnsiCQuotedCommandNotFoundPattern = regexp.MustCompile(`\$'((?:[^'\\]|\\.)*)': command not found`)
+var bashQuotedNoSuchFilePattern = regexp.MustCompile(`(?m)^([-.[:alnum:]_]+): '([^']+)': No such file or directory$`)
+var bashCannotOpenNoSuchFilePattern = regexp.MustCompile(`(?m)^([-.[:alnum:]_]+): cannot (?:open|remove) '([^']+)'(?: for reading)?: No such file or directory$`)
 
 var (
 	conformanceLocaleOnce sync.Once
@@ -314,16 +316,11 @@ func runGBash(ctx context.Context, specPath, workspace, script string) (Executio
 	if err != nil {
 		return ExecutionResult{}, err
 	}
-	startupHome := conformanceVirtualHomeDir
-	if useScopedGlobWorkspace(specPath) {
-		startupHome = isolatedGBashWorkspaceRoot
-	}
 	result, err := session.Exec(ctx, &gbruntime.ExecutionRequest{
-		Script:      script,
-		WorkDir:     gbashWorkspaceRoot(specPath),
-		ReplaceEnv:  true,
-		StartupHome: startupHome,
-		Env:         env,
+		Script:     script,
+		WorkDir:    gbashWorkspaceRoot(specPath),
+		ReplaceEnv: true,
+		Env:        env,
 	})
 	if err != nil {
 		errMsg := err.Error()
@@ -517,6 +514,8 @@ func normalizeBashStderr(value string) string {
 	value = bashLinePrefixPattern.ReplaceAllString(filepath.ToSlash(value), "")
 	value = normalizeNestedShellPrefixes(value)
 	value = strings.ReplaceAll(value, "shopt: usage: shopt [-pqsu] [-o long-option] optname [optname...]\n", "shopt: usage: shopt [-pqsu] [-o] [optname ...]\n")
+	value = bashCannotOpenNoSuchFilePattern.ReplaceAllString(value, "$1: $2: No such file or directory")
+	value = bashQuotedNoSuchFilePattern.ReplaceAllString(value, "$1: $2: No such file or directory")
 	return bashAnsiCQuotedCommandNotFoundPattern.ReplaceAllStringFunc(value, func(match string) string {
 		parts := bashAnsiCQuotedCommandNotFoundPattern.FindStringSubmatch(match)
 		if len(parts) != 2 {
@@ -594,7 +593,7 @@ func gbashEnv(specPath string) map[string]string {
 		env["EGID"] = strconv.Itoa(os.Getegid())
 		return env
 	}
-	env["HOME"] = "/"
+	env["HOME"] = conformanceVirtualHomeDir
 	env["PATH"] = "/bin:/usr/bin"
 	env["PWD"] = "/"
 	env["TMP"] = "/tmp"

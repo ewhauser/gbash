@@ -640,10 +640,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-printf.test.sh::Unicode char with '": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-printf.test.sh::bash truncates long strftime string at 128": {
           "mode": "xfail",
           "reason": "darwin bash uses BSD wc, so this portability probe still differs from the linux oracle",
@@ -652,10 +648,6 @@
           ]
         },
         "oils/builtin-printf.test.sh::printf # flag": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf %b unicode escapes": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -678,10 +670,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/builtin-printf.test.sh::printf eE fF gG": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf unicode backslash escapes": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1328,10 +1316,6 @@
             "linux"
           ]
         },
-        "oils/divergence.test.sh::!( as negation and subshell versus extended glob - #2463": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/divergence.test.sh::builtin cat crashes a subshell (#2530)": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -1408,10 +1392,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/fatal-errors.test.sh::Unrecoverable: divide by zero in conditional word": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/fatal-errors.test.sh::Unrecoverable: divide by zero in redirect word": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1555,10 +1535,6 @@
           "goos": [
             "darwin"
           ]
-        },
-        "oils/nul-bytes.test.sh::printf - literal NUL in format string": {
-          "mode": "xfail",
-          "reason": "conformance: printf literal-NUL format handling still differs from bash"
         },
         "oils/paren-ambiguity.test.sh::$(( closed with ) ) after multiple lines is command - #2337": {
           "mode": "xfail",
@@ -1792,31 +1768,11 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/redirect.test.sh::>&word redirects stdout and stderr when word is not a number or -": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/redirect.test.sh::>| to clobber": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/redirect.test.sh::Descriptor redirect with filename": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/redirect.test.sh::Double digit fd (20> file)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::Duplicated named file descriptor shares file position": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::Named file descriptor": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/redirect.test.sh::Named read-write file descriptor": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1834,10 +1790,6 @@
           "goos": [
             "darwin"
           ]
-        },
-        "oils/redirect.test.sh::Redirect to empty string": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/redirect.test.sh::Redirect to file descriptor that's not open": {
           "mode": "xfail",
@@ -1878,14 +1830,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/serialize.test.sh::declare": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/serialize.test.sh::printf %q invalid unicode": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/serialize.test.sh::printf %q unicode": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -2002,10 +1946,6 @@
           "mode": "xfail",
           "reason": "conformance: echo now matches bash; printf still differs for C-locale Unicode escape preservation"
         },
-        "oils/unicode.test.sh::Unicode escapes \\u03bc \\U000003bc in $'', echo -e, printf": {
-          "mode": "xfail",
-          "reason": "conformance: echo now matches bash; printf still differs for C-locale Unicode escape preservation"
-        },
         "oils/unicode.test.sh::printf / echo -e do NOT check max code point at runtime": {
           "mode": "xfail",
           "reason": "conformance: echo now matches bash; printf still differs for out-of-range Unicode escape handling"
@@ -2111,10 +2051,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/var-op-strip.test.sh::Strip unicode prefix": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/var-op-strip.test.sh::strip unquoted and quoted [": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -2171,19 +2107,11 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/var-sub-quote.test.sh::single quotes work inside character classes": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/var-sub.test.sh::Bad var sub": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/var-sub.test.sh::Descriptor redirect to bad \"$@\"": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/var-sub.test.sh::Filename redirect with \"$@\"": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
