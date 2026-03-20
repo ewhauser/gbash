@@ -271,7 +271,51 @@ func arrayDefaultIndex(kind expand.ValueKind) *syntax.Subscript {
 	}
 }
 
-func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand.Variable, appendValue bool) error {
+type attrUpdate struct {
+	hasLocal    bool
+	local       bool
+	hasExported bool
+	exported    bool
+	hasReadOnly bool
+	readOnly    bool
+	hasInteger  bool
+	integer     bool
+	hasLower    bool
+	lower       bool
+	hasUpper    bool
+	upper       bool
+}
+
+func (u attrUpdate) mergeOntoTarget(vr *expand.Variable, target expand.Variable) {
+	if vr == nil {
+		return
+	}
+	if u.hasLocal {
+		vr.Local = u.local
+	}
+	vr.Exported = target.Exported
+	if u.hasExported {
+		vr.Exported = u.exported
+	}
+	vr.ReadOnly = target.ReadOnly
+	if u.hasReadOnly {
+		vr.ReadOnly = u.readOnly
+	}
+	vr.Integer = target.Integer
+	if u.hasInteger {
+		vr.Integer = u.integer
+	}
+	vr.Lower = target.Lower
+	if u.hasLower {
+		vr.Lower = u.lower
+	}
+	vr.Upper = target.Upper
+	if u.hasUpper {
+		vr.Upper = u.upper
+	}
+}
+
+func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand.Variable, appendValue bool, updates attrUpdate) error {
 	origName := ref.Name.Value
 	origKind := prev.Kind
 	result, err := prev.ResolveRefState(r.writeEnv, ref)
@@ -320,11 +364,7 @@ func (r *Runner) setVarByRef(prev expand.Variable, ref *syntax.VarRef, vr expand
 	ref = result.Ref
 	prev = result.Var
 	if origKind == expand.NameRef {
-		vr.Exported = prev.Exported
-		vr.ReadOnly = prev.ReadOnly
-		vr.Integer = prev.Integer
-		vr.Lower = prev.Lower
-		vr.Upper = prev.Upper
+		updates.mergeOntoTarget(&vr, prev)
 	}
 	if origKind == expand.NameRef && ref.Index != nil && ref.Index.AllElements() {
 		return fmt.Errorf("`%s': not a valid identifier", printVarRef(ref))

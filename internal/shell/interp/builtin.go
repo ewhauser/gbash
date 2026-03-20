@@ -230,7 +230,7 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 			vr.List = nil
 			vr.Indices = nil
 			vr.Map = nil
-			if err := r.setVarByRef(prev, destRef, vr, false); err != nil {
+			if err := r.setVarByRef(prev, destRef, vr, false, attrUpdate{}); err != nil {
 				return failf(2, "printf: %v\n", err)
 			}
 			if result.ExitCode != 0 {

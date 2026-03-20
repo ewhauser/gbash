@@ -1,6 +1,27 @@
 package interp
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"strings"
+	"testing"
+)
+
+func runInterpScriptWithRunner(t *testing.T, src string) (*Runner, string, string, error) {
+	t.Helper()
+
+	var stdout, stderr bytes.Buffer
+	runner, err := NewRunner(&RunnerConfig{
+		Dir:    "/tmp",
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner error = %v", err)
+	}
+	err = runner.runShellReader(context.Background(), strings.NewReader(src), "nameref-conformance-test.sh", nil)
+	return runner, stdout.String(), stderr.String(), err
+}
 
 func TestNamerefFlagLifecycleMatchesBash(t *testing.T) {
 	t.Parallel()
@@ -278,4 +299,89 @@ f1
 	if stderr != "" {
 		t.Fatalf("stderr = %q, want empty", stderr)
 	}
+}
+
+func TestNamerefAssignmentsPreserveExplicitAttrUpdates(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		script string
+		check  func(*testing.T, expandVarSnapshot)
+	}{
+		{
+			name: "export",
+			script: `
+x=0
+declare -n r=x
+export r=1
+`,
+			check: func(t *testing.T, snapshot expandVarSnapshot) {
+				t.Helper()
+				if snapshot.Str != "1" || !snapshot.Exported {
+					t.Fatalf("x = %+v, want exported string value 1", snapshot)
+				}
+			},
+		},
+		{
+			name: "readonly",
+			script: `
+x=0
+declare -n r=x
+readonly r=1
+`,
+			check: func(t *testing.T, snapshot expandVarSnapshot) {
+				t.Helper()
+				if snapshot.Str != "1" || !snapshot.ReadOnly {
+					t.Fatalf("x = %+v, want readonly string value 1", snapshot)
+				}
+			},
+		},
+		{
+			name: "integer",
+			script: `
+x=0
+declare -n r=x
+declare -i r=2+3
+`,
+			check: func(t *testing.T, snapshot expandVarSnapshot) {
+				t.Helper()
+				if snapshot.Str != "5" || !snapshot.Integer {
+					t.Fatalf("x = %+v, want integer string value 5", snapshot)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			runner, stdout, stderr, err := runInterpScriptWithRunner(t, tc.script)
+			if err != nil {
+				t.Fatalf("Run error = %v", err)
+			}
+			if stdout != "" {
+				t.Fatalf("stdout = %q, want empty", stdout)
+			}
+			if stderr != "" {
+				t.Fatalf("stderr = %q, want empty", stderr)
+			}
+
+			vr := runner.lookupVar("x")
+			tc.check(t, expandVarSnapshot{
+				Str:      vr.Str,
+				Exported: vr.Exported,
+				ReadOnly: vr.ReadOnly,
+				Integer:  vr.Integer,
+			})
+		})
+	}
+}
+
+type expandVarSnapshot struct {
+	Str      string
+	Exported bool
+	ReadOnly bool
+	Integer  bool
 }

@@ -316,6 +316,9 @@ func (r *Runner) arithmEval(expr syntax.ArithmExpr, command bool, source string,
 		err = arithmCommandError{err: err}
 	}
 	r.expandErr(err)
+	if err != nil && r.exit.ok() {
+		r.exit.code = 1
+	}
 	return n
 }
 
@@ -382,7 +385,7 @@ func (e expandEnv) Set(name string, vr expand.Variable) error {
 }
 
 func (e expandEnv) SetVarRef(ref *syntax.VarRef, vr expand.Variable, appendValue bool) error {
-	return e.r.setVarByRef(e.r.lookupVar(ref.Name.Value), ref, vr, appendValue)
+	return e.r.setVarByRef(e.r.lookupVar(ref.Name.Value), ref, vr, appendValue, attrUpdate{})
 }
 
 func (e expandEnv) Each(fn func(name string, vr expand.Variable) bool) {
@@ -641,7 +644,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				} else {
 					r.applyVarAttrs(&vr)
 				}
-				if err := r.setVarByRef(prev, as.Ref, vr, as.Append); err != nil {
+				if err := r.setVarByRef(prev, as.Ref, vr, as.Append, attrUpdate{}); err != nil {
 					r.errf("%v\n", err)
 					r.exit.code = 1
 					var strictErr strictIndexedSubscriptError
@@ -829,13 +832,25 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		case *syntax.CStyleLoop:
 			if y.Init != nil {
 				r.arithmCmd(y.Init)
+				if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
+					break
+				}
 			}
-			for y.Cond == nil || r.arithmCmd(y.Cond) != 0 {
-				if !r.exit.ok() || r.loopStmtsBroken(ctx, cm.Do) {
+			for {
+				if y.Cond != nil && r.arithmCmd(y.Cond) == 0 {
+					break
+				}
+				if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
+					break
+				}
+				if r.loopStmtsBroken(ctx, cm.Do) {
 					break
 				}
 				if y.Post != nil {
 					r.arithmCmd(y.Post)
+					if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
+						break
+					}
 				}
 			}
 		}
@@ -1093,37 +1108,70 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					}
 				}
 			}
+			updates := attrUpdate{}
 			// Apply attribute modes before transforming the value,
 			// so that "declare -i foo=2+3" evaluates arithmetic.
 			for _, mode := range modes {
 				switch mode {
 				case "-i":
+					updates.hasInteger = true
+					updates.integer = true
 					vr.Integer = true
 				case "+i":
+					updates.hasInteger = true
+					updates.integer = false
 					vr.Integer = false
 				case "-l":
+					updates.hasLower = true
+					updates.lower = true
+					updates.hasUpper = true
+					updates.upper = false
 					vr.Lower = true
 					vr.Upper = false // -l and -u are mutually exclusive
 				case "+l":
+					updates.hasLower = true
+					updates.lower = false
 					vr.Lower = false
 				case "-u":
+					updates.hasUpper = true
+					updates.upper = true
+					updates.hasLower = true
+					updates.lower = false
 					vr.Upper = true
 					vr.Lower = false // -l and -u are mutually exclusive
 				case "+u":
+					updates.hasUpper = true
+					updates.upper = false
 					vr.Upper = false
 				}
 			}
 			if global {
+				updates.hasLocal = true
+				updates.local = false
 				vr.Local = false
 			} else if local {
+				updates.hasLocal = true
+				updates.local = true
 				vr.Local = true
 			}
 			for _, mode := range modes {
 				switch mode {
 				case "-x":
+					updates.hasExported = true
+					updates.exported = true
 					vr.Exported = true
+				case "+x":
+					updates.hasExported = true
+					updates.exported = false
+					vr.Exported = false
 				case "-r":
+					updates.hasReadOnly = true
+					updates.readOnly = true
 					vr.ReadOnly = true
+				case "+r":
+					updates.hasReadOnly = true
+					updates.readOnly = false
+					vr.ReadOnly = false
 				}
 			}
 			r.applyVarAttrs(&vr)
@@ -1150,7 +1198,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				}
 				return true
 			}
-			if err := r.setVarByRef(r.lookupVar(as.Ref.Name.Value), as.Ref, vr, as.Append); err != nil {
+			if err := r.setVarByRef(r.lookupVar(as.Ref.Name.Value), as.Ref, vr, as.Append, updates); err != nil {
 				r.errf("%v\n", err)
 				r.exit.code = 1
 				return false
@@ -1571,7 +1619,7 @@ func (r *Runner) runCallAssigns(assigns []*syntax.Assign) []restoreVar {
 			r.exit.code = 1
 			return restores
 		}
-		if err := r.setVarByRef(prev, as.Ref, vr, as.Append); err != nil {
+		if err := r.setVarByRef(prev, as.Ref, vr, as.Append, attrUpdate{}); err != nil {
 			r.errf("%v\n", err)
 			r.exit.code = 1
 			return restores
