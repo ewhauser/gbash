@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -28,6 +29,13 @@ import (
 var bashLinePrefixPattern = regexp.MustCompile(`(?m)^(?:[^:\n]+/)?\w+:(?:[^:\n]+:)* line \d+: `)
 var bashShellPrefixPattern = regexp.MustCompile(`^(?:[^:\n]+/)?[A-Za-z0-9_-]*sh: `)
 var bashAnsiCQuotedCommandNotFoundPattern = regexp.MustCompile(`\$'((?:[^'\\]|\\.)*)': command not found`)
+
+var (
+	conformanceLocaleOnce sync.Once
+	conformanceLocaleName string
+)
+
+const gbashWorkspaceRoot = "/work"
 
 func resolvedSuiteConfig(cfg *SuiteConfig) SuiteConfig {
 	resolved := *cfg
@@ -153,7 +161,7 @@ func RunCase(ctx context.Context, cfg *SuiteConfig, bashPath, specPath string, s
 	}
 	return ComparisonResult{
 		GBash: normalizeExecutionResult(gbashResult, gbashWorkspace),
-		Bash:  normalizeExecutionResult(bashResult, bashWorkspace),
+		Bash:  applyOracleOverrides(cfg.OracleMode, specCase, normalizeExecutionResult(bashResult, bashWorkspace)),
 	}, nil
 }
 
@@ -172,12 +180,9 @@ func prepareWorkspace(cfg *SuiteConfig) (string, error) {
 			continue
 		}
 		src := relDir
-		dst := workspace
+		dst := filepath.Join(workspace, filepath.Base(relDir))
 		if filepath.Base(relDir) == "bin" {
 			dst = filepath.Join(workspace, "bin")
-		}
-		if filepath.Base(relDir) != "bin" {
-			dst = workspace
 		}
 		if err := copyTree(src, dst); err != nil {
 			removeAll(workspace)
@@ -190,6 +195,10 @@ func prepareWorkspace(cfg *SuiteConfig) (string, error) {
 		return "", err
 	}
 	if err := os.MkdirAll(filepath.Join(workspace, "_tmp"), 0o755); err != nil {
+		removeAll(workspace)
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "_tmp", "spec-tmp"), 0o755); err != nil {
 		removeAll(workspace)
 		return "", err
 	}
@@ -269,6 +278,7 @@ func copyFile(src, dst string) error {
 
 func runGBash(ctx context.Context, specPath, workspace, script string) (ExecutionResult, error) {
 	opts := []gbruntime.Option{
+		gbruntime.WithBaseEnv(gbashEnv()),
 		gbruntime.WithFileSystem(virtualWorkspaceFileSystem(workspace)),
 	}
 	if specPath == "oils/builtin-cd.test.sh" {
@@ -302,7 +312,7 @@ func runGBash(ctx context.Context, specPath, workspace, script string) (Executio
 	}
 	result, err := session.Exec(ctx, &gbruntime.ExecutionRequest{
 		Script:      script,
-		WorkDir:     "/",
+		WorkDir:     gbashWorkspaceRoot,
 		ReplaceEnv:  true,
 		StartupHome: startupHome,
 		Env:         env,
@@ -330,20 +340,35 @@ func runGBash(ctx context.Context, specPath, workspace, script string) (Executio
 
 func virtualWorkspaceFileSystem(workspace string) gbruntime.FileSystemConfig {
 	return gbruntime.CustomFileSystem(gbfs.FactoryFunc(func(ctx context.Context) (gbfs.FileSystem, error) {
-		return loadWorkspaceIntoMemory(ctx, workspace)
+		base := gbfs.NewMemory()
+		if err := copyWorkspaceToSandbox(ctx, base, filepath.Join(workspace, "bin"), "/bin"); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		hostWorkspace, err := gbfs.NewReadWrite(gbfs.ReadWriteOptions{Root: workspace})
+		if err != nil {
+			return nil, err
+		}
+		mountable := gbfs.NewMountable(base)
+		if err := mountable.Mount(gbashWorkspaceRoot, hostWorkspace); err != nil {
+			return nil, err
+		}
+		return mountable, nil
 	}), "/")
 }
 
 func loadWorkspaceIntoMemory(ctx context.Context, workspace string) (gbfs.FileSystem, error) {
 	mem := gbfs.NewMemory()
-	if err := copyWorkspaceToSandbox(ctx, mem, workspace); err != nil {
+	if err := copyWorkspaceToSandbox(ctx, mem, workspace, gbashWorkspaceRoot); err != nil {
+		return nil, err
+	}
+	if err := copyWorkspaceToSandbox(ctx, mem, filepath.Join(workspace, "bin"), "/bin"); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
 	return mem, nil
 }
 
 //nolint:forbidigo // The harness mirrors a host temp workspace into a virtual in-memory filesystem.
-func copyWorkspaceToSandbox(ctx context.Context, dst gbfs.FileSystem, workspace string) error {
+func copyWorkspaceToSandbox(ctx context.Context, dst gbfs.FileSystem, workspace, sandboxRoot string) error {
 	info, err := os.Stat(workspace)
 	if err != nil {
 		return err
@@ -362,7 +387,7 @@ func copyWorkspaceToSandbox(ctx context.Context, dst gbfs.FileSystem, workspace 
 		if rel == "." {
 			return nil
 		}
-		sandboxPath := "/" + filepath.ToSlash(rel)
+		sandboxPath := path.Join(sandboxRoot, filepath.ToSlash(rel))
 		info, err := d.Info()
 		if err != nil {
 			return err
@@ -477,6 +502,8 @@ func normalizeOutput(value, workspace string) string {
 	workspace = filepath.ToSlash(workspace)
 	value = strings.ReplaceAll(value, workspace+"/", "/")
 	value = strings.ReplaceAll(value, workspace, "/")
+	value = strings.ReplaceAll(value, gbashWorkspaceRoot+"/", "/")
+	value = strings.ReplaceAll(value, gbashWorkspaceRoot, "/")
 	if runtime.GOOS == "darwin" {
 		value = strings.ReplaceAll(value, "/private/tmp/", "/tmp/")
 		value = strings.ReplaceAll(value, "/private/tmp\n", "/tmp\n")
@@ -542,29 +569,38 @@ func isNestedShellDiagnostic(line string) bool {
 	}
 }
 
+//nolint:forbidigo // The conformance harness mounts a host temp workspace and must mirror its owner IDs.
 func gbashEnv() map[string]string {
+	locale := conformanceLocale()
 	env := map[string]string{
-		"HOME":                  "/",
-		"PATH":                  "/bin:/usr/bin",
-		"LANG":                  "C",
-		"LC_ALL":                "C",
-		"PWD":                   "/",
+		"HOME":                  gbashWorkspaceRoot,
+		"PATH":                  "/bin",
+		"LANG":                  locale,
+		"LC_ALL":                locale,
+		"PWD":                   gbashWorkspaceRoot,
+		"REPO_ROOT":             gbashWorkspaceRoot,
 		"SH":                    "bash",
 		"TZ":                    "UTC",
-		"TMP":                   "/tmp",
-		"TMPDIR":                "/tmp",
+		"TMP":                   gbashWorkspaceRoot + "/tmp",
+		"TMPDIR":                gbashWorkspaceRoot + "/tmp",
+		"UID":                   strconv.Itoa(os.Getuid()),
+		"EUID":                  strconv.Itoa(os.Geteuid()),
+		"GID":                   strconv.Itoa(os.Getgid()),
+		"EGID":                  strconv.Itoa(os.Getegid()),
 		"GBASH_CONFORMANCE_SED": "sed",
 	}
 	return env
 }
 
 func bashEnv(workspace string) []string {
+	locale := conformanceLocale()
 	values := []string{
 		"HOME=" + workspace,
 		"PWD=" + workspace,
+		"REPO_ROOT=" + workspace,
 		"PATH=" + filepath.Join(workspace, "bin") + ":/usr/bin:/bin",
-		"LANG=C",
-		"LC_ALL=C",
+		"LANG=" + locale,
+		"LC_ALL=" + locale,
 		"SH=bash",
 		"TZ=UTC",
 		"TMP=" + filepath.Join(workspace, "tmp"),
@@ -581,6 +617,47 @@ func conformanceToolPath(name string) string {
 		return name
 	}
 	return toolPath
+}
+
+//nolint:forbidigo // The conformance harness needs a host-level escape hatch for locale selection.
+func conformanceLocale() string {
+	conformanceLocaleOnce.Do(func() {
+		conformanceLocaleName = "C.UTF-8"
+		if override := strings.TrimSpace(os.Getenv("GBASH_CONFORMANCE_LOCALE")); override != "" {
+			conformanceLocaleName = override
+			return
+		}
+	})
+	return conformanceLocaleName
+}
+
+func applyOracleOverrides(mode OracleMode, specCase SpecCase, result ExecutionResult) ExecutionResult {
+	override, ok := specCase.OracleOverrides[mode]
+	if !ok {
+		return result
+	}
+	if override.Status != nil {
+		if specCase.Expectation.Status != nil {
+			result.ExitCode = *specCase.Expectation.Status
+		} else {
+			result.ExitCode = *override.Status
+		}
+	}
+	if override.Stdout != nil {
+		if specCase.Expectation.Stdout != nil {
+			result.Stdout = *specCase.Expectation.Stdout
+		} else {
+			result.Stdout = *override.Stdout
+		}
+	}
+	if override.Stderr != nil {
+		if specCase.Expectation.Stderr != nil {
+			result.Stderr = *specCase.Expectation.Stderr
+		} else {
+			result.Stderr = *override.Stderr
+		}
+	}
+	return result
 }
 
 func expectedFailureReason(fileEntry ManifestEntry, hasFileEntry bool, caseEntry ManifestEntry, hasCaseEntry bool) string {

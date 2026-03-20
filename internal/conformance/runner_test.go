@@ -82,6 +82,26 @@ func TestResolvedSuiteConfigUsesPackagePaths(t *testing.T) {
 	}
 }
 
+func TestApplyOracleOverridesUsesGenericExpectationForAnnotatedFields(t *testing.T) {
+	t.Parallel()
+
+	wantStdout := "expected\n"
+	actualStdout := "buggy\n"
+	specCase := SpecCase{
+		Expectation: ExpectedResult{Stdout: &wantStdout},
+		OracleOverrides: map[OracleMode]OracleOverride{
+			OracleBash: {
+				Kind:   OracleOverrideBug,
+				Stdout: &actualStdout,
+			},
+		},
+	}
+	got := applyOracleOverrides(OracleBash, specCase, ExecutionResult{Stdout: actualStdout, ExitCode: 0})
+	if got.Stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", got.Stdout, wantStdout)
+	}
+}
+
 func TestLoadWorkspaceIntoMemoryPreservesFixturesAndMutability(t *testing.T) {
 	t.Parallel()
 
@@ -102,15 +122,15 @@ func TestLoadWorkspaceIntoMemoryPreservesFixturesAndMutability(t *testing.T) {
 		t.Fatalf("loadWorkspaceIntoMemory() error = %v", err)
 	}
 
-	info, err := fsys.Stat(context.Background(), "/empty")
+	info, err := fsys.Stat(context.Background(), gbashWorkspaceRoot+"/empty")
 	if err != nil {
-		t.Fatalf("Stat(/empty) error = %v", err)
+		t.Fatalf("Stat(%s/empty) error = %v", gbashWorkspaceRoot, err)
 	}
 	if !info.IsDir() {
-		t.Fatalf("Stat(/empty).IsDir() = false, want true")
+		t.Fatalf("Stat(%s/empty).IsDir() = false, want true", gbashWorkspaceRoot)
 	}
 	if got, want := info.Mode().Perm(), os.FileMode(0o700); got != want {
-		t.Fatalf("Stat(/empty).Mode().Perm() = %v, want %v", got, want)
+		t.Fatalf("Stat(%s/empty).Mode().Perm() = %v, want %v", gbashWorkspaceRoot, got, want)
 	}
 
 	info, err = fsys.Stat(context.Background(), "/bin/tool")
