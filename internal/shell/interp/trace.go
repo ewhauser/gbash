@@ -13,12 +13,12 @@ import (
 // tracer prints expressions like a shell would do if its
 // options '-o' is set to either 'xtrace' or its shorthand, '-x'.
 type tracer struct {
-	buf         bytes.Buffer
-	printer     *syntax.Printer
-	output      io.Writer
-	prefix      string
-	needsPrefix bool
-	cLocale     bool
+	buf          bytes.Buffer
+	printer      *syntax.Printer
+	output       io.Writer
+	prefixRunner *Runner
+	needsPrefix  bool
+	cLocale      bool
 }
 
 func (r *Runner) tracer() *tracer {
@@ -27,11 +27,11 @@ func (r *Runner) tracer() *tracer {
 	}
 
 	return &tracer{
-		printer:     syntax.NewPrinter(),
-		output:      r.stderr,
-		prefix:      r.tracePrefix(),
-		needsPrefix: true,
-		cLocale:     runnerUsesCLocale(r),
+		printer:      syntax.NewPrinter(),
+		output:       r.stderr,
+		prefixRunner: r.subshell(true),
+		needsPrefix:  true,
+		cLocale:      runnerUsesCLocale(r),
 	}
 }
 
@@ -150,7 +150,9 @@ func (t *tracer) startLine() {
 	if t == nil || !t.needsPrefix {
 		return
 	}
-	t.buf.WriteString(t.prefix)
+	if t.prefixRunner != nil {
+		t.buf.WriteString(t.prefixRunner.tracePrefix())
+	}
 	t.needsPrefix = false
 }
 

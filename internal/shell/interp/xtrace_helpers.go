@@ -2,7 +2,6 @@ package interp
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
 
 	"github.com/ewhauser/gbash/internal/shell/expand"
@@ -77,25 +76,4 @@ func (r *Runner) traceArrayAssign(as *syntax.Assign) string {
 	}
 	b.WriteByte(')')
 	return b.String()
-}
-
-func (r *Runner) traceCondExpr(expr syntax.CondExpr, trace *tracer) string {
-	switch x := expr.(type) {
-	case *syntax.CondWord:
-		return trace.traceArg(r.literal(x.Word))
-	case *syntax.CondPattern:
-		return r.pattern(x.Pattern)
-	case *syntax.CondRegex:
-		return trace.traceArg(r.literal(x.Word))
-	case *syntax.CondVarRef:
-		return printVarRef(x.Ref)
-	case *syntax.CondParen:
-		return "( " + r.traceCondExpr(x.X, trace) + " )"
-	case *syntax.CondBinary:
-		return strings.TrimSpace(fmt.Sprintf("%s %s %s", r.traceCondExpr(x.X, trace), x.Op, r.traceCondExpr(x.Y, trace)))
-	case *syntax.CondUnary:
-		return strings.TrimSpace(fmt.Sprintf("%s %s", x.Op, r.traceCondExpr(x.X, trace)))
-	default:
-		return printSyntaxNode(expr.(syntax.Node))
-	}
 }

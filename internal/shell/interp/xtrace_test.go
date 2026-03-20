@@ -1,9 +1,35 @@
 package interp
 
 import (
+	"bytes"
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/ewhauser/gbash/internal/shell/syntax"
 )
+
+func runInterpNode(t *testing.T, src string) (string, string, error) {
+	t.Helper()
+
+	var stdout, stderr bytes.Buffer
+	runner, err := NewRunner(&RunnerConfig{
+		Dir:    "/tmp",
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner error = %v", err)
+	}
+
+	file, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(src), "xtrace-test.sh")
+	if err != nil {
+		t.Fatalf("Parse error = %v", err)
+	}
+
+	err = runner.Run(context.Background(), file)
+	return stdout.String(), stderr.String(), err
+}
 
 func TestXTraceUnsetPS4UsesNoFallbackPrefix(t *testing.T) {
 	t.Parallel()
@@ -89,6 +115,37 @@ echo one
 	const wantStderr = "+trace echo one\n"
 	if stderr != wantStderr {
 		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	}
+}
+
+func TestXTracePS4ExpandsBeforeEachTraceLine(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+PS4='+$RANDOM '
+set -x
+readonly x=3
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	if got, want := len(lines), 2; got != want {
+		t.Fatalf("stderr = %q, want %d trace lines", stderr, want)
+	}
+	if !strings.HasSuffix(lines[0], " readonly x=3") {
+		t.Fatalf("stderr first line = %q, want readonly trace", lines[0])
+	}
+	if !strings.HasSuffix(lines[1], " x=3") {
+		t.Fatalf("stderr second line = %q, want assignment trace", lines[1])
+	}
+	prefix0 := strings.TrimSuffix(lines[0], " readonly x=3")
+	prefix1 := strings.TrimSuffix(lines[1], " x=3")
+	if prefix0 == prefix1 {
+		t.Fatalf("stderr = %q, want distinct PS4 prefixes", stderr)
 	}
 }
 
@@ -201,6 +258,37 @@ fi
 	}
 }
 
+func TestXTraceDoubleBracketTracingDoesNotReExecuteExpansions(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+mark() {
+  echo mark >&2
+  printf x
+}
+set -x
+[[ $(mark) == x ]]
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "+ [[ x == x ]]\n") {
+		t.Fatalf("stderr = %q, want traced [[ command", stderr)
+	}
+	markLines := 0
+	for _, line := range strings.Split(strings.TrimSpace(stderr), "\n") {
+		if line == "mark" {
+			markLines++
+		}
+	}
+	if got, want := markLines, 1; got != want {
+		t.Fatalf("stderr = %q, want %d raw mark line", stderr, want)
+	}
+}
+
 func TestVerbosePrintsRawInputLines(t *testing.T) {
 	t.Parallel()
 
@@ -219,6 +307,26 @@ echo $(echo $y)
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 	const wantStderr = "x=foo\ny=bar\necho $x\necho $(echo $y)\n\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	}
+}
+
+func TestVerbosePrintsOnRunnerRun(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpNode(t, `
+set -o verbose
+x=foo
+echo $x
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if got, want := stdout, "foo\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	const wantStderr = "x=foo\necho $x\n"
 	if stderr != wantStderr {
 		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
 	}

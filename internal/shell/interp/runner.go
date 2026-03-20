@@ -427,14 +427,14 @@ func (r *Runner) sourceForNode(node syntax.Node) string {
 
 func (r *Runner) verboseStmtSource(st *syntax.Stmt) string {
 	src := r.sourceForNode(st)
-	if src == "" {
-		return ""
+	if src != "" {
+		end := int(st.End().Offset() - r.currentChunkSourceBase)
+		if end >= 0 && end < len(r.currentChunkSource) && r.currentChunkSource[end] == '\n' {
+			src += "\n"
+		}
+		return src
 	}
-	end := int(st.End().Offset() - r.currentChunkSourceBase)
-	if end >= 0 && end < len(r.currentChunkSource) && r.currentChunkSource[end] == '\n' {
-		src += "\n"
-	}
-	return src
+	return printSyntaxNode(st)
 }
 
 func (r *Runner) printVerbose(st *syntax.Stmt) {
@@ -823,13 +823,14 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			}
 		}
 	case *syntax.TestClause:
+		cond := r.evalCond(ctx, cm.X, trace)
 		if tracingEnabled {
 			trace.string("[[ ")
-			trace.string(r.traceCondExpr(cm.X, trace))
+			trace.string(cond.trace)
 			trace.string(" ]]")
 			trace.newLineFlush()
 		}
-		if r.bashCond(ctx, cm.X) == "" && r.exit.ok() {
+		if cond.value == "" && r.exit.ok() {
 			// to preserve exit status code 2 for regex errors, etc
 			r.exit.code = 1
 		}
