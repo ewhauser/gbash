@@ -717,7 +717,10 @@
         },
         "oils/builtin-echo.test.sh::\\u6": {
           "mode": "xfail",
-          "reason": "conformance: echo bytes match bash; od text formatting still differs on the pinned harness"
+          "reason": "conformance: darwin's od text formatting still differs from the Linux CI oracle for this echo case",
+          "goos": [
+            "darwin"
+          ]
         },
         "oils/builtin-echo.test.sh::\\x": {
           "mode": "xfail",
