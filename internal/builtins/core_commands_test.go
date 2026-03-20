@@ -1787,6 +1787,25 @@ func TestBashGroupedShortFlagsSetShellOptionsForCommandString(t *testing.T) {
 	}
 }
 
+func TestBashCommandStringPrefixesFatalArithmeticDiagnostic(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "bash -c 'echo $((a + 42x))'\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	const want = "bash: a + 42x: value too great for base (error token is \"42x\")\n"
+	if got := result.Stderr; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
 func TestBashDashOpipefailAffectsCommandString(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})

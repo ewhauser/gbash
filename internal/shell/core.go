@@ -140,9 +140,13 @@ func (m *core) Run(ctx context.Context, exec *Execution) (result *RunResult, run
 	if err != nil {
 		return nil, err
 	}
+	script := exec.Script
+	if script != "" && !strings.HasSuffix(script, "\n") {
+		script += "\n"
+	}
 	runErr = runner.RunReaderWithMetadata(
 		ctx,
-		strings.NewReader(exec.Script),
+		strings.NewReader(script),
 		executionSourceName(exec),
 		effectiveExec.ScriptPath,
 		func(file *syntax.File) (map[*syntax.Stmt]*syntax.Stmt, error) {
