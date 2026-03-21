@@ -24,3 +24,19 @@ func TestGzipQuietSuppressesMissingInputDiagnostics(t *testing.T) {
 		t.Fatalf("Stderr = %q, want gzip diagnostic", got)
 	}
 }
+
+func TestGzipDecompressEmptyOperandFallsBackToSuffixLookup(t *testing.T) {
+	t.Parallel()
+
+	session := newSession(t, &Config{})
+	result := mustExecSession(t, session, "missing=\ngzip -cdf -- \"$missing\"\n")
+	if got, want := result.ExitCode, 1; got != want {
+		t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+	}
+	if runtime.GOOS == "darwin" {
+		return
+	}
+	if got := result.Stderr; !strings.Contains(got, ".gz") {
+		t.Fatalf("Stderr = %q, want .gz lookup diagnostic", got)
+	}
+}

@@ -3,6 +3,7 @@ package builtins
 import (
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	stdfs "io/fs"
@@ -140,7 +141,7 @@ func gzipExitf(inv *Invocation, quiet bool, format string, args ...any) error {
 }
 
 func runGzipItem(ctx context.Context, inv *Invocation, opts *gzipOptions, name, commandName string) error {
-	reader, sourceAbs, sourceInfo, closeInput, err := openGzipInput(ctx, inv, name, opts.quiet)
+	reader, sourceAbs, sourceInfo, closeInput, err := openGzipInput(ctx, inv, name, opts)
 	if err != nil {
 		return gzipMaybeQuietError(err, opts.quiet)
 	}
@@ -213,22 +214,50 @@ func runGzipItem(ctx context.Context, inv *Invocation, opts *gzipOptions, name, 
 	return nil
 }
 
-func openGzipInput(ctx context.Context, inv *Invocation, name string, quiet bool) (reader io.Reader, abs string, info stdfs.FileInfo, closeFn func(), err error) {
+func openGzipInput(ctx context.Context, inv *Invocation, name string, opts *gzipOptions) (reader io.Reader, abs string, info stdfs.FileInfo, closeFn func(), err error) {
 	if name == "-" {
 		return inv.Stdin, "-", nil, func() {}, nil
 	}
-	info, abs, err = statPath(ctx, inv, name)
-	if err != nil {
-		return nil, "", nil, nil, err
+
+	candidates := gzipInputCandidates(name, opts)
+	for i, candidate := range candidates {
+		info, abs, err = statPath(ctx, inv, candidate)
+		if err != nil {
+			if i+1 < len(candidates) && gzipIsNotExist(err) {
+				continue
+			}
+			return nil, "", nil, nil, err
+		}
+		if info.IsDir() {
+			return nil, "", nil, nil, gzipExitf(inv, opts.quiet, "gzip: %s: Is a directory", abs)
+		}
+		file, _, err := openRead(ctx, inv, candidate)
+		if err != nil {
+			if i+1 < len(candidates) && gzipIsNotExist(err) {
+				continue
+			}
+			return nil, "", nil, nil, err
+		}
+		return file, abs, info, func() { _ = file.Close() }, nil
 	}
-	if info.IsDir() {
-		return nil, "", nil, nil, gzipExitf(inv, quiet, "gzip: %s: Is a directory", abs)
+	return nil, "", nil, nil, stdfs.ErrNotExist
+}
+
+func gzipInputCandidates(name string, opts *gzipOptions) []string {
+	if name == "-" || opts == nil || !opts.decompress {
+		return []string{name}
 	}
-	file, _, err := openRead(ctx, inv, name)
-	if err != nil {
-		return nil, "", nil, nil, err
+	if name == "" {
+		return []string{opts.suffix}
 	}
-	return file, abs, info, func() { _ = file.Close() }, nil
+	if strings.HasSuffix(name, opts.suffix) {
+		return []string{name}
+	}
+	return []string{name, name + opts.suffix}
+}
+
+func gzipIsNotExist(err error) bool {
+	return errors.Is(err, stdfs.ErrNotExist) || os.IsNotExist(err)
 }
 
 func gzipTestStream(inv *Invocation, verbose bool, displayName string, reader io.Reader) error {
