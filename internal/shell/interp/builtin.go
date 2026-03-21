@@ -687,6 +687,9 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 			r.outf("alias %s='%s'\n", name, als.value)
 		}
 
+		if len(args) > 0 && args[0] == "--" {
+			args = args[1:]
+		}
 		if len(args) == 0 {
 			names := make([]string, 0, len(r.alias))
 			for name := range r.alias {
@@ -702,7 +705,8 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 			if !ok {
 				als, ok := r.alias[name]
 				if !ok {
-					r.errf("alias: %q not found\n", name)
+					r.errf("alias: %s: not found\n", name)
+					exit.code = 1
 					continue
 				}
 				show(name, als)
@@ -715,7 +719,32 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 			r.alias[name] = alias{value: src}
 		}
 	case "unalias":
+		removeAll := false
+		fp := flagParser{remaining: args}
+		for fp.more() {
+			switch flag := fp.flag(); flag {
+			case "-a":
+				removeAll = true
+			default:
+				return failf(2, "unalias: %s: invalid option\nunalias: usage: unalias [-a] name [name ...]\n", flag)
+			}
+		}
+		args = fp.args()
+		if removeAll {
+			clear(r.alias)
+		}
+		if len(args) == 0 {
+			if removeAll {
+				break
+			}
+			return failf(2, "unalias: usage: unalias [-a] name [name ...]\n")
+		}
 		for _, name := range args {
+			if _, ok := r.alias[name]; !ok {
+				r.errf("unalias: %s: not found\n", name)
+				exit.code = 1
+				continue
+			}
 			delete(r.alias, name)
 		}
 
