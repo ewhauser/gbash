@@ -108,7 +108,7 @@ echo status=$?
 
 #### errexit and time { }
 set -o errexit
-time false
+{ time false; } 2>/dev/null
 echo status=$?
 ## status: 1
 
