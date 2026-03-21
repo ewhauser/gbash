@@ -88,6 +88,7 @@ func (r *Runner) fillExpandConfig(ctx context.Context) {
 			r2.stmts(ctx, cs.Stmts)
 			r2.exit.exiting = false // subshells don't exit the parent shell
 			r.lastExpandExit = r2.exit
+			r.lastExpandExit.errExitIgnored = false
 			if r2.exit.fatalExit {
 				return r2.exit.err // surface fatal errors immediately
 			}
@@ -685,7 +686,14 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 		releasedNamedFDs = append(releasedNamedFDs, result.releasedNamedFDs...)
 	}
 	if r.exit.ok() && st.Cmd != nil {
-		r.cmd(ctx, st.Cmd)
+		if st.Negated {
+			oldNoErrExit := r.noErrExit
+			r.noErrExit = true
+			r.cmd(ctx, st.Cmd)
+			r.noErrExit = oldNoErrExit
+		} else {
+			r.cmd(ctx, st.Cmd)
+		}
 	}
 	if !r.pipeStatusSet {
 		r.setPipeStatuses(r.exit.code)
@@ -703,6 +711,9 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 		}
 	}
 	r.waitProcSubsts(procSubstStart)
+	if !r.exit.ok() && r.noErrExit {
+		r.exit.errExitIgnored = true
+	}
 	if st.Negated {
 		if r.exit.ok() {
 			r.exit.code = 1
@@ -710,7 +721,7 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 			r.exit.clear()
 		}
 	} else if b, ok := st.Cmd.(*syntax.BinaryCmd); ok && (b.Op == syntax.AndStmt || b.Op == syntax.OrStmt) {
-	} else {
+	} else if !r.exit.ok() && !r.noErrExit && !r.exit.errExitIgnored {
 		r.maybeRunErrTrap(ctx, st.Pos().Line())
 	}
 	if !keepRedirs {
@@ -777,6 +788,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		r2.stmts(ctx, cm.Stmts)
 		r2.exit.exiting = false // subshells don't exit the parent shell
 		r.exit = r2.exit
+		r.exit.errExitIgnored = false
 	case *syntax.CallExpr:
 		if r.runDebugTrap(ctx, debugLineForCommand(cm)) {
 			return
@@ -851,6 +863,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			// we need to surface that last exit code.
 			if r.exit.ok() {
 				r.exit = r.lastExpandExit
+				r.exit.errExitIgnored = false
 			}
 			if !r.exit.fatalExit && !r.exit.exiting && r.exit.err == nil {
 				r.setSpecialUnderscore("")
@@ -870,6 +883,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		trace.newLineFlush()
 
 		r.call(ctx, cm.Args[0].Pos(), fields)
+		r.exit.errExitIgnored = false
 		r.restoreCallAssigns(restores)
 	case *syntax.BinaryCmd:
 		switch cm.Op {
@@ -916,6 +930,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			r.setPipeStatusValues(combined)
 			if r.opts[optPipeFail] && !r2.exit.ok() && r.exit.ok() {
 				r.exit = r2.exit
+				r.exit.errExitIgnored = false
 			}
 			if r2.exit.fatalExit {
 				r.exit.fatal(r2.exit.err) // surface fatal errors immediately
@@ -1979,13 +1994,13 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		if cm.PosixFormat {
 			format = "%s %s\n"
 		} else {
-			r.outf("\n")
+			r.errf("\n")
 		}
 		realTime := time.Since(start)
-		r.outf(format, "real", elapsedString(realTime, cm.PosixFormat))
+		r.errf(format, "real", elapsedString(realTime, cm.PosixFormat))
 		// TODO: can we do these?
-		r.outf(format, "user", elapsedString(0, cm.PosixFormat))
-		r.outf(format, "sys", elapsedString(0, cm.PosixFormat))
+		r.errf(format, "user", elapsedString(0, cm.PosixFormat))
+		r.errf(format, "sys", elapsedString(0, cm.PosixFormat))
 	default:
 		panic(fmt.Sprintf("unhandled command node: %T", cm))
 	}

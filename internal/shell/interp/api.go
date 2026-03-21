@@ -288,6 +288,12 @@ type exitStatus struct {
 	exiting   bool // whether the current shell is exiting
 	fatalExit bool // whether the current shell is exiting due to a fatal error; err below must not be nil
 
+	// errExitIgnored tracks whether this non-zero status originated from a
+	// context where errexit is ignored, such as an if-condition or the left
+	// side of &&/||. Compound commands can then return that status without
+	// re-triggering errexit on the enclosing statement.
+	errExitIgnored bool
+
 	// err holds the error information for a non-zero exit status code or fatal error.
 	// Used so that running a single statement with a custom handler
 	// which returns a non-fatal Go error such as [ExitStatus],
@@ -303,6 +309,7 @@ func (e *exitStatus) clear() {
 	}
 	e.code = 0
 	e.err = nil
+	e.errExitIgnored = false
 }
 
 func (e *exitStatus) ok() bool { return e.code == 0 }
@@ -313,6 +320,7 @@ func (e *exitStatus) ok() bool { return e.code == 0 }
 func (e *exitStatus) oneIf(b bool) {
 	if b {
 		e.code = 1
+		e.errExitIgnored = false
 	}
 }
 
@@ -323,6 +331,7 @@ func (e *exitStatus) fatal(err error) {
 	e.exiting = true
 	e.fatalExit = true
 	e.err = err
+	e.errExitIgnored = false
 	if e.code == 0 {
 		e.code = 1
 	}
@@ -1045,6 +1054,7 @@ func (r *Runner) subshell(background bool) *Runner {
 		commandString:           r.commandString,
 		commandStringValue:      r.commandStringValue,
 		legacyBashCompat:        r.legacyBashCompat,
+		noErrExit:               r.noErrExit,
 		inSubshell:              true,
 		inFunc:                  r.inFunc,
 		inSource:                r.inSource,

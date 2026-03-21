@@ -79,7 +79,7 @@ echo status=$?
 echo
 
 # noforklast optimization
-$SH -c 'set -e; false || /bin/false; echo bad'
+$SH -c 'set -e; false || /bin/false; echo bad' 2>/dev/null
 echo status=$?
 
 ## STDOUT:
@@ -108,7 +108,7 @@ echo status=$?
 
 #### errexit and time { }
 set -o errexit
-time false
+{ time false; } 2>/dev/null
 echo status=$?
 ## status: 1
 
@@ -433,8 +433,6 @@ foo() {
 ! foo
 
 echo "should be executed"
-## BUG bash stdout-json: ""
-## BUG bash status: 1
 ## STDOUT:
 should be executed
 should be executed
@@ -450,7 +448,7 @@ shopt -s inherit_errexit || true
 # This changes it
 #shopt -s command_sub_errexit || true
 
-echo f $(date %x)
+echo f $(date %x 2>/dev/null)
 echo status=$?
 
 # compare with 
@@ -468,4 +466,3 @@ status=0
 ft
 status=0
 ## END
-
