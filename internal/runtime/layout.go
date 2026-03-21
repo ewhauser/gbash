@@ -51,6 +51,9 @@ func initializeSandboxLayout(ctx context.Context, fsys gbfs.FileSystem, env map[
 			return err
 		}
 	}
+	if err := fsys.Chmod(ctx, defaultTempDir, stdfs.ModeSticky|0o777); err != nil {
+		return err
+	}
 
 	for _, dir := range commandDirectories(env) {
 		for _, name := range publicCommandNames(commands) {

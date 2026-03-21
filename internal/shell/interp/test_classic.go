@@ -106,7 +106,7 @@ func (p *testParser) parseThreeArgs(args []string) (syntax.TestExpr, error) {
 	case args[0] == "(" && args[2] == ")":
 		return testWord(args[1]), nil
 	default:
-		return nil, fmt.Errorf("not a valid test operator: %#q", args[1])
+		return nil, fmt.Errorf("%s: binary operator expected", args[1])
 	}
 }
 

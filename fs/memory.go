@@ -478,8 +478,9 @@ func (m *MemoryFS) Chmod(_ context.Context, name string, mode stdfs.FileMode) er
 	if err != nil {
 		return &os.PathError{Op: "chmod", Path: Resolve(m.cwd, name), Err: err}
 	}
-	typeBits := node.mode &^ stdfs.ModePerm
-	node.mode = typeBits | mode.Perm()
+	const mutableModeBits = stdfs.ModePerm | stdfs.ModeSetuid | stdfs.ModeSetgid | stdfs.ModeSticky
+	typeBits := node.mode &^ mutableModeBits
+	node.mode = typeBits | (mode & mutableModeBits)
 	node.modTime = time.Now().UTC()
 	m.nodes[abs] = node
 	return nil

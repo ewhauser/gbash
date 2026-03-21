@@ -424,7 +424,7 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		return r.sourceBuiltin(ctx, pos, args)
 	case "[":
 		if len(args) == 0 || args[len(args)-1] != "]" {
-			r.errf("[: missing matching ]\n")
+			r.errf("[: missing `]'\n")
 			return failf(2, "")
 		}
 		args = args[:len(args)-1]
@@ -435,12 +435,7 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		p := testParser{
 			args: args,
 			err: func(err error) {
-				// Match bash error format: "[: error" or just "error" for test
-				if cmdName == "[" {
-					r.errf("%s: %v\n", cmdName, err)
-				} else {
-					r.errf("%v\n", err)
-				}
+				r.errf("%s: %v\n", cmdName, err)
 				parseErr = true
 			},
 		}
@@ -449,7 +444,7 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 			exit.code = 2
 			return exit
 		}
-		if r.bashTest(ctx, expr, true) == "" && exit.code == 0 {
+		if r.bashTest(ctx, expr, true, cmdName) == "" && exit.code == 0 {
 			exit.oneIf(true)
 		}
 		if r.exit.code != 0 {

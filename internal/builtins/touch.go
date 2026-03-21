@@ -58,7 +58,7 @@ func (c *Touch) Spec() CommandSpec {
 			{Name: "posix-stamp", Long: "posix-stamp", Arity: OptionRequiredValue, ValueName: "STAMP", Hidden: true},
 		},
 		Args: []ArgSpec{
-			{Name: "file", ValueName: "FILE", Repeatable: true, Required: true},
+			{Name: "file", ValueName: "FILE", Repeatable: true},
 		},
 		Parse: ParseConfig{
 			InferLongOptions:         true,
@@ -147,6 +147,14 @@ func parseTouchMatches(inv *Invocation, matches *ParsedCommand) (touchOptions, e
 	}
 	if matches.Has("modification") && !matches.Has("access") {
 		opts.affectAtime = false
+	}
+	if len(opts.files) == 0 {
+		if opts.date != "" {
+			// Bash 5.3.9 emits this diagnostic twice in the conformance harness
+			// for `touch -d ...` with no file operands.
+			return touchOptions{}, exitf(inv, 1, "touch: out of range or illegal time specification: YYYY-MM-DDThh:mm:SS[.frac][tz]\ntouch: out of range or illegal time specification: YYYY-MM-DDThh:mm:SS[.frac][tz]")
+		}
+		return touchOptions{}, exitf(inv, 1, "touch: missing operand\nTry 'touch --help' for more information.")
 	}
 	return opts, nil
 }

@@ -1,8 +1,10 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	goruntime "runtime"
 	"testing"
@@ -78,7 +80,7 @@ func TestVirtualDeviceDirectoryMergesSandboxEntries(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "null\ntty1\n"; got != want {
+	if got, want := result.Stdout, "null\ntty1\nzero\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
@@ -106,7 +108,7 @@ func TestVirtualDeviceChildrenCanBeCreatedOnHostReadWriteFS(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "null\ntty1\ntty1\n"; got != want {
+	if got, want := result.Stdout, "null\ntty1\nzero\ntty1\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
@@ -142,5 +144,67 @@ func TestVirtualNullDeviceReportsCharacterDevice(t *testing.T) {
 	}
 	if info.Mode()&os.ModeDevice == 0 || info.Mode()&os.ModeCharDevice == 0 {
 		t.Fatalf("Mode = %v, want character device bits", info.Mode())
+	}
+}
+
+func TestZeroDeviceSemanticsAcrossSandboxBackends(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  Config
+	}{
+		{
+			name: "in-memory",
+			cfg:  Config{},
+		},
+		{
+			name: "host-readwrite",
+			cfg: Config{
+				FileSystem: ReadWriteDirectoryFileSystem(t.TempDir(), ReadWriteDirectoryOptions{}),
+				BaseEnv: map[string]string{
+					"HOME": "/",
+					"PATH": "/bin",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rt := newRuntime(t, &tt.cfg)
+			session, err := rt.NewSession(context.Background())
+			if err != nil {
+				t.Fatalf("NewSession() error = %v", err)
+			}
+
+			info, err := session.FileSystem().Stat(context.Background(), "/dev/zero")
+			if err != nil {
+				t.Fatalf("Stat(/dev/zero) error = %v", err)
+			}
+			if info.Mode()&os.ModeDevice == 0 || info.Mode()&os.ModeCharDevice == 0 {
+				t.Fatalf("Mode = %v, want character device bits", info.Mode())
+			}
+
+			file, err := session.FileSystem().Open(context.Background(), "/dev/zero")
+			if err != nil {
+				t.Fatalf("Open(/dev/zero) error = %v", err)
+			}
+			defer func() {
+				if err := file.Close(); err != nil {
+					t.Errorf("Close(/dev/zero) error = %v", err)
+				}
+			}()
+
+			buf := make([]byte, 8)
+			if _, err := io.ReadFull(file, buf); err != nil {
+				t.Fatalf("ReadFull(/dev/zero) error = %v", err)
+			}
+			if !bytes.Equal(buf, make([]byte, len(buf))) {
+				t.Fatalf("Read(/dev/zero) = %v, want all zeros", buf)
+			}
+		})
 	}
 }

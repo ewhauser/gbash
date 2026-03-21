@@ -112,6 +112,26 @@ func TestMemoryFSReadlinkRejectsNonSymlink(t *testing.T) {
 	}
 }
 
+func TestMemoryFSChmodPreservesSpecialModeBits(t *testing.T) {
+	t.Parallel()
+	mem := NewMemory()
+	writeTestFile(t, mem, "/data/file.txt", "hello\n")
+
+	if err := mem.Chmod(context.Background(), "/data/file.txt", stdfs.ModeSetuid|stdfs.ModeSetgid|0o755); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	info, err := mem.Stat(context.Background(), "/data/file.txt")
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	want := stdfs.ModeSetuid | stdfs.ModeSetgid | 0o755
+	got := info.Mode() & (stdfs.ModePerm | stdfs.ModeSetuid | stdfs.ModeSetgid | stdfs.ModeSticky)
+	if got != want {
+		t.Fatalf("Mode = %v, want %v", got, want)
+	}
+}
+
 func TestMemoryFSRenameRejectsRoot(t *testing.T) {
 	t.Parallel()
 	mem := NewMemory()

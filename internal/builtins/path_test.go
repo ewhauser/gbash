@@ -64,6 +64,22 @@ func TestTouchSupportsNoCreateAndDateParsing(t *testing.T) {
 	}
 }
 
+func TestTouchDateWithoutFileMatchesConformanceOracle(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "touch -d 2024/01/02 > /tmp/out\nprintf 'status=%s\\n' \"$?\"\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "status=1\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, "touch: out of range or illegal time specification: YYYY-MM-DDThh:mm:SS[.frac][tz]\ntouch: out of range or illegal time specification: YYYY-MM-DDThh:mm:SS[.frac][tz]\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
 func TestMkfifoCreatesNamedPipesAndSupportsReadWriteRedirects(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})

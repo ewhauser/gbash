@@ -94,7 +94,7 @@ func numericTest(op syntax.BinTestOperator, x, y int64) bool {
 }
 
 // non-empty string is true, empty string is false
-func (r *Runner) bashTest(ctx context.Context, expr syntax.TestExpr, classic bool) string {
+func (r *Runner) bashTest(ctx context.Context, expr syntax.TestExpr, classic bool, cmdName string) string {
 	switch x := expr.(type) {
 	case *syntax.Word:
 		if classic {
@@ -104,7 +104,7 @@ func (r *Runner) bashTest(ctx context.Context, expr syntax.TestExpr, classic boo
 		}
 		return r.literal(x)
 	case *syntax.ParenTest:
-		return r.bashTest(ctx, x.X, classic)
+		return r.bashTest(ctx, x.X, classic, cmdName)
 	case *syntax.BinaryTest:
 		switch x.Op {
 		case syntax.TsReMatch:
@@ -143,23 +143,23 @@ func (r *Runner) bashTest(ctx context.Context, expr syntax.TestExpr, classic boo
 			return ""
 		}
 		if classic && isNumericTestOp(x.Op) {
-			left := r.bashTest(ctx, x.X, classic)
+			left := r.bashTest(ctx, x.X, classic, cmdName)
 			if !r.exit.ok() {
 				return ""
 			}
-			right := r.bashTest(ctx, x.Y, classic)
+			right := r.bashTest(ctx, x.Y, classic, cmdName)
 			if !r.exit.ok() {
 				return ""
 			}
 			lx, ok := classicTestInt(left)
 			if !ok {
-				r.errf("[: %s: integer expected\n", left)
+				r.classicTestError(cmdName, "%s: integer expected", left)
 				r.exit.code = 2
 				return ""
 			}
 			rx, ok := classicTestInt(right)
 			if !ok {
-				r.errf("[: %s: integer expected\n", right)
+				r.classicTestError(cmdName, "%s: integer expected", right)
 				r.exit.code = 2
 				return ""
 			}
@@ -168,7 +168,7 @@ func (r *Runner) bashTest(ctx context.Context, expr syntax.TestExpr, classic boo
 			}
 			return ""
 		}
-		if r.binTest(ctx, x.Op, r.bashTest(ctx, x.X, classic), r.bashTest(ctx, x.Y, classic)) {
+		if r.binTest(ctx, x.Op, r.bashTest(ctx, x.X, classic, cmdName), r.bashTest(ctx, x.Y, classic, cmdName)) {
 			return "1"
 		}
 		return ""
@@ -205,12 +205,22 @@ func (r *Runner) bashTest(ctx context.Context, expr syntax.TestExpr, classic boo
 			}
 			return ""
 		}
-		if r.unTest(ctx, x.Op, r.bashTest(ctx, x.X, classic)) {
+		if r.unTest(ctx, x.Op, r.bashTest(ctx, x.X, classic, cmdName), cmdName) {
 			return "1"
 		}
 		return ""
 	}
 	return ""
+}
+
+func (r *Runner) classicTestError(cmdName, format string, args ...any) {
+	if cmdName == "" {
+		cmdName = "["
+	}
+	values := make([]any, 0, len(args)+1)
+	values = append(values, cmdName)
+	values = append(values, args...)
+	r.errf("%s: "+format+"\n", values...)
 }
 
 // non-empty string is true, empty string is false
@@ -338,7 +348,7 @@ func (r *Runner) evalCond(ctx context.Context, expr syntax.CondExpr, trace *trac
 		}
 		operand := r.evalCond(ctx, x.X, trace)
 		return condEval{
-			value: condBoolString(r.unTest(ctx, x.Op, operand.value)),
+			value: condBoolString(r.unTest(ctx, x.Op, operand.value, "")),
 			trace: condTraceUnary(x.Op, operand.trace),
 		}
 	}
@@ -646,7 +656,7 @@ const (
 	access_X_OK = 0x1
 )
 
-func (r *Runner) unTest(ctx context.Context, op syntax.UnTestOperator, x string) bool {
+func (r *Runner) unTest(ctx context.Context, op syntax.UnTestOperator, x, cmdName string) bool {
 	switch op {
 	case syntax.TsExists:
 		if x == "" {
@@ -706,7 +716,32 @@ func (r *Runner) unTest(ctx context.Context, op syntax.UnTestOperator, x string)
 		info, err := r.stat(ctx, x)
 		return err == nil && info.Size() > 0
 	case syntax.TsFdTerm:
-		fd := atoi(x)
+		if cmdName == "" {
+			fd := atoi(x)
+			var f any
+			switch fd {
+			case 0:
+				f = r.stdin
+			case 1:
+				f = r.stdout
+			case 2:
+				f = r.stderr
+			}
+			if f, ok := f.(interface{ Fd() uintptr }); ok {
+				if statter, ok := f.(interface{ Stat() (os.FileInfo, error) }); ok {
+					if info, err := statter.Stat(); err == nil {
+						return info.Mode()&os.ModeCharDevice != 0
+					}
+				}
+			}
+			return false
+		}
+		fd, ok := classicTestInt(x)
+		if !ok {
+			r.classicTestError(cmdName, "%s: integer expected", x)
+			r.exit.code = 2
+			return false
+		}
 		var f any
 		switch fd {
 		case 0:
