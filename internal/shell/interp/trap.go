@@ -537,6 +537,9 @@ func (r *Runner) maybeRunReturnTrap(ctx context.Context, line uint, status uint8
 }
 
 func (r *Runner) runSourceReturnTrap(ctx context.Context, line uint, status uint8) {
+	if !r.returnTrapAllowed() {
+		return
+	}
 	line = r.currentVisibleLine(line)
 	result := r.runTrap(ctx, trapIDReturn, line, status)
 	if result.handler.exiting || result.handler.fatalExit {

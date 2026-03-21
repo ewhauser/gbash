@@ -845,6 +845,67 @@ func TestSourceReturnTrapSkipsExit(t *testing.T) {
 	}
 }
 
+func TestSourceReturnTrapSkippedInUntracedFunction(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	helperPath := filepath.Join(dir, "helper.sh")
+	if err := os.WriteFile(helperPath, []byte("echo sourced\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", helperPath, err)
+	}
+
+	// Without functrace, a RETURN trap set at top level should not fire
+	// when source is called inside a function.
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir:         dir,
+		OpenHandler: sourceTestOpenHandler,
+	}, "trap 'echo ret' RETURN\n"+
+		fmt.Sprintf("f() { . %q; }\n", helperPath)+
+		"f\n"+
+		"echo done\n")
+	if err != nil {
+		t.Fatalf("Run error = %v, stdout=%q stderr=%q", err, stdout, stderr)
+	}
+	const want = "sourced\ndone\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestSourceReturnTrapFiresInTracedFunction(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	helperPath := filepath.Join(dir, "helper.sh")
+	if err := os.WriteFile(helperPath, []byte("echo sourced\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", helperPath, err)
+	}
+
+	// With functrace, source inside a function should fire the RETURN trap.
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir:         dir,
+		OpenHandler: sourceTestOpenHandler,
+	}, "set -o functrace\n"+
+		"trap 'echo ret' RETURN\n"+
+		fmt.Sprintf("f() { . %q; }\n", helperPath)+
+		"f\n"+
+		"echo done\n")
+	if err != nil {
+		t.Fatalf("Run error = %v, stdout=%q stderr=%q", err, stdout, stderr)
+	}
+	// Expect: sourced, ret (from source return), ret (from function return), done
+	const want = "sourced\nret\nret\ndone\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestDebugAndReturnTrapInheritance(t *testing.T) {
 	t.Parallel()
 
