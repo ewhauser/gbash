@@ -423,7 +423,7 @@ func (r *Runner) queueSignalTrap(id trapID) {
 	r.traps.pending = append(r.traps.pending, pendingSignalTrap{
 		id:     id,
 		status: r.exit.code,
-		line:   r.currentStmtLine,
+		line:   1,
 	})
 }
 
@@ -557,6 +557,7 @@ func (r *Runner) maybeRunErrTrap(ctx context.Context, line uint) {
 	if r.noErrExit || r.exit.ok() {
 		return
 	}
+	line = r.trapEffectiveLine(line)
 	if r.errTrapAllowed() {
 		line = r.currentVisibleLine(line)
 		result := r.runTrap(ctx, trapIDErr, line, r.exit.code)
@@ -568,6 +569,13 @@ func (r *Runner) maybeRunErrTrap(ctx context.Context, line uint) {
 	if r.opts[optErrExit] {
 		r.exit.exiting = true
 	}
+}
+
+func (r *Runner) trapEffectiveLine(line uint) uint {
+	if r.trapLineOverride != 0 {
+		return r.trapLineOverride
+	}
+	return line
 }
 
 func debugLineForCommand(cm syntax.Command) uint {
