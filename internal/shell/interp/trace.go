@@ -356,9 +356,9 @@ func traceANSIQuote(arg string, cLocale bool) string {
 	b.WriteString("$'")
 	for i := 0; i < len(arg); {
 		if !cLocale {
-			r, size := utf8.DecodeRuneInString(arg[i:])
-			if size > 1 && r != utf8.RuneError {
-				// Valid multi-byte UTF-8: preserve as-is.
+			_, size := utf8.DecodeRuneInString(arg[i:])
+			if size > 1 {
+				// Valid multi-byte UTF-8 (including U+FFFD): preserve as-is.
 				b.WriteString(arg[i : i+size])
 				i += size
 				continue
