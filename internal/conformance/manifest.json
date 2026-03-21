@@ -236,14 +236,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/empty-bodies.test.sh::Empty do/done": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/empty-bodies.test.sh::Empty then/fi": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/errexit.test.sh::bash atoms [[ (( - redir failure checked": {
           "mode": "xfail",
           "reason": "darwin's pinned bash oracle differs from the Linux CI oracle for these redirect-errexit cases",
