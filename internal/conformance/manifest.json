@@ -883,10 +883,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-trap.test.sh::trap EXIT with PARSE error": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-trap.test.sh::trap EXIT with PARSE error and explicit exit": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -1030,10 +1026,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/dbracket.test.sh::Argument that looks like a real operator": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/dbracket.test.sh::[[ && ]] is syntax error": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
@@ -1323,18 +1315,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/parse-errors.test.sh::Incomplete for": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/parse-errors.test.sh::Incomplete if": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/parse-errors.test.sh::Incomplete while": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/parse-errors.test.sh::Invalid for loop variable name": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -1359,31 +1339,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/parse-errors.test.sh::empty clause in [[": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/parse-errors.test.sh::incomplete backticks": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/parse-errors.test.sh::incomplete command sub": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/parse-errors.test.sh::interactive parse error (regression)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/parse-errors.test.sh::misplaced ;;": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/parse-errors.test.sh::{ is its own word, needs a space": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/parse-errors.test.sh::} is a parse error": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
