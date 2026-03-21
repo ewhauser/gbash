@@ -1615,10 +1615,23 @@ func (cfg *Config) paramExpFields(pe *syntax.ParamExp, ql quoteLevel) ([][]field
 		}
 		if target != nil && quotedIndirectArrayTarget(target) && pe.Exp != nil {
 			hasElems := len(resolved.elems) > 0
+			indirectArgFields := func() ([][]fieldPart, error) {
+				if pe.Exp.Word == nil {
+					return nil, nil
+				}
+				// Unquoted param-op words must preserve quoted-array field
+				// boundaries. Assignment-like argv expansion still needs the
+				// quoteAssignArgs path for nested tilde handling.
+				if ql == quoteNone {
+					return cfg.wordFields(pe.Exp.Word.Parts)
+				}
+				fields, _, err := cfg.paramOpArgFields(pe.Exp.Word, ql)
+				return fields, err
+			}
 			switch pe.Exp.Op {
 			case syntax.AlternateUnset:
 				if hasElems {
-					fields, _, err := cfg.paramOpArgFields(pe.Exp.Word, ql)
+					fields, err := indirectArgFields()
 					return fields, true, false, err
 				}
 				if resolved.indexAllElements {
@@ -1632,7 +1645,7 @@ func (cfg *Config) paramExpFields(pe *syntax.ParamExp, ql quoteLevel) ([][]field
 				}
 				null := arrayExpansionNull(target, fields0, resolved.elems)
 				if !null {
-					fields, _, err := cfg.paramOpArgFields(pe.Exp.Word, ql)
+					fields, err := indirectArgFields()
 					return fields, true, false, err
 				}
 				if resolved.indexAllElements {

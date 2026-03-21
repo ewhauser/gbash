@@ -44,7 +44,7 @@ HOME=$TMP
 echo hi > ~/tilde1.txt
 cat $HOME/tilde1.txt | wc -c
 ## STDOUT:
-       3
+3
 ## END
 ## status: 0
 ## BUG bash STDOUT:

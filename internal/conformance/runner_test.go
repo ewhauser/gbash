@@ -252,6 +252,17 @@ func TestNormalizeOracleResultNormalizesTildeRootFallbackAcrossPlatforms(t *test
 	}
 }
 
+func TestNormalizeCaseResultTrimsWcPaddingForTildeRedirect(t *testing.T) {
+	t.Parallel()
+
+	got := normalizeCaseResult("oils/tilde.test.sh", SpecCase{Name: "tilde expansion of word after redirect"}, ExecutionResult{
+		Stdout: "       3\n",
+	})
+	if want := "3\n"; got.Stdout != want {
+		t.Fatalf("stdout = %q, want %q", got.Stdout, want)
+	}
+}
+
 func TestLoadWorkspaceIntoMemoryPreservesFixturesAndMutability(t *testing.T) {
 	t.Parallel()
 

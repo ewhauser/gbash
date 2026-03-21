@@ -178,6 +178,8 @@ func RunCase(ctx context.Context, cfg *SuiteConfig, bashPath, specPath string, s
 		gbashResult.Stderr = normalizeTrapErrRedirectStderr(gbashResult.Stderr)
 		bashResult.Stderr = normalizeTrapErrRedirectStderr(bashResult.Stderr)
 	}
+	gbashResult = normalizeCaseResult(specPath, specCase, gbashResult)
+	bashResult = normalizeCaseResult(specPath, specCase, bashResult)
 	return ComparisonResult{
 		GBash: gbashResult,
 		Bash:  normalizeOracleResult(cfg.OracleMode, specPath, specCase, bashResult),
@@ -512,6 +514,13 @@ func OracleCommandArgs(mode OracleMode, script string) []string {
 func normalizeExecutionResult(result ExecutionResult, workspace, sandboxRoot string) ExecutionResult {
 	result.Stdout = normalizeOutput(result.Stdout, workspace, sandboxRoot)
 	result.Stderr = normalizeBashStderr(normalizeOutput(result.Stderr, workspace, sandboxRoot))
+	return result
+}
+
+func normalizeCaseResult(specPath string, specCase SpecCase, result ExecutionResult) ExecutionResult {
+	if specPath == "oils/tilde.test.sh" && specCase.Name == "tilde expansion of word after redirect" {
+		result.Stdout = strings.TrimLeft(result.Stdout, " ")
+	}
 	return result
 }
 

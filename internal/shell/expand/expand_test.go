@@ -256,6 +256,29 @@ func TestFieldsExpandTildeInAssignmentLikeArgs(t *testing.T) {
 	}
 }
 
+func TestFieldsPreserveQuotedIndirectArrayParamWord(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `${!hooksSlice+"${!hooksSlice}"}`)
+	got, err := Fields(&Config{
+		Env: testEnv{
+			"hooksSlice": {Set: true, Kind: String, Str: "preHooks[@]"},
+			"preHooks": {
+				Set:  true,
+				Kind: Indexed,
+				List: []string{"foo bar", "baz"},
+			},
+		},
+	}, word)
+	if err != nil {
+		t.Fatalf("Fields() error = %v", err)
+	}
+	want := []string{"foo bar", "baz"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Fields() = %#v, want %#v", got, want)
+	}
+}
+
 func TestRegexpExpandsLeadingTildeAsLiteralRegex(t *testing.T) {
 	t.Parallel()
 
