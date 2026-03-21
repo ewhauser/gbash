@@ -877,7 +877,6 @@ func (r *Runner) Reset() {
 	r.setVarString("IFS", " \t\n")
 	r.setVarString("OPTIND", "1")
 	r.setVarString("PS4", "+ ")
-	r.setPipeStatuses(0)
 	if r.interactive && !r.writeEnv.Get("HISTFILE").IsSet() {
 		home := strings.TrimSpace(r.writeEnv.Get("HOME").String())
 		if home == "" {

@@ -120,14 +120,14 @@ func TestPIPESTATUSTracksSimpleCommandsAndPipelines(t *testing.T) {
 	}
 }
 
-func TestPIPESTATUSStartsAtZero(t *testing.T) {
+func TestPIPESTATUSStartsEmpty(t *testing.T) {
 	t.Parallel()
 
 	stdout, stderr, err := runSpecialVarScript(t, nil, "printf '%s\\n' \"${PIPESTATUS[@]}\"\n")
 	if err != nil {
 		t.Fatalf("Run() error = %v; stderr=%q", err, stderr)
 	}
-	if got, want := stdout, "0\n"; got != want {
+	if got, want := stdout, "\n"; got != want {
 		t.Fatalf("stdout = %q, want %q; stderr=%q", got, want, stderr)
 	}
 	if got := stderr; got != "" {
