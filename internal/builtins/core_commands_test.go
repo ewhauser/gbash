@@ -2268,6 +2268,61 @@ func TestBashInteractiveCommandStringUsesInteractiveSemantics(t *testing.T) {
 	assertInteractiveShellStderr(t, result.Stderr, "bash")
 }
 
+func TestBashInteractiveCommandStringParseErrorsUseShellPrefixWithoutSourceLine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		script string
+	}{
+		{name: "short interactive command string", script: "bash -ic 'var=)'\n"},
+		{name: "rcfile before command string", script: "bash --rcfile /dev/null -i -c 'var=)'\n"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt := newRuntime(t, &Config{})
+
+			result, err := rt.Run(context.Background(), &ExecutionRequest{
+				Script: tc.script,
+			})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result.ExitCode != 2 {
+				t.Fatalf("ExitCode = %d, want 2; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+			}
+			if result.Stdout != "" {
+				t.Fatalf("Stdout = %q, want empty", result.Stdout)
+			}
+			assertInteractiveShellStderr(t, result.Stderr, "bash", "bash: syntax error near unexpected token `)'\n")
+		})
+	}
+}
+
+func TestBashCommandStringParseErrorsKeepSourceLine(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "bash -c 'var=)'\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 2 {
+		t.Fatalf("ExitCode = %d, want 2; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if result.Stdout != "" {
+		t.Fatalf("Stdout = %q, want empty", result.Stdout)
+	}
+	const wantStderr = "bash: line 1: syntax error near unexpected token `)'\nbash: line 1: `var=)'\n"
+	if got := result.Stderr; got != wantStderr {
+		t.Fatalf("Stderr = %q, want %q", got, wantStderr)
+	}
+}
+
 func TestBashInteractiveCommandStringPrefixesBuiltinWarnings(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})

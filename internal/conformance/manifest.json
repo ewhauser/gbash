@@ -365,10 +365,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/loop.test.sh::for loop with invalid identifier": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/loop.test.sh::top-level break/continue/return (without strict_control_flow)": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
@@ -395,10 +391,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/parse-errors.test.sh::Invalid for loop variable name": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/parse-errors.test.sh::Long Token - 65535 bytes": {
           "mode": "xfail",
           "reason": "conformance: Darwin wc still differs from GNU bash harness behavior for this case",
@@ -412,22 +404,6 @@
           "goos": [
             "darwin"
           ]
-        },
-        "oils/parse-errors.test.sh::array literal in case": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/parse-errors.test.sh::array literal inside array is a parse error": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/parse-errors.test.sh::array literal inside loop is a parse error": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/parse-errors.test.sh::interactive parse error (regression)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/pipeline.test.sh::SIGPIPE causes pipeline to die (regression for issue #295)": {
           "mode": "xfail",

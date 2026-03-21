@@ -1289,6 +1289,11 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		switch y := cm.Loop.(type) {
 		case *syntax.WordIter:
 			name := y.Name.Value
+			if !syntax.ValidName(name) {
+				r.errf("`%s': not a valid identifier\n", name)
+				r.exit.code = 1
+				break
+			}
 			items := r.Params // for i; do ...
 
 			inToken := y.InPos.IsValid()

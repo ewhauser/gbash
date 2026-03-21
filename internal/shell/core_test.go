@@ -352,6 +352,50 @@ func TestCoreRunPreservesLineContinuationsAcrossChunks(t *testing.T) {
 	}
 }
 
+func TestExecutionUsesCommandStringSkipsLongOptionsWithValues(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		exec *Execution
+		want bool
+	}{
+		{
+			name: "rcfile before command string",
+			exec: &Execution{
+				Interpreter:     "bash",
+				PassthroughArgs: []string{"--rcfile", "/dev/null", "-i", "-c", "echo hi"},
+			},
+			want: true,
+		},
+		{
+			name: "long option before command string",
+			exec: &Execution{
+				Interpreter:     "bash",
+				PassthroughArgs: []string{"--option", "errexit", "-c", "echo hi"},
+			},
+			want: true,
+		},
+		{
+			name: "non-bash interpreter",
+			exec: &Execution{
+				Interpreter:     "gbash",
+				PassthroughArgs: []string{"--rcfile", "/dev/null", "-i", "-c", "echo hi"},
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := executionUsesCommandString(tc.exec); got != tc.want {
+				t.Fatalf("executionUsesCommandString() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCoreRunTracePreservesUserLineNumbers(t *testing.T) {
 	t.Parallel()
 

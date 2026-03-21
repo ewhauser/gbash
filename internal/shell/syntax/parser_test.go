@@ -450,6 +450,16 @@ func TestParseErrorBashErrorParseCompatibility(t *testing.T) {
 			src:  "[[ || true ]]\n",
 			want: "stdin: line 1: unexpected token `||' in conditional command\nstdin: line 1: syntax error near `|'\nstdin: line 1: `[[ || true ]]'",
 		},
+		{
+			name: "array literal in case clause",
+			src:  "case a=() in\n",
+			want: "stdin: line 1: syntax error near unexpected token `('\nstdin: line 1: `case a=() in'",
+		},
+		{
+			name: "array literal in for word list",
+			src:  "for x in a=(); do\n",
+			want: "stdin: line 1: syntax error near unexpected token `('\nstdin: line 1: `for x in a=(); do'",
+		},
 	}
 
 	for _, tc := range tests {
@@ -472,6 +482,52 @@ func TestParseErrorBashErrorParseCompatibility(t *testing.T) {
 				t.Fatalf("BashError() mismatch\nwant: %s\ngot:  %s", tc.want, got)
 			}
 		})
+	}
+}
+
+func TestParseErrorInteractiveCommandStringFormatting(t *testing.T) {
+	t.Parallel()
+
+	parser := NewParser(Variant(LangBash))
+	_, err := parser.Parse(strings.NewReader("var=)\n"), "bash")
+	if err == nil {
+		t.Fatal("Parse() error = nil, want parse error")
+	}
+	var parseErr ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("Parse() error = %T, want ParseError", err)
+	}
+	if parseErr.SourceLine == "" {
+		parseErr.SourceLine = sourceLineForTest("var=)\n", parseErr.Pos.Line())
+	}
+	parseErr = parseErr.WithInteractiveCommandStringPrefix("bash")
+	const want = "bash: syntax error near unexpected token `)'"
+	if got := parseErr.BashError(); got != want {
+		t.Fatalf("BashError() = %q, want %q", got, want)
+	}
+}
+
+func TestParseErrorRecoverableNestedArrayLiteral(t *testing.T) {
+	t.Parallel()
+
+	parser := NewParser(Variant(LangBash))
+	_, err := parser.Parse(strings.NewReader("a=( inside=() )\n"), "stdin")
+	if err == nil {
+		t.Fatal("Parse() error = nil, want parse error")
+	}
+	var parseErr ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("Parse() error = %T, want ParseError", err)
+	}
+	if !parseErr.Recoverable() {
+		t.Fatal("Recoverable() = false, want true")
+	}
+	if parseErr.SourceLine == "" {
+		parseErr.SourceLine = sourceLineForTest("a=( inside=() )\n", parseErr.Pos.Line())
+	}
+	const want = "stdin: line 1: syntax error near unexpected token `('\nstdin: line 1: `a=( inside=() )'"
+	if got := parseErr.BashError(); got != want {
+		t.Fatalf("BashError() = %q, want %q", got, want)
 	}
 }
 
