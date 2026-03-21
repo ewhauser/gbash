@@ -1774,7 +1774,7 @@ func (r *Runner) sourceBuiltin(ctx context.Context, pos syntax.Pos, name string,
 	sourceName := sourceArg
 	sourcePath := sourceArg
 	preSourceStatus := r.lastExit.code
-	preSourceReturnTrap := r.trapAction(trapIDReturn)
+	preSourceTrapGen := r.traps.generation
 	sourcepathOpt, _ := r.bashOptByName("sourcepath")
 	if !strings.ContainsRune(args[0], '/') && sourcepathOpt != nil && *sourcepathOpt {
 		if resolved, err := r.lookPath(ctx, r.Dir, r.writeEnv, args[0], false, false); err == nil {
@@ -1786,7 +1786,7 @@ func (r *Runner) sourceBuiltin(ctx context.Context, pos syntax.Pos, name string,
 	if err != nil {
 		r.errf("%s", sourceBuiltinOpenError(name, sourceArg, err))
 		exit.code = 1
-		r.runSourceReturnTrap(ctx, pos.Line(), preSourceStatus, preSourceReturnTrap)
+		r.runSourceReturnTrap(ctx, pos.Line(), preSourceStatus, preSourceTrapGen)
 		if r.exit.exiting || r.exit.fatalExit {
 			return r.exit
 		}
@@ -1826,7 +1826,7 @@ func (r *Runner) sourceBuiltin(ctx context.Context, pos syntax.Pos, name string,
 		if !r.exit.returning {
 			sourceTrapStatus = r.exit.code
 		}
-		r.runSourceReturnTrap(ctx, pos.Line(), sourceTrapStatus, preSourceReturnTrap)
+		r.runSourceReturnTrap(ctx, pos.Line(), sourceTrapStatus, preSourceTrapGen)
 	}
 
 	if sourceArgs && !r.sourceSetParams {
