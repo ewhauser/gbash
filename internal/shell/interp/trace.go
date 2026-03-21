@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ewhauser/gbash/internal/shell/expand"
 	"github.com/ewhauser/gbash/internal/shell/syntax"
@@ -353,8 +354,17 @@ func needsTraceControlQuote(arg string) bool {
 func traceANSIQuote(arg string) string {
 	var b strings.Builder
 	b.WriteString("$'")
-	for i := 0; i < len(arg); i++ {
-		switch c := arg[i]; c {
+	for i := 0; i < len(arg); {
+		r, size := utf8.DecodeRuneInString(arg[i:])
+		if size > 1 && r != utf8.RuneError {
+			// Valid multi-byte UTF-8: preserve as-is.
+			b.WriteString(arg[i : i+size])
+			i += size
+			continue
+		}
+		c := arg[i]
+		i++
+		switch c {
 		case '\a':
 			b.WriteString(`\a`)
 		case '\b':

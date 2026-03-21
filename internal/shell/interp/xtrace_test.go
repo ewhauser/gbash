@@ -118,6 +118,26 @@ echo "$s"
 	}
 }
 
+func TestXTraceControlBytesPreserveUTF8(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+s=$'é\x03'
+set -x
+echo "$s"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if got, want := stdout, "é\x03\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	const wantStderr = "+ echo $'é\\003'\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	}
+}
+
 func TestXTracePS4CommandSubstDoesNotTraceRecursively(t *testing.T) {
 	t.Parallel()
 

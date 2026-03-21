@@ -412,6 +412,14 @@ func (r *Runner) arithmEval(expr syntax.ArithmExpr, command, let bool, source st
 		err = arithmCommandError{err: err}
 	}
 	r.expandErr(err)
+	var divErr *expand.ArithmDivByZeroError
+	if (command || let) && errors.As(err, &divErr) {
+		// In let/arithmetic-command contexts, division by zero is a
+		// diagnostic that sets exit status 1 but must not abort control
+		// flow.  This keeps if/while conditions working like bash:
+		//   if let '42/0'; then ... else ... fi  → runs else
+		r.commandAborted = false
+	}
 	if command && err != nil && r.exit.code == 0 {
 		r.exit.code = 1
 	}
