@@ -2384,7 +2384,7 @@ func (r *Runner) typeFileMatches(ctx context.Context, name string, all, requireE
 	}
 	exts := pathExts(r.writeEnv)
 	if strings.ContainsAny(name, chars) {
-		if path, err := r.typeExecutablePath(ctx, name, exts, requireExec); err == nil {
+		if path, err := r.typeExecutablePath(ctx, name, exts, true); err == nil {
 			return []shellTypeMatch{{kind: shellTypeFile, path: path}}
 		}
 		return nil
