@@ -2546,6 +2546,10 @@ var fileTests = []fileTestCase{
 		langFile(word(lit("$"), lit("à"))),
 	),
 	fileTest(
+		[]string{"$?", "$\\\n?", "$\\\r\n?"},
+		langFile(word(litParamExp("?"))),
+	),
+	fileTest(
 		[]string{"$foobar", "$foo\\\nbar"},
 		langFile(call(
 			word(litParamExp("foobar")),

@@ -276,6 +276,12 @@ func (r *Runner) expandErr(err error) {
 		arithSyntaxErr expand.ArithmSyntaxError
 		arithDiagErr   *expand.ArithmDiagnosticError
 	)
+	if r.commandString && !r.interactive &&
+		(errors.As(err, &arithSyntaxErr) || errors.As(err, &arithDiagErr)) {
+		if name := r.lookupVar("0").String(); name != "" && name != "gosh" {
+			errMsg = name + ": " + errMsg
+		}
+	}
 	fmt.Fprintln(r.stderr, errMsg)
 	switch {
 	case errors.As(err, &cmdArithErr):

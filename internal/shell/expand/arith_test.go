@@ -446,3 +446,41 @@ func TestWithArithmSourceEnrichesExistingDivisionByZeroErrors(t *testing.T) {
 		t.Fatalf("WithArithmSource() error = %q, want %q", got, want)
 	}
 }
+
+func TestArithmWithSourceRejectsCarriageReturnStringToInteger(t *testing.T) {
+	t.Parallel()
+
+	exp := parseArithmExpansion(t, "$(( $x + 1 ))")
+	cfg := &Config{Env: testEnv{
+		"x": {Set: true, Kind: String, Str: "\r42\r"},
+	}}
+
+	got, err := ArithmWithSource(cfg, exp.X, exp.Source, exp.Left.Offset()+3, exp.Right.Offset())
+	if err == nil {
+		t.Fatal("ArithmWithSource() error = nil, want parse error")
+	}
+	if got != 0 {
+		t.Fatalf("ArithmWithSource() = %d, want 0", got)
+	}
+	const want = "\r42\r + 1 : syntax error: operand expected (error token is \"\r42\r + 1 \")"
+	if err.Error() != want {
+		t.Fatalf("ArithmWithSource() error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestArithmWithSourceAllowsTabStringToInteger(t *testing.T) {
+	t.Parallel()
+
+	exp := parseArithmExpansion(t, "$(( $x + 1 ))")
+	cfg := &Config{Env: testEnv{
+		"x": {Set: true, Kind: String, Str: "\t42\t"},
+	}}
+
+	got, err := ArithmWithSource(cfg, exp.X, exp.Source, exp.Left.Offset()+3, exp.Right.Offset())
+	if err != nil {
+		t.Fatalf("ArithmWithSource() error = %v", err)
+	}
+	if got != 43 {
+		t.Fatalf("ArithmWithSource() = %d, want 43", got)
+	}
+}

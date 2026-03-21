@@ -143,6 +143,11 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 	if err != nil {
 		return err
 	}
+	if result != nil && result.Stderr != "" {
+		if normalized, ok := normalizeNestedShellArithStderr(script, result.Stderr); ok {
+			result.Stderr = normalized
+		}
+	}
 	commandString := parsed != nil && parsed.Source == BashSourceCommandString
 	if commandString {
 		prefixNestedShellDiagnostic(result, parsed.Name)
@@ -155,6 +160,67 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 		return err
 	}
 	return exitForExecutionResult(result)
+}
+
+func normalizeNestedShellArithStderr(script, stderr string) (string, bool) {
+	if !strings.Contains(stderr, "not a valid arithmetic operator") {
+		return "", false
+	}
+	for search := 0; search < len(script); {
+		startRel := strings.Index(script[search:], "$((")
+		if startRel < 0 {
+			return "", false
+		}
+		exprStart := search + startRel + len("$((")
+		endRel := strings.Index(script[exprStart:], "))")
+		if endRel < 0 {
+			return "", false
+		}
+		exprEnd := exprStart + endRel
+		exprRaw := script[exprStart:exprEnd]
+		tokenText, ok := nestedShellArithCRToken(exprRaw)
+		if ok {
+			exprText := strings.Trim(exprRaw, " \t\n")
+			if exprText == "" {
+				return "", false
+			}
+			return fmt.Sprintf("%s: syntax error: operand expected (error token is %s)\n", exprText, bashQuoteArithToken(tokenText)), true
+		}
+		search = exprEnd + len("))")
+	}
+	return "", false
+}
+
+func nestedShellArithCRToken(exprRaw string) (string, bool) {
+	tokenStart := strings.IndexByte(exprRaw, '\r')
+	if tokenStart < 0 {
+		return "", false
+	}
+	tokenEnd := tokenStart + 1
+	if tokenEnd < len(exprRaw) && exprRaw[tokenEnd] == '\n' {
+		tokenEnd++
+	}
+	for tokenEnd < len(exprRaw) && !isNestedShellArithTokenDelimiter(exprRaw[tokenEnd]) {
+		tokenEnd++
+	}
+	if tokenEnd <= tokenStart {
+		return "", false
+	}
+	return exprRaw[tokenStart:tokenEnd], true
+}
+
+func isNestedShellArithTokenDelimiter(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\r', '+', '-', '*', '/', '%', '(', ')', '<', '>', '=', '&', '|', '^', '?', ':', ',', ';':
+		return true
+	default:
+		return false
+	}
+}
+
+func bashQuoteArithToken(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+	return `"` + replacer.Replace(s) + `"`
 }
 
 func (c *Bash) applyRcfile(ctx context.Context, inv *Invocation, parsed *BashInvocation, script string) (string, error) {
@@ -284,7 +350,6 @@ func prefixNestedShellDiagnostic(result *ExecutionResult, shellName string) {
 			return
 		}
 		normalized := strings.TrimRight(strings.TrimLeft(lines[i], " \t"), " \t")
-		normalized = strings.Replace(normalized, " : ", ": ", 1)
 		lines[i] = shellName + ": line 1: " + normalized
 		result.Stderr = strings.Join(lines, "\n")
 		if hadTrailingNewline {
@@ -311,6 +376,8 @@ func shouldPrefixNestedShellDiagnostic(line, shellName string) bool {
 	case strings.Contains(line, "invalid number"):
 		return true
 	case strings.Contains(line, "arithmetic syntax error"):
+		return true
+	case strings.Contains(line, "syntax error: operand expected"):
 		return true
 	case strings.Contains(line, "division by 0"):
 		return true

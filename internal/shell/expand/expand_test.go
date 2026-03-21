@@ -1731,6 +1731,27 @@ func TestAssociativeAllElementSliceUsesBashOffsets(t *testing.T) {
 	}
 }
 
+func TestFieldsSupportsMultibyteIFS(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{
+		Env: testEnv{
+			"IFS": {Set: true, Kind: String, Str: "ç"},
+			"x":   {Set: true, Kind: String, Str: "çx"},
+		},
+	}
+
+	word := parseCommandWord(t, `$x`)
+	got, err := Fields(cfg, word)
+	if err != nil {
+		t.Fatalf("Fields() error = %v", err)
+	}
+	want := []string{"", "x"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Fields() = %#v, want %#v", got, want)
+	}
+}
+
 type mockFileInfo struct {
 	name        string
 	typ         fs.FileMode
