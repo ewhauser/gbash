@@ -72,7 +72,8 @@ type HandlerContext struct {
 	Internal bool
 
 	// DisableCommandHash bypasses the runner's cached command lookup table for
-	// this handler context without clearing the user-visible hash state.
+	// this handler context without clearing the user-visible hash state. Fresh
+	// resolutions still update the table.
 	DisableCommandHash bool
 
 	// Pos is the source position which relates to the operation,
@@ -100,14 +101,14 @@ func (hc *HandlerContext) LookupCommandHash(name string) (string, bool) {
 }
 
 func (hc *HandlerContext) RememberCommandHash(name, path string) {
-	if hc == nil || hc.runner == nil || hc.DisableCommandHash {
+	if hc == nil || hc.runner == nil {
 		return
 	}
 	hc.runner.commandHashRemember(name, path)
 }
 
 func (hc *HandlerContext) IncrementCommandHash(name string) {
-	if hc == nil || hc.runner == nil || hc.DisableCommandHash {
+	if hc == nil || hc.runner == nil {
 		return
 	}
 	hc.runner.commandHashIncrement(name)

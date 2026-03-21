@@ -360,6 +360,49 @@ hash
 	}
 }
 
+func TestRunCommandPRefreshesCommandHash(t *testing.T) {
+	t.Parallel()
+
+	registry := newShellTestRegistry(t)
+	fsys := newShellTestFS(t, "mkdir", "chmod", "rm")
+	makeShellTmpDir(t, fsys)
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	_, err := Run(context.Background(), &Execution{
+		Script: `
+/bin/mkdir -p /tmp/custom
+printf '%s\n' placeholder > /tmp/custom/mkdir
+/bin/chmod +x /tmp/custom/mkdir
+PATH="/tmp/custom:$PATH"
+hash mkdir
+/bin/rm /tmp/custom/mkdir
+command -p mkdir -p /tmp/from-default >/dev/null
+hash
+mkdir -p /tmp/plain
+`,
+		Env:      map[string]string{"PATH": "/bin"},
+		Registry: registry,
+		FS:       fsys,
+		Exec:     newCoreTestExec(registry, fsys),
+		Stdout:   &stdout,
+		Stderr:   &stderr,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := stdout.String(), "hits\tcommand\n   1\t/bin/mkdir\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	if _, err := fsys.Stat(context.Background(), "/tmp/plain"); err != nil {
+		t.Fatalf("Stat(/tmp/plain) error = %v", err)
+	}
+}
+
 func makeShellTmpDir(t testing.TB, fsys interface {
 	MkdirAll(context.Context, string, os.FileMode) error
 }) {
