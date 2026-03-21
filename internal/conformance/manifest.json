@@ -1342,21 +1342,6 @@
             "darwin"
           ]
         },
-        "oils/quote.test.sh::$'' octal escapes don't have leading 0": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/quote.test.sh::$'' octal escapes with fewer than 3 chars": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/quote.test.sh::$'' supports \\cA escape for Ctrl-A - mask with 0x1f": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
         "oils/quote.test.sh::$? split over multiple lines": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"

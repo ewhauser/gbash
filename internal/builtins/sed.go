@@ -242,10 +242,7 @@ func parseSedCommand(script string, regexExtended bool) (sedCommand, error) {
 		command.kind = sedCommandSubstitute
 		command.replacement = replacement
 		command.global = strings.ContainsRune(flags, 'g')
-		if strings.ContainsRune(flags, 'i') {
-			pattern = "(?i)" + pattern
-		}
-		command.pattern, err = compileSedRegexp(pattern, regexExtended)
+		command.pattern, err = compileSedRegexp(pattern, regexExtended, strings.ContainsRune(flags, 'i'))
 		if err != nil {
 			return sedCommand{}, err
 		}
@@ -270,7 +267,7 @@ func parseSedAddress(script string, regexExtended bool) (address *sedAddress, re
 		if err != nil {
 			return nil, "", false, err
 		}
-		re, err := compileSedRegexp(pattern, regexExtended)
+		re, err := compileSedRegexp(pattern, regexExtended, false)
 		if err != nil {
 			return nil, "", false, err
 		}
@@ -312,11 +309,14 @@ func parseSedSubstitute(script string) (pattern, replacement, flags string, err 
 	return pattern, replacement, flags, nil
 }
 
-func compileSedRegexp(pattern string, regexExtended bool) (*regexp.Regexp, error) {
-	if regexExtended {
-		return regexp.Compile(pattern)
+func compileSedRegexp(pattern string, regexExtended, ignoreCase bool) (*regexp.Regexp, error) {
+	if !regexExtended {
+		pattern = sedBasicRegexp(pattern)
 	}
-	return regexp.Compile(sedBasicRegexp(pattern))
+	if ignoreCase {
+		pattern = "(?i)" + pattern
+	}
+	return regexp.Compile(pattern)
 }
 
 func sedBasicRegexp(pattern string) string {
