@@ -24,6 +24,9 @@ func bashInteractiveJobControlWarning(ctx context.Context, name string, inv *Inv
 }
 
 func bashInteractiveJobControlPID(ctx context.Context) int {
+	if pgrp, ok := shellstate.ProcessGroupFromContext(ctx); ok && pgrp > 0 {
+		return pgrp
+	}
 	if lookup := shellstate.ShellVarLookupFromContext(ctx); lookup != nil {
 		if raw, ok := lookup("BASHPID"); ok {
 			if pid, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && pid > 0 {
