@@ -201,10 +201,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-misc.test.sh::Shifting too far": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-misc.test.sh::history builtin usage": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -595,10 +591,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/smoke.test.sh::failed command": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/temp-binding.test.sh::Temp bindings with unset": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

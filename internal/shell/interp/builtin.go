@@ -125,6 +125,7 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		r.updateExpandOpts()
 	case "shift":
 		n := 1
+		label := "1"
 		switch len(args) {
 		case 0:
 		case 1:
@@ -135,12 +136,16 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 				return exit
 			}
 			n = n2
+			label = args[0]
 		default:
 			exit = failf(1, "shift: too many arguments\n")
 			exit.exiting = true
 			return exit
 		}
 		if n < 0 || n > len(r.Params) {
+			if r.legacyBashCompat && r.posixMode() {
+				return failf(1, "shift: %s: shift count out of range\n", label)
+			}
 			exit.code = 1
 			return exit
 		}
@@ -2556,7 +2561,7 @@ func (r *Runner) printTypeMatch(name string, match shellTypeMatch, mode shellTyp
 		r.out(bashFunctionBody(match.body))
 		r.out("}\n")
 	case shellTypeSpecialBuiltin:
-		r.outf("%s is a special shell builtin\n", name)
+		r.outf("%s is a shell builtin\n", name)
 	case shellTypeBuiltin:
 		r.outf("%s is a shell builtin\n", name)
 	case shellTypeFile:
