@@ -333,10 +333,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-trap-bash.test.sh::trap -p in child is BUGGY in bash": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-trap-bash.test.sh::trap DEBUG and control flow": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -394,34 +390,6 @@
           "reason": "conformance: gbash behavior differs from bash"
         },
         "oils/builtin-trap-err.test.sh::trap ERR with redirect": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-trap.test.sh::Remove multiple handlers with trap -": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-trap.test.sh::Remove trap with an unsigned integer": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-trap.test.sh::exit 1 when trap code string is invalid": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-trap.test.sh::print trap handler with multiple lines": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-trap.test.sh::trap 0 2 resets EXIT AND SIGINT": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-trap.test.sh::trap foo gives non-zero error": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-trap.test.sh::traps are not active inside subshells $() ()  trap | cat": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

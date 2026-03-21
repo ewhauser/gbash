@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,6 +18,37 @@ func (r *Runner) trapActions() map[trapID]trapAction {
 		r.traps.actions = make(map[trapID]trapAction, 8)
 	}
 	return r.traps.actions
+}
+
+func (r *Runner) trapPrintAction(id trapID) trapAction {
+	if action := r.trapAction(id); action.active() {
+		return action
+	}
+	if r == nil || r.traps.display == nil {
+		return trapAction{}
+	}
+	return r.traps.display[id]
+}
+
+func (r *Runner) trapPrintActions() map[trapID]trapAction {
+	if r == nil {
+		return nil
+	}
+	actions := make(map[trapID]trapAction, len(r.traps.display)+len(r.traps.actions))
+	for id, action := range r.traps.display {
+		if action.active() {
+			actions[id] = action
+		}
+	}
+	for id, action := range r.traps.actions {
+		if action.active() {
+			actions[id] = action
+		}
+	}
+	if len(actions) == 0 {
+		return nil
+	}
+	return actions
 }
 
 func (r *Runner) trapActiveCounts() map[trapID]int {
@@ -34,6 +66,9 @@ func (r *Runner) trapAction(id trapID) trapAction {
 }
 
 func (r *Runner) setTrapAction(id trapID, action trapAction) {
+	if r.traps.display != nil {
+		r.traps.display = nil
+	}
 	if !action.active() {
 		if r.traps.actions != nil {
 			delete(r.traps.actions, id)
@@ -44,10 +79,12 @@ func (r *Runner) setTrapAction(id trapID, action trapAction) {
 }
 
 func (r *Runner) cloneTrapStateFrom(parent *Runner) {
-	if parent == nil || len(parent.traps.actions) == 0 {
+	if parent == nil {
 		r.traps.actions = nil
+		r.traps.display = nil
 		return
 	}
+	display := parent.trapPrintActions()
 	actions := make(map[trapID]trapAction, len(parent.traps.actions))
 	for id, action := range parent.traps.actions {
 		switch {
@@ -71,9 +108,17 @@ func (r *Runner) cloneTrapStateFrom(parent *Runner) {
 	}
 	if len(actions) == 0 {
 		r.traps.actions = nil
+	} else {
+		r.traps.actions = actions
+	}
+	for id := range actions {
+		delete(display, id)
+	}
+	if len(display) == 0 {
+		r.traps.display = nil
 		return
 	}
-	r.traps.actions = actions
+	r.traps.display = display
 }
 
 func (r *Runner) validateTrapCommand(command string) error {
@@ -83,32 +128,83 @@ func (r *Runner) validateTrapCommand(command string) error {
 	return nil
 }
 
+func trimTrapParseError(err syntax.ParseError) string {
+	lines := strings.Split(err.BashError(), "\n")
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		prefix, rest, ok := strings.Cut(line, ": line ")
+		if !ok || prefix == "" {
+			continue
+		}
+		_, text, ok := strings.Cut(rest, ": ")
+		if !ok {
+			continue
+		}
+		lines[i] = text
+	}
+	return strings.Join(lines, "\n")
+}
+
+func trapInvalidOptionUsageLine() string {
+	if runtime.GOOS == "darwin" {
+		return "trap: usage: trap [-lp] [arg signal_spec ...]\n"
+	}
+	return "trap: usage: trap [-lp] [[arg] signal_spec ...]\n"
+}
+
 func (r *Runner) trapBuiltin(ctx context.Context, args []string) (exit exitStatus) {
 	failf := func(code uint8, format string, args ...any) exitStatus {
 		r.errf(format, args...)
 		exit.code = code
 		return exit
 	}
+	usagef := func() exitStatus {
+		r.errf("trap: usage: trap [-Plp] [[action] signal_spec ...]\n")
+		exit.code = 2
+		return exit
+	}
+	invalidOptionUsagef := func() exitStatus {
+		r.errf("%s", trapInvalidOptionUsageLine())
+		exit.code = 2
+		return exit
+	}
 
-	fp := flagParser{remaining: args}
 	printMode := false
 	listMode := false
-	for fp.more() {
-		switch flag := fp.flag(); flag {
-		case "-p":
-			printMode = true
-		case "-l":
-			listMode = true
-		case "-":
-			// reset form
+	argIdx := 0
+flagLoop:
+	for argIdx < len(args) {
+		arg := args[argIdx]
+		switch {
+		case arg == "--":
+			argIdx++
+			break flagLoop
+		case arg == "":
+			break flagLoop
+		case arg == "-":
+			break flagLoop
+		case arg[0] != '-':
+			break flagLoop
+		case len(arg) == 1:
+			break flagLoop
 		default:
-			r.errf("trap: %q: invalid option\n", flag)
-			r.errf("trap: usage: trap [-lp] [[arg] signal_spec ...]\n")
-			exit.code = 2
-			return exit
+			for i := 1; i < len(arg); i++ {
+				switch arg[i] {
+				case 'p':
+					printMode = true
+				case 'l':
+					listMode = true
+				default:
+					r.errf("trap: %s: invalid option\n", arg)
+					return invalidOptionUsagef()
+				}
+			}
+			argIdx++
 		}
 	}
-	args = fp.args()
+	args = args[argIdx:]
 
 	if listMode {
 		if len(args) > 0 {
@@ -147,7 +243,7 @@ func (r *Runner) trapBuiltin(ctx context.Context, args []string) (exit exitStatu
 			ids = trapPrintOrderIDs()
 		}
 		for _, id := range ids {
-			action := r.trapAction(id)
+			action := r.trapPrintAction(id)
 			if !action.active() {
 				continue
 			}
@@ -160,21 +256,30 @@ func (r *Runner) trapBuiltin(ctx context.Context, args []string) (exit exitStatu
 		return exit
 	}
 
-	callback := "-"
-	signalArgs := args
+	callback := ""
+	var signalArgs []string
 	switch {
 	case len(args) == 1:
-		// Single-arg form resets the named signal.
-	case isTrapResetCommand(args[0]):
+		if _, err := resolveTrapID(args[0]); err != nil {
+			return usagef()
+		}
+		callback = "-"
+		signalArgs = args
+	case args[0] == "-":
+		callback = "-"
 		signalArgs = args[1:]
+	case isTrapResetCommand(args[0]):
+		callback = "-"
+		signalArgs = args[1:]
+		if _, err := resolveTrapID(args[0]); err == nil {
+			signalArgs = args
+		}
 	default:
 		callback = args[0]
 		signalArgs = args[1:]
 	}
 	if len(signalArgs) == 0 {
-		r.errf("trap: usage: trap [-lp] [[arg] signal_spec ...]\n")
-		exit.code = 2
-		return exit
+		return usagef()
 	}
 
 	action := trapAction{}
@@ -184,22 +289,14 @@ func (r *Runner) trapBuiltin(ctx context.Context, args []string) (exit exitStatu
 	case "":
 		action = trapAction{kind: trapActionIgnore}
 	default:
-		if err := r.validateTrapCommand(callback); err != nil {
-			exit.code = 1
-			return exit
-		}
 		action = trapAction{kind: trapActionCommand, command: callback}
 	}
 
-	ids := make([]trapID, 0, len(signalArgs))
 	for _, raw := range signalArgs {
 		id, err := resolveTrapID(raw)
 		if err != nil {
-			return failf(2, "%v\n", err)
+			return failf(1, "%v\n", err)
 		}
-		ids = append(ids, id)
-	}
-	for _, id := range ids {
 		r.setTrapAction(id, action)
 	}
 	return exit
@@ -211,6 +308,9 @@ func isTrapResetCommand(command string) bool {
 }
 
 func hasUnsignedResetPrefix(command string) bool {
+	if strings.TrimSpace(command) != command {
+		return false
+	}
 	_, ok := parseTrapUnsigned(command)
 	return ok
 }
@@ -259,7 +359,19 @@ func (r *Runner) runTrap(ctx context.Context, id trapID, line uint, status uint8
 	handler := r.exit
 	if err != nil {
 		var statusErr ExitStatus
-		if !errors.As(err, &statusErr) {
+		switch {
+		case errors.As(err, &statusErr):
+		default:
+			var parseErr syntax.ParseError
+			if errors.As(err, &parseErr) {
+				if parseErr.SourceLine == "" && parseErr.WantsSourceLine() {
+					parseErr.SourceLine = action.command
+				}
+				r.errf("%s\n", trimTrapParseError(parseErr))
+				handler.code = 2
+				handler.err = parseErr
+				break
+			}
 			r.errf("%s trap: %v\n", name, err)
 			handler.fatal(err)
 		}
@@ -466,13 +578,14 @@ func (r *Runner) writeTrapList(w io.Writer) error {
 	if w == nil {
 		return nil
 	}
-	ids := make([]trapID, 0, len(r.traps.actions))
-	for id := range r.traps.actions {
+	visible := r.trapPrintActions()
+	ids := make([]trapID, 0, len(visible))
+	for id := range visible {
 		ids = append(ids, id)
 	}
 	sortedTrapIDs(ids)
 	for _, id := range ids {
-		action := r.trapAction(id)
+		action := r.trapPrintAction(id)
 		if !action.active() {
 			continue
 		}
