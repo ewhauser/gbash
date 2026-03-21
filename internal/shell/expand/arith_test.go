@@ -391,6 +391,25 @@ func TestArithmWithSourceUsesExpandedStringForIndexedStringDiagnostics(t *testin
 	}
 }
 
+func TestArithmWithSourcePreservesParenAmbiguityRuntimeParseError(t *testing.T) {
+	t.Parallel()
+
+	exp := parseArithmExpansionScript(t, "echo $(( echo 1\necho 2\n(( x ))\n: $(( x ))\necho 3\n))\n")
+	cfg := &Config{Env: testEnv{}}
+
+	got, err := ArithmWithSource(cfg, exp.X, exp.Source, exp.Left.Offset()+3, exp.Right.Offset())
+	if err == nil {
+		t.Fatal("ArithmWithSource() error = nil, want multiline parse error")
+	}
+	if got != 0 {
+		t.Fatalf("ArithmWithSource() = %d, want 0", got)
+	}
+	const want = "echo 1\necho 2\n(( x ))\n: 0\necho 3\n: syntax error in expression (error token is \"1\necho 2\n(( x ))\n: 0\necho 3\n\")"
+	if err.Error() != want {
+		t.Fatalf("ArithmWithSource() error = %q, want %q", err.Error(), want)
+	}
+}
+
 func TestWithArithmSourceEnrichesExistingDivisionByZeroErrors(t *testing.T) {
 	t.Parallel()
 

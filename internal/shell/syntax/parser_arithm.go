@@ -1,5 +1,7 @@
 package syntax
 
+import "strings"
+
 // compact specifies whether we allow spaces between expressions.
 // This is true for let
 func (p *Parser) arithmExpr(compact bool) ArithmExpr {
@@ -286,14 +288,28 @@ func (p *Parser) arithmWordSuffixEnd(compact bool) Pos {
 	}
 }
 
+func (p *Parser) arithmSuffixWord(start, end Pos, src string) *Word {
+	if src == "" {
+		return nil
+	}
+	doc := NewParser(Variant(p.lang), KeepComments(p.keepComments))
+	if len(p.stopAt) > 0 {
+		doc.stopAt = append([]byte(nil), p.stopAt...)
+	}
+	if word, err := doc.document(strings.NewReader(src), start); err == nil && word != nil {
+		return word
+	}
+	return p.wordOne(p.rawLit(start, end, src))
+}
+
 func (p *Parser) appendArithmSuffix(expr ArithmExpr, start, end Pos, src string) ArithmExpr {
 	if src == "" {
 		return expr
 	}
-	part := p.rawLit(start, end, src)
+	word := p.arithmSuffixWord(start, end, src)
 	switch expr := expr.(type) {
 	case *Word:
-		expr.Parts = append(expr.Parts, part) //nolint:nilaway // expr non-nil when matched by type switch
+		expr.Parts = append(expr.Parts, word.Parts...)
 		return expr
 	case *BinaryArithm:
 		expr.Y = p.appendArithmSuffix(expr.Y, start, end, src)
@@ -305,7 +321,7 @@ func (p *Parser) appendArithmSuffix(expr ArithmExpr, start, end Pos, src string)
 		expr.X = p.appendArithmSuffix(expr.X, start, end, src)
 		return expr
 	default:
-		return p.wordOne(part)
+		return word
 	}
 }
 
@@ -316,6 +332,24 @@ func (p *Parser) arithmContinueWord(expr ArithmExpr, compact bool) ArithmExpr {
 	start := p.pos
 	end := p.arithmWordSuffixEnd(compact)
 	return p.appendArithmSuffix(expr, start, end, p.sourceRange(start, end))
+}
+
+func arithmExprEnd(expr ArithmExpr) Pos {
+	switch expr := expr.(type) {
+	case nil:
+		return Pos{}
+	case *BinaryArithm:
+		if end := arithmExprEnd(expr.Y); end.IsValid() {
+			return end
+		}
+		return arithmExprEnd(expr.X)
+	case *UnaryArithm:
+		return arithmExprEnd(expr.X)
+	case *ParenArithm:
+		return arithmExprEnd(expr.X)
+	default:
+		return expr.End()
+	}
 }
 
 // nextArith consumes a token.
@@ -424,26 +458,47 @@ func (p *Parser) matchedArithm(lpos Pos, left, right token) {
 	}
 }
 
-func (p *Parser) arithmTailToEnd() (Pos, string, bool) {
-	start := p.pos
+func (p *Parser) arithmTailToEnd() (Pos, bool) {
 	for !p.peekArithmEnd() {
 		if p.tok == _EOF {
-			return Pos{}, "", false
+			return Pos{}, false
 		}
 		p.nextArith(false)
 	}
-	return p.pos, p.sourceRange(start, p.pos), true
+	return p.pos, true
 }
 
-func (p *Parser) arithmEndExpr(expr *ArithmExpr, ltok token, lpos Pos, old saveState) Pos {
+func (p *Parser) arithmTailToPos(end Pos) (Pos, bool) {
+	for end.After(p.pos) {
+		if p.tok == _EOF {
+			return Pos{}, false
+		}
+		p.nextArith(false)
+	}
+	if p.pos != end {
+		return Pos{}, false
+	}
+	return p.pos, true
+}
+
+func (p *Parser) arithmEndExpr(expr *ArithmExpr, ltok token, lpos Pos, old saveState, salvageTail bool, tailEnd Pos) Pos {
 	if !p.peekArithmEnd() {
 		if p.recoverError() {
 			return recoveredPos
 		}
-		if expr != nil && *expr != nil {
+		if salvageTail && expr != nil && *expr != nil {
 			tailStart := p.pos
-			if end, tail, ok := p.arithmTailToEnd(); ok {
-				*expr = p.appendArithmSuffix(*expr, tailStart, end, tail)
+			if exprEnd := arithmExprEnd(*expr); exprEnd.IsValid() && !exprEnd.After(tailStart) {
+				tailStart = exprEnd
+			}
+			if tailEnd.IsValid() {
+				if end, ok := p.arithmTailToPos(tailEnd); ok {
+					*expr = p.appendArithmSuffix(*expr, tailStart, end, p.sourceRange(tailStart, end))
+				} else {
+					p.arithmMatchingErr(lpos, ltok, dblRightParen)
+				}
+			} else if end, ok := p.arithmTailToEnd(); ok {
+				*expr = p.appendArithmSuffix(*expr, tailStart, end, p.sourceRange(tailStart, end))
 			} else {
 				p.arithmMatchingErr(lpos, ltok, dblRightParen)
 			}

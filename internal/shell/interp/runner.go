@@ -351,7 +351,8 @@ func (r *Runner) arithmEval(expr syntax.ArithmExpr, command bool, source string,
 	}
 	var syntaxErr expand.ArithmSyntaxError
 	var diagErr *expand.ArithmDiagnosticError
-	if command && (errors.As(err, &syntaxErr) || errors.As(err, &diagErr)) {
+	if command && (errors.As(err, &syntaxErr) ||
+		(errors.As(err, &diagErr) && diagErr.Message != "syntax error in expression")) {
 		err = arithmCommandError{err: err}
 	}
 	r.expandErr(err)

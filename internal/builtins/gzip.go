@@ -20,6 +20,7 @@ type gzipOptions struct {
 	toStdout   bool
 	force      bool
 	keep       bool
+	quiet      bool
 	test       bool
 	verbose    bool
 	suffix     string
@@ -54,6 +55,7 @@ func (c *Gzip) Spec() CommandSpec {
 			{Name: "decompress", Short: 'd', Long: "decompress", Aliases: []string{"uncompress"}, Help: "decompress"},
 			{Name: "force", Short: 'f', Long: "force", Help: "overwrite output files"},
 			{Name: "keep", Short: 'k', Long: "keep", Help: "keep input files"},
+			{Name: "quiet", Short: 'q', Long: "quiet", Aliases: []string{"silent"}, HelpAliases: []string{"silent"}, Help: "suppress all warnings"},
 			{Name: "suffix", Short: 'S', Long: "suffix", ValueName: "SUF", Arity: OptionRequiredValue, Help: "use suffix SUF on compressed files"},
 			{Name: "test", Short: 't', Long: "test", Help: "test compressed file integrity"},
 			{Name: "verbose", Short: 'v', Long: "verbose", Help: "verbose output"},
@@ -62,6 +64,7 @@ func (c *Gzip) Spec() CommandSpec {
 			{Name: "file", ValueName: "FILE", Repeatable: true},
 		},
 		Parse: ParseConfig{
+			GroupShortOptions:        true,
 			ShortOptionValueAttached: true,
 			LongOptionValueEquals:    true,
 			AutoHelp:                 true,
@@ -80,6 +83,7 @@ func (c *Gzip) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCo
 	opts.toStdout = opts.toStdout || matches.Has("stdout")
 	opts.force = matches.Has("force")
 	opts.keep = opts.keep || matches.Has("keep")
+	opts.quiet = matches.Has("quiet")
 	opts.test = matches.Has("test")
 	opts.verbose = matches.Has("verbose")
 	if matches.Has("suffix") {
@@ -117,25 +121,42 @@ func (c *Gzip) defaultOptions() gzipOptions {
 	return opts
 }
 
-func runGzipItem(ctx context.Context, inv *Invocation, opts *gzipOptions, name, commandName string) error {
-	reader, sourceAbs, sourceInfo, closeInput, err := openGzipInput(ctx, inv, name)
-	if err != nil {
+func gzipMaybeQuietError(err error, quiet bool) error {
+	if err == nil || !quiet {
 		return err
+	}
+	if code, ok := ExitCode(err); ok {
+		return &ExitError{Code: code}
+	}
+	return &ExitError{Code: 1}
+}
+
+func gzipExitf(inv *Invocation, quiet bool, format string, args ...any) error {
+	if quiet {
+		return &ExitError{Code: 1}
+	}
+	return exitf(inv, 1, format, args...)
+}
+
+func runGzipItem(ctx context.Context, inv *Invocation, opts *gzipOptions, name, commandName string) error {
+	reader, sourceAbs, sourceInfo, closeInput, err := openGzipInput(ctx, inv, name, opts.quiet)
+	if err != nil {
+		return gzipMaybeQuietError(err, opts.quiet)
 	}
 	defer closeInput()
 
 	if opts.test {
-		return gzipTestStream(inv, opts.verbose, name, reader)
+		return gzipMaybeQuietError(gzipTestStream(inv, opts.verbose, name, reader), opts.quiet)
 	}
 
 	if opts.toStdout || name == "-" {
 		if opts.decompress {
 			if err := gunzipStream(reader, inv.Stdout); err != nil {
-				return exitf(inv, 1, "%s: %v", commandName, err)
+				return gzipExitf(inv, opts.quiet, "%s: %v", commandName, err)
 			}
 		} else {
 			if err := gzipStream(inv.Stdout, reader); err != nil {
-				return exitf(inv, 1, "%s: %v", commandName, err)
+				return gzipExitf(inv, opts.quiet, "%s: %v", commandName, err)
 			}
 		}
 		return nil
@@ -143,19 +164,19 @@ func runGzipItem(ctx context.Context, inv *Invocation, opts *gzipOptions, name, 
 
 	targetAbs, err := resolveGzipOutputPath(inv, opts, sourceAbs)
 	if err != nil {
-		return err
+		return gzipMaybeQuietError(err, opts.quiet)
 	}
 	if err := ensureParentDirExists(ctx, inv, targetAbs); err != nil {
-		return err
+		return gzipMaybeQuietError(err, opts.quiet)
 	}
 	if exists, err := gzipTargetExists(ctx, inv, targetAbs); err != nil {
-		return err
+		return gzipMaybeQuietError(err, opts.quiet)
 	} else if exists {
 		if !opts.force {
-			return exitf(inv, 1, "%s: %s already exists; use -f to overwrite", commandName, targetAbs)
+			return gzipExitf(inv, opts.quiet, "%s: %s already exists; use -f to overwrite", commandName, targetAbs)
 		}
 		if err := inv.FS.Remove(ctx, targetAbs, false); err != nil {
-			return &ExitError{Code: 1, Err: err}
+			return gzipMaybeQuietError(&ExitError{Code: 1, Err: err}, opts.quiet)
 		}
 	}
 
@@ -165,7 +186,7 @@ func runGzipItem(ctx context.Context, inv *Invocation, opts *gzipOptions, name, 
 	}
 	output, err := inv.FS.OpenFile(ctx, targetAbs, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
-		return &ExitError{Code: 1, Err: err}
+		return gzipMaybeQuietError(&ExitError{Code: 1, Err: err}, opts.quiet)
 	}
 
 	writeErr := func() error {
@@ -176,7 +197,7 @@ func runGzipItem(ctx context.Context, inv *Invocation, opts *gzipOptions, name, 
 		return gzipStream(output, reader)
 	}()
 	if writeErr != nil {
-		return exitf(inv, 1, "%s: %v", commandName, writeErr)
+		return gzipExitf(inv, opts.quiet, "%s: %v", commandName, writeErr)
 	}
 	recordFileMutation(inv.TraceRecorder(), "write", targetAbs, sourceAbs, targetAbs)
 
@@ -185,13 +206,13 @@ func runGzipItem(ctx context.Context, inv *Invocation, opts *gzipOptions, name, 
 	}
 	if !opts.keep {
 		if err := inv.FS.Remove(ctx, sourceAbs, false); err != nil {
-			return &ExitError{Code: 1, Err: err}
+			return gzipMaybeQuietError(&ExitError{Code: 1, Err: err}, opts.quiet)
 		}
 	}
 	return nil
 }
 
-func openGzipInput(ctx context.Context, inv *Invocation, name string) (reader io.Reader, abs string, info stdfs.FileInfo, closeFn func(), err error) {
+func openGzipInput(ctx context.Context, inv *Invocation, name string, quiet bool) (reader io.Reader, abs string, info stdfs.FileInfo, closeFn func(), err error) {
 	if name == "-" {
 		return inv.Stdin, "-", nil, func() {}, nil
 	}
@@ -200,7 +221,7 @@ func openGzipInput(ctx context.Context, inv *Invocation, name string) (reader io
 		return nil, "", nil, nil, err
 	}
 	if info.IsDir() {
-		return nil, "", nil, nil, exitf(inv, 1, "gzip: %s: Is a directory", abs)
+		return nil, "", nil, nil, gzipExitf(inv, quiet, "gzip: %s: Is a directory", abs)
 	}
 	file, _, err := openRead(ctx, inv, name)
 	if err != nil {
@@ -227,7 +248,7 @@ func resolveGzipOutputPath(inv *Invocation, opts *gzipOptions, sourceAbs string)
 	if before, ok := strings.CutSuffix(sourceAbs, opts.suffix); ok {
 		return before, nil
 	}
-	return "", exitf(inv, 1, "gzip: %s: unknown suffix -- ignored", path.Base(sourceAbs))
+	return "", gzipExitf(inv, opts.quiet, "gzip: %s: unknown suffix -- ignored", path.Base(sourceAbs))
 }
 
 func gzipTargetExists(ctx context.Context, inv *Invocation, targetAbs string) (bool, error) {

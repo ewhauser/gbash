@@ -807,6 +807,14 @@ var fileTests = []fileTestCase{
 		}),
 	),
 	fileTest(
+		[]string{"((test x = y) || (test a = a))"},
+		langFile(subshell(stmt(&BinaryCmd{
+			Op: OrStmt,
+			X:  stmt(subshell(litStmt("test", "x", "=", "y"))),
+			Y:  stmt(subshell(litStmt("test", "a", "=", "a"))),
+		})), LangBash|LangBats|LangMirBSDKorn|LangZsh),
+	),
+	fileTest(
 		[]string{"if a; then b; fi || while a; do b; done"},
 		langFile(&BinaryCmd{
 			Op: OrStmt,
