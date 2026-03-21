@@ -306,6 +306,31 @@ func TestSECONDSLocalAssignmentDoesNotLeak(t *testing.T) {
 	}
 }
 
+func TestSECONDSBackgroundSubshellPreservesScopedBaseline(t *testing.T) {
+	t.Parallel()
+
+	runner, err := NewRunner(&RunnerConfig{Dir: "/tmp"})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	runner.Reset()
+	runner.startTime = time.Now().Add(-time.Second)
+	runner.setVar("SECONDS", expand.Variable{
+		Set:  true,
+		Kind: expand.String,
+		Str:  "5",
+	})
+
+	background := runner.subshell(true)
+	value, err := strconv.Atoi(background.lookupVar("SECONDS").String())
+	if err != nil {
+		t.Fatalf("Atoi(background SECONDS) error = %v", err)
+	}
+	if value < 5 || value > 6 {
+		t.Fatalf("background SECONDS = %d, want 5 or 6", value)
+	}
+}
+
 func TestSubshellRandomIsReseeded(t *testing.T) {
 	t.Parallel()
 

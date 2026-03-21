@@ -30,6 +30,14 @@ func newOverlayEnviron(parent expand.Environ, background bool) *overlayEnviron {
 		for name, vr := range parent.Each {
 			oenv.Set(name, vr)
 		}
+		if parentWrite, ok := parent.(expand.WriteEnviron); ok {
+			if secondsEnv, _, ok := visibleSecondsBinding(parentWrite); ok {
+				if started, ok := secondsStartTimeForEnv(secondsEnv); ok {
+					oenv.secondsStartTime = started
+					oenv.secondsStartSet = true
+				}
+			}
+		}
 	}
 	return oenv
 }
