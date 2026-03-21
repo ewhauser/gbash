@@ -906,6 +906,36 @@ func TestSourceReturnTrapFiresInTracedFunction(t *testing.T) {
 	}
 }
 
+func TestSourceReturnTrapSetInsideSourceFiresInUntracedFunction(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	helperPath := filepath.Join(dir, "helper.sh")
+	// The sourced script sets its own RETURN trap.
+	if err := os.WriteFile(helperPath, []byte("trap 'echo ret' RETURN\necho sourced\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", helperPath, err)
+	}
+
+	// Without functrace, a RETURN trap set *inside* the sourced script
+	// should still fire when source finishes, even from an untraced function.
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir:         dir,
+		OpenHandler: sourceTestOpenHandler,
+	}, fmt.Sprintf("f() { . %q; }\n", helperPath)+
+		"f\n"+
+		"echo done\n")
+	if err != nil {
+		t.Fatalf("Run error = %v, stdout=%q stderr=%q", err, stdout, stderr)
+	}
+	const want = "sourced\nret\ndone\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestDebugAndReturnTrapInheritance(t *testing.T) {
 	t.Parallel()
 

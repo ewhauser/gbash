@@ -536,9 +536,15 @@ func (r *Runner) maybeRunReturnTrap(ctx context.Context, line uint, status uint8
 	}
 }
 
-func (r *Runner) runSourceReturnTrap(ctx context.Context, line uint, status uint8) {
+func (r *Runner) runSourceReturnTrap(ctx context.Context, line uint, status uint8, preSourceAction trapAction) {
 	if !r.returnTrapAllowed() {
-		return
+		// The caller frame (e.g. an untraced function) doesn't allow
+		// inherited RETURN traps.  Still fire the trap if it was set or
+		// changed during the source execution itself.
+		cur := r.trapAction(trapIDReturn)
+		if cur == preSourceAction {
+			return
+		}
 	}
 	line = r.currentVisibleLine(line)
 	result := r.runTrap(ctx, trapIDReturn, line, status)
