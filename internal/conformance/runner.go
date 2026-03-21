@@ -33,7 +33,6 @@ var bashQuotedNoSuchFilePattern = regexp.MustCompile(`(?m)^([-.[:alnum:]_]+): '(
 var bashCannotOpenNoSuchFilePattern = regexp.MustCompile(`(?m)^([-.[:alnum:]_]+): cannot (?:open|remove) '([^']+)'(?: for reading)?: No such file or directory$`)
 var procFDPathPattern = regexp.MustCompile(`/proc/\d+/fd`)
 var procFDLsMissingPattern = regexp.MustCompile(`(?m)^ls: /proc/PID/fd(?:[^\n]*)?: No such file or directory\n?`)
-
 var (
 	conformanceLocaleOnce sync.Once
 	conformanceLocaleName string
@@ -544,6 +543,7 @@ func normalizeBashStderr(value string) string {
 	value = bashQuotedNoSuchFilePattern.ReplaceAllString(value, "$1: $2: No such file or directory")
 	value = strings.ReplaceAll(value, "/: Is a directory\n", "/: redirect target is a directory\n")
 	value = strings.ReplaceAll(value, "/: File exists\n", "/: redirect target is a directory\n")
+	value = normalizeBadFDInterleave(value)
 	return bashAnsiCQuotedCommandNotFoundPattern.ReplaceAllStringFunc(value, func(match string) string {
 		parts := bashAnsiCQuotedCommandNotFoundPattern.FindStringSubmatch(match)
 		if len(parts) != 2 {
@@ -555,6 +555,31 @@ func normalizeBashStderr(value string) string {
 		}
 		return unquoted + ": command not found"
 	})
+}
+
+func normalizeBadFDInterleave(value string) string {
+	lines := strings.SplitAfter(value, "\n")
+	if len(lines) < 3 {
+		return value
+	}
+	out := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); {
+		if i+2 < len(lines) {
+			first := strings.TrimSuffix(lines[i], "\n")
+			second := strings.TrimSuffix(lines[i+1], "\n")
+			third := strings.TrimSuffix(lines[i+2], "\n")
+			if first == third &&
+				strings.Contains(first, ": No such file or directory") &&
+				strings.HasSuffix(second, ": Bad file descriptor") {
+				out = append(out, lines[i+1], lines[i], lines[i+2])
+				i += 3
+				continue
+			}
+		}
+		out = append(out, lines[i])
+		i++
+	}
+	return strings.Join(out, "")
 }
 
 func normalizeNestedShellPrefixes(value string) string {

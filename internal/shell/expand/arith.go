@@ -600,9 +600,6 @@ func arithParseErrorToken(source string, pos syntax.Pos) string {
 	if start < 0 || start >= len(source) {
 		return source
 	}
-	for start > 0 && (source[start-1] == ' ' || source[start-1] == '\t') {
-		start--
-	}
 	if start > 0 {
 		switch source[start-1] {
 		case '#', '[', '.':
@@ -619,6 +616,65 @@ func arithParseOperandExpectedToken(source string, parseErr syntax.ParseError) (
 		return arithParseErrorToken(source, parseErr.Pos), true
 	default:
 		return "", false
+	}
+}
+
+func arithRuntimeErrorToken(source string, parseErr syntax.ParseError) string {
+	if source == "" || !parseErr.Pos.IsValid() {
+		return source
+	}
+	start := int(parseErr.Pos.Offset())
+	if start < 0 || start >= len(source) {
+		return source
+	}
+	return strings.TrimLeft(source[start:], " \t")
+}
+
+func arithRuntimeIsExpressionError(tokenText string) bool {
+	i := 0
+	for i < len(tokenText) && tokenText[i] >= '0' && tokenText[i] <= '9' {
+		i++
+	}
+	if i == 0 || i >= len(tokenText) {
+		return false
+	}
+	j := i
+	for j < len(tokenText) {
+		switch tokenText[j] {
+		case ' ', '\t', '\r', '\n':
+			j++
+		default:
+			goto done
+		}
+	}
+done:
+	if j == i || j >= len(tokenText) {
+		return false
+	}
+	b := tokenText[j]
+	return (b >= '0' && b <= '9') ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		b == '_' || b == '\'' || b == '"'
+}
+
+func arithRuntimeParseError(src string, parseErr syntax.ParseError) error {
+	if tokenText, ok := arithParseOperandExpectedToken(src, parseErr); ok {
+		return &ArithmDiagnosticError{
+			ExprText:  src,
+			TokenText: tokenText,
+			Message:   "arithmetic syntax error: operand expected",
+		}
+	}
+	tokenText := arithRuntimeErrorToken(src, parseErr)
+	message := "arithmetic syntax error: invalid arithmetic operator"
+	if arithRuntimeIsExpressionError(tokenText) {
+		message = "syntax error in expression"
+	}
+	return &ArithmDiagnosticError{
+		ExprText:  src,
+		TokenText: tokenText,
+		Message:   message,
 	}
 }
 
@@ -661,9 +717,7 @@ func arithRuntimeSource(cfg *Config, expr syntax.ArithmExpr) (string, error) {
 
 func arithmRuntimeParse(cfg *Config, expr syntax.ArithmExpr) (syntax.ArithmExpr, bool, error) {
 	switch expr.(type) {
-	case *syntax.Word:
-		return nil, false, nil
-	case *syntax.BinaryArithm, *syntax.UnaryArithm, *syntax.ParenArithm:
+	case *syntax.Word, *syntax.BinaryArithm, *syntax.UnaryArithm, *syntax.ParenArithm:
 	default:
 		return nil, false, nil
 	}
@@ -679,13 +733,7 @@ func arithmRuntimeParse(cfg *Config, expr syntax.ArithmExpr) (syntax.ArithmExpr,
 	if err != nil {
 		var parseErr syntax.ParseError
 		if errors.As(err, &parseErr) {
-			if tokenText, ok := arithParseOperandExpectedToken(src, parseErr); ok {
-				return nil, false, &ArithmDiagnosticError{
-					ExprText:  src,
-					TokenText: tokenText,
-					Message:   "arithmetic syntax error: operand expected",
-				}
-			}
+			return nil, false, arithRuntimeParseError(src, parseErr)
 		}
 		return nil, false, &ArithmDiagnosticError{
 			ExprText:  src,

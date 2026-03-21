@@ -88,6 +88,133 @@ func TestParseErr(t *testing.T) {
 	}
 }
 
+func TestParseParenAmbiguityFallback(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		src   string
+		check func(*testing.T, *File)
+	}{
+		{
+			name: "command substitution fallback",
+			src:  "echo $((foo) )",
+			check: func(t *testing.T, prog *File) {
+				t.Helper()
+				call, ok := prog.Stmts[0].Cmd.(*CallExpr)
+				if !ok {
+					t.Fatalf("root cmd = %T, want *CallExpr", prog.Stmts[0].Cmd)
+				}
+				if len(call.Args) != 2 || len(call.Args[1].Parts) != 1 {
+					t.Fatalf("args = %#v, want echo plus one command substitution", call.Args)
+				}
+				cs, ok := call.Args[1].Parts[0].(*CmdSubst)
+				if !ok {
+					t.Fatalf("word part = %T, want *CmdSubst", call.Args[1].Parts[0])
+				}
+				if len(cs.Stmts) != 1 {
+					t.Fatalf("cmd subst stmts = %d, want 1", len(cs.Stmts))
+				}
+				if _, ok := cs.Stmts[0].Cmd.(*Subshell); !ok {
+					t.Fatalf("cmd subst body = %T, want *Subshell", cs.Stmts[0].Cmd)
+				}
+			},
+		},
+		{
+			name: "nested subshell fallback",
+			src:  "((foo) )",
+			check: func(t *testing.T, prog *File) {
+				t.Helper()
+				outer, ok := prog.Stmts[0].Cmd.(*Subshell)
+				if !ok {
+					t.Fatalf("root cmd = %T, want *Subshell", prog.Stmts[0].Cmd)
+				}
+				if len(outer.Stmts) != 1 {
+					t.Fatalf("outer stmts = %d, want 1", len(outer.Stmts))
+				}
+				if _, ok := outer.Stmts[0].Cmd.(*Subshell); !ok {
+					t.Fatalf("outer body = %T, want nested *Subshell", outer.Stmts[0].Cmd)
+				}
+			},
+		},
+		{
+			name: "outer level binary command fallback",
+			src:  "((test x = y) || (test a = a))",
+			check: func(t *testing.T, prog *File) {
+				t.Helper()
+				outer, ok := prog.Stmts[0].Cmd.(*Subshell)
+				if !ok {
+					t.Fatalf("root cmd = %T, want *Subshell", prog.Stmts[0].Cmd)
+				}
+				if len(outer.Stmts) != 1 {
+					t.Fatalf("outer stmts = %d, want 1", len(outer.Stmts))
+				}
+				bin, ok := outer.Stmts[0].Cmd.(*BinaryCmd)
+				if !ok {
+					t.Fatalf("outer body = %T, want *BinaryCmd", outer.Stmts[0].Cmd)
+				}
+				if bin.Op != OrStmt {
+					t.Fatalf("binary op = %v, want %v", bin.Op, OrStmt)
+				}
+				if _, ok := bin.X.Cmd.(*Subshell); !ok {
+					t.Fatalf("left cmd = %T, want *Subshell", bin.X.Cmd)
+				}
+				if _, ok := bin.Y.Cmd.(*Subshell); !ok {
+					t.Fatalf("right cmd = %T, want *Subshell", bin.Y.Cmd)
+				}
+			},
+		},
+		{
+			name: "dynamic base arithmetic stays arithmetic",
+			src:  "echo $(( ${base}#a ))",
+			check: func(t *testing.T, prog *File) {
+				t.Helper()
+				call, ok := prog.Stmts[0].Cmd.(*CallExpr)
+				if !ok {
+					t.Fatalf("root cmd = %T, want *CallExpr", prog.Stmts[0].Cmd)
+				}
+				part, ok := call.Args[1].Parts[0].(*ArithmExp)
+				if !ok {
+					t.Fatalf("word part = %T, want *ArithmExp", call.Args[1].Parts[0])
+				}
+				if got, want := part.Source, " ${base}#a "; got != want {
+					t.Fatalf("arith source = %q, want %q", got, want)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			prog, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(tc.src), "")
+			if err != nil {
+				t.Fatalf("Parse(%q) error = %v", tc.src, err)
+			}
+			tc.check(t, prog)
+		})
+	}
+}
+
+func TestParseParenAmbiguityErrors(t *testing.T) {
+	t.Parallel()
+
+	for _, src := range []string{
+		"(( echo 1\necho 2\n))",
+		"echo $(( echo 1\necho 2\n))",
+	} {
+		t.Run(src, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+			if err == nil {
+				t.Fatalf("Parse(%q) error = nil, want parse error", src)
+			}
+		})
+	}
+}
+
 func TestParseErrorBashErrorConditionalDiagnostics(t *testing.T) {
 	t.Parallel()
 
@@ -1525,7 +1652,7 @@ var errorCases = []errorCase{
 	),
 	errCase(
 		`echo $((\`,
-		langErr("1:6: reached EOF without matching `$((` with `))`"),
+		langErr("1:6: `$((` must be followed by an expression"),
 	),
 	errCase(
 		`echo $((o\`,
@@ -1566,11 +1693,6 @@ var errorCases = []errorCase{
 	errCase(
 		"echo $((+))",
 		langErr("1:9: `+` must be followed by an expression"),
-	),
-	errCase(
-		"echo $((foo) )",
-		langErr("1:6: reached EOF without matching `$((` with `))`", LangBash|LangMirBSDKorn|LangZsh),
-		flipConfirmAll, // note that we don't backtrack
 	),
 	errCase(
 		"echo $((a *))",

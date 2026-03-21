@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -370,6 +371,10 @@ type arithmCommandError struct {
 }
 
 func (e arithmCommandError) Error() string {
+	var diagErr *expand.ArithmDiagnosticError
+	if runtime.GOOS == "darwin" && errors.As(e.err, &diagErr) && diagErr.Message == "syntax error in expression" {
+		return e.err.Error()
+	}
 	return fmt.Sprintf("((: %s", e.err)
 }
 

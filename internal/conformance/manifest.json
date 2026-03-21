@@ -1190,38 +1190,6 @@
             "darwin"
           ]
         },
-        "oils/paren-ambiguity.test.sh::$(( closed with ) ) after multiple lines is command - #2337": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/paren-ambiguity.test.sh::$(( closed with )) after multiple lines is parse error - #2337": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/paren-ambiguity.test.sh::$((which example - command sub versus arith sub - gnunet-gtk package": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/paren-ambiguity.test.sh::(( closed with ) ) after multiple lines is command - #2337": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/paren-ambiguity.test.sh::(( closed with )) after multiple lines is parse error - #2337": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/paren-ambiguity.test.sh::(((grep example - 4+ instances in regtest/aports - #2337": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/paren-ambiguity.test.sh::((gzip example - zdiff package - #2337": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/paren-ambiguity.test.sh::((test example - liblo package - #2337": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/parse-errors.test.sh::Invalid for loop variable name": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"

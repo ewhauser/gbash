@@ -571,6 +571,9 @@ type Parser struct {
 	r   rune   // next rune; [utf8.RuneSelf] when it went past EOF, or we stopped
 	w   int    // width of [Parser.r]
 
+	sourceBs   []byte
+	sourceOffs int64
+
 	f *File
 
 	spaced bool // whether [Parser.tok] has whitespace on its left
@@ -680,6 +683,8 @@ func (p *Parser) reset() {
 	p.tok, p.val = illegalTok, ""
 	p.eqlOffs = 0
 	p.bs, p.bsp = nil, 0
+	p.sourceBs = nil
+	p.sourceOffs = 0
 	p.offs, p.line, p.col = 0, 1, 1
 	p.r, p.w = 0, 0
 	p.err, p.readErr, p.readEOF = nil, nil, false
@@ -1883,79 +1888,298 @@ func (p *Parser) currentRuneSource() string {
 }
 
 func (p *Parser) sourceFromPos(pos Pos) string {
-	start := int(pos.Offset())
-	if start < 0 || start > len(p.bs) {
+	start, ok := p.bufferIndex(pos.Offset())
+	if !ok {
 		return ""
 	}
-	return string(p.bs[start:])
+	buf, _ := p.sourceBuffer()
+	return string(buf[start:])
 }
 
 func (p *Parser) sourceBetween(left, right Pos) string {
-	start := int(left.Offset())
-	end := int(right.Offset())
-	if start < 0 || end < start || end > len(p.bs) {
+	start, end, ok := p.bufferRange(left, right)
+	if !ok {
 		return ""
 	}
-	return string(p.bs[start:end])
+	buf, _ := p.sourceBuffer()
+	return string(buf[start:end])
 }
 
 func (p *Parser) sourceLineAtPos(pos Pos) string {
 	if !pos.IsValid() {
 		return ""
 	}
-	start := int(pos.Offset())
-	if start < 0 || start > len(p.bs) {
+	start, ok := p.bufferIndex(pos.Offset())
+	if !ok {
 		return ""
 	}
-	for start > 0 && p.bs[start-1] != '\n' {
+	end, ok := p.bufferIndex(pos.Offset())
+	if !ok {
+		return ""
+	}
+	buf, _ := p.sourceBuffer()
+	for start > 0 && buf[start-1] != '\n' {
 		start--
 	}
-	end := int(pos.Offset())
-	for end < len(p.bs) && p.bs[end] != '\n' {
+	for end < len(buf) && buf[end] != '\n' {
 		end++
 	}
-	return string(p.bs[start:end])
+	return string(buf[start:end])
 }
 
 func (p *Parser) arithmInnerSource(left, right Pos, bracket bool) string {
-	start := int(left.Offset())
-	end := int(right.Offset())
+	start, end, ok := p.bufferRange(left, right)
+	if !ok {
+		return ""
+	}
+	buf, _ := p.sourceBuffer()
 	if !bracket {
 		start += 3 // $((
 	} else {
 		start += 2 // $[
 	}
-	if end > len(p.bs) {
-		end = len(p.bs)
-	}
-	if start < 0 || start > end || end > len(p.bs) {
+	if start < 0 || start > end || end > len(buf) {
 		return ""
 	}
-	return string(p.bs[start:end])
+	return string(buf[start:end])
 }
 
 func (p *Parser) arithmCmdSource(left, right Pos) string {
-	start := int(left.Offset()) + 2 // ((
-	end := int(right.Offset())
-	if end > len(p.bs) {
-		end = len(p.bs)
-	}
-	if start < 0 || start > end || end > len(p.bs) {
+	start, end, ok := p.bufferRange(left, right)
+	if !ok {
 		return ""
 	}
-	return string(p.bs[start:end])
+	buf, _ := p.sourceBuffer()
+	start += 2 // ((
+	if start < 0 || start > end || end > len(buf) {
+		return ""
+	}
+	return string(buf[start:end])
 }
 
 func (p *Parser) sourceRange(start, end Pos) string {
 	if !start.IsValid() || !end.IsValid() {
 		return ""
 	}
-	from := int(start.Offset())
-	to := int(end.Offset())
-	if from < 0 || from > to || to > len(p.bs) {
+	from, to, ok := p.bufferRange(start, end)
+	if !ok {
 		return ""
 	}
-	return string(p.bs[from:to])
+	buf, _ := p.sourceBuffer()
+	return string(buf[from:to])
+}
+
+func (p *Parser) sourceBuffer() ([]byte, int64) {
+	if p.sourceBs != nil {
+		return p.sourceBs, p.sourceOffs
+	}
+	return p.bs, p.offs
+}
+
+func (p *Parser) bufferIndex(offset uint) (int, bool) {
+	buf, baseOffs := p.sourceBuffer()
+	base := int(baseOffs)
+	idx := int(offset) - base
+	if idx < 0 || idx > len(buf) {
+		return 0, false
+	}
+	return idx, true
+}
+
+func (p *Parser) bufferRange(start, end Pos) (int, int, bool) {
+	from, ok := p.bufferIndex(start.Offset())
+	if !ok {
+		return 0, 0, false
+	}
+	to, ok := p.bufferIndex(end.Offset())
+	if !ok || to < from {
+		return 0, 0, false
+	}
+	return from, to, true
+}
+
+func (p *Parser) currentSourceTail() ([]byte, error) {
+	var tail []byte
+	if src := p.currentRuneSource(); src != "" {
+		tail = append(tail, src...)
+	}
+	if idx := int(p.bsp); idx >= 0 && idx <= len(p.bs) {
+		tail = append(tail, p.bs[idx:]...)
+	}
+	switch p.readErr {
+	case nil:
+	case io.EOF:
+		return tail, nil
+	default:
+		return tail, p.readErr
+	}
+	if p.readEOF || p.src == nil {
+		return tail, nil
+	}
+	var buf bytes.Buffer
+	_, err := buf.ReadFrom(p.src)
+	rest := buf.Bytes()
+	tail = append(tail, rest...)
+	if err != nil && err != io.EOF {
+		return tail, err
+	}
+	return tail, nil
+}
+
+func (p *Parser) loadReplay(pos Pos, src []byte, readErr error) {
+	p.src = bytes.NewReader(nil)
+	p.bs = append(p.bs[:0], src...)
+	p.offs = int64(pos.Offset())
+	p.line = int64(pos.Line())
+	p.col = int64(pos.Col())
+	p.err = nil
+	p.readErr = readErr
+	p.readEOF = false
+	if len(p.bs) == 0 {
+		p.r = utf8.RuneSelf
+		p.w = 1
+		p.bsp = 1
+		return
+	}
+	r, w := utf8.DecodeRune(p.bs)
+	p.r = r
+	p.w = w
+	p.bsp = uint(w)
+}
+
+func (p *Parser) setSourceBuffer(pos Pos, src []byte) {
+	p.sourceBs = append(p.sourceBs[:0], src...)
+	p.sourceOffs = int64(pos.Offset())
+}
+
+func cloneByteSlices(src [][]byte) [][]byte {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([][]byte, len(src))
+	for i, b := range src {
+		dst[i] = append([]byte(nil), b...)
+	}
+	return dst
+}
+
+func copyAliasActive(src map[string]int) map[string]int {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]int, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
+func (p *Parser) parenAmbiguityClone() *Parser {
+	clone := *p
+	clone.err = nil
+	clone.readErr = nil
+	clone.readEOF = false
+	clone.bs = nil
+	clone.bsp = 0
+	clone.sourceBs = nil
+	clone.sourceOffs = 0
+	clone.r = 0
+	clone.w = 0
+	clone.accComs = nil
+	clone.curComs = &clone.accComs
+	clone.litBatch = nil
+	clone.wordBatch = nil
+	clone.litBs = nil
+	clone.wordRawBs = nil
+	clone.captureWordRaw = false
+	clone.pendingArrayWord = ""
+	clone.pendingArrayWordPos = Pos{}
+	clone.keepComments = false
+	clone.recoveredErrors = 0
+	clone.heredocs = append([]*Redirect(nil), p.heredocs...)
+	clone.hdocStops = cloneByteSlices(p.hdocStops)
+	clone.aliasChain = append([]*AliasExpansion(nil), p.aliasChain...)
+	clone.aliasInputStack = append([]aliasInputState(nil), p.aliasInputStack...)
+	clone.aliasActive = copyAliasActive(p.aliasActive)
+	clone.tokAliasChain = nil
+	return &clone
+}
+
+func (p *Parser) allowParenAmbiguityFallback(stmts []*Stmt, last []Comment, outerRight Pos) bool {
+	if len(stmts) == 0 || !stmtStartsWithSubshell(stmts[0]) {
+		return false
+	}
+	if len(stmts) != 1 || len(last) != 0 {
+		return true
+	}
+	stmt := stmts[0]
+	if stmt == nil || stmt.Negated || stmt.Background || stmt.Coprocess || stmt.Disown ||
+		stmt.Semicolon.IsValid() || len(stmt.Redirs) > 0 {
+		return true
+	}
+	sub, ok := stmt.Cmd.(*Subshell)
+	if !ok {
+		return true
+	}
+	gap := p.sourceRange(posAddCol(sub.Rparen, 1), outerRight)
+	return gap != "" && strings.TrimSpace(gap) == ""
+}
+
+func keepParenAmbiguityArithError(stmts []*Stmt, last []Comment) bool {
+	if len(stmts) != 1 || len(last) != 0 {
+		return false
+	}
+	stmt := stmts[0]
+	if stmt == nil {
+		return false
+	}
+	sub, ok := stmt.Cmd.(*Subshell)
+	if !ok {
+		return false
+	}
+	return len(sub.Stmts) != 1 || len(sub.Last) != 0
+}
+
+func hasInternalNewline(src []byte) bool {
+	trimmed := strings.TrimRight(string(src), "\r\n")
+	return strings.Contains(trimmed, "\n")
+}
+
+func hasNestedDblRightParen(src []byte) bool {
+	return bytes.Count(src, []byte("))")) > 1
+}
+
+func parenAmbiguityInnerRight(stmts []*Stmt) Pos {
+	if len(stmts) != 1 {
+		return Pos{}
+	}
+	stmt := stmts[0]
+	if stmt == nil {
+		return Pos{}
+	}
+	sub, ok := stmt.Cmd.(*Subshell)
+	if !ok {
+		return Pos{}
+	}
+	return sub.Rparen
+}
+
+func stmtStartsWithSubshell(stmt *Stmt) bool {
+	if stmt == nil {
+		return false
+	}
+	return commandStartsWithSubshell(stmt.Cmd)
+}
+
+func commandStartsWithSubshell(cmd Command) bool {
+	switch cmd := cmd.(type) {
+	case *Subshell:
+		return true
+	case *BinaryCmd:
+		return stmtStartsWithSubshell(cmd.X)
+	default:
+		return false
+	}
 }
 
 func regexNearFragment(s string) string {
@@ -2104,6 +2328,104 @@ func (p *Parser) ensureNoNested(pos Pos) {
 	}
 }
 
+func (p *Parser) arithmWordPartTo(salvageTail bool, tailEnd Pos) *ArithmExp {
+	left := p.tok
+	ar := &ArithmExp{Left: p.pos, Bracket: left == dollBrack}
+	old := p.preNested(arithmExpr)
+	p.next()
+	if p.got(hash) {
+		p.checkLang(ar.Pos(), LangMirBSDKorn, "unsigned expressions")
+		ar.Unsigned = true
+	}
+	ar.X = p.followArithm(left, ar.Left)
+	if ar.Bracket {
+		if p.tok != rightBrack {
+			p.arithmMatchingErr(ar.Left, dollBrack, rightBrack)
+		}
+		p.postNested(old)
+		ar.Right = p.pos
+		p.next()
+	} else {
+		expr := ar.X
+		ar.Right = p.arithmEndExpr(&expr, dollDblParen, ar.Left, old, salvageTail, tailEnd)
+		ar.X = expr
+	}
+	ar.Source = p.arithmInnerSource(ar.Left, ar.Right, ar.Bracket)
+	return ar
+}
+
+func (p *Parser) arithmWordPart(salvageTail bool) *ArithmExp {
+	return p.arithmWordPartTo(salvageTail, Pos{})
+}
+
+func (p *Parser) parenAmbiguityWordPart() WordPart {
+	afterToken, err := p.currentSourceTail()
+	start := p.pos
+	fullSrc := append([]byte(dollDblParen.String()), afterToken...)
+	arithPos := posAddCol(start, len(dollDblParen.String()))
+	arith := p.parenAmbiguityClone()
+	arith.tok = dollDblParen
+	arith.pos = start
+	arith.loadReplay(arithPos, afterToken, err)
+	arith.setSourceBuffer(start, fullSrc)
+	part := arith.arithmWordPart(false)
+	arithOK := arith.err == nil
+	arithRight := Pos{}
+	if part != nil {
+		arithRight = part.Right
+	}
+
+	fallbackSrc := append([]byte{'('}, afterToken...)
+	fallbackPos := posAddCol(start, len(dollParen.String()))
+	cmd := p.parenAmbiguityClone()
+	cmd.tok = dollParen
+	cmd.pos = start
+	cmd.loadReplay(fallbackPos, fallbackSrc, err)
+	cmd.setSourceBuffer(start, fullSrc)
+	cs := cmd.cmdSubst()
+	fallbackIncomplete := cmd.err != nil && IsIncomplete(cmd.err) && hasInternalNewline(afterToken)
+	if fallbackIncomplete {
+		p.tok = dollParen
+		p.pos = start
+		p.loadReplay(fallbackPos, fallbackSrc, err)
+		p.setSourceBuffer(start, fullSrc)
+		return p.cmdSubst()
+	}
+	fallbackOK := cmd.err == nil && cmd.allowParenAmbiguityFallback(cs.Stmts, cs.Last, cs.Right)
+	if fallbackOK {
+		p.tok = dollParen
+		p.pos = start
+		p.loadReplay(fallbackPos, fallbackSrc, err)
+		p.setSourceBuffer(start, fullSrc)
+		return p.cmdSubst()
+	}
+	arithEndedEarly := false
+	fallbackTailEnd := Pos{}
+	if arithOK && cmd.err == nil {
+		fallbackTailEnd = parenAmbiguityInnerRight(cs.Stmts)
+		if fallbackTailEnd.After(arithRight) {
+			arithEndedEarly = true
+		}
+	} else if cmd.err == nil {
+		fallbackTailEnd = parenAmbiguityInnerRight(cs.Stmts)
+	}
+
+	p.tok = dollDblParen
+	p.pos = start
+	p.loadReplay(arithPos, afterToken, err)
+	p.setSourceBuffer(start, fullSrc)
+	if arithOK && !arithEndedEarly {
+		return p.arithmWordPart(true)
+	}
+	if cmd.err == nil && keepParenAmbiguityArithError(cs.Stmts, cs.Last) && !arithEndedEarly && !hasNestedDblRightParen(afterToken) {
+		return p.arithmWordPart(false)
+	}
+	if cmd.err == nil && fallbackTailEnd.IsValid() && hasNestedDblRightParen(afterToken) {
+		return p.arithmWordPartTo(true, fallbackTailEnd)
+	}
+	return p.arithmWordPart(true)
+}
+
 func (p *Parser) wordPart() WordPart {
 	switch p.tok {
 	case _Lit, _LitWord, _LitRedir:
@@ -2139,29 +2461,10 @@ func (p *Parser) wordPart() WordPart {
 		}
 	case dollDblParen, dollBrack:
 		p.ensureNoNested(p.pos)
-		left := p.tok
-		ar := &ArithmExp{Left: p.pos, Bracket: left == dollBrack}
-		old := p.preNested(arithmExpr)
-		p.next()
-		if p.got(hash) {
-			p.checkLang(ar.Pos(), LangMirBSDKorn, "unsigned expressions")
-			ar.Unsigned = true
+		if p.tok == dollDblParen {
+			return p.parenAmbiguityWordPart()
 		}
-		ar.X = p.followArithm(left, ar.Left)
-		if ar.Bracket {
-			if p.tok != rightBrack {
-				p.arithmMatchingErr(ar.Left, dollBrack, rightBrack)
-			}
-			p.postNested(old)
-			ar.Right = p.pos
-			p.next()
-		} else {
-			expr := ar.X
-			ar.Right = p.arithmEndExpr(&expr, dollDblParen, ar.Left, old)
-			ar.X = expr
-		}
-		ar.Source = p.arithmInnerSource(ar.Left, ar.Right, ar.Bracket)
-		return ar
+		return p.arithmWordPart(true)
 	case dollParen:
 		p.ensureNoNested(p.pos)
 		return p.cmdSubst()
@@ -4287,7 +4590,7 @@ func (p *Parser) subshell(s *Stmt) {
 	s.Cmd = sub
 }
 
-func (p *Parser) arithmExpCmd(s *Stmt) {
+func (p *Parser) arithmExpCmdWithTailTo(s *Stmt, salvageTail bool, tailEnd Pos) {
 	ar := &ArithmCmd{Left: p.pos}
 	old := p.preNested(arithmExprCmd)
 	p.next()
@@ -4297,10 +4600,106 @@ func (p *Parser) arithmExpCmd(s *Stmt) {
 	}
 	ar.X = p.followArithm(dblLeftParen, ar.Left)
 	expr := ar.X
-	ar.Right = p.arithmEndExpr(&expr, dblLeftParen, ar.Left, old)
+	ar.Right = p.arithmEndExpr(&expr, dblLeftParen, ar.Left, old, salvageTail, tailEnd)
 	ar.X = expr
 	ar.Source = p.arithmCmdSource(ar.Left, ar.Right)
 	s.Cmd = ar
+}
+
+func (p *Parser) arithmExpCmdWithTail(s *Stmt, salvageTail bool) {
+	p.arithmExpCmdWithTailTo(s, salvageTail, Pos{})
+}
+
+func (p *Parser) parenAmbiguityStmt(s *Stmt) {
+	afterToken, err := p.currentSourceTail()
+	start := p.pos
+	fullSrc := append([]byte(dblLeftParen.String()), afterToken...)
+	arithPos := posAddCol(start, len(dblLeftParen.String()))
+	arith := p.parenAmbiguityClone()
+	arith.tok = dblLeftParen
+	arith.pos = start
+	arith.loadReplay(arithPos, afterToken, err)
+	arith.setSourceBuffer(start, fullSrc)
+	probeStmt := &Stmt{Position: s.Position}
+	arith.arithmExpCmdWithTail(probeStmt, false)
+	arithOK := arith.err == nil
+	arithRight := Pos{}
+	if arithCmd, ok := probeStmt.Cmd.(*ArithmCmd); ok {
+		arithRight = arithCmd.Right
+	}
+
+	fallbackSrc := append([]byte{'('}, afterToken...)
+	fallbackPos := posAddCol(start, len(leftParen.String()))
+	sub := p.parenAmbiguityClone()
+	sub.tok = leftParen
+	sub.pos = start
+	sub.loadReplay(fallbackPos, fallbackSrc, err)
+	sub.setSourceBuffer(start, fullSrc)
+	probeStmt = &Stmt{Position: s.Position}
+	sub.subshell(probeStmt)
+	fallbackIncomplete := false
+	if sub.err != nil && IsIncomplete(sub.err) {
+		fallbackIncomplete = hasInternalNewline(afterToken)
+	}
+	if fallbackIncomplete {
+		p.tok = leftParen
+		p.pos = start
+		p.loadReplay(fallbackPos, fallbackSrc, err)
+		p.setSourceBuffer(start, fullSrc)
+		p.subshell(s)
+		return
+	}
+	fallbackOK := false
+	if sub.err == nil {
+		if outer, ok := probeStmt.Cmd.(*Subshell); ok && sub.allowParenAmbiguityFallback(outer.Stmts, outer.Last, outer.Rparen) {
+			fallbackOK = true
+			p.tok = leftParen
+			p.pos = start
+			p.loadReplay(fallbackPos, fallbackSrc, err)
+			p.setSourceBuffer(start, fullSrc)
+			p.subshell(s)
+			return
+		}
+	}
+	arithEndedEarly := false
+	fallbackTailEnd := Pos{}
+	if arithOK && sub.err == nil {
+		if outer, ok := probeStmt.Cmd.(*Subshell); ok {
+			fallbackTailEnd = parenAmbiguityInnerRight(outer.Stmts)
+			if fallbackTailEnd.After(arithRight) {
+				arithEndedEarly = true
+			}
+		}
+	} else if sub.err == nil {
+		if outer, ok := probeStmt.Cmd.(*Subshell); ok {
+			fallbackTailEnd = parenAmbiguityInnerRight(outer.Stmts)
+		}
+	}
+	_ = fallbackOK
+
+	p.tok = dblLeftParen
+	p.pos = start
+	p.loadReplay(arithPos, afterToken, err)
+	p.setSourceBuffer(start, fullSrc)
+	if arithOK && !arithEndedEarly {
+		p.arithmExpCmdWithTail(s, true)
+		return
+	}
+	if sub.err == nil {
+		if outer, ok := probeStmt.Cmd.(*Subshell); ok && keepParenAmbiguityArithError(outer.Stmts, outer.Last) && !arithEndedEarly && !hasNestedDblRightParen(afterToken) {
+			p.arithmExpCmdWithTail(s, false)
+			return
+		}
+	}
+	if sub.err == nil && fallbackTailEnd.IsValid() && hasNestedDblRightParen(afterToken) {
+		p.arithmExpCmdWithTailTo(s, true, fallbackTailEnd)
+		return
+	}
+	p.arithmExpCmdWithTail(s, true)
+}
+
+func (p *Parser) arithmExpCmd(s *Stmt) {
+	p.parenAmbiguityStmt(s)
 }
 
 func (p *Parser) block(s *Stmt) {
