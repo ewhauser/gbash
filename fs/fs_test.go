@@ -379,6 +379,33 @@ func TestSnapshotFSPreservesSourceViewAndRejectsWrites(t *testing.T) {
 	}
 }
 
+func TestSnapshotFSPreservesSpecialFilesWithoutReadingDeviceStreams(t *testing.T) {
+	t.Parallel()
+
+	source := &specialCloneSourceFS{MemoryFS: NewMemory()}
+	if err := source.seedInitialFiles(InitialFiles{
+		"/dev/zero": {Mode: os.ModeDevice | os.ModeCharDevice | 0o666},
+	}, time.Now().UTC()); err != nil {
+		t.Fatalf("seedInitialFiles() error = %v", err)
+	}
+
+	snapshot, err := NewSnapshot(context.Background(), source)
+	if err != nil {
+		t.Fatalf("NewSnapshot() error = %v", err)
+	}
+	if got := source.specialOpenCalls.Load(); got != 0 {
+		t.Fatalf("special device open count = %d, want 0", got)
+	}
+
+	info, err := snapshot.Stat(context.Background(), "/dev/zero")
+	if err != nil {
+		t.Fatalf("Stat(/dev/zero) error = %v", err)
+	}
+	if info.Mode()&os.ModeDevice == 0 || info.Mode()&os.ModeCharDevice == 0 {
+		t.Fatalf("Mode(/dev/zero) = %v, want character device bits", info.Mode())
+	}
+}
+
 func TestReusableFactoryReusesBaseAndKeepsSessionsIsolated(t *testing.T) {
 	t.Parallel()
 	var created atomic.Int32
@@ -517,6 +544,36 @@ func assertStatConcurrentWithWrite(t *testing.T, fsys FileSystem) {
 	if got := len(readTestFile(t, fsys, "/data.txt")); got != iterations {
 		t.Fatalf("final size = %d, want %d", got, iterations)
 	}
+}
+
+type specialCloneSourceFS struct {
+	*MemoryFS
+	specialOpenCalls atomic.Int32
+}
+
+func (s *specialCloneSourceFS) Open(ctx context.Context, name string) (File, error) {
+	if Resolve(s.Getwd(), name) == "/dev/zero" {
+		s.specialOpenCalls.Add(1)
+		info, err := s.Stat(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		return specialCloneFile{info: info}, nil
+	}
+	return s.MemoryFS.Open(ctx, name)
+}
+
+type specialCloneFile struct {
+	info stdfs.FileInfo
+}
+
+func (f specialCloneFile) Read([]byte) (int, error) {
+	return 0, errors.New("unexpected special file read")
+}
+func (f specialCloneFile) Write([]byte) (int, error) { return 0, stdfs.ErrPermission }
+func (f specialCloneFile) Close() error              { return nil }
+func (f specialCloneFile) Stat() (stdfs.FileInfo, error) {
+	return f.info, nil
 }
 
 func writeTestFile(t *testing.T, fsys FileSystem, name, contents string) {

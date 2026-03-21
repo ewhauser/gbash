@@ -5,6 +5,8 @@ import (
 	"io"
 	stdfs "io/fs"
 	"os"
+	"path"
+	"time"
 )
 
 func clonePath(ctx context.Context, src FileSystem, srcName string, dst *MemoryFS, dstName string) error {
@@ -60,7 +62,10 @@ func clonePathWithInfo(ctx context.Context, src FileSystem, srcName string, info
 		}
 		return nil
 	}
-	return cloneFile(ctx, src, srcName, dst, absDst, info.Mode().Perm())
+	if info.Mode()&stdfs.ModeType != 0 {
+		return cloneSpecialFile(dst, absDst, info)
+	}
+	return cloneFile(ctx, src, srcName, dst, absDst, info.Mode())
 }
 
 func joinChildPath(parent, child string) string {
@@ -70,7 +75,7 @@ func joinChildPath(parent, child string) string {
 	return parent + "/" + child
 }
 
-func cloneFile(ctx context.Context, src FileSystem, srcName string, dst *MemoryFS, dstName string, perm stdfs.FileMode) error {
+func cloneFile(ctx context.Context, src FileSystem, srcName string, dst *MemoryFS, dstName string, mode stdfs.FileMode) error {
 	reader, err := src.Open(ctx, srcName)
 	if err != nil {
 		return err
@@ -81,7 +86,7 @@ func cloneFile(ctx context.Context, src FileSystem, srcName string, dst *MemoryF
 		return err
 	}
 
-	writer, err := dst.OpenFile(ctx, dstName, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	writer, err := dst.OpenFile(ctx, dstName, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode.Perm())
 	if err != nil {
 		return err
 	}
@@ -90,9 +95,45 @@ func cloneFile(ctx context.Context, src FileSystem, srcName string, dst *MemoryF
 	if _, err := io.Copy(writer, reader); err != nil {
 		return err
 	}
+	if err := dst.Chmod(ctx, dstName, mode); err != nil {
+		return err
+	}
 	ownership, ok := OwnershipFromFileInfo(info)
 	if !ok {
 		return nil
 	}
 	return dst.Chown(ctx, dstName, ownership.UID, ownership.GID, true)
+}
+
+func cloneSpecialFile(dst *MemoryFS, dstName string, info stdfs.FileInfo) error {
+	now := info.ModTime().UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+
+	dst.mu.Lock()
+	defer dst.mu.Unlock()
+
+	if err := dst.mkdirAllLocked(parentDir(dstName), 0o755); err != nil {
+		return err
+	}
+
+	node := &memoryNode{
+		id:      dst.newNodeIDLocked(),
+		mode:    info.Mode(),
+		atime:   now,
+		modTime: now,
+		uid:     DefaultOwnerUID,
+		gid:     DefaultOwnerGID,
+	}
+	if info.Mode()&stdfs.ModeNamedPipe != 0 {
+		node.fifo = newMemoryFIFO()
+	}
+	if ownership, ok := OwnershipFromFileInfo(info); ok {
+		node.uid = ownership.UID
+		node.gid = ownership.GID
+	}
+	dst.nodes[dstName] = node
+	dst.nodes[parentDir(dstName)].children[path.Base(dstName)] = struct{}{} //nolint:nilaway // parent guaranteed by mkdirAllLocked above
+	return nil
 }
