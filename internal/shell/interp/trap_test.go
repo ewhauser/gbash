@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -255,7 +256,10 @@ trap -- 'echo trap-exit' EXIT
 	if stdout != wantStdout {
 		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
 	}
-	const wantStderr = "trap: -1: invalid option\ntrap: usage: trap [-lp] [arg signal_spec ...]\n"
+	wantStderr := "trap: -1: invalid option\ntrap: usage: trap [-lp] [[arg] signal_spec ...]\n"
+	if runtime.GOOS == "darwin" {
+		wantStderr = "trap: -1: invalid option\ntrap: usage: trap [-lp] [arg signal_spec ...]\n"
+	}
 	if stderr != wantStderr {
 		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
 	}
@@ -316,6 +320,11 @@ echo 'trap | while read'
 trap | while IFS= read -r line; do
   printf '%s\n' "$line"
 done
+
+echo 'trap -p | while read'
+trap -p | while IFS= read -r line; do
+  printf '%s\n' "$line"
+done
 `)
 	if err != nil {
 		t.Fatalf("Run error = %v, stdout=%q stderr=%q", err, stdout, stderr)
@@ -325,6 +334,8 @@ trap -- 'echo bye' EXIT
 $(trap)
 trap -- 'echo bye' EXIT
 trap | while read
+trap -- 'echo bye' EXIT
+trap -p | while read
 trap -- 'echo bye' EXIT
 `
 	if stdout != want {

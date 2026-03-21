@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -149,6 +150,13 @@ func trimTrapParseError(err syntax.ParseError) string {
 	return strings.Join(lines, "\n")
 }
 
+func trapInvalidOptionUsageLine() string {
+	if runtime.GOOS == "darwin" {
+		return "trap: usage: trap [-lp] [arg signal_spec ...]\n"
+	}
+	return "trap: usage: trap [-lp] [[arg] signal_spec ...]\n"
+}
+
 func (r *Runner) trapBuiltin(ctx context.Context, args []string) (exit exitStatus) {
 	failf := func(code uint8, format string, args ...any) exitStatus {
 		r.errf(format, args...)
@@ -161,7 +169,7 @@ func (r *Runner) trapBuiltin(ctx context.Context, args []string) (exit exitStatu
 		return exit
 	}
 	invalidOptionUsagef := func() exitStatus {
-		r.errf("trap: usage: trap [-lp] [arg signal_spec ...]\n")
+		r.errf("%s", trapInvalidOptionUsageLine())
 		exit.code = 2
 		return exit
 	}

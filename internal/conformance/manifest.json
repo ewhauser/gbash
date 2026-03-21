@@ -361,10 +361,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-trap-bash.test.sh::trap -p in child is BUGGY in bash": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-trap-bash.test.sh::trap DEBUG and control flow": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
