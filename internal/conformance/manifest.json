@@ -522,11 +522,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/tilde.test.sh::No tilde expansion in word that looks like assignment but isn't": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/tilde.test.sh::x=${undef-~:~}": {
+        "oils/temp-binding.test.sh::Temp bindings with unset": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

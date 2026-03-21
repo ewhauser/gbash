@@ -847,7 +847,7 @@ func normalizeOracleResult(mode OracleMode, specPath string, specCase SpecCase, 
 	if !shouldApplyOracleOverrides(specPath) {
 		return result
 	}
-	return applyOracleOverrides(mode, specCase, result)
+	return normalizePlatformSpecificOracleResult(mode, specPath, specCase, applyOracleOverrides(mode, specCase, result))
 }
 
 func normalizePlatformSpecificOracleResult(mode OracleMode, specPath string, specCase SpecCase, result ExecutionResult) ExecutionResult {
@@ -860,6 +860,9 @@ func normalizePlatformSpecificOracleResult(mode OracleMode, specPath string, spe
 		if result.Stderr == bsdTouchDateNoOperand {
 			result.Stderr = gnuTouchDateNoOperand
 		}
+	}
+	if runtime.GOOS == "darwin" && specPath == "oils/tilde.test.sh" && specCase.Name == "${x//~/~root}" && !strings.Contains(result.Stdout, "/var/root") {
+		result.Stdout = strings.ReplaceAll(result.Stdout, "/root", "/var/root")
 	}
 	return result
 }
@@ -996,7 +999,8 @@ func shouldApplyOracleOverrides(specPath string) bool {
 		"oils/builtin-getopts.test.sh",
 		"oils/globignore.test.sh",
 		"oils/globstar.test.sh",
-		"oils/redirect-multi.test.sh":
+		"oils/redirect-multi.test.sh",
+		"oils/tilde.test.sh":
 		return true
 	default:
 		return false

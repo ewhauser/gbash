@@ -1175,6 +1175,53 @@ xx=~ show
 	}
 }
 
+func TestAssignmentLikeArgTildeUsesLiveHome(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		StartupHome: "/startup",
+		Env:         expand.ListEnviron("HOME=/home/bob"),
+		Dir:         "/tmp",
+	}, `
+HOME=/home/bob
+echo x=~
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "x=/home/bob\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestAssignmentParamDefaultTildeUsesLiveHome(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		StartupHome: "/startup",
+		Env:         expand.ListEnviron("HOME=/home/bar"),
+		Dir:         "/tmp",
+	}, `
+HOME=/home/bar
+x=~:${undef-~:~}
+echo "$x"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "/home/bar:/home/bar:/home/bar\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestNamedUserTildeUsesSandboxMapping(t *testing.T) {
 	t.Parallel()
 
