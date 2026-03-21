@@ -20,6 +20,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -233,6 +234,10 @@ type Runner struct {
 
 	trapLineOverride uint
 	signalOwner      *Runner
+	// signalChildren is an owner-wide registry of inherited shell runners keyed
+	// by their bash PID so signal dispatch can inspect direct child shells.
+	signalChildren      *sync.Map
+	signalParentBASHPID int
 }
 
 type commandHashEntry struct {
@@ -257,8 +262,14 @@ type funcInfo struct {
 type trapState struct {
 	actions             map[trapID]trapAction
 	active              map[trapID]int
-	pending             []trapID
+	pending             []pendingSignalTrap
 	currentSignalNumber int
+}
+
+type pendingSignalTrap struct {
+	id     trapID
+	status uint8
+	line   uint
 }
 
 type virtualPIDState struct {
@@ -899,6 +910,8 @@ func (r *Runner) Reset() {
 		interactive:            r.interactive,
 		syntheticPipelineStmts: r.syntheticPipelineStmts,
 		signalOwner:            r.signalOwner,
+		signalChildren:         r.signalChildren,
+		signalParentBASHPID:    r.signalParentBASHPID,
 	}
 	r.traps.actions = nil
 	r.traps.active = nil
@@ -912,6 +925,9 @@ func (r *Runner) Reset() {
 		r.commandHash = make(map[string]commandHashEntry)
 	} else {
 		clear(r.commandHash)
+	}
+	if r.signalChildren == nil {
+		r.signalChildren = &sync.Map{}
 	}
 	r.nextVirtualPID = newVirtualPIDState(max(r.pid, r.bashPID) + 1)
 	// Ensure we stop referencing any pointers before we reuse bgProcs.
@@ -1136,6 +1152,8 @@ func (r *Runner) subshell(background bool) *Runner {
 		random:                  random,
 		origRandom:              random,
 		signalOwner:             r.signalOwner,
+		signalChildren:          r.signalChildren,
+		signalParentBASHPID:     r.signalParentBASHPID,
 
 		origStdout: r.origStdout, // used for process substitutions
 	}
@@ -1170,6 +1188,9 @@ func (r *Runner) InheritSignalFamily(owner *Runner, stablePID, parentBASHPID int
 	if owner.signalOwner != nil {
 		owner = owner.signalOwner
 	}
+	if owner.signalChildren == nil {
+		owner.signalChildren = &sync.Map{}
+	}
 	if stablePID <= 0 {
 		stablePID = owner.pid
 	}
@@ -1177,10 +1198,41 @@ func (r *Runner) InheritSignalFamily(owner *Runner, stablePID, parentBASHPID int
 		parentBASHPID = owner.bashPID
 	}
 	r.signalOwner = owner
+	r.signalChildren = owner.signalChildren
+	r.signalParentBASHPID = parentBASHPID
 	r.pid = stablePID
 	r.ppid = parentBASHPID
 	r.nextVirtualPID = owner.nextVirtualPID
 	r.bashPID = owner.allocateSubshellPID()
+	owner.signalChildren.Store(r.bashPID, r)
+}
+
+func (r *Runner) signalChildTrapTarget(id trapID) *Runner {
+	if r == nil {
+		return nil
+	}
+	owner := r
+	if owner.signalOwner != nil {
+		owner = owner.signalOwner
+	}
+	if owner.signalChildren != nil {
+		var target *Runner
+		owner.signalChildren.Range(func(_, child any) bool {
+			runner, ok := child.(*Runner)
+			if !ok || runner == nil || runner.signalParentBASHPID != r.bashPID {
+				return true
+			}
+			if action := runner.trapAction(id); action.active() {
+				target = runner
+				return false
+			}
+			return true
+		})
+		if target != nil {
+			return target
+		}
+	}
+	return nil
 }
 
 func randomSeed(pid int, started time.Time) uint32 {
