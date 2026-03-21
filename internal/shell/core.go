@@ -653,7 +653,6 @@ func (m *core) execHandler(exec *Execution, budget *executionBudget) interp.Exec
 				callCtx = shellstate.WithShellVarAssignments(callCtx, shellVars)
 				callCtx = shellstate.WithShellVarLookup(callCtx, shellVarLookup)
 				callCtx = shellstate.WithSignalDispatcher(callCtx, hc.DispatchSignal)
-				callCtx = shellstate.WithProcessGroup(callCtx, currentProcessGroup())
 				return shellstate.WithSignalFamily(callCtx, hc.SignalFamily())
 			},
 			SyncEnv: func(callCtx context.Context, before, after map[string]string) error {
