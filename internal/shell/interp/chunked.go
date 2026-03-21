@@ -119,7 +119,19 @@ func (r *Runner) runChunked(ctx context.Context, reader io.Reader, name, topLeve
 				continue
 			}
 			err = attachChunkParseErrorSourceLine(err, pending.String())
-			return finish(shiftChunkError(err, chunkStartOffset, chunkStartLine))
+			err = decorateCommandStringParseError(err, r, name)
+			err = shiftChunkError(err, chunkStartOffset, chunkStartLine)
+			if recoverable, ok := recoverableParseError(err); ok {
+				_, _ = io.WriteString(r.stderr, recoverable.BashError())
+				_, _ = io.WriteString(r.stderr, "\n")
+				r.exit.code = 1
+				pending.Reset()
+				if readErr == io.EOF {
+					break
+				}
+				continue
+			}
+			return finish(err)
 		}
 		shiftChunkPositions(file, chunkStartOffset, chunkStartLine)
 		if len(file.Stmts) == 0 {
@@ -167,6 +179,25 @@ func (r *Runner) runChunked(ctx context.Context, reader io.Reader, name, topLeve
 	}
 
 	return finish(nil)
+}
+
+func decorateCommandStringParseError(err error, r *Runner, name string) error {
+	if err == nil || r == nil || !r.interactive || !r.commandString {
+		return err
+	}
+	var parseErr syntax.ParseError
+	if !errors.As(err, &parseErr) {
+		return err
+	}
+	return parseErr.WithInteractiveCommandStringPrefix(name)
+}
+
+func recoverableParseError(err error) (syntax.ParseError, bool) {
+	var parseErr syntax.ParseError
+	if !errors.As(err, &parseErr) || !parseErr.Recoverable() {
+		return syntax.ParseError{}, false
+	}
+	return parseErr, true
 }
 
 func chunkParseIncomplete(err error, parser *syntax.Parser) bool {

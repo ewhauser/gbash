@@ -331,6 +331,9 @@ func hasBashCommandStringPassthroughArg(args []string) bool {
 			return false
 		case arg == "--command" || strings.HasPrefix(arg, "--command="):
 			return true
+		case arg == "--rcfile" || arg == "--option":
+			i++
+			continue
 		case !strings.HasPrefix(arg, "-") || arg == "-":
 			return false
 		case strings.HasPrefix(arg, "--"):

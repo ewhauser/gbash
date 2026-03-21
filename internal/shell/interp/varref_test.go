@@ -51,6 +51,77 @@ func runInterpScriptConfig(t *testing.T, cfg *RunnerConfig, src string) (string,
 	return stdout.String(), stderr.String(), err
 }
 
+func TestForLoopInvalidIdentifierMatchesBash(t *testing.T) {
+	t.Parallel()
+
+	t.Run("continues after invalid name", func(t *testing.T) {
+		t.Parallel()
+
+		stdout, stderr, err := runInterpScript(t, "for i.j in a b c; do echo hi; done; echo done\n")
+		if err != nil {
+			t.Fatalf("Run error = %v", err)
+		}
+		if got, want := stdout, "done\n"; got != want {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+		if got, want := stderr, "`i.j': not a valid identifier\n"; got != want {
+			t.Fatalf("stderr = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("standalone loop returns status one", func(t *testing.T) {
+		t.Parallel()
+
+		stdout, stderr, err := runInterpScript(t, "for - in a b c; do echo hi; done\n")
+		var status ExitStatus
+		if !errors.As(err, &status) || status != 1 {
+			t.Fatalf("Run error = %v, want exit status 1", err)
+		}
+		if stdout != "" {
+			t.Fatalf("stdout = %q, want empty", stdout)
+		}
+		if got, want := stderr, "`-': not a valid identifier\n"; got != want {
+			t.Fatalf("stderr = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestRecoverableNestedArrayLiteralParseError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("later lines continue", func(t *testing.T) {
+		t.Parallel()
+
+		stdout, stderr, err := runInterpScript(t, "a=( inside=() )\necho len=${#a[@]}\n")
+		if err != nil {
+			t.Fatalf("Run error = %v", err)
+		}
+		if got, want := stdout, "len=0\n"; got != want {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+		const wantStderr = "varref-test.sh: line 1: syntax error near unexpected token `('\nvarref-test.sh: line 1: `a=( inside=() )'\n"
+		if got := stderr; got != wantStderr {
+			t.Fatalf("stderr = %q, want %q", got, wantStderr)
+		}
+	})
+
+	t.Run("same line is discarded but next line runs", func(t *testing.T) {
+		t.Parallel()
+
+		stdout, stderr, err := runInterpScript(t, "a=( inside=() ); echo first\necho second\n")
+		if err != nil {
+			t.Fatalf("Run error = %v", err)
+		}
+		if got, want := stdout, "second\n"; got != want {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+		const wantStderr = "varref-test.sh: line 1: syntax error near unexpected token `('\nvarref-test.sh: line 1: `a=( inside=() ); echo first'\n"
+		if got := stderr; got != wantStderr {
+			t.Fatalf("stderr = %q, want %q", got, wantStderr)
+		}
+	})
+}
+
 func TestPrintfVarRef(t *testing.T) {
 	t.Parallel()
 

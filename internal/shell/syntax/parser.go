@@ -1459,7 +1459,10 @@ type ParseError struct {
 
 	bashText          string
 	bashSecondaryText string
+	bashPrefix        string
+	bashPrefixNoLine  bool
 	noSourceLine      bool
+	recoverable       bool
 }
 
 func (e ParseError) Error() string {
@@ -1518,6 +1521,10 @@ func (e ParseError) bashCompat() ParseError {
 		e.bashText = "syntax error near unexpected token `;;'"
 	case e.Text == "`}` can only be used to close a block":
 		e.bashText = "syntax error near unexpected token `}'"
+	case e.Text == "`case x` must be followed by `in`" && bashCompatArrayLiteralToken(sourceLine):
+		e.bashText = "syntax error near unexpected token `('"
+	case e.Text == "word list can only contain words" && bashCompatArrayLiteralToken(sourceLine):
+		e.bashText = "syntax error near unexpected token `('"
 	case bashCompatFuncOpenError(e.Text):
 		if token, ok := bashCompatFuncOpenToken(sourceLine); ok {
 			if token == "newline" {
@@ -1528,6 +1535,10 @@ func (e ParseError) bashCompat() ParseError {
 		}
 	}
 	return e
+}
+
+func bashCompatArrayLiteralToken(sourceLine string) bool {
+	return strings.Contains(sourceLine, "=()")
 }
 
 func bashCompatFuncOpenError(text string) bool {
@@ -1589,7 +1600,11 @@ func (e ParseError) BashError() string {
 	if e.bashText != "" {
 		text = e.bashText
 	}
-	if e.Filename == "" {
+	if e.bashPrefix != "" && e.bashPrefixNoLine {
+		first = fmt.Sprintf("%s: %s", e.bashPrefix, text)
+	} else if e.bashPrefix != "" {
+		first = fmt.Sprintf("%s: line %d: %s", e.bashPrefix, e.Pos.Line(), text)
+	} else if e.Filename == "" {
 		first = fmt.Sprintf("line %d: %s", e.Pos.Line(), text)
 	} else {
 		first = fmt.Sprintf("%s: line %d: %s", e.Filename, e.Pos.Line(), text)
@@ -1600,7 +1615,11 @@ func (e ParseError) BashError() string {
 		secondaryText = e.bashSecondaryText
 	}
 	if secondaryText != "" {
-		if e.Filename == "" {
+		if e.bashPrefix != "" && e.bashPrefixNoLine {
+			lines = append(lines, fmt.Sprintf("%s: %s", e.bashPrefix, secondaryText))
+		} else if e.bashPrefix != "" {
+			lines = append(lines, fmt.Sprintf("%s: line %d: %s", e.bashPrefix, secondaryPos.Line(), secondaryText))
+		} else if e.Filename == "" {
 			lines = append(lines, fmt.Sprintf("line %d: %s", secondaryPos.Line(), secondaryText))
 		} else {
 			lines = append(lines, fmt.Sprintf("%s: line %d: %s", e.Filename, secondaryPos.Line(), secondaryText))
@@ -1621,6 +1640,21 @@ func (e ParseError) BashError() string {
 
 func (e ParseError) WantsSourceLine() bool {
 	return !e.noSourceLine
+}
+
+func (e ParseError) Recoverable() bool {
+	return e.recoverable
+}
+
+func (e ParseError) WithInteractiveCommandStringPrefix(name string) ParseError {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return e
+	}
+	e.bashPrefix = name
+	e.bashPrefixNoLine = true
+	e.noSourceLine = true
+	return e
 }
 
 // LangError is returned when the parser encounters code that is only valid in
@@ -1708,6 +1742,16 @@ func (p *Parser) posErrSecondaryDetailed(pos, secondaryPos, sourceLinePos Pos, s
 		SecondaryPos:  secondaryPos,
 		SourceLine:    sourceLine,
 		SourceLinePos: sourceLinePos,
+	})
+}
+
+func (p *Parser) posRecoverableErr(pos Pos, format string, args ...any) {
+	p.errPass(ParseError{
+		Filename:    p.f.Name,
+		Pos:         pos,
+		Text:        fmt.Sprintf(format, args...),
+		Incomplete:  p.tok == _EOF && p.Incomplete(),
+		recoverable: true,
 	})
 }
 
@@ -3966,6 +4010,9 @@ func (p *Parser) finishAssign(as *Assign) *Assign {
 					goto arrayElemDone
 				}
 				switch p.tok {
+				case assgnParen, leftParen:
+					p.posRecoverableErr(p.pos, "syntax error near unexpected token %s", leftParen.bashQuote())
+					return nil
 				case _Newl, rightParen, leftBrack:
 					// TODO: support [index]=[
 				default:
