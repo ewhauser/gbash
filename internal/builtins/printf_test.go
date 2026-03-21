@@ -1,6 +1,7 @@
 package builtins_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -63,5 +64,44 @@ func TestPrintfWriteFailureReturnsExitStatusOne(t *testing.T) {
 	}
 	if exitErr.Code != 1 {
 		t.Fatalf("ExitError.Code = %d, want 1", exitErr.Code)
+	}
+}
+
+func TestPrintfNoArgsMatchesBashUsage(t *testing.T) {
+	t.Parallel()
+
+	cmd := builtins.NewPrintf()
+	var stderr bytes.Buffer
+	err := cmd.Run(context.Background(), &builtins.Invocation{Stderr: &stderr})
+	var exitErr *builtins.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("error = %T %v, want *ExitError", err, err)
+	}
+	if exitErr.Code != 2 {
+		t.Fatalf("ExitError.Code = %d, want 2", exitErr.Code)
+	}
+	if got, want := stderr.String(), "printf: usage: printf [-v var] format [arguments]\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
+func TestPrintfInvalidVarNameMatchesBashDiagnostic(t *testing.T) {
+	t.Parallel()
+
+	cmd := builtins.NewPrintf()
+	var stderr bytes.Buffer
+	err := cmd.Run(context.Background(), &builtins.Invocation{
+		Args:   []string{"-v", "a[", "%s", "foo"},
+		Stderr: &stderr,
+	})
+	var exitErr *builtins.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("error = %T %v, want *ExitError", err, err)
+	}
+	if exitErr.Code != 2 {
+		t.Fatalf("ExitError.Code = %d, want 2", exitErr.Code)
+	}
+	if got, want := stderr.String(), "printf: `a[': not a valid identifier\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }

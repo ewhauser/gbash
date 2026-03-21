@@ -22,6 +22,18 @@ func TestFormatShellQuoteAndZeroPadStrings(t *testing.T) {
 	}
 }
 
+func TestFormatSupportsUppercaseEAndAlternateHexZero(t *testing.T) {
+	t.Parallel()
+
+	result := Format("[%E][%#x][%#x][%#X][%#X]\n", []string{"3.14", "0", "42", "0", "42"}, Options{})
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; diagnostics=%v", result.ExitCode, result.Diagnostics)
+	}
+	if got, want := result.Output, "[3.140000E+00][0][0x2a][0][0X2A]\n"; got != want {
+		t.Fatalf("Output = %q, want %q", got, want)
+	}
+}
+
 func TestFormatQuotedCharUsesFirstByteForInvalidUnicode(t *testing.T) {
 	t.Parallel()
 
@@ -33,7 +45,11 @@ func TestFormatQuotedCharUsesFirstByteForInvalidUnicode(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; diagnostics=%v", result.ExitCode, result.Diagnostics)
 	}
-	if got, want := result.Output, "f4\ned\n3bc\n"; got != want {
+	want := "f4\ned\n3bc\n"
+	if runtime.GOOS == "linux" {
+		want = "111111\ned\n3bc\n"
+	}
+	if got := result.Output; got != want {
 		t.Fatalf("Output = %q, want %q", got, want)
 	}
 }

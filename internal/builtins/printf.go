@@ -23,6 +23,12 @@ func (c *Printf) Name() string {
 }
 
 func (c *Printf) Run(ctx context.Context, inv *Invocation) error {
+	if len(inv.Args) == 0 {
+		if inv != nil && inv.Stderr != nil {
+			_, _ = io.WriteString(inv.Stderr, "printf: usage: printf [-v var] format [arguments]\n")
+		}
+		return &ExitError{Code: 2}
+	}
 	varName, assign, args, err := normalizePrintfArgs(inv.Args)
 	if err != nil {
 		return exitf(inv, 2, "printf: %v", err)
@@ -96,7 +102,7 @@ func normalizePrintfArgs(args []string) (varName string, assign bool, normalized
 	}
 	varName = args[1]
 	if !isPrintfVarName(varName) {
-		return "", false, nil, fmt.Errorf("%q: invalid variable name for -v", varName)
+		return "", false, nil, fmt.Errorf("`%s': not a valid identifier", varName)
 	}
 	args = args[2:]
 	if len(args) > 0 && args[0] == "--" {

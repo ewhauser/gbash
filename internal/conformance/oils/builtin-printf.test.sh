@@ -603,7 +603,8 @@ AZ
 #### printf %c unicode - prints the first BYTE of a string - it does not respect UTF-8
 
 show_bytes() {
-  od -A n -t x1
+  od -A n -t x1 -v | tr -d '[:space:]'
+  echo
 }
 twomu=$'\u03bc\u03bc'
 printf '[%s]\n' "$twomu"
@@ -613,7 +614,7 @@ printf '%c' "$twomu" | show_bytes
 
 ## STDOUT:
 [μμ]
- ce
+ce
 ## END
 
 #### printf invalid format
@@ -816,11 +817,16 @@ strftime-format() {
   echo -n ')T'
 }
 
-printf $(strftime-format 1) | wc --bytes
-printf $(strftime-format 10) | wc --bytes
-printf $(strftime-format 30) | wc --bytes
-printf $(strftime-format 31) | wc --bytes
-printf $(strftime-format 32) | wc --bytes
+count_bytes() {
+  wc -c | tr -d '[:space:]'
+  echo
+}
+
+printf $(strftime-format 1) | count_bytes
+printf $(strftime-format 10) | count_bytes
+printf $(strftime-format 30) | count_bytes
+printf $(strftime-format 31) | count_bytes
+printf $(strftime-format 32) | count_bytes
 
 ## STDOUT:
 4
@@ -987,7 +993,8 @@ printf '%b\n' '\0558'
 echo
 
 show_bytes() {
-  od -A n -t x1
+  od -A n -t x1 -v | tr -d '[:space:]'
+  echo
 }
 printf '%b' '\7' | show_bytes
 printf '%b' '\07' | show_bytes
@@ -998,10 +1005,10 @@ printf '%b' '\0007' | show_bytes
 -8
 -8
 
- 07
- 07
- 07
- 07
+07
+07
+07
+07
 ## END
 
 #### printf %d %X support hex 0x5 and octal 055
@@ -1115,4 +1122,3 @@ echo status=$?
 ## STDOUT:
 status=1
 ## END
-

@@ -101,7 +101,7 @@ func TestPrintfRejectsInvalidDashVVariableName(t *testing.T) {
 	if got := result.Stdout; got != "" {
 		t.Fatalf("Stdout = %q, want empty", got)
 	}
-	if got, want := result.Stderr, "printf: \"bad-name\": invalid variable name for -v\n"; got != want {
+	if got, want := result.Stderr, "printf: `bad-name': not a valid identifier\n"; got != want {
 		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }

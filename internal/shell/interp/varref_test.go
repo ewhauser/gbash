@@ -53,7 +53,7 @@ func runInterpScriptConfig(t *testing.T, cfg *RunnerConfig, src string) (string,
 func TestPrintfVarRef(t *testing.T) {
 	t.Parallel()
 
-	stdout, _, err := runInterpScript(t, `
+	stdout, stderr, err := runInterpScript(t, `
 var=foo
 printf -v $var %s 'hello there'
 a=(a b c)
@@ -75,6 +75,9 @@ printf 'status=%d\n' "$?"
 	const want = "hello there\na\nfoo\nc\nbaz\nstatus=2\n"
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	if got, want := stderr, "printf: `a[': not a valid identifier\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }
 
