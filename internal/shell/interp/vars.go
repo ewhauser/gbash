@@ -56,6 +56,10 @@ type overlayEnviron struct {
 	// functions can modify global variables. When true, [parent] must not be nil.
 	funcScope bool
 
+	// optState tracks clustered getopts progress for the OPTIND binding visible
+	// in this scope.
+	optState getopts
+
 	// secondsStartTime tracks the SECONDS baseline for this scope when that
 	// binding is visible from here.
 	secondsStartTime time.Time
@@ -229,6 +233,26 @@ func visibleBindingWriteEnv(env expand.WriteEnviron, name string) (expand.WriteE
 	default:
 		return nil, expand.Variable{}, false
 	}
+}
+
+func getoptsStateForEnv(env expand.WriteEnviron) *getopts {
+	switch env := env.(type) {
+	case *overlayEnviron:
+		return &env.optState
+	case *shadowWriteEnviron:
+		return &env.optState
+	default:
+		return nil
+	}
+}
+
+func (r *Runner) currentGetoptsState() *getopts {
+	if env, _, ok := visibleBindingWriteEnv(r.writeEnv, "OPTIND"); ok {
+		if state := getoptsStateForEnv(env); state != nil {
+			return state
+		}
+	}
+	return &r.optState
 }
 
 func visibleSecondsBinding(env expand.WriteEnviron) (expand.WriteEnviron, expand.Variable, bool) {
@@ -567,7 +591,11 @@ func (r *Runner) setVarString(name, value string) {
 }
 
 func (r *Runner) setOPTIND(value string) {
-	if err := r.writeEnv.Set("OPTIND", expand.Variable{Set: true, Kind: expand.String, Str: value}); err != nil {
+	vr := expand.Variable{Set: true, Kind: expand.String, Str: value}
+	if prev := r.lookupVar("OPTIND"); prev.Exported || r.opts[optAllExport] {
+		vr.Exported = true
+	}
+	if err := r.writeEnv.Set("OPTIND", vr); err != nil {
 		r.errf("OPTIND: %v\n", err)
 		r.exit.code = 1
 	}
@@ -598,7 +626,7 @@ func (r *Runner) setVar(name string, vr expand.Variable) {
 		return
 	}
 	if name == "OPTIND" {
-		r.optState.reset()
+		r.currentGetoptsState().reset()
 	}
 	if name == "SECONDS" && vr.IsSet() {
 		seconds, err := strconv.ParseInt(strings.TrimSpace(vr.String()), 10, 64)
@@ -744,6 +772,8 @@ type shadowWriteEnviron struct {
 	shadow     expand.Variable
 	shadowName string
 	shadowSet  bool
+
+	optState getopts
 
 	secondsStartTime time.Time
 	secondsStartSet  bool

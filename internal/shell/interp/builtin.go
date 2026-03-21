@@ -569,12 +569,13 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		if len(args) < 2 {
 			return failf(2, "getopts: usage: getopts optstring name [arg ...]\n")
 		}
+		state := r.currentGetoptsState()
 		optind, _ := strconv.Atoi(r.envGet("OPTIND"))
 		if optind < 1 {
 			optind = 1
 		}
-		if optind-1 != r.optState.argidx {
-			r.optState = getopts{argidx: optind - 1}
+		if optind-1 != state.argidx {
+			*state = getopts{argidx: optind - 1}
 		}
 		optstr := args[0]
 		name := args[1]
@@ -584,7 +585,7 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		}
 		diagnostics := !strings.HasPrefix(optstr, ":")
 
-		result := r.optState.next(optstr, args)
+		result := state.next(optstr, args)
 		opt := result.opt
 		switch result.kind {
 		case getoptsResultDone, getoptsResultUnknown:
@@ -605,8 +606,8 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		} else if !diagnostics && !result.done() && result.optarg != "" {
 			r.setVarString("OPTARG", result.optarg)
 		}
-		if optind-1 != r.optState.argidx {
-			r.setOPTIND(strconv.FormatInt(int64(r.optState.argidx+1), 10))
+		if optind-1 != state.argidx {
+			r.setOPTIND(strconv.FormatInt(int64(state.argidx+1), 10))
 		}
 		if !syntax.ValidName(name) {
 			return failf(2, "getopts: `%s': not a valid identifier\n", name)

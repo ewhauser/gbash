@@ -227,3 +227,54 @@ printf 'third=%s OPTIND=%s\n' "$opt" "$OPTIND"
 		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }
+
+func TestGetoptsLocalOPTINDDoesNotResetCallerState(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+set -- -ab
+getopts "ab" opt
+printf 'outer1=%s OPTIND=%s\n' "$opt" "$OPTIND"
+helper() {
+  local OPTIND=1
+  getopts "ab" inner "$@"
+  printf 'inner=%s OPTIND=%s\n' "$inner" "$OPTIND"
+}
+helper "$@"
+getopts "ab" opt
+printf 'outer2=%s OPTIND=%s\n' "$opt" "$OPTIND"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "outer1=a OPTIND=1\ninner=a OPTIND=1\nouter2=b OPTIND=2\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestGetoptsExportsOPTINDInAllexportMode(t *testing.T) {
+	t.Parallel()
+
+	runner, stdout, stderr, err := runInterpScriptWithRunner(t, `
+set -a
+set -- -a
+getopts "a" opt
+printf 'OPTIND=%s\n' "$OPTIND"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "OPTIND=2\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "OPTIND=2\n")
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+	if got := runner.lookupVar("OPTIND"); !got.Exported || got.String() != "2" {
+		t.Fatalf("OPTIND = %#v, want exported string 2", got)
+	}
+}
