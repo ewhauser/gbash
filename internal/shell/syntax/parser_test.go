@@ -2982,6 +2982,25 @@ func TestParseArithmeticError(t *testing.T) {
 	}
 }
 
+func TestParseArithmeticRejectsCarriageReturnLineEndings(t *testing.T) {
+	t.Parallel()
+
+	p := NewParser()
+	_, err := p.Arithmetic(strings.NewReader("1 +\r\n2"))
+	if err == nil {
+		t.Fatal("Arithmetic() error = nil, want parse error")
+	}
+}
+
+func TestParseArithmeticExpansionRejectsCarriageReturnLineEndings(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewParser(Variant(LangBash)).Parse(strings.NewReader("echo $(( 1 +\r\n2))\n"), "")
+	if err == nil {
+		t.Fatal("Parse() error = nil, want parse error")
+	}
+}
+
 var stopAtTests = []struct {
 	in   string
 	stop string

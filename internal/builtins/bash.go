@@ -8,6 +8,7 @@ import (
 	stdfs "io/fs"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ewhauser/gbash/internal/completionutil"
@@ -143,9 +144,14 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 	if err != nil {
 		return err
 	}
+	if result != nil && result.Stderr != "" {
+		if normalized, ok := normalizeNestedShellArithStderr(script, result.Stderr); ok {
+			result.Stderr = normalized
+		}
+	}
 	commandString := parsed != nil && parsed.Source == BashSourceCommandString
 	if commandString {
-		prefixNestedShellDiagnostic(result, parsed.Name)
+		prefixNestedShellDiagnostic(result, parsed.ExecutionName)
 	}
 	if result != nil && result.Stderr != "" {
 		result.Stderr = prefixNestedShellCommandNotFound(c.name, result.Stderr)
@@ -155,6 +161,198 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 		return err
 	}
 	return exitForExecutionResult(result)
+}
+
+func normalizeNestedShellArithStderr(script, stderr string) (string, bool) {
+	failureLine, failureToken, ok := nestedShellArithFailure(stderr)
+	if !ok {
+		return "", false
+	}
+	replacement := ""
+	for search := 0; search < len(script); {
+		startRel := strings.Index(script[search:], "$((")
+		if startRel < 0 {
+			break
+		}
+		exprStart := search + startRel + len("$((")
+		endRel := strings.Index(script[exprStart:], "))")
+		if endRel < 0 {
+			return "", false
+		}
+		exprEnd := exprStart + endRel
+		exprRaw := script[exprStart:exprEnd]
+		tokenText, tokenStart, ok := nestedShellArithCRToken(exprRaw)
+		if ok {
+			exprLine := nestedShellArithLine(script, exprStart)
+			tokenLine := nestedShellArithTokenLine(script, exprStart+tokenStart, tokenText)
+			if nestedShellArithFailureToken(tokenText) != failureToken {
+				search = exprEnd + len("))")
+				continue
+			}
+			if failureLine > 0 && exprLine != failureLine && tokenLine != failureLine {
+				search = exprEnd + len("))")
+				continue
+			}
+			if replacement != "" {
+				return "", false
+			}
+			exprText := strings.Trim(exprRaw, " \t\n")
+			if exprText == "" {
+				return "", false
+			}
+			replacement = fmt.Sprintf("%s: syntax error: operand expected (error token is %s)\n", exprText, bashQuoteArithToken(tokenText))
+		}
+		search = exprEnd + len("))")
+	}
+	if replacement == "" {
+		return "", false
+	}
+	normalized := stderr
+	replaced := false
+	if strings.Contains(stderr, "not a valid arithmetic operator") {
+		normalized, replaced = replaceNestedShellArithDiagnostic(stderr, replacement)
+	}
+	withoutContinuation, stripped := stripNestedShellArithContinuation(normalized)
+	if replaced || stripped {
+		return withoutContinuation, true
+	}
+	return "", false
+}
+
+func nestedShellArithFailure(stderr string) (lineNum int, token string, ok bool) {
+	for line := range strings.SplitSeq(stderr, "\n") {
+		prefix, remainder, found := strings.Cut(line, "not a valid arithmetic operator: `")
+		if !found {
+			continue
+		}
+		token, _, found = strings.Cut(remainder, "`")
+		if !found {
+			continue
+		}
+		linePrefix := strings.TrimSuffix(strings.TrimSpace(prefix), ":")
+		if linePrefix != "" {
+			if trimmed, found := strings.CutPrefix(linePrefix, "bash: "); found {
+				linePrefix = trimmed
+			}
+			if !strings.HasPrefix(linePrefix, "line ") {
+				continue
+			}
+			parsedLine, err := strconv.Atoi(strings.TrimPrefix(linePrefix, "line "))
+			if err != nil {
+				return 0, "", false
+			}
+			lineNum = parsedLine
+		}
+		return lineNum, token, true
+	}
+	return 0, "", false
+}
+
+func replaceNestedShellArithDiagnostic(stderr, replacement string) (string, bool) {
+	lines := strings.SplitAfter(stderr, "\n")
+	out := make([]string, 0, len(lines))
+	replaced := false
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimRight(lines[i], "\n")
+		if !strings.Contains(trimmed, "not a valid arithmetic operator") {
+			out = append(out, lines[i])
+			continue
+		}
+		out = append(out, replacement)
+		replaced = true
+		for i+1 < len(lines) {
+			next := strings.TrimLeft(strings.TrimRight(lines[i+1], "\n"), " \t")
+			if strings.HasPrefix(next, "`") || (strings.HasPrefix(next, "line ") && strings.Contains(next, ": `")) {
+				i++
+				continue
+			}
+			break
+		}
+	}
+	if !replaced {
+		return "", false
+	}
+	return strings.Join(out, ""), true
+}
+
+func stripNestedShellArithContinuation(stderr string) (string, bool) {
+	lines := strings.SplitAfter(stderr, "\n")
+	out := make([]string, 0, len(lines))
+	stripped := false
+	sawOperandExpected := false
+	for _, line := range lines {
+		trimmed := strings.TrimRight(line, "\n")
+		switch {
+		case strings.Contains(trimmed, "syntax error: operand expected"):
+			sawOperandExpected = true
+			out = append(out, line)
+		case sawOperandExpected && isNestedShellArithContinuationLine(trimmed):
+			stripped = true
+		default:
+			sawOperandExpected = false
+			out = append(out, line)
+		}
+	}
+	if !stripped {
+		return stderr, false
+	}
+	return strings.Join(out, ""), true
+}
+
+func isNestedShellArithContinuationLine(line string) bool {
+	line = strings.TrimLeft(line, " \t")
+	if strings.HasPrefix(line, "`") {
+		return true
+	}
+	return strings.HasPrefix(line, "bash: line ") && strings.Contains(line, ": `")
+}
+
+func nestedShellArithCRToken(exprRaw string) (string, int, bool) {
+	tokenStart := strings.IndexByte(exprRaw, '\r')
+	if tokenStart < 0 {
+		return "", 0, false
+	}
+	tokenEnd := tokenStart + 1
+	if tokenEnd < len(exprRaw) && exprRaw[tokenEnd] == '\n' {
+		tokenEnd++
+	}
+	for tokenEnd < len(exprRaw) && !isNestedShellArithTokenDelimiter(exprRaw[tokenEnd]) {
+		tokenEnd++
+	}
+	if tokenEnd <= tokenStart {
+		return "", 0, false
+	}
+	return exprRaw[tokenStart:tokenEnd], tokenStart, true
+}
+
+func nestedShellArithTokenLine(script string, tokenPos int, tokenText string) int {
+	offset := 0
+	for offset < len(tokenText) && (tokenText[offset] == '\r' || tokenText[offset] == '\n') {
+		offset++
+	}
+	return nestedShellArithLine(script, tokenPos+offset)
+}
+
+func nestedShellArithLine(script string, pos int) int {
+	return 1 + strings.Count(script[:pos], "\n")
+}
+
+func nestedShellArithFailureToken(tokenText string) string {
+	return strings.Trim(tokenText, "\r\n")
+}
+
+func isNestedShellArithTokenDelimiter(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\r', '+', '-', '*', '/', '%', '(', ')', '<', '>', '=', '&', '|', '^', '?', ':', ',', ';':
+		return true
+	default:
+		return false
+	}
+}
+
+func bashQuoteArithToken(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+	return `"` + replacer.Replace(s) + `"`
 }
 
 func (c *Bash) applyRcfile(ctx context.Context, inv *Invocation, parsed *BashInvocation, script string) (string, error) {
@@ -280,12 +478,12 @@ func prefixNestedShellDiagnostic(result *ExecutionResult, shellName string) {
 		if line == "" {
 			continue
 		}
-		if !shouldPrefixNestedShellDiagnostic(line, shellName) {
+		normalized := strings.TrimRight(strings.TrimLeft(lines[i], " \t"), " \t")
+		prefixed, ok := nestedShellDiagnosticLine(normalized, shellName)
+		if !ok {
 			return
 		}
-		normalized := strings.TrimRight(strings.TrimLeft(lines[i], " \t"), " \t")
-		normalized = strings.Replace(normalized, " : ", ": ", 1)
-		lines[i] = shellName + ": line 1: " + normalized
+		lines[i] = prefixed
 		result.Stderr = strings.Join(lines, "\n")
 		if hadTrailingNewline {
 			result.Stderr += "\n"
@@ -294,13 +492,35 @@ func prefixNestedShellDiagnostic(result *ExecutionResult, shellName string) {
 	}
 }
 
-func shouldPrefixNestedShellDiagnostic(line, shellName string) bool {
+func nestedShellDiagnosticLine(line, shellName string) (string, bool) {
 	if line == "" {
+		return "", false
+	}
+	if shellName != "" {
+		if rest, ok := strings.CutPrefix(line, shellName+": "); ok {
+			if shouldUpgradePrefixedNestedShellDiagnostic(rest) {
+				return shellName + ": line 1: " + rest, true
+			}
+			return "", false
+		}
+	}
+	if !isNestedShellDiagnosticText(line) {
+		return "", false
+	}
+	return shellName + ": line 1: " + line, true
+}
+
+func shouldUpgradePrefixedNestedShellDiagnostic(line string) bool {
+	if line == "" || strings.HasPrefix(line, "line ") {
 		return false
 	}
-	if shellName != "" && strings.HasPrefix(line, shellName+": ") {
+	if !strings.Contains(line, "(error token is ") {
 		return false
 	}
+	return isNestedShellDiagnosticText(line)
+}
+
+func isNestedShellDiagnosticText(line string) bool {
 	switch {
 	case strings.Contains(line, "unbound variable"):
 		return true
@@ -311,6 +531,10 @@ func shouldPrefixNestedShellDiagnostic(line, shellName string) bool {
 	case strings.Contains(line, "invalid number"):
 		return true
 	case strings.Contains(line, "arithmetic syntax error"):
+		return true
+	case strings.Contains(line, "syntax error: operand expected"):
+		return true
+	case strings.Contains(line, "syntax error in expression"):
 		return true
 	case strings.Contains(line, "division by 0"):
 		return true

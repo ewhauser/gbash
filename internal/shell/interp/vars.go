@@ -699,7 +699,7 @@ func (r *Runner) applyVarAttrs(vr *expand.Variable) {
 // evalIntegerAttr evaluates a string as a shell arithmetic expression,
 // used for the -i variable attribute.
 func (r *Runner) evalIntegerAttr(s string) int {
-	s = strings.TrimSpace(s)
+	s = expandTrimArithSpace(s)
 	if s == "" {
 		return 0
 	}
@@ -711,6 +711,10 @@ func (r *Runner) evalIntegerAttr(s string) int {
 		return int(n)
 	}
 	return r.arithm(expr)
+}
+
+func expandTrimArithSpace(s string) string {
+	return strings.Trim(s, " \t\n")
 }
 
 func (r *Runner) setFunc(name string, body *syntax.Stmt) {

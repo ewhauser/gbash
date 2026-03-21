@@ -254,10 +254,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-bracket.test.sh::Looks like octal, but digit is too big": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-bracket.test.sh::[ -t invalid ]": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -1164,10 +1160,6 @@
             "darwin"
           ]
         },
-        "oils/quote.test.sh::$? split over multiple lines": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/regex.test.sh::Operator chars ; & but not |": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
@@ -1297,14 +1289,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/whitespace.test.sh::\\r in arith expression is allowed by some shells, but not most!": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/whitespace.test.sh::whitespace in string to integer conversion": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/xtrace.test.sh::xtrace with unprintable chars": {
           "mode": "xfail",
           "reason": "conformance: xtrace escape style for unprintable bytes still differs from bash"
@@ -1312,10 +1296,6 @@
         "oils/glob.test.sh::Glob unicode char": {
           "mode": "xfail",
           "reason": "conformance: C.UTF-8 pathname collation order still differs from bash for this glob case"
-        },
-        "oils/word-split.test.sh::Unicode in IFS": {
-          "mode": "xfail",
-          "reason": "conformance: Unicode IFS splitting still differs from bash"
         }
       }
     }

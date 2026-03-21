@@ -71,6 +71,13 @@ func TestReadFieldsFromChars(t *testing.T) {
 			n:    2,
 			want: []string{"hello world", "test"},
 		},
+		{
+			name: "multibyte ifs leading empty field",
+			ifs:  "ç",
+			in:   "çx",
+			n:    -1,
+			want: []string{"", "x"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -100,6 +107,22 @@ func TestReadFieldsPreservesEscapedIFSDelimiters(t *testing.T) {
 	cfg := &Config{Env: ListEnviron("IFS=:%")}
 	got := ReadFields(cfg, `spam:eggs%ham cheese\:colon`, -1, false)
 	want := []string{"spam", "eggs", "ham cheese:colon"}
+	if len(got) != len(want) {
+		t.Fatalf("len(ReadFields()) = %d, want %d (%q)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ReadFields()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestReadFieldsSupportsMultibyteIFS(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{Env: ListEnviron("IFS=ç")}
+	got := ReadFields(cfg, "çx", -1, false)
+	want := []string{"", "x"}
 	if len(got) != len(want) {
 		t.Fatalf("len(ReadFields()) = %d, want %d (%q)", len(got), len(want), got)
 	}

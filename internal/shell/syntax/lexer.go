@@ -87,7 +87,7 @@ retry:
 			p.col++
 			goto retry
 		case '\r':
-			if p.peek() == '\n' { // \r\n turns into \n
+			if p.peek() == '\n' && p.quote&allArithmExpr == 0 { // \r\n turns into \n outside arithmetic parsing
 				p.col++
 				goto retry
 			}
@@ -393,6 +393,12 @@ skipSpace:
 		}
 	case p.quote&allArithmExpr != 0 && arithmOps(r):
 		p.tok = p.arithmToken(r)
+	case p.quote&allArithmExpr != 0 && r == '\r':
+		// Arithmetic parsing rejects bare carriage returns, but we still need to
+		// consume the byte so recovery doesn't loop on a zero-width token.
+		p.newLit(r)
+		p.rune()
+		p.tok, p.val = _LitWord, p.endLit()
 	case p.quote&allParamExp != 0 && paramOps(r):
 		p.tok = p.paramToken(r)
 	case regOps(r):

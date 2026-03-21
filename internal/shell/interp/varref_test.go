@@ -971,6 +971,34 @@ printf 'unreachable\n'
 	}
 }
 
+func TestCommandStringArithmeticErrorsUseShellNamePrefix(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	runner, err := NewRunner(&RunnerConfig{
+		Dir:           "/tmp",
+		Params:        []string{"\r42\r"},
+		CommandString: true,
+		Stdout:        &stdout,
+		Stderr:        &stderr,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner error = %v", err)
+	}
+
+	err = runner.runShellReader(context.Background(), strings.NewReader("echo $(( $1 + 1 ))\n"), "dummy0", nil)
+	if err == nil {
+		t.Fatal("Run error = nil, want arithmetic failure")
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+	const wantStderr = "dummy0: \r42\r + 1 : syntax error: operand expected (error token is \"\r42\r + 1 \")\n"
+	if got := stderr.String(); got != wantStderr {
+		t.Fatalf("stderr = %q, want %q", got, wantStderr)
+	}
+}
+
 func TestIndexedAssignNestedSideEffects(t *testing.T) {
 	t.Parallel()
 

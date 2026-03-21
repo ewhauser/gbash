@@ -513,8 +513,8 @@ func (p *Parser) Arithmetic(r io.Reader) (ArithmExpr, error) {
 	p.reset()
 	p.f = &File{}
 	p.src = r
-	p.rune()
 	p.quote = arithmExpr
+	p.rune()
 	p.next()
 	expr := p.arithmExpr(false)
 	if p.err == nil && p.tok != _EOF {
@@ -3423,6 +3423,11 @@ func (p *Parser) paramExpParameter(pe *ParamExp) *ParamExp {
 			pe.NestedParam = wp
 		}
 		return pe
+	}
+	if pe.Short {
+		for p.r == escNewl {
+			p.rune()
+		}
 	}
 	// The parameter name itself, like $foo or $?.
 	switch p.r {

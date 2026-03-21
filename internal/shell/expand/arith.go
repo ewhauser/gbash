@@ -183,15 +183,28 @@ func (e *ArithmDiagnosticError) Error() string {
 			exprText = fromSource
 		}
 	}
-	if tokenText == "" && e.Token != nil {
+	if e.Token != nil {
 		if fromSource, ok := arithTokenDiagnosticSource(e.Token, e.Source, e.SourceStart, e.SourceEnd, e.Replacements); ok {
 			tokenText = fromSource
 		}
 	}
+	exprText = arithDiagnosticExprText(e.Message, exprText)
 	if exprText == "" {
 		return fmt.Sprintf("%s (error token is %s)", e.Message, bashQuoteErrorToken(tokenText))
 	}
 	return fmt.Sprintf("%s: %s (error token is %s)", exprText, e.Message, bashQuoteErrorToken(tokenText))
+}
+
+func arithDiagnosticExprText(message, exprText string) string {
+	if exprText == "" {
+		return exprText
+	}
+	switch message {
+	case "value too great for base", "invalid number":
+		return trimArithSpace(exprText)
+	default:
+		return exprText
+	}
 }
 
 // ArithmDivByZeroError preserves the AST context for bash-style
@@ -294,8 +307,18 @@ func Arithm(cfg *Config, expr syntax.ArithmExpr) (int, error) {
 	return arithm(cfg, expr, expr, 0)
 }
 
+const arithWhitespace = " \t\n"
+
+func trimArithSpace(str string) string {
+	return strings.Trim(str, arithWhitespace)
+}
+
+func trimArithLeftSpace(str string) string {
+	return strings.TrimLeft(str, arithWhitespace)
+}
+
 func (cfg *Config) arithmStringValue(root, tokenExpr syntax.ArithmExpr, word *syntax.Word, str string, depth int) (int, error) {
-	s := strings.TrimSpace(str)
+	s := trimArithSpace(str)
 	if s == "" || isEmptyArithWord(word) {
 		return 0, nil
 	}
@@ -690,41 +713,59 @@ func arithRuntimeParseError(src string, parseErr syntax.ParseError) error {
 	}
 }
 
-func arithRuntimeSource(cfg *Config, expr syntax.ArithmExpr) (string, error) {
+func arithRuntimeSource(cfg *Config, expr syntax.ArithmExpr, cache map[syntax.ArithmExpr]string) (string, error) {
+	if cache != nil {
+		if cached, ok := cache[expr]; ok {
+			return cached, nil
+		}
+	}
+	var (
+		val string
+		err error
+	)
 	switch expr := expr.(type) {
 	case *syntax.Word:
 		if arithExprUsesExpandedValue(expr) {
-			return Literal(cfg, expr)
+			val, err = Literal(cfg, expr)
+			break
 		}
-		return arithExprSource(expr), nil
+		val = arithExprSource(expr)
 	case *syntax.BinaryArithm:
-		left, err := arithRuntimeSource(cfg, expr.X)
+		left, err := arithRuntimeSource(cfg, expr.X, cache)
 		if err != nil {
 			return "", err
 		}
-		right, err := arithRuntimeSource(cfg, expr.Y)
+		right, err := arithRuntimeSource(cfg, expr.Y, cache)
 		if err != nil {
 			return "", err
 		}
-		return left + expr.Op.String() + right, nil
+		val = left + expr.Op.String() + right
 	case *syntax.UnaryArithm:
-		val, err := arithRuntimeSource(cfg, expr.X)
+		inner, err := arithRuntimeSource(cfg, expr.X, cache)
 		if err != nil {
 			return "", err
 		}
 		if expr.Post {
-			return val + expr.Op.String(), nil
+			val = inner + expr.Op.String()
+			break
 		}
-		return expr.Op.String() + val, nil
+		val = expr.Op.String() + inner
 	case *syntax.ParenArithm:
-		val, err := arithRuntimeSource(cfg, expr.X)
+		inner, err := arithRuntimeSource(cfg, expr.X, cache)
 		if err != nil {
 			return "", err
 		}
-		return "(" + val + ")", nil
+		val = "(" + inner + ")"
 	default:
-		return arithExprSource(expr), nil
+		val = arithExprSource(expr)
 	}
+	if err != nil {
+		return "", err
+	}
+	if cache != nil {
+		cache[expr] = val
+	}
+	return val, nil
 }
 
 func arithmRuntimeParse(cfg *Config, expr syntax.ArithmExpr) (syntax.ArithmExpr, bool, error) {
@@ -736,9 +777,22 @@ func arithmRuntimeParse(cfg *Config, expr syntax.ArithmExpr) (syntax.ArithmExpr,
 	if !arithExprUsesExpandedValue(expr) {
 		return nil, false, nil
 	}
-	src, err := arithRuntimeSource(cfg, expr)
+	sourceCache := make(map[syntax.ArithmExpr]string)
+	src, err := arithRuntimeSource(cfg, expr, sourceCache)
 	if err != nil {
 		return nil, false, err
+	}
+	replacements, err := arithRuntimeDiagnosticReplacements(cfg, expr, sourceCache)
+	if err != nil {
+		return nil, false, err
+	}
+	if arithHasLeadingInvalidControl(src) {
+		return nil, false, &ArithmDiagnosticError{
+			Expr:         expr,
+			Token:        expr,
+			Message:      "syntax error: operand expected",
+			Replacements: replacements,
+		}
 	}
 	p := syntax.NewParser()
 	parsed, err := p.Arithmetic(strings.NewReader(src))
@@ -760,6 +814,52 @@ func arithmRuntimeParse(cfg *Config, expr syntax.ArithmExpr) (syntax.ArithmExpr,
 		return nil, false, nil
 	}
 	return parsed, true, nil
+}
+
+func arithHasLeadingInvalidControl(src string) bool {
+	trimmed := trimArithLeftSpace(src)
+	if trimmed == "" {
+		return false
+	}
+	switch trimmed[0] {
+	case '\r', '\v', '\f':
+		return true
+	default:
+		return false
+	}
+}
+
+func arithRuntimeDiagnosticReplacements(cfg *Config, expr syntax.ArithmExpr, sourceCache map[syntax.ArithmExpr]string) ([]arithDiagnosticReplacement, error) {
+	switch expr := expr.(type) {
+	case *syntax.Word:
+		if !arithExprUsesExpandedValue(expr) {
+			return nil, nil
+		}
+		text, err := arithRuntimeSource(cfg, expr, sourceCache)
+		if err != nil {
+			return nil, err
+		}
+		if repl, ok := arithDiagnosticReplacementForExpr(expr, text); ok {
+			return []arithDiagnosticReplacement{repl}, nil
+		}
+		return nil, nil
+	case *syntax.BinaryArithm:
+		left, err := arithRuntimeDiagnosticReplacements(cfg, expr.X, sourceCache)
+		if err != nil {
+			return nil, err
+		}
+		right, err := arithRuntimeDiagnosticReplacements(cfg, expr.Y, sourceCache)
+		if err != nil {
+			return nil, err
+		}
+		return append(left, right...), nil
+	case *syntax.UnaryArithm:
+		return arithRuntimeDiagnosticReplacements(cfg, expr.X, sourceCache)
+	case *syntax.ParenArithm:
+		return arithRuntimeDiagnosticReplacements(cfg, expr.X, sourceCache)
+	default:
+		return nil, nil
+	}
 }
 
 func arithSourceSpan(expr syntax.ArithmExpr, source string, sourceStart, sourceEnd uint, includeTrailingSpaces bool, replacements []arithDiagnosticReplacement) (string, bool) {
@@ -1113,10 +1213,10 @@ func parseArithNumber(s string, root, tokenExpr syntax.ArithmExpr) (int64, bool,
 		return 0, true, arithWordDiagnostic(root, tokenExpr, s, token, msg)
 	}
 	rest := s[consumed:]
-	if strings.TrimSpace(rest) == "" {
+	if trimArithSpace(rest) == "" {
 		return n, true, nil
 	}
-	trimmed := strings.TrimLeft(rest, " \t")
+	trimmed := trimArithLeftSpace(rest)
 	message := "arithmetic syntax error: invalid arithmetic operator"
 	if trimmed != "" {
 		switch trimmed[0] {
@@ -1135,7 +1235,7 @@ func parseArithNumber(s string, root, tokenExpr syntax.ArithmExpr) (int64, bool,
 }
 
 func arithmWordValue(root syntax.ArithmExpr, expr *syntax.Word, str string) (int, error) {
-	s := strings.TrimSpace(str)
+	s := trimArithSpace(str)
 	if s == "" || isEmptyArithWord(expr) {
 		return 0, nil
 	}

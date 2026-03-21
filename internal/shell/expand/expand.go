@@ -246,6 +246,17 @@ func (cfg *Config) classifyIFSByte(b byte) ifsRuneType {
 	}
 }
 
+func (cfg *Config) classifyIFSStringAt(s string, start int) (ifsRuneType, int) {
+	if start >= len(s) {
+		return ifsRuneNone, 0
+	}
+	r, width := utf8.DecodeRuneInString(s[start:])
+	if r == utf8.RuneError && width == 1 {
+		return cfg.classifyIFSByte(s[start]), 1
+	}
+	return cfg.classifyIFSRune(r), width
+}
+
 func (cfg *Config) ifsJoin(strs []string) string {
 	sep := ""
 	if cfg.ifs != "" {
@@ -1137,9 +1148,10 @@ func (s *fieldSplitter) appendUnquoted(val string) {
 		return
 	}
 	start := 0
-	for i := 0; i < len(val); i++ {
-		rType := s.cfg.classifyIFSByte(val[i])
+	for i := 0; i < len(val); {
+		rType, width := s.cfg.classifyIFSStringAt(val, i)
 		if rType == ifsRuneNone {
+			i += width
 			continue
 		}
 		if start < i {
@@ -1149,7 +1161,8 @@ func (s *fieldSplitter) appendUnquoted(val string) {
 		if rType == ifsRuneNonWhitespace {
 			s.clusterNonWS++
 		}
-		start = i + 1
+		i += width
+		start = i
 	}
 	if start < len(val) {
 		s.appendPart(fieldPart{val: val[start:]})
@@ -2339,22 +2352,54 @@ func readFieldString(chars []ReadFieldChar, start, end int) string {
 	return string(buf)
 }
 
-func readIFSClass(cfg *Config, ch ReadFieldChar) ifsRuneType {
-	if ch.Escaped {
-		return ifsRuneNone
+func readIFSClass(cfg *Config, chars []ReadFieldChar, start int) (ifsRuneType, int) {
+	if start >= len(chars) {
+		return ifsRuneNone, 0
 	}
-	return cfg.classifyIFSByte(ch.Value)
+	if chars[start].Escaped {
+		return ifsRuneNone, 1
+	}
+	if chars[start].Value < utf8.RuneSelf {
+		return cfg.classifyIFSByte(chars[start].Value), 1
+	}
+
+	var buf [utf8.UTFMax]byte
+	buf[0] = chars[start].Value
+	n := 1
+	for n < utf8.UTFMax && start+n < len(chars) {
+		if chars[start+n].Escaped {
+			break
+		}
+		buf[n] = chars[start+n].Value
+		n++
+		if utf8.FullRune(buf[:n]) {
+			break
+		}
+	}
+	r, width := utf8.DecodeRune(buf[:n])
+	if r == utf8.RuneError && width == 1 {
+		return cfg.classifyIFSByte(chars[start].Value), 1
+	}
+	return cfg.classifyIFSRune(r), width
 }
 
 func trimReadLeadingIFSWhitespace(cfg *Config, chars []ReadFieldChar, start, end int) int {
-	for start < end && readIFSClass(cfg, chars[start]) == ifsRuneWhitespace {
-		start++
+	for start < end {
+		class, width := readIFSClass(cfg, chars, start)
+		if class != ifsRuneWhitespace {
+			break
+		}
+		start += width
 	}
 	return start
 }
 
 func trimReadTrailingIFSWhitespace(cfg *Config, chars []ReadFieldChar, start, end int) int {
-	for end > start && readIFSClass(cfg, chars[end-1]) == ifsRuneWhitespace {
+	for end > start {
+		class, width := readIFSClass(cfg, chars, end-1)
+		if class != ifsRuneWhitespace || width != 1 {
+			break
+		}
 		end--
 	}
 	return end
@@ -2375,27 +2420,42 @@ func ReadFieldsFromChars(cfg *Config, chars []ReadFieldChar, n int) []string {
 	fields := make([]readFieldSpan, 0, 4)
 	fieldStart := start
 	for i := start; i < end; {
-		class := readIFSClass(cfg, chars[i])
+		class, width := readIFSClass(cfg, chars, i)
 		if class == ifsRuneNone {
-			i++
+			i += width
 			continue
 		}
 
 		fields = append(fields, readFieldSpan{start: fieldStart, end: i})
 		if class == ifsRuneWhitespace {
-			for i < end && readIFSClass(cfg, chars[i]) == ifsRuneWhitespace {
-				i++
+			for i < end {
+				nextClass, nextWidth := readIFSClass(cfg, chars, i)
+				if nextClass != ifsRuneWhitespace {
+					break
+				}
+				i += nextWidth
 			}
-			if i < end && readIFSClass(cfg, chars[i]) == ifsRuneNonWhitespace {
-				i++
-				for i < end && readIFSClass(cfg, chars[i]) == ifsRuneWhitespace {
-					i++
+			if i < end {
+				nextClass, nextWidth := readIFSClass(cfg, chars, i)
+				if nextClass == ifsRuneNonWhitespace {
+					i += nextWidth
+					for i < end {
+						spaceClass, spaceWidth := readIFSClass(cfg, chars, i)
+						if spaceClass != ifsRuneWhitespace {
+							break
+						}
+						i += spaceWidth
+					}
 				}
 			}
 		} else {
-			i++
-			for i < end && readIFSClass(cfg, chars[i]) == ifsRuneWhitespace {
-				i++
+			i += width
+			for i < end {
+				spaceClass, spaceWidth := readIFSClass(cfg, chars, i)
+				if spaceClass != ifsRuneWhitespace {
+					break
+				}
+				i += spaceWidth
 			}
 		}
 		fieldStart = i
