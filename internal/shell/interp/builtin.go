@@ -1773,6 +1773,7 @@ func (r *Runner) sourceBuiltin(ctx context.Context, pos syntax.Pos, name string,
 	sourceArg := args[0]
 	sourceName := sourceArg
 	sourcePath := sourceArg
+	preSourceStatus := r.lastExit.code
 	sourcepathOpt, _ := r.bashOptByName("sourcepath")
 	if !strings.ContainsRune(args[0], '/') && sourcepathOpt != nil && *sourcepathOpt {
 		if resolved, err := r.lookPath(ctx, r.Dir, r.writeEnv, args[0], false, false); err == nil {
@@ -1784,7 +1785,10 @@ func (r *Runner) sourceBuiltin(ctx context.Context, pos syntax.Pos, name string,
 	if err != nil {
 		r.errf("%s", sourceBuiltinOpenError(name, sourceArg, err))
 		exit.code = 1
-		r.runSourceReturnTrap(ctx, pos.Line(), exit.code)
+		r.runSourceReturnTrap(ctx, pos.Line(), preSourceStatus)
+		if r.exit.exiting || r.exit.fatalExit {
+			return r.exit
+		}
 		return exit
 	}
 	defer f.Close()
@@ -1817,7 +1821,7 @@ func (r *Runner) sourceBuiltin(ctx context.Context, pos syntax.Pos, name string,
 	r.inSource = true
 	runErr := r.runShellReader(ctx, f, sourceName, frame)
 	if !r.exit.fatalExit {
-		r.runSourceReturnTrap(ctx, pos.Line(), r.exit.code)
+		r.runSourceReturnTrap(ctx, pos.Line(), preSourceStatus)
 	}
 
 	if sourceArgs && !r.sourceSetParams {

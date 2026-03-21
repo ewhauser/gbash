@@ -763,6 +763,34 @@ func TestSourceReturnTrapRunsWithoutFunctrace(t *testing.T) {
 	}
 }
 
+func TestSourceReturnTrapUsesPreSourceStatusForQuestionMark(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	helperPath := filepath.Join(dir, "return-helper.sh")
+	if err := os.WriteFile(helperPath, []byte("return 42\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", helperPath, err)
+	}
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir:         dir,
+		OpenHandler: sourceTestOpenHandler,
+	}, "trap 'echo ret:$?' RETURN\n"+
+		"false\n"+
+		fmt.Sprintf(". %q\n", helperPath))
+	var status ExitStatus
+	if !errors.As(err, &status) || status != 42 {
+		t.Fatalf("Run error = %v, want exit status 42", err)
+	}
+	const want = "ret:1\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestDebugAndReturnTrapInheritance(t *testing.T) {
 	t.Parallel()
 
