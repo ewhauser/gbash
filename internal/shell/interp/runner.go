@@ -2079,7 +2079,7 @@ func (r *Runner) restoreCallAssigns(restores []restoreVar) {
 			if err := r.writeEnv.Set(restore.name, restore.vr); err != nil {
 				r.errf("%s: %v\n", restore.name, err)
 				r.exit.code = 1
-				return
+				continue
 			}
 			if restore.secondsEnv != nil && setSecondsStartTimeForEnv(restore.secondsEnv, restore.secondsStartTime) {
 				continue

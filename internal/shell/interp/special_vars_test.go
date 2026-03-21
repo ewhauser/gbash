@@ -270,6 +270,57 @@ func TestSECONDSPrefixAssignmentRestoreIsLIFO(t *testing.T) {
 	}
 }
 
+func TestSECONDSRestoreFailureStillRestoresOtherPrefixAssignments(t *testing.T) {
+	t.Parallel()
+
+	var stderr strings.Builder
+	runner, err := NewRunner(&RunnerConfig{
+		Dir:    "/tmp",
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	runner.Reset()
+	runner.fillExpandConfig(context.Background())
+	runner.setVar("X", expand.Variable{Set: true, Kind: expand.String, Str: "old"})
+
+	file, err := syntax.NewParser().Parse(strings.NewReader("X=1 SECONDS=5 external\n"), "seconds-prefix-error.sh")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	cm, ok := file.Stmts[0].Cmd.(*syntax.CallExpr)
+	if !ok {
+		t.Fatalf("command = %T, want *syntax.CallExpr", file.Stmts[0].Cmd)
+	}
+
+	restores := runner.runCallAssigns(cm.Assigns)
+	if got, want := runner.lookupVar("X").String(), "1"; got != want {
+		t.Fatalf("X after runCallAssigns = %q, want %q", got, want)
+	}
+	if err := runner.writeEnv.Set("SECONDS", expand.Variable{
+		Set:      true,
+		ReadOnly: true,
+		Kind:     expand.String,
+		Str:      runner.lookupVar("SECONDS").String(),
+		Exported: true,
+	}); err != nil {
+		t.Fatalf("Set(SECONDS readonly) error = %v", err)
+	}
+
+	runner.restoreCallAssigns(restores)
+
+	if got, want := runner.lookupVar("X").String(), "old"; got != want {
+		t.Fatalf("X after restoreCallAssigns = %q, want %q", got, want)
+	}
+	if got, want := runner.exit.code, uint8(1); got != want {
+		t.Fatalf("exit code = %d, want %d", got, want)
+	}
+	if got, want := stderr.String(), "SECONDS: readonly variable\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
 func TestSECONDSLocalAssignmentDoesNotLeak(t *testing.T) {
 	t.Parallel()
 
