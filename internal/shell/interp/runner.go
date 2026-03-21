@@ -2483,7 +2483,7 @@ func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (redirResult, e
 				return result, nil
 			}
 			src := r.getFD(dup.sourceFD)
-			if src == nil {
+			if src == nil || src.writer == nil {
 				diag := redirectBadFDText(rd, arg, wordText)
 				r.errf("%s: Bad file descriptor\n", diag)
 				return result, errors.New("bad file descriptor")
@@ -2514,7 +2514,7 @@ func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (redirResult, e
 				return result, nil
 			}
 			src := r.getFD(dup.sourceFD)
-			if src == nil {
+			if src == nil || src.reader == nil {
 				diag := redirectBadFDText(rd, arg, wordText)
 				r.errf("%s: Bad file descriptor\n", diag)
 				return result, errors.New("bad file descriptor")

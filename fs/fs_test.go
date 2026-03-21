@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestMemoryFSPathIntrospection(t *testing.T) {
@@ -129,6 +130,65 @@ func TestMemoryFSRenameRejectsRoot(t *testing.T) {
 	}
 	if !info.IsDir() {
 		t.Fatalf("Stat(/).IsDir() = false, want true")
+	}
+}
+
+func TestMemoryFSFIFOWriterWaitsForReader(t *testing.T) {
+	t.Parallel()
+
+	mem := NewMemory()
+	if err := mem.MkdirAll(context.Background(), "/tmp", 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := mem.Mkfifo(context.Background(), "/tmp/p", 0o600); err != nil {
+		t.Fatalf("Mkfifo() error = %v", err)
+	}
+
+	writer, err := mem.OpenFile(context.Background(), "/tmp/p", os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("OpenFile(writer) error = %v", err)
+	}
+
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(writer, "hello")
+		if closeErr := writer.Close(); err == nil {
+			err = closeErr
+		}
+		writeDone <- err
+	}()
+
+	select {
+	case err := <-writeDone:
+		t.Fatalf("writer finished before reader attached: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	reader, err := mem.OpenFile(context.Background(), "/tmp/p", os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatalf("OpenFile(reader) error = %v", err)
+	}
+	defer func() {
+		if err := reader.Close(); err != nil {
+			t.Errorf("reader.Close() error = %v", err)
+		}
+	}()
+
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("writer error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("writer did not unblock after reader attached")
+	}
+
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if got, want := string(data), "hello"; got != want {
+		t.Fatalf("ReadAll() = %q, want %q", got, want)
 	}
 }
 

@@ -70,6 +70,7 @@ func newMemoryFIFOFile(fs *MemoryFS, path string, fifo *memoryFIFO, flag int) *m
 	if file.writable {
 		fifo.writers++
 	}
+	fifo.cond.Broadcast()
 	fifo.mu.Unlock()
 	return file
 }
@@ -115,8 +116,8 @@ func (f *memoryFIFOFile) Write(p []byte) (int, error) {
 	f.fifo.mu.Lock()
 	defer f.fifo.mu.Unlock()
 
-	if f.fifo.readers == 0 {
-		return 0, &os.PathError{Op: "write", Path: f.path, Err: io.ErrClosedPipe}
+	for f.fifo.readers == 0 {
+		f.fifo.cond.Wait()
 	}
 	f.fifo.buf = append(f.fifo.buf, p...)
 	f.fifo.cond.Broadcast()

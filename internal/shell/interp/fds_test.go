@@ -239,3 +239,18 @@ func TestSelfDupRedirectOnClosedFDIsNoOp(t *testing.T) {
 		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }
+
+func TestDupRedirectRequiresCompatibleDescriptorMode(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, "echo hi 1>&0\necho status=$?\nread x 0<&1\necho read_status=$?\n")
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "status=1\nread_status=1\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "status=1\nread_status=1\n")
+	}
+	if stderr != "0: Bad file descriptor\n1: Bad file descriptor\n" {
+		t.Fatalf("stderr = %q, want %q", stderr, "0: Bad file descriptor\n1: Bad file descriptor\n")
+	}
+}
