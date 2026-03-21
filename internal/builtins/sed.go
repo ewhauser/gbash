@@ -105,7 +105,8 @@ func (c *Sed) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCom
 		if err != nil {
 			return err
 		}
-		output := runSedProgram(program, textLines(data), opts.quiet)
+		trailingNL := len(data) > 0 && data[len(data)-1] == '\n'
+		output := runSedProgram(program, textLines(data), opts.quiet, trailingNL)
 		if _, err := inv.Stdout.Write(output); err != nil {
 			return &ExitError{Code: 1, Err: err}
 		}
@@ -119,7 +120,8 @@ func (c *Sed) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCom
 			exitCode = 1
 			continue
 		}
-		output := runSedProgram(program, textLines(data), opts.quiet)
+		trailingNL := len(data) > 0 && data[len(data)-1] == '\n'
+		output := runSedProgram(program, textLines(data), opts.quiet, trailingNL)
 		if !opts.inPlace {
 			if _, err := inv.Stdout.Write(output); err != nil {
 				return &ExitError{Code: 1, Err: err}
@@ -380,7 +382,7 @@ func parseSedDelimited(input string, delimiter rune) (value, remainder string, e
 	return "", "", fmt.Errorf("unterminated expression")
 }
 
-func runSedProgram(program []sedCommand, lines []string, quiet bool) []byte {
+func runSedProgram(program []sedCommand, lines []string, quiet, trailingNewline bool) []byte {
 	output := make([]string, 0, len(lines))
 	active := make([]bool, len(program))
 	totalLines := len(lines)
@@ -426,7 +428,11 @@ func runSedProgram(program []sedCommand, lines []string, quiet bool) []byte {
 	if len(output) == 0 {
 		return nil
 	}
-	return []byte(strings.Join(output, "\n") + "\n")
+	joined := strings.Join(output, "\n")
+	if trailingNewline {
+		joined += "\n"
+	}
+	return []byte(joined)
 }
 
 func sedCommandApplies(command sedCommand, active bool, line string, lineNumber, totalLines int) (applies, nextActive bool) {

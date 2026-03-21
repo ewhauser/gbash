@@ -886,7 +886,7 @@ func (cfg *Config) decodeANSICString(src string) string {
 			}
 			r := rune(n)
 			if !utf8.ValidRune(r) {
-				sb.WriteString(src[start-2 : end])
+				writeRawUTF8(&sb, uint32(n))
 				break
 			}
 			sb.WriteRune(r)
@@ -900,6 +900,28 @@ func (cfg *Config) decodeANSICString(src string) string {
 
 func isHex(b byte) bool {
 	return '0' <= b && b <= '9' || 'a' <= b && b <= 'f' || 'A' <= b && b <= 'F'
+}
+
+// writeRawUTF8 encodes a codepoint value as raw UTF-8 bytes, even for
+// invalid Unicode (surrogates, values above U+10FFFF). This matches bash
+// behavior for $”, printf, and echo -e with out-of-range escapes.
+func writeRawUTF8(sb *strings.Builder, v uint32) {
+	switch {
+	case v <= 0x7f:
+		sb.WriteByte(byte(v))
+	case v <= 0x7ff:
+		sb.WriteByte(0xc0 | byte(v>>6))
+		sb.WriteByte(0x80 | byte(v&0x3f))
+	case v <= 0xffff:
+		sb.WriteByte(0xe0 | byte(v>>12))
+		sb.WriteByte(0x80 | byte((v>>6)&0x3f))
+		sb.WriteByte(0x80 | byte(v&0x3f))
+	case v <= 0x1fffff:
+		sb.WriteByte(0xf0 | byte(v>>18))
+		sb.WriteByte(0x80 | byte((v>>12)&0x3f))
+		sb.WriteByte(0x80 | byte((v>>6)&0x3f))
+		sb.WriteByte(0x80 | byte(v&0x3f))
+	}
 }
 
 func formatInto(sb *strings.Builder, format string, args []string) (int, error) {
@@ -973,8 +995,10 @@ func formatInto(sb *strings.Builder, format string, args []string) (int, error) 
 					if c == 'x' {
 						// always as a single byte
 						sb.WriteByte(byte(n))
-					} else {
+					} else if utf8.ValidRune(rune(n)) {
 						sb.WriteRune(rune(n))
+					} else {
+						writeRawUTF8(sb, uint32(n))
 					}
 					break
 				}
