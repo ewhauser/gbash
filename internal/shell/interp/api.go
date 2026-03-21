@@ -1046,17 +1046,9 @@ func (r *Runner) subshell(background bool) *Runner {
 		hiddenReadonlyArrayDecl: maps.Clone(r.hiddenReadonlyArrayDecl),
 		origStart:               r.origStart,
 		startTime:               r.startTime,
-<<<<<<< HEAD
-		random:                  random,
-		origRandom:              random,
-||||||| parent of b594ce0 (shell: implement trap subsystem redesign)
-		random:                  r.random,
-		origRandom:              r.origRandom,
-=======
 		random:                  random,
 		origRandom:              random,
 		signalOwner:             r.signalOwner,
->>>>>>> b594ce0 (shell: implement trap subsystem redesign)
 
 		origStdout: r.origStdout, // used for process substitutions
 	}
