@@ -1359,10 +1359,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/parse-errors.test.sh::do unexpected": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/parse-errors.test.sh::empty clause in [[": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
