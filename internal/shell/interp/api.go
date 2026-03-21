@@ -20,6 +20,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ewhauser/gbash/internal/shell/expand"
@@ -114,7 +115,7 @@ type Runner struct {
 
 	// nextVirtualPID is shared by a shell family so BASHPID changes across
 	// subshells while $$ remains stable.
-	nextVirtualPID *int
+	nextVirtualPID *virtualPIDState
 
 	stdin  StdinReader // e.g. the read end of a pipe
 	stdout io.Writer
@@ -238,6 +239,23 @@ type Runner struct {
 type funcSourceSpan struct {
 	text string
 	base uint
+}
+
+type virtualPIDState struct {
+	next atomic.Int64
+}
+
+func newVirtualPIDState(next int) *virtualPIDState {
+	state := &virtualPIDState{}
+	state.next.Store(int64(next))
+	return state
+}
+
+func (s *virtualPIDState) allocate() int {
+	if s == nil {
+		return defaultVirtualPID
+	}
+	return int(s.next.Add(1) - 1)
 }
 
 // exitStatus holds the state of the shell after running one command.
@@ -438,8 +456,7 @@ func (r *Runner) normalizeVirtualState() {
 	r.bashPID = firstVirtualInt(r.bashPID, nil, "", r.pid)
 	r.ppid = firstVirtualInt(r.ppid, nil, "", defaultVirtualPPID)
 	if r.nextVirtualPID == nil {
-		next := max(r.pid, r.bashPID) + 1
-		r.nextVirtualPID = &next
+		r.nextVirtualPID = newVirtualPIDState(max(r.pid, r.bashPID) + 1)
 	}
 }
 
@@ -795,8 +812,7 @@ func (r *Runner) Reset() {
 		interactive:            r.interactive,
 		syntheticPipelineStmts: r.syntheticPipelineStmts,
 	}
-	next := max(r.pid, r.bashPID) + 1
-	r.nextVirtualPID = &next
+	r.nextVirtualPID = newVirtualPIDState(max(r.pid, r.bashPID) + 1)
 	// Ensure we stop referencing any pointers before we reuse bgProcs.
 	clear(r.bgProcs)
 	r.bgProcs = r.bgProcs[:0]
@@ -1039,12 +1055,9 @@ func (r *Runner) allocateSubshellPID() int {
 		return defaultVirtualPID
 	}
 	if r.nextVirtualPID == nil {
-		next := max(r.pid, r.bashPID) + 1
-		r.nextVirtualPID = &next
+		r.nextVirtualPID = newVirtualPIDState(max(r.pid, r.bashPID) + 1)
 	}
-	pid := *r.nextVirtualPID
-	*r.nextVirtualPID = pid + 1
-	return pid
+	return r.nextVirtualPID.allocate()
 }
 
 func randomSeed(pid int, started time.Time) uint32 {
