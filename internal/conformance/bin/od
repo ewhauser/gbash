@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -x /opt/homebrew/bin/god ]]; then
+  exec /opt/homebrew/bin/god "$@"
+fi
+
+if [[ -x /usr/local/bin/god ]]; then
+  exec /usr/local/bin/god "$@"
+fi
+
+exec /usr/bin/od "$@"
