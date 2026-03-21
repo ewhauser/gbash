@@ -498,7 +498,7 @@ func nestedShellDiagnosticLine(line, shellName string) (string, bool) {
 	}
 	if shellName != "" {
 		if rest, ok := strings.CutPrefix(line, shellName+": "); ok {
-			if isNestedShellDiagnosticText(rest) {
+			if shouldUpgradePrefixedNestedShellDiagnostic(rest) {
 				return shellName + ": line 1: " + rest, true
 			}
 			return "", false
@@ -508,6 +508,16 @@ func nestedShellDiagnosticLine(line, shellName string) (string, bool) {
 		return "", false
 	}
 	return shellName + ": line 1: " + line, true
+}
+
+func shouldUpgradePrefixedNestedShellDiagnostic(line string) bool {
+	if line == "" || strings.HasPrefix(line, "line ") {
+		return false
+	}
+	if !strings.Contains(line, "(error token is ") {
+		return false
+	}
+	return isNestedShellDiagnosticText(line)
 }
 
 func isNestedShellDiagnosticText(line string) bool {

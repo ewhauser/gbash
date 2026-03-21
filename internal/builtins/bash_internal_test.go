@@ -81,3 +81,19 @@ func TestPrefixNestedShellDiagnosticPreservesOperandSpacing(t *testing.T) {
 		t.Fatalf("result.Stderr = %q, want %q", got, want)
 	}
 }
+
+func TestPrefixNestedShellDiagnosticLeavesPrefixedUserStderrUntouched(t *testing.T) {
+	t.Parallel()
+
+	result := &ExecutionResult{
+		ExitCode: 1,
+		Stderr:   "bash: unbound variable\n",
+	}
+
+	prefixNestedShellDiagnostic(result, "bash")
+
+	const want = "bash: unbound variable\n"
+	if got := result.Stderr; got != want {
+		t.Fatalf("result.Stderr = %q, want %q", got, want)
+	}
+}

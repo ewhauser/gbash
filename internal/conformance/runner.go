@@ -682,7 +682,7 @@ func normalizeMultiLineNestedShellPrefixes(value string) string {
 			continue
 		}
 		rest := strings.TrimPrefix(trimmed, match)
-		if isNestedShellDiagnostic(rest) || !hasNestedShellDiagnosticLater(lines[i+1:]) {
+		if isNestedShellDiagnostic(rest) || !hasNestedShellContextLater(lines[i+1:]) {
 			continue
 		}
 		lines[i] = rest + line[len(trimmed):]
@@ -690,15 +690,17 @@ func normalizeMultiLineNestedShellPrefixes(value string) string {
 	return strings.Join(lines, "")
 }
 
-func hasNestedShellDiagnosticLater(lines []string) bool {
+func hasNestedShellContextLater(lines []string) bool {
+	sawContext := false
 	for _, line := range lines {
 		trimmed := strings.TrimRight(line, "\n")
 		if trimmed == "" {
 			break
 		}
 		if isNestedShellDiagnostic(trimmed) {
-			return true
+			return sawContext
 		}
+		sawContext = true
 	}
 	return false
 }

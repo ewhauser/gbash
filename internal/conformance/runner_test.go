@@ -96,6 +96,12 @@ func TestNormalizeOutputAndBashStderr(t *testing.T) {
 	if got, want := normalizeBashStderr("gzip: .gz: No such file or directory\ngzip: .gz: No such file or directory\n3: Bad file descriptor\n"), "3: Bad file descriptor\ngzip: .gz: No such file or directory\ngzip: .gz: No such file or directory\n"; got != want {
 		t.Fatalf("normalizeBashStderr(bad fd trailing) = %q, want %q", got, want)
 	}
+	if got, want := normalizeBashStderr("bash: user payload\nbash: line 1: syntax error in expression\n"), "bash: user payload\nsyntax error in expression\n"; got != want {
+		t.Fatalf("normalizeBashStderr(user payload) = %q, want %q", got, want)
+	}
+	if got, want := normalizeBashStderr("bash: echo 1\necho 2\n(( x ))\n: 0\necho 3\n: syntax error in expression (error token is \"1\necho 2\n(( x ))\n: 0\necho 3\n\")\n"), "echo 1\necho 2\n(( x ))\n: 0\necho 3\n: syntax error in expression (error token is \"1\necho 2\n(( x ))\n: 0\necho 3\n\")\n"; got != want {
+		t.Fatalf("normalizeBashStderr(multiline context) = %q, want %q", got, want)
+	}
 }
 
 func TestResolvedSuiteConfigUsesPackagePaths(t *testing.T) {
