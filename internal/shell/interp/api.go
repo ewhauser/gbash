@@ -984,18 +984,6 @@ func (r *Runner) Reset() {
 		ReadOnly: true,
 		Str:      strconv.Itoa(r.euid),
 	})
-	r.setVar("GID", expand.Variable{
-		Set:      true,
-		Kind:     expand.String,
-		ReadOnly: true,
-		Str:      strconv.Itoa(r.gid),
-	})
-	r.setVar("EGID", expand.Variable{
-		Set:      true,
-		Kind:     expand.String,
-		ReadOnly: true,
-		Str:      strconv.Itoa(r.egid),
-	})
 	if r.commandStringValue != "" {
 		r.setVar("BASH_EXECUTION_STRING", expand.Variable{
 			Set:  true,

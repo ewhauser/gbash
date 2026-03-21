@@ -462,15 +462,7 @@ func (r *Runner) printSetVars() {
 }
 
 func (r *Runner) printSetVarVisible(name string, vr expand.Variable) bool {
-	if !vr.Declared() || !vr.IsSet() {
-		return false
-	}
-	switch name {
-	case "GID", "EGID":
-		return false
-	default:
-		return true
-	}
+	return vr.Declared() && vr.IsSet()
 }
 
 func (r *Runner) setBuiltinSpecialVar(name string) (expand.Variable, bool) {

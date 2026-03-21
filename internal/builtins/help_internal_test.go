@@ -73,6 +73,49 @@ func TestHelpShortSynopsisMatchesBash(t *testing.T) {
 	}
 }
 
+func TestHelpAdvertisedFallbackTopicsResolve(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "alias default",
+			args: []string{"alias"},
+			want: "alias: alias [-p] [name[=value] ... ]\n    Define or display aliases.\n",
+		},
+		{
+			name: "trap describe",
+			args: []string{"-d", "trap"},
+			want: "trap - Trap signals and other events.\n",
+		},
+		{
+			name: "double-bracket short",
+			args: []string{"-s", "[["},
+			want: "[[ ... ]]: [[ expression ]]\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, err := runHelpCommand(t, tc.args...)
+			if err != nil {
+				t.Fatalf("Run(%v) error = %v", tc.args, err)
+			}
+			if stdout != tc.want {
+				t.Fatalf("stdout = %q, want %q", stdout, tc.want)
+			}
+			if stderr != "" {
+				t.Fatalf("stderr = %q, want empty", stderr)
+			}
+		})
+	}
+}
+
 func TestHelpModePrecedenceMatchesBash(t *testing.T) {
 	t.Parallel()
 
