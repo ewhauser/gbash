@@ -377,9 +377,9 @@ const (
 type RunnerConfig struct {
 	Env expand.Environ
 
-	// StartupHome overrides the home directory used for plain current-user
-	// tilde expansion. Callers should only populate this from a trusted
-	// sandbox boundary.
+	// StartupHome overrides the home directory used for scalar assignment
+	// tilde expansion such as `foo=~`. Callers should only populate this from
+	// a trusted sandbox boundary.
 	StartupHome string
 
 	// Dir is the authoritative virtual current directory.

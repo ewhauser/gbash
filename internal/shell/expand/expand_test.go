@@ -1758,17 +1758,6 @@ func TestLiteralCurrentUserHomeUsesSandboxEnv(t *testing.T) {
 			want: "/live/src",
 		},
 		{
-			name: "StartupHomeOverride",
-			src:  `~/src`,
-			cfg: &Config{
-				StartupHome: "/startup",
-				Env: testEnv{
-					"HOME": {Set: true, Kind: String, Str: "/live"},
-				},
-			},
-			want: "/startup/src",
-		},
-		{
 			name: "RootHomeAvoidsDoubleSlash",
 			src:  `~/src`,
 			cfg: &Config{
