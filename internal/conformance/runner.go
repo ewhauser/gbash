@@ -31,6 +31,7 @@ var bashShellPrefixPattern = regexp.MustCompile(`^(?:[^:\n]+/)?[A-Za-z0-9_-]*sh:
 var bashAnsiCQuotedCommandNotFoundPattern = regexp.MustCompile(`\$'((?:[^'\\]|\\.)*)': command not found`)
 var bashQuotedNoSuchFilePattern = regexp.MustCompile(`(?m)^([-.[:alnum:]_]+): '([^']+)': No such file or directory$`)
 var bashCannotOpenNoSuchFilePattern = regexp.MustCompile(`(?m)^([-.[:alnum:]_]+): cannot (?:open|remove) '([^']+)'(?: for reading)?: No such file or directory$`)
+
 // The interactive bash oracle can run in a different host process group than
 // the in-process gbash interpreter under CI, so normalize just the numeric PGID.
 var bashTerminalProcessGroupPattern = regexp.MustCompile(`cannot set terminal process group \(\d+\)`)
