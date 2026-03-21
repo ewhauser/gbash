@@ -4,7 +4,6 @@
 package expand
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -53,123 +52,95 @@ func parseArithmExpansionScript(t *testing.T, script string) *syntax.ArithmExp {
 	return part
 }
 
-func TestArithmSingleQuoteRejection(t *testing.T) {
+func TestArithmQuotedWordsUseRuntimeString(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
-		name       string
-		src        string
-		wantErr    bool
-		errExpr    string
-		errTok     string
-		errMessage string
+		name        string
+		src         string
+		env         testEnv
+		want        int
+		wantVarName string
+		wantVar     string
 	}{
 		{
-			name:       "single quoted number",
-			src:        "'1'",
-			wantErr:    true,
-			errExpr:    "'1'",
-			errTok:     "'1'",
-			errMessage: "'1': arithmetic syntax error: operand expected (error token is \"'1'\")",
+			name: "single quoted number",
+			src:  "'1'",
+			want: 1,
 		},
 		{
-			name:       "single quoted with space",
-			src:        "'1 '",
-			wantErr:    true,
-			errExpr:    "'1 '",
-			errTok:     "'1 '",
-			errMessage: "'1 ': arithmetic syntax error: operand expected (error token is \"'1 '\")",
+			name: "ansi-c quoted number",
+			src:  "$'1'",
+			want: 1,
 		},
 		{
-			name:       "ansi-c quoted",
-			src:        "$'1'",
-			wantErr:    true,
-			errExpr:    "$'1'",
-			errTok:     "$'1'",
-			errMessage: "$'1': arithmetic syntax error: operand expected (error token is \"$'1'\")",
+			name: "double quoted number",
+			src:  `"1"`,
+			want: 1,
 		},
 		{
-			name:       "ansi-c quoted with escape",
-			src:        "$'\\n'",
-			wantErr:    true,
-			errExpr:    "$'\\n'",
-			errTok:     "$'\\n'",
-			errMessage: "$'\\n': arithmetic syntax error: operand expected (error token is \"$'\\\\n'\")",
+			name:        "assignment with single quoted rhs",
+			src:         "x='1'",
+			env:         testEnv{},
+			want:        1,
+			wantVarName: "x",
+			wantVar:     "1",
 		},
 		{
-			name:       "assignment with single quoted",
-			src:        "x='1'",
-			wantErr:    true,
-			errExpr:    "x='1'",
-			errTok:     "'1'",
-			errMessage: "x='1': arithmetic syntax error: operand expected (error token is \"'1'\")",
+			name: "add-assign with single quoted rhs",
+			src:  "x+='2'",
+			env: testEnv{
+				"x": {Set: true, Kind: String, Str: "1"},
+			},
+			want:        3,
+			wantVarName: "x",
+			wantVar:     "3",
 		},
 		{
-			name:       "add-assign with single quoted",
-			src:        "x+='2'",
-			wantErr:    true,
-			errExpr:    "x+='2'",
-			errTok:     "'2'",
-			errMessage: "x+='2': arithmetic syntax error: operand expected (error token is \"'2'\")",
+			name: "binary expression with single quoted rhs",
+			src:  "1+'2'",
+			want: 3,
 		},
 		{
-			name:       "binary expression with single quoted rhs",
-			src:        "1+'2'",
-			wantErr:    true,
-			errExpr:    "1+'2'",
-			errTok:     "'2'",
-			errMessage: "1+'2': arithmetic syntax error: operand expected (error token is \"'2'\")",
+			name: "escaped operator",
+			src:  `1\+2`,
+			want: 3,
 		},
 		{
-			name:    "plain number",
-			src:     "42",
-			wantErr: false,
+			name: "plain number",
+			src:  "42",
+			want: 42,
 		},
 		{
-			name:    "double quoted number",
-			src:     `"1"`,
-			wantErr: false, // double quotes are allowed in arithmetic
+			name: "variable",
+			src:  "x",
+			env:  testEnv{"x": {Set: true, Kind: String, Str: "7"}},
+			want: 7,
 		},
 		{
-			name:    "variable",
-			src:     "x",
-			wantErr: false,
-		},
-		{
-			name:    "expression",
-			src:     "1+2",
-			wantErr: false,
+			name: "expression",
+			src:  "1+2",
+			want: 3,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			expr := parseArithmExpr(t, tt.src)
-			cfg := &Config{
-				Env: testEnv{},
+			env := tt.env
+			if env == nil {
+				env = testEnv{}
 			}
-			_, err := Arithm(cfg, expr)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("Arithm(%q) expected error, got nil", tt.src)
-					return
-				}
-				var syntaxErr ArithmSyntaxError
-				if !errors.As(err, &syntaxErr) {
-					t.Errorf("Arithm(%q) expected ArithmSyntaxError, got %T: %v", tt.src, err, err)
-					return
-				}
-				if got := syntax.ArithmExprString(syntaxErr.Expr); got != tt.errExpr {
-					t.Errorf("Arithm(%q) error expr = %q, want %q", tt.src, got, tt.errExpr)
-				}
-				if got := syntax.ArithmExprString(syntaxErr.Token); got != tt.errTok {
-					t.Errorf("Arithm(%q) error token = %q, want %q", tt.src, got, tt.errTok)
-				}
-				if got := syntaxErr.Error(); got != tt.errMessage {
-					t.Errorf("Arithm(%q) error message = %q, want %q", tt.src, got, tt.errMessage)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Arithm(%q) unexpected error: %v", tt.src, err)
+			got, err := Arithm(&Config{Env: env}, expr)
+			if err != nil {
+				t.Fatalf("Arithm(%q) unexpected error: %v", tt.src, err)
+			}
+			if got != tt.want {
+				t.Fatalf("Arithm(%q) = %d, want %d", tt.src, got, tt.want)
+			}
+			if tt.wantVarName != "" {
+				if got := env.Get(tt.wantVarName).String(); got != tt.wantVar {
+					t.Fatalf("%s = %q, want %q", tt.wantVarName, got, tt.wantVar)
 				}
 			}
 		})

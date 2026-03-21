@@ -292,15 +292,29 @@ func WithArithmSource(err error, source string, sourceStart, sourceEnd uint) err
 	return err
 }
 
-// hasSingleQuote checks if a word contains any single-quoted parts.
-// Bash rejects both '...' and $'...' (ANSI-C) strings in arithmetic context.
-func hasSingleQuote(word *syntax.Word) *syntax.SglQuoted {
+// arithWordUsesRuntimeString reports whether arithmetic must use the word's
+// shell-evaluated string rather than its raw source text. This covers both
+// shell expansion and quote-removal syntax like quotes and backslash escapes.
+func arithWordUsesRuntimeString(word *syntax.Word) bool {
 	for _, part := range word.Parts {
-		if sq, ok := part.(*syntax.SglQuoted); ok {
-			return sq
+		switch part := part.(type) {
+		case *syntax.Lit:
+			if strings.Contains(part.Value, "\\") {
+				return true
+			}
+		case *syntax.ParamExp:
+			if !(part.Short && part.Index != nil && !part.Dollar.IsValid()) {
+				return true
+			}
+		default:
+			return true
 		}
 	}
-	return nil
+	return false
+}
+
+func arithWordLiteral(cfg *Config, word *syntax.Word) (string, error) {
+	return AssignmentWordLiteral(cfg, word)
 }
 
 func Arithm(cfg *Config, expr syntax.ArithmExpr) (int, error) {
@@ -405,15 +419,7 @@ func arithm(cfg *Config, root, expr syntax.ArithmExpr, depth int) (int, error) {
 	}
 	switch expr := expr.(type) {
 	case *syntax.Word:
-		// Bash rejects single-quoted strings in arithmetic context.
-		if hasSingleQuote(expr) != nil {
-			token := syntax.ArithmExpr(expr)
-			if root != nil && root.Pos() == expr.Pos() {
-				token = root
-			}
-			return 0, ArithmSyntaxError{Expr: root, Token: token}
-		}
-		if !containsShellExpansion(expr) {
+		if !arithWordUsesRuntimeString(expr) {
 			src := arithExprSource(expr)
 			p := syntax.NewParser()
 			if _, err := p.Arithmetic(strings.NewReader(src)); err != nil {
@@ -438,7 +444,7 @@ func arithm(cfg *Config, root, expr syntax.ArithmExpr, depth int) (int, error) {
 				}
 			}
 		}
-		str, err := Document(cfg, expr)
+		str, err := arithWordLiteral(cfg, expr)
 		if err != nil {
 			var unboundErr UnboundVariableError
 			if errors.As(err, &unboundErr) {
@@ -615,7 +621,7 @@ func arithTokenDiagnosticSource(expr syntax.ArithmExpr, source string, sourceSta
 func arithExprUsesExpandedValue(expr syntax.ArithmExpr) bool {
 	switch expr := expr.(type) {
 	case *syntax.Word:
-		return containsShellExpansion(expr)
+		return arithWordUsesRuntimeString(expr)
 	case *syntax.BinaryArithm:
 		return arithExprUsesExpandedValue(expr.X) || arithExprUsesExpandedValue(expr.Y)
 	case *syntax.UnaryArithm:
@@ -726,7 +732,7 @@ func arithRuntimeSource(cfg *Config, expr syntax.ArithmExpr, cache map[syntax.Ar
 	switch expr := expr.(type) {
 	case *syntax.Word:
 		if arithExprUsesExpandedValue(expr) {
-			val, err = Literal(cfg, expr)
+			val, err = arithWordLiteral(cfg, expr)
 			break
 		}
 		val = arithExprSource(expr)

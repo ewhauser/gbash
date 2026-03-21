@@ -954,21 +954,42 @@ printf 'status=%d x=%s\n' "$?" "${x-unset}"
 	}
 }
 
-func TestIndexedAssignQuotedSubscriptIsFatal(t *testing.T) {
+func TestIndexedAssignQuotedSubscriptUsesArithmeticValue(t *testing.T) {
 	t.Parallel()
 
 	stdout, stderr, err := runInterpScript(t, `
 a['2']=3
-printf 'unreachable\n'
+printf 'status=%d value=%s len=%d\n' "$?" "${a[2]}" "${#a[@]}"
 `)
-	if err == nil {
-		t.Fatal("Run error = nil, want fatal assignment failure")
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
 	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q, want empty", stdout)
+	if got, want := stdout, "status=0 value=3 len=1\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
 	}
-	if stderr == "" {
-		t.Fatal("stderr = empty, want arithmetic diagnostic")
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestArithmeticCommandStripsQuotedWords(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+(( x=1 ))
+(( y=x+2 ))
+(( z=y*3 ))
+(( z2='y*3' ))
+echo $x $y $z $z2
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if got, want := stdout, "1 3 9 9\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }
 
