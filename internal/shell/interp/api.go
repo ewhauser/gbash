@@ -386,9 +386,8 @@ const (
 type RunnerConfig struct {
 	Env expand.Environ
 
-	// StartupHome overrides the home directory used for plain current-user
-	// tilde expansion. Callers should only populate this from a trusted
-	// sandbox boundary.
+	// StartupHome carries the shell's trusted startup home for callers that
+	// need startup-sensitive tilde semantics.
 	StartupHome string
 
 	// Dir is the authoritative virtual current directory.
@@ -427,6 +426,11 @@ func newRunnerBase() *Runner {
 func (r *Runner) applyConstructorDefaults() error {
 	if r.Env == nil {
 		r.Env = expand.ListEnviron()
+	}
+	if r.startupHome == "" {
+		if home := r.Env.Get("HOME").String(); path.IsAbs(home) {
+			r.startupHome = path.Clean(home)
+		}
 	}
 	if r.Dir == "" {
 		if home := r.Env.Get("HOME").String(); path.IsAbs(home) {

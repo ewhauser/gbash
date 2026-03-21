@@ -42,9 +42,8 @@ type Config struct {
 	// variables.
 	Env Environ
 
-	// StartupHome, when set, overrides the home directory used for plain
-	// current-user tilde expansion. Callers must only set this from a trusted
-	// sandbox boundary.
+	// StartupHome carries the shell's trusted startup home for callers that
+	// need startup-sensitive tilde semantics.
 	StartupHome string
 
 	// TildeEnv is used for ~ and ~user lookup. If nil, Env is used.
@@ -455,7 +454,7 @@ func (cfg *Config) expandAssignmentTildeLiteral(s string, moreFields bool) strin
 			}
 		}
 		segment := s[start:i]
-		if prefix, suffix, expanded := cfg.expandUser(segment, moreFields); expanded {
+		if prefix, suffix, expanded := cfg.expandAssignmentUser(segment, moreFields); expanded {
 			b.WriteString(prefix)
 			b.WriteString(suffix)
 		} else {
@@ -1336,10 +1335,11 @@ func FieldsSeq(cfg *Config, words ...*syntax.Word) iter.Seq2[string, error] {
 	return func(yield func(string, error) bool) {
 		for _, word := range words {
 			afterBraces := []*syntax.Word{word}
-			if slices.ContainsFunc(word.Parts, func(part syntax.WordPart) bool {
+			hadBraces := slices.ContainsFunc(word.Parts, func(part syntax.WordPart) bool {
 				_, ok := part.(*syntax.BraceExp)
 				return ok
-			}) {
+			})
+			if hadBraces {
 				var err error
 				afterBraces, err = Braces(word)
 				if err != nil {
@@ -1348,6 +1348,16 @@ func FieldsSeq(cfg *Config, words ...*syntax.Word) iter.Seq2[string, error] {
 				}
 			}
 			for _, word2 := range afterBraces {
+				if hadBraces {
+					// Bash performs brace expansion textually before tilde and parameter
+					// expansion, so reparse each brace-expanded word before continuing.
+					reparsed, err := reparseBraceWord(word2)
+					if err != nil {
+						yield("", err)
+						return
+					}
+					word2 = reparsed
+				}
 				wfields, err := cfg.wordFields(word2.Parts)
 				if err != nil {
 					yield("", err)
@@ -2046,6 +2056,14 @@ func (cfg *Config) sliceElems(pe *syntax.ParamExp, elems []string, indices []int
 }
 
 func (cfg *Config) expandUser(field string, moreFields bool) (prefix, rest string, expanded bool) {
+	return cfg.expandUserWithHome(field, moreFields, "")
+}
+
+func (cfg *Config) expandAssignmentUser(field string, moreFields bool) (prefix, rest string, expanded bool) {
+	return cfg.expandUserWithHome(field, moreFields, "")
+}
+
+func (cfg *Config) expandUserWithHome(field string, moreFields bool, startupHome string) (prefix, rest string, expanded bool) {
 	name, ok := strings.CutPrefix(field, "~")
 	if !ok {
 		// No tilde prefix to expand, e.g. "foo".
@@ -2067,8 +2085,8 @@ func (cfg *Config) expandUser(field string, moreFields bool) (prefix, rest strin
 		// that's overkill. We can't use [os.UserHomeDir], because we want
 		// to use cfg.Env, and we always want to check "HOME" first.
 
-		if cfg.StartupHome != "" {
-			prefix, rest := joinTildeHome(cfg.StartupHome, rest)
+		if startupHome != "" {
+			prefix, rest := joinTildeHome(startupHome, rest)
 			return prefix, rest, true
 		}
 		if vr := cfg.TildeEnv.Get("HOME"); vr.IsSet() {

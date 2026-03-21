@@ -4,6 +4,7 @@
 package interp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -47,6 +48,7 @@ func (r *Runner) fillExpandConfig(ctx context.Context) {
 	r.ectx = ctx
 	r.ecfg = &expand.Config{
 		Env:         expandEnv{r},
+		TildeEnv:    tildeExpandEnv{r},
 		StartupHome: r.startupHome,
 		CurrentLine: func() uint {
 			if r.trapLineOverride != 0 {
@@ -423,9 +425,9 @@ func (r *Runner) condLiteral(word *syntax.Word) string {
 		err error
 	)
 	if condTildeExpandsInDBrackets() {
-		str, err = expand.Literal(r.ecfg, word)
+		str, err = expand.Literal(r.condExpandConfig(), word)
 	} else {
-		str, err = expand.LiteralNoTilde(r.ecfg, word)
+		str, err = expand.LiteralNoTilde(r.condExpandConfig(), word)
 	}
 	r.expandErr(err)
 	return str
@@ -436,7 +438,6 @@ func (r *Runner) assignmentLiteral(word *syntax.Word) string {
 		r.fillExpandConfig(context.Background())
 	}
 	cfg := *r.ecfg
-	cfg.StartupHome = ""
 	str, err := expand.AssignmentLiteral(&cfg, word)
 	r.expandErr(err)
 	return str
@@ -447,7 +448,6 @@ func (r *Runner) assignmentWordLiteral(word *syntax.Word) string {
 		r.fillExpandConfig(context.Background())
 	}
 	cfg := *r.ecfg
-	cfg.StartupHome = ""
 	str, err := expand.AssignmentWordLiteral(&cfg, word)
 	r.expandErr(err)
 	return str
@@ -471,9 +471,9 @@ func (r *Runner) condPattern(pat *syntax.Pattern) string {
 		err error
 	)
 	if condTildeExpandsInDBrackets() {
-		str, err = expand.Pattern(r.ecfg, pat)
+		str, err = expand.Pattern(r.condExpandConfig(), pat)
 	} else {
-		str, err = expand.PatternNoTilde(r.ecfg, pat)
+		str, err = expand.PatternNoTilde(r.condExpandConfig(), pat)
 	}
 	r.expandErr(err)
 	return str
@@ -491,6 +491,7 @@ type expandEnv struct {
 }
 
 var _ expand.WriteEnviron = expandEnv{}
+var _ expand.Environ = tildeExpandEnv{}
 
 func (e expandEnv) Get(name string) expand.Variable {
 	return e.r.lookupVar(name)
@@ -507,6 +508,75 @@ func (e expandEnv) SetVarRef(ref *syntax.VarRef, vr expand.Variable, appendValue
 
 func (e expandEnv) Each(fn func(name string, vr expand.Variable) bool) {
 	e.r.writeEnv.Each(fn)
+}
+
+// tildeExpandEnv keeps named-user tilde expansion inside sandbox-owned data.
+type tildeExpandEnv struct {
+	r *Runner
+}
+
+func (e tildeExpandEnv) Get(name string) expand.Variable {
+	if !strings.HasPrefix(name, "HOME ") {
+		return e.r.lookupVar(name)
+	}
+	if vr := e.r.lookupVar(name); vr.IsSet() {
+		return vr
+	}
+	user := strings.TrimSpace(strings.TrimPrefix(name, "HOME "))
+	if user == "" {
+		return expand.Variable{}
+	}
+	if home, ok := e.passwdHome(user); ok {
+		return expand.Variable{Set: true, Exported: true, Kind: expand.String, Str: home}
+	}
+	if home, ok := defaultNamedUserHome(user); ok {
+		return expand.Variable{Set: true, Exported: true, Kind: expand.String, Str: home}
+	}
+	return expand.Variable{}
+}
+
+func (e tildeExpandEnv) Each(fn func(name string, vr expand.Variable) bool) {
+	e.r.writeEnv.Each(fn)
+}
+
+func (e tildeExpandEnv) passwdHome(user string) (string, bool) {
+	ctx := e.r.ectx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	f, err := e.r.open(ctx, "/etc/passwd", os.O_RDONLY, 0, false)
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Split(line, ":")
+		if len(fields) < 7 || fields[0] != user {
+			continue
+		}
+		home := strings.TrimSpace(fields[5])
+		if home == "" {
+			return "", false
+		}
+		return home, true
+	}
+	return "", false
+}
+
+func defaultNamedUserHome(user string) (string, bool) {
+	if user != "root" {
+		return "", false
+	}
+	if runtime.GOOS == "darwin" {
+		return "/var/root", true
+	}
+	return "/root", true
 }
 
 var todoPos syntax.Pos // for handlerCtx callers where we don't yet have a position

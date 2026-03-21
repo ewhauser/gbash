@@ -162,6 +162,24 @@ func TestAssignmentLiteralExpandsColonSeparatedTildes(t *testing.T) {
 	}
 }
 
+func TestAssignmentLiteralUsesLiveHome(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `~:~/src`)
+	got, err := AssignmentLiteral(&Config{
+		StartupHome: "/startup",
+		Env: testEnv{
+			"HOME": {Set: true, Kind: String, Str: "/live"},
+		},
+	}, word)
+	if err != nil {
+		t.Fatalf("AssignmentLiteral() error = %v", err)
+	}
+	if got != "/live:/live/src" {
+		t.Fatalf("AssignmentLiteral() = %q, want %q", got, "/live:/live/src")
+	}
+}
+
 func TestAssignmentLiteralHonorsEscapedColonsForTildes(t *testing.T) {
 	t.Parallel()
 
@@ -1649,6 +1667,101 @@ func TestFieldsCurrentUserHomeEmptyPreservesEmptyField(t *testing.T) {
 	}
 }
 
+func TestFieldsDoubleQuotedScalarWord(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `"== $y"`)
+	got, err := Fields(&Config{
+		Env: testEnv{
+			"y": {Set: true, Kind: String, Str: "foo"},
+		},
+	}, word)
+	if err != nil {
+		t.Fatalf("Fields() error = %v", err)
+	}
+	want := []string{"== foo"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Fields() = %#v, want %#v", got, want)
+	}
+}
+
+func TestFieldsReparseBraceExpandedWords(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{
+		StartupHome: "/startup",
+		Env: testEnv{
+			"a":         {Set: true, Kind: String, Str: "A"},
+			"HOME":      {Set: true, Kind: String, Str: "/home/bob"},
+			"HOME root": {Set: true, Kind: String, Str: "/root"},
+		},
+	}
+	tests := []struct {
+		name string
+		src  string
+		want []string
+	}{
+		{
+			name: "SimpleVarAbsorbsBraceSuffix",
+			src:  `{$a,b}_{c,d}`,
+			want: []string{"b_c", "b_d"},
+		},
+		{
+			name: "LiteralPrefixVarAbsorbsBraceSuffix",
+			src:  `{_$a,b}_{c,d}`,
+			want: []string{"_", "_", "b_c", "b_d"},
+		},
+		{
+			name: "TildeExpandsAfterBraceSplit",
+			src:  `{foo~,~}/bar`,
+			want: []string{"foo~/bar", "/home/bob/bar"},
+		},
+		{
+			name: "NamedUserTildeExpandsAfterBraceSplit",
+			src:  `~{/src,root}`,
+			want: []string{"/home/bob/src", "/root"},
+		},
+		{
+			name: "QuotedBraceElementsStillQuoteAfterReparse",
+			src:  `{'a',b}_{c,"d"}`,
+			want: []string{"a_c", "a_d", "b_c", "b_d"},
+		},
+		{
+			name: "LeadingCommentByteRemainsLiteral",
+			src:  `{#foo,bar}`,
+			want: []string{"#foo", "bar"},
+		},
+		{
+			name: "MixedQuotesPreserveLiteralValue",
+			src:  `-{\X"b",'cd'}-`,
+			want: []string{"-Xb-", "-cd-"},
+		},
+		{
+			name: "EmptyAlternativesRemainWords",
+			src:  `{X,,Y,}`,
+			want: []string{"X", "Y"},
+		},
+		{
+			name: "EmptyAlternativesPreserveQuotedSuffix",
+			src:  `{X,,Y,}''`,
+			want: []string{"X", "", "Y", ""},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			word := parseCommandWord(t, tc.src)
+			got, err := Fields(cfg, word)
+			if err != nil {
+				t.Fatalf("Fields() error = %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("Fields() = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLiteralCurrentUserHomeUsesSandboxEnv(t *testing.T) {
 	t.Parallel()
 
@@ -1669,7 +1782,7 @@ func TestLiteralCurrentUserHomeUsesSandboxEnv(t *testing.T) {
 			want: "/live/src",
 		},
 		{
-			name: "StartupHomeOverride",
+			name: "StartupHomeIgnored",
 			src:  `~/src`,
 			cfg: &Config{
 				StartupHome: "/startup",
@@ -1677,7 +1790,7 @@ func TestLiteralCurrentUserHomeUsesSandboxEnv(t *testing.T) {
 					"HOME": {Set: true, Kind: String, Str: "/live"},
 				},
 			},
-			want: "/startup/src",
+			want: "/live/src",
 		},
 		{
 			name: "RootHomeAvoidsDoubleSlash",
@@ -1720,6 +1833,52 @@ func TestLiteralCurrentUserHomeUsesSandboxEnv(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Fatalf("Literal() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLiteralNamedUserTildeRequiresSandboxMapping(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `~root/src`)
+	got, err := Literal(&Config{Env: testEnv{}}, word)
+	if err != nil {
+		t.Fatalf("Literal() error = %v", err)
+	}
+	if got != "~root/src" {
+		t.Fatalf("Literal() = %q, want %q", got, "~root/src")
+	}
+}
+
+func TestReparseBraceWordSpecialLeadingTokens(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		word *syntax.Word
+		want string
+	}{
+		{
+			name: "CommentByte",
+			word: litWord("#foo"),
+			want: "#foo",
+		},
+		{
+			name: "RedirectByte",
+			word: litWord(">"),
+			want: ">",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := reparseBraceWord(tc.word)
+			if err != nil {
+				t.Fatalf("reparseBraceWord() error = %v", err)
+			}
+			if got.Lit() != tc.want {
+				t.Fatalf("reparseBraceWord() = %q, want %q", got.Lit(), tc.want)
 			}
 		})
 	}

@@ -122,26 +122,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/brace-expansion.test.sh::Mixed comma and range doesn't work": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/brace-expansion.test.sh::Tilde expansion with brace expansion": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/brace-expansion.test.sh::Two kinds of tilde expansion": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/brace-expansion.test.sh::double expansion with literal and simple var": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/brace-expansion.test.sh::double expansion with simple var -- bash bug": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/bugs.test.sh::#2640 Hanging when reading from character devices": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -845,24 +825,9 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/tilde.test.sh::${x//~/~root}": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/tilde.test.sh::No tilde expansion in word that looks like assignment but isn't": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/tilde.test.sh::temp assignment x=~ env": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/tilde.test.sh::tilde expansion of word after redirect": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
         },
         "oils/tilde.test.sh::x=${undef-~:~}": {
           "mode": "xfail",

@@ -26,6 +26,7 @@ func runInterpScriptConfig(t *testing.T, cfg *RunnerConfig, src string) (string,
 		cfg = &RunnerConfig{Dir: "/tmp"}
 	}
 	cfg = &RunnerConfig{
+		StartupHome:      cfg.StartupHome,
 		Env:              cfg.Env,
 		Dir:              cfg.Dir,
 		Params:           cfg.Params,
@@ -1047,12 +1048,13 @@ echo "$a" "${b-unset}" "${c-unset}"
 	}
 }
 
-func TestArrayAssignmentTildeUsesCurrentShellHome(t *testing.T) {
+func TestArrayAssignmentTildeUsesLiveHome(t *testing.T) {
 	t.Parallel()
 
 	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
-		Env: expand.ListEnviron("HOME=/"),
-		Dir: "/tmp",
+		StartupHome: "/startup",
+		Env:         expand.ListEnviron("HOME=/"),
+		Dir:         "/tmp",
 	}, `
 a=(0 1 2)
 b=(3 4 5)
@@ -1066,6 +1068,229 @@ typeset -p a b
 		t.Fatalf("Run error = %v", err)
 	}
 	const wantStdout = "declare -a a=([0]=\"0\" [1]=\"\" [2]=\"2\")\ndeclare -a b=([0]=\"3\" [1]=\"4\" [2]=\"/home/spec-test/src\")\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestScalarAssignmentTildeUsesLiveHome(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		StartupHome: "/startup",
+		Env:         expand.ListEnviron("HOME=/home/spec-test"),
+		Dir:         "/tmp",
+	}, `
+foo=~
+echo "$foo"
+foo='~'
+echo "$foo"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "/home/spec-test\n~\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestReadonlyAssignmentTildeUsesLiveHome(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		StartupHome: "/startup",
+		Env:         expand.ListEnviron("HOME=/home/bob"),
+		Dir:         "/tmp",
+	}, `
+readonly const=~/src
+echo "$const"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "/home/bob/src\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestAssignmentKeywordTildeUsesLiveHome(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		StartupHome: "/startup",
+		Env:         expand.ListEnviron("HOME=/home/bar"),
+		Dir:         "/tmp",
+	}, `
+f() {
+  local x=foo:~
+  echo "$x"
+}
+f
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "foo:/home/bar\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestTempAssignmentTildeUsesLiveHome(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		StartupHome: "/startup",
+		Env:         expand.ListEnviron("HOME=/home/bar"),
+		Dir:         "/tmp",
+	}, `
+show() {
+  echo "$xx"
+}
+xx=~ show
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "/home/bar\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestNamedUserTildeUsesSandboxMapping(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Env: expand.ListEnviron(
+			"HOME=/home/agent",
+			"HOME root=/sandbox/root",
+		),
+		Dir: "/tmp",
+	}, `
+echo ~root
+echo ~nonexistent
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "/sandbox/root\n~nonexistent\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestNamedUserTildeUsesDeterministicRootFallback(t *testing.T) {
+	t.Parallel()
+
+	rootHome, ok := defaultNamedUserHome("root")
+	if !ok {
+		t.Fatal("defaultNamedUserHome(root) returned no fallback")
+	}
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Env: expand.ListEnviron("HOME=/home/agent"),
+		Dir: "/tmp",
+	}, `
+echo ~root
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != rootHome+"\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, rootHome+"\n")
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestDbracketTildeUsesLiveHome(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		StartupHome: "/startup",
+		Env:         expand.ListEnviron("HOME=/home/bob"),
+		Dir:         "/tmp",
+	}, `
+[[ ~ == /home/bob ]]
+echo status=$?
+
+HOME=''
+[[ ~ ]]
+echo status=$?
+[[ -n ~ ]]
+echo unary=$?
+
+[[ ~ == ~ ]]
+echo status=$?
+
+[[ $HOME == ~ ]]
+echo fnmatch=$?
+[[ ~ == $HOME ]]
+echo fnmatch=$?
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	wantStdout := "status=0\nstatus=1\nunary=1\nstatus=0\nfnmatch=0\nfnmatch=0\n"
+	if runtime.GOOS == "darwin" {
+		wantStdout = "status=1\nstatus=0\nunary=0\nstatus=0\nfnmatch=1\nfnmatch=1\n"
+	}
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestDbracketRegexTildeMatchesHostBash(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		StartupHome: "/startup",
+		Env:         expand.ListEnviron("HOME=/home/bob"),
+		Dir:         "/tmp",
+	}, `
+HOME=foo
+[[ ~ =~ $HOME ]]
+echo regex=$?
+[[ $HOME =~ ~ ]]
+echo regex=$?
+
+HOME='^a$'
+[[ ~ =~ $HOME ]]
+echo regex=$?
+[[ $HOME =~ ~ ]]
+echo regex=$?
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	wantStdout := "regex=0\nregex=0\nregex=1\nregex=0\n"
+	if runtime.GOOS == "darwin" {
+		wantStdout = "regex=1\nregex=1\nregex=1\nregex=1\n"
+	}
 	if stdout != wantStdout {
 		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
 	}
