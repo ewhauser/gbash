@@ -584,43 +584,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/errexit.test.sh::Command sub exit code is lost": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/errexit.test.sh::More && ||": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
-        "oils/errexit.test.sh::bash atoms [[ (( - redir failure checked": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
-        "oils/errexit.test.sh::errexit and brace group { }": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/errexit.test.sh::errexit and time { }": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/errexit.test.sh::set errexit while it's ignored in a subshell (moot with strict_errexit)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/errexit.test.sh::simple command that's an alias - redir failure checked": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
         "oils/exit-status.test.sh::subshell OverflowError https://github.com/oilshell/oil/issues/996": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",

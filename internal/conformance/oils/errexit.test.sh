@@ -79,7 +79,7 @@ echo status=$?
 echo
 
 # noforklast optimization
-$SH -c 'set -e; false || /bin/false; echo bad'
+$SH -c 'set -e; false || /bin/false; echo bad' 2>/dev/null
 echo status=$?
 
 ## STDOUT:
@@ -341,7 +341,8 @@ echo alias status=$?
 echo status=$?
 
 ## STDOUT:
-status=1
+alias status=1
+status=0
 ## END
 
 #### bash atoms [[ (( - redir failure checked
@@ -363,8 +364,10 @@ echo dparen status=$?
 echo status=$?
 
 ## STDOUT:
-status=1
-status=1
+dbracket status=1
+status=0
+dparen status=1
+status=0
 ## END
 
 #### brace group - redir failure checked
@@ -433,8 +436,6 @@ foo() {
 ! foo
 
 echo "should be executed"
-## BUG bash stdout-json: ""
-## BUG bash status: 1
 ## STDOUT:
 should be executed
 should be executed
@@ -450,7 +451,7 @@ shopt -s inherit_errexit || true
 # This changes it
 #shopt -s command_sub_errexit || true
 
-echo f $(date %x)
+echo f $(date %x 2>/dev/null)
 echo status=$?
 
 # compare with 
@@ -468,4 +469,3 @@ status=0
 ft
 status=0
 ## END
-

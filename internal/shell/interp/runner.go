@@ -674,6 +674,9 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 		result, err := r.redir(ctx, rd)
 		if err != nil {
 			r.exit.code = 1
+			if redirectFailureIgnoresErrExit(st.Cmd, err) {
+				r.exit.errExitIgnored = true
+			}
 			break
 		}
 		if result.closer != nil {
@@ -685,7 +688,14 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 		releasedNamedFDs = append(releasedNamedFDs, result.releasedNamedFDs...)
 	}
 	if r.exit.ok() && st.Cmd != nil {
-		r.cmd(ctx, st.Cmd)
+		if st.Negated {
+			oldNoErrExit := r.noErrExit
+			r.noErrExit = true
+			r.cmd(ctx, st.Cmd)
+			r.noErrExit = oldNoErrExit
+		} else {
+			r.cmd(ctx, st.Cmd)
+		}
 	}
 	if !r.pipeStatusSet {
 		r.setPipeStatuses(r.exit.code)
@@ -703,14 +713,16 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 		}
 	}
 	r.waitProcSubsts(procSubstStart)
+	if !r.exit.ok() && r.noErrExit {
+		r.exit.errExitIgnored = true
+	}
 	if st.Negated {
 		if r.exit.ok() {
 			r.exit.code = 1
 		} else {
 			r.exit.clear()
 		}
-	} else if b, ok := st.Cmd.(*syntax.BinaryCmd); ok && (b.Op == syntax.AndStmt || b.Op == syntax.OrStmt) {
-	} else {
+	} else if !r.exit.ok() && !r.noErrExit && !r.exit.errExitIgnored {
 		r.maybeRunErrTrap(ctx, st.Pos().Line())
 	}
 	if !keepRedirs {
@@ -735,6 +747,39 @@ func usesPreRedirectExpandFDs(cmd syntax.Command) bool {
 	default:
 		return false
 	}
+}
+
+func redirectFailureIgnoresErrExit(cmd syntax.Command, err error) bool {
+	if cmd == nil || !isRedirectOpenError(err) {
+		return false
+	}
+	switch cmd.(type) {
+	case *syntax.TestClause, *syntax.ArithmCmd:
+		return true
+	default:
+		return commandHasAliasExpansion(cmd)
+	}
+}
+
+func isRedirectOpenError(err error) bool {
+	var pathErr *os.PathError
+	return errors.As(err, &pathErr) && pathErr.Op == "open"
+}
+
+func commandHasAliasExpansion(cmd syntax.Command) bool {
+	found := false
+	syntax.Walk(cmd, func(node syntax.Node) bool {
+		if found || node == nil {
+			return !found
+		}
+		word, ok := node.(*syntax.Word)
+		if !ok {
+			return true
+		}
+		found = len(word.AliasExpansions) > 0
+		return !found
+	})
+	return found
 }
 
 type redirResult struct {
@@ -1979,13 +2024,13 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		if cm.PosixFormat {
 			format = "%s %s\n"
 		} else {
-			r.outf("\n")
+			r.errf("\n")
 		}
 		realTime := time.Since(start)
-		r.outf(format, "real", elapsedString(realTime, cm.PosixFormat))
+		r.errf(format, "real", elapsedString(realTime, cm.PosixFormat))
 		// TODO: can we do these?
-		r.outf(format, "user", elapsedString(0, cm.PosixFormat))
-		r.outf(format, "sys", elapsedString(0, cm.PosixFormat))
+		r.errf(format, "user", elapsedString(0, cm.PosixFormat))
+		r.errf(format, "sys", elapsedString(0, cm.PosixFormat))
 	default:
 		panic(fmt.Sprintf("unhandled command node: %T", cm))
 	}
