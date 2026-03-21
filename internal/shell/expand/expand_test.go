@@ -1708,6 +1708,11 @@ func TestFieldsReparseBraceExpandedWords(t *testing.T) {
 			want: []string{"a_c", "a_d", "b_c", "b_d"},
 		},
 		{
+			name: "LeadingCommentByteRemainsLiteral",
+			src:  `{#foo,bar}`,
+			want: []string{"#foo", "bar"},
+		},
+		{
 			name: "MixedQuotesPreserveLiteralValue",
 			src:  `-{\X"b",'cd'}-`,
 			want: []string{"-Xb-", "-cd-"},
@@ -1798,6 +1803,39 @@ func TestLiteralCurrentUserHomeUsesSandboxEnv(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Fatalf("Literal() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReparseBraceWordSpecialLeadingTokens(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		word *syntax.Word
+		want string
+	}{
+		{
+			name: "CommentByte",
+			word: litWord("#foo"),
+			want: "#foo",
+		},
+		{
+			name: "RedirectByte",
+			word: litWord(">"),
+			want: ">",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := reparseBraceWord(tc.word)
+			if err != nil {
+				t.Fatalf("reparseBraceWord() error = %v", err)
+			}
+			if got.Lit() != tc.want {
+				t.Fatalf("reparseBraceWord() = %q, want %q", got.Lit(), tc.want)
 			}
 		})
 	}

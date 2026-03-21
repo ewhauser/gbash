@@ -122,26 +122,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/brace-expansion.test.sh::Ascending number range expansion with negative step is invalid": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/brace-expansion.test.sh::Char ranges with steps of the wrong sign": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/brace-expansion.test.sh::Descending number range expansion with positive step is invalid": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/brace-expansion.test.sh::Fixed width number range expansion": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/brace-expansion.test.sh::Mixed case char expansion is invalid": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/bugs.test.sh::#2640 Hanging when reading from character devices": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -818,6 +798,10 @@
             "darwin"
           ]
         },
+        "oils/paren-ambiguity.test.sh::((gzip example - zdiff package - #2337": {
+          "mode": "xfail",
+          "reason": "conformance: external gzip stderr differs from bash on Linux CI"
+        },
         "oils/regex.test.sh::Operator chars ; & but not |": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
@@ -868,15 +852,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/tilde.test.sh::${x//~/~root}": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/tilde.test.sh::No tilde expansion in word that looks like assignment but isn't": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/tilde.test.sh::temp assignment x=~ env": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

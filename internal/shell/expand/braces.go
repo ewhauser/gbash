@@ -139,12 +139,17 @@ func reparseBraceWord(word *syntax.Word) (*syntax.Word, error) {
 	if len(word.Parts) == 0 {
 		return word, nil
 	}
+	if braceWordStartsWithLiteralShellToken(word) {
+		return word, nil
+	}
 	src, err := braceWordSource(word)
 	if err != nil {
 		return nil, err
 	}
+	// Parse through a literal-prefixed argv token so leading shell tokens like
+	// "#" and ">" keep command-word semantics instead of being reclassified.
 	parser := syntax.NewParser()
-	file, err := parser.Parse(strings.NewReader("x "+src+"\n"), "")
+	file, err := parser.Parse(strings.NewReader("__jb_brace_reparse _"+src+"\n"), "")
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +160,36 @@ func reparseBraceWord(word *syntax.Word) (*syntax.Word, error) {
 	if !ok || len(call.Args) != 2 {
 		return nil, fmt.Errorf("brace reparse: unexpected parse shape")
 	}
-	return call.Args[1], nil
+	reparsed := *call.Args[1]
+	reparsed.Parts = append([]syntax.WordPart(nil), reparsed.Parts...)
+	if len(reparsed.Parts) == 0 {
+		return &reparsed, nil
+	}
+	lit, ok := reparsed.Parts[0].(*syntax.Lit)
+	if !ok || !strings.HasPrefix(lit.Value, "_") {
+		return nil, fmt.Errorf("brace reparse: missing literal prefix")
+	}
+	if lit.Value == "_" {
+		reparsed.Parts = reparsed.Parts[1:]
+		return &reparsed, nil
+	}
+	litCopy := *lit
+	litCopy.Value = strings.TrimPrefix(litCopy.Value, "_")
+	reparsed.Parts[0] = &litCopy
+	return &reparsed, nil
+}
+
+func braceWordStartsWithLiteralShellToken(word *syntax.Word) bool {
+	lit, ok := word.Parts[0].(*syntax.Lit)
+	if !ok || lit.Value == "" {
+		return false
+	}
+	switch lit.Value[0] {
+	case '#', '!', '&', '(', ')', ';', '<', '>', '|':
+		return true
+	default:
+		return false
+	}
 }
 
 func braceWordSource(word *syntax.Word) (string, error) {
