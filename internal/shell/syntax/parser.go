@@ -3051,7 +3051,8 @@ func (p *Parser) paramExpParameter(pe *ParamExp) *ParamExp {
 				if pe.Short {
 					return nil // just "$"
 				}
-				if p.val == "" && p.r != utf8.RuneSelf && p.peek() == '}' {
+				if p.val == "" && p.r != utf8.RuneSelf && p.r < utf8.RuneSelf &&
+					p.peek() == '}' && !singleRuneParam(p.r) && !paramNameRune(p.r) {
 					pe.Rbrace = posAddCol(p.nextPos(), 1)
 					pe.Invalid = p.sourceRange(pe.Dollar, posAddCol(pe.Rbrace, 1))
 					p.rune()
