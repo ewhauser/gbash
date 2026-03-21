@@ -190,6 +190,40 @@ func TestAssignmentLiteralHonorsEscapedColonsForTildes(t *testing.T) {
 	}
 }
 
+func TestRegexpExpandsLeadingTildeAsLiteralRegex(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `~`)
+	got, err := Regexp(&Config{
+		Env: testEnv{
+			"HOME": {Set: true, Kind: String, Str: "^a$"},
+		},
+	}, word)
+	if err != nil {
+		t.Fatalf("Regexp() error = %v", err)
+	}
+	if got != `\^a\$` {
+		t.Fatalf("Regexp() = %q, want %q", got, `\^a\$`)
+	}
+}
+
+func TestRegexpExpandsNestedTildeAsLiteralRegex(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `${v:-~}`)
+	got, err := Regexp(&Config{
+		Env: testEnv{
+			"HOME": {Set: true, Kind: String, Str: "^a$"},
+		},
+	}, word)
+	if err != nil {
+		t.Fatalf("Regexp() error = %v", err)
+	}
+	if got != `\^a\$` {
+		t.Fatalf("Regexp() = %q, want %q", got, `\^a\$`)
+	}
+}
+
 func parseCondPattern(t *testing.T, src string) *syntax.Pattern {
 	t.Helper()
 	p := syntax.NewParser()

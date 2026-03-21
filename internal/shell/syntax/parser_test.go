@@ -248,6 +248,41 @@ func TestParseErrorBashErrorConditionalDiagnostics(t *testing.T) {
 			src:  "[[ $'a\\nb' =~ a\nb ]]",
 			want: "line 1: syntax error in conditional expression: unexpected token `b'\nline 2: syntax error near `b'\nline 2: `b ]]'",
 		},
+		{
+			name: "empty conditional",
+			src:  "[[ ]]",
+			want: "line 1: syntax error near `]]'\nline 1: `[[ ]]'",
+		},
+		{
+			name: "missing unary operand",
+			src:  "[[ -z ]]",
+			want: "line 1: unexpected argument `]]' to conditional unary operator\nline 1: syntax error near `]]'\nline 1: `[[ -z ]]'",
+		},
+		{
+			name: "operand in binary operator slot",
+			src:  "[[ '(' foo ]]",
+			want: "line 1: unexpected token `foo', conditional binary operator expected\nline 1: syntax error near `foo'\nline 1: `[[ '(' foo ]]'",
+		},
+		{
+			name: "extra token after unary expression",
+			src:  "[[ -z '>' -- ]]",
+			want: "line 1: syntax error in conditional expression: unexpected token `--'\nline 1: syntax error near `--'\nline 1: `[[ -z '>' -- ]]'",
+		},
+		{
+			name: "redirect-looking operator token",
+			src:  "[[ a 3< b ]]",
+			want: "line 1: unexpected token `3', conditional binary operator expected\nline 1: syntax error near `3<'\nline 1: `[[ a 3< b ]]'",
+		},
+		{
+			name: "variable in operator position",
+			src:  "[[ a $op a ]]",
+			want: "line 1: unexpected token `$op', conditional binary operator expected\nline 1: syntax error near `$op'\nline 1: `[[ a $op a ]]'",
+		},
+		{
+			name: "redirect argument to unary operator",
+			src:  "[[ -f < ]]",
+			want: "line 1: unexpected argument `<' to conditional unary operator\nline 1: syntax error near `<'\nline 1: `[[ -f < ]]'",
+		},
 	}
 
 	for _, tc := range tests {
@@ -2041,7 +2076,7 @@ var errorCases = []errorCase{
 	),
 	errCase(
 		"[[ ]]",
-		langErr("1:1: `[[` must be followed by an expression", LangBash|LangMirBSDKorn|LangZsh),
+		langErr("1:4: syntax error near `]]'", LangBash|LangMirBSDKorn|LangZsh),
 	),
 	errCase(
 		"[[ a",
@@ -2102,15 +2137,39 @@ var errorCases = []errorCase{
 	),
 	errCase(
 		"[[ a b c ]]",
-		langErr("1:6: not a valid test operator: `b`", LangBash|LangMirBSDKorn|LangZsh),
+		langErr("1:6: unexpected token `b', conditional binary operator expected", LangBash|LangMirBSDKorn|LangZsh),
 	),
 	errCase(
 		"[[ a b$x c ]]",
-		langErr("1:6: test operator words must consist of a single literal", LangBash|LangMirBSDKorn|LangZsh),
+		langErr("1:6: unexpected token `b$x', conditional binary operator expected", LangBash|LangMirBSDKorn|LangZsh),
 	),
 	errCase(
 		"[[ a & b ]]",
-		langErr("1:6: not a valid test operator: `&`", LangBash|LangMirBSDKorn|LangZsh),
+		langErr("1:6: unexpected token `&', conditional binary operator expected", LangBash|LangMirBSDKorn|LangZsh),
+	),
+	errCase(
+		"[[ -z ]]",
+		langErr("1:7: unexpected argument `]]' to conditional unary operator", LangBash|LangMirBSDKorn|LangZsh),
+	),
+	errCase(
+		"[[ '(' foo ]]",
+		langErr("1:8: unexpected token `foo', conditional binary operator expected", LangBash|LangMirBSDKorn|LangZsh),
+	),
+	errCase(
+		"[[ -z '>' -- ]]",
+		langErr("1:11: syntax error in conditional expression: unexpected token `--'", LangBash|LangMirBSDKorn|LangZsh),
+	),
+	errCase(
+		"[[ a 3< b ]]",
+		langErr("1:6: unexpected token `3', conditional binary operator expected", LangBash|LangMirBSDKorn|LangZsh),
+	),
+	errCase(
+		"[[ a $op a ]]",
+		langErr("1:6: unexpected token `$op', conditional binary operator expected", LangBash|LangMirBSDKorn|LangZsh),
+	),
+	errCase(
+		"[[ -f < ]]",
+		langErr("1:7: unexpected argument `<' to conditional unary operator", LangBash|LangMirBSDKorn|LangZsh),
 	),
 	errCase(
 		"[[ true && () ]]",

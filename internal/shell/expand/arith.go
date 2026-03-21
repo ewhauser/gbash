@@ -1089,6 +1089,9 @@ func arithWordDiagnostic(root, tokenExpr syntax.ArithmExpr, exprText, tokenText,
 	if root == nil {
 		return diag
 	}
+	if _, ok := arithmVarRef(tokenExpr); ok {
+		return diag
+	}
 	diag.Expr = root
 	if root != tokenExpr && !arithExprUsesExpandedValue(root) {
 		diag.ExprText = arithExprPrinted(root)

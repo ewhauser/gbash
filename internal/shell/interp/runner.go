@@ -412,6 +412,24 @@ func (r *Runner) literal(word *syntax.Word) string {
 	return str
 }
 
+func condTildeExpandsInDBrackets() bool {
+	return runtime.GOOS != "darwin"
+}
+
+func (r *Runner) condLiteral(word *syntax.Word) string {
+	var (
+		str string
+		err error
+	)
+	if condTildeExpandsInDBrackets() {
+		str, err = expand.Literal(r.ecfg, word)
+	} else {
+		str, err = expand.LiteralNoTilde(r.ecfg, word)
+	}
+	r.expandErr(err)
+	return str
+}
+
 func (r *Runner) assignmentLiteral(word *syntax.Word) string {
 	if r.ecfg == nil {
 		r.fillExpandConfig(context.Background())
@@ -442,6 +460,20 @@ func (r *Runner) document(word *syntax.Word) string {
 
 func (r *Runner) pattern(pat *syntax.Pattern) string {
 	str, err := expand.Pattern(r.ecfg, pat)
+	r.expandErr(err)
+	return str
+}
+
+func (r *Runner) condPattern(pat *syntax.Pattern) string {
+	var (
+		str string
+		err error
+	)
+	if condTildeExpandsInDBrackets() {
+		str, err = expand.Pattern(r.ecfg, pat)
+	} else {
+		str, err = expand.PatternNoTilde(r.ecfg, pat)
+	}
 	r.expandErr(err)
 	return str
 }

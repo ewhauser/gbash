@@ -1238,9 +1238,17 @@ func (cfg *Config) paramArgField(word *syntax.Word, ql quoteLevel) ([]fieldPart,
 		switch wp := wp.(type) {
 		case *syntax.Lit:
 			s := wp.Value
-			if i == 0 && ql == quoteNone {
+			if i == 0 && (ql == quoteNone || ql == quoteRegexp) {
 				if prefix, rest, expanded := cfg.expandUser(s, len(word.Parts) > 1); expanded {
-					s = prefix + rest
+					if ql == quoteRegexp && (prefix != "" || rest == "") {
+						field = append(field, fieldPart{
+							quote: quoteSingle,
+							val:   prefix,
+						})
+						s = rest
+					} else {
+						s = prefix + rest
+					}
 				}
 			}
 			if (ql == quoteDouble || ql == quoteHeredoc) && strings.Contains(s, "\\") {

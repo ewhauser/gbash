@@ -234,14 +234,12 @@ echo status=$?
 (( a == d ))
 echo status=$?
 
-## stdout-json: ""
-## status: 1
-## BUG bash STDOUT:
+## STDOUT:
 status=1
 status=1
 status=1
 ## END
-## BUG bash status: 0
+## status: 0
 
 #### Quotes don't matter in comparison
 [[ '3' = 3 ]] && echo true
@@ -438,4 +436,3 @@ octal=0
 hex=0
 baseN=0
 ## END
-
