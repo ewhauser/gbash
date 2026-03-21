@@ -45,7 +45,11 @@ func TestFormatQuotedCharUsesFirstByteForInvalidUnicode(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; diagnostics=%v", result.ExitCode, result.Diagnostics)
 	}
-	if got, want := result.Output, "f4\ned\n3bc\n"; got != want {
+	want := "f4\ned\n3bc\n"
+	if runtime.GOOS == "linux" {
+		want = "111111\ned\n3bc\n"
+	}
+	if got := result.Output; got != want {
 		t.Fatalf("Output = %q, want %q", got, want)
 	}
 }

@@ -321,7 +321,7 @@ func decodeShellCharValue(data []byte) uint32 {
 	if len(data) >= 4 && data[0] >= 0xf0 && data[0] <= 0xf7 &&
 		isContinuation(data[1]) && isContinuation(data[2]) && isContinuation(data[3]) {
 		value := uint32(data[0]&0x07)<<18 | uint32(data[1]&0x3f)<<12 | uint32(data[2]&0x3f)<<6 | uint32(data[3]&0x3f)
-		if value < 0x10000 || value > 0x10ffff {
+		if value < 0x10000 || (value > 0x10ffff && runtime.GOOS != "linux") {
 			return uint32(data[0])
 		}
 		return value
