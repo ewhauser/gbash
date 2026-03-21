@@ -67,7 +67,36 @@ func TestExecNameOnlyLeavesBashSourceUnset(t *testing.T) {
 	}
 }
 
-func TestExecInlineFunctionsTrackCallLinesWithoutBashSource(t *testing.T) {
+func TestExecInlineCommandStringSetsBashExecutionString(t *testing.T) {
+	t.Parallel()
+
+	session := newSession(t, &Config{})
+	script := strings.Join([]string{
+		"declare -p BASH_EXECUTION_STRING",
+		"BASH_EXECUTION_STRING=override",
+		"echo status=$?",
+		"declare -p BASH_EXECUTION_STRING",
+		"",
+	}, "\n")
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		Name:   "inline.sh",
+		Script: script,
+	})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+
+	if got, want := result.Stdout, strings.Join([]string{
+		"declare -- BASH_EXECUTION_STRING=$'declare -p BASH_EXECUTION_STRING\\nBASH_EXECUTION_STRING=override\\necho status=$?\\ndeclare -p BASH_EXECUTION_STRING\\n'",
+		"status=0",
+		"declare -- BASH_EXECUTION_STRING=\"override\"",
+		"",
+	}, "\n"); got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestExecInlineFunctionsTrackCallLinesWithExecutionNameSource(t *testing.T) {
 	t.Parallel()
 
 	session := newSession(t, &Config{})
@@ -89,10 +118,32 @@ func TestExecInlineFunctionsTrackCallLinesWithoutBashSource(t *testing.T) {
 
 	if got, want := result.Stdout, strings.Join([]string{
 		"FUNC:f",
-		"SRC:",
+		"SRC:inline.sh",
 		"LINE:6",
 		"",
 	}, "\n"); got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestExecInlineFunctionsUseExecutionNameForExtdebugSource(t *testing.T) {
+	t.Parallel()
+
+	session := newSession(t, &Config{})
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		Name: "inline.sh",
+		Script: strings.Join([]string{
+			"shopt -s extdebug",
+			"f() { :; }",
+			"declare -F f",
+			"",
+		}, "\n"),
+	})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+
+	if got, want := result.Stdout, "f 2 inline.sh\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }

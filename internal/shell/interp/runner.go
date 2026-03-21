@@ -1286,8 +1286,11 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			})
 			return seen
 		}
-		matchesVarFilter := func(vr expand.Variable) bool {
+		matchesVarFilter := func(name string, vr expand.Variable) bool {
 			if !vr.Declared() {
+				return false
+			}
+			if name == "BASH_EXECUTION_STRING" && len(modes) > 0 {
 				return false
 			}
 			switch valType {
@@ -1304,7 +1307,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					return false
 				}
 			}
-			if declQuery == "" {
+			if declQuery == "" || (declQuery == "-p" && declName == "local") {
 				switch declName {
 				case "readonly":
 					return vr.ReadOnly
@@ -1350,7 +1353,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			seen := listedVars(currentOnly)
 			names := make([]string, 0, len(seen))
 			for name, vr := range seen {
-				if !matchesVarFilter(vr) {
+				if !matchesVarFilter(name, vr) {
 					continue
 				}
 				names = append(names, name)
@@ -1536,9 +1539,12 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					}
 				}
 				if clearReadonly && vr.ReadOnly {
-					if declName == "local" {
+					switch declName {
+					case "local":
 						declErrf("local: %s: readonly variable\n", name)
-					} else {
+					case "declare", "typeset":
+						declErrf("%s: %s: readonly variable\n", declName, name)
+					default:
 						declErrf("%s: readonly variable\n", name)
 					}
 					r.exit.code = 1
