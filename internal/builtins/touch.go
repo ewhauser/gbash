@@ -96,6 +96,9 @@ func (c *Touch) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedC
 	if err != nil {
 		return err
 	}
+	if len(opts.files) == 0 {
+		return exitf(inv, 1, "touch: missing file operand\nTry 'touch --help' for more information.")
+	}
 
 	for _, name := range opts.files {
 		if err := touchOne(ctx, inv, &opts, times, name); err != nil {
@@ -147,9 +150,6 @@ func parseTouchMatches(inv *Invocation, matches *ParsedCommand) (touchOptions, e
 	}
 	if matches.Has("modification") && !matches.Has("access") {
 		opts.affectAtime = false
-	}
-	if len(opts.files) == 0 {
-		return touchOptions{}, exitf(inv, 1, "touch: missing file operand\nTry 'touch --help' for more information.")
 	}
 	return opts, nil
 }

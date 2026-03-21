@@ -80,6 +80,19 @@ func TestTouchDateWithoutFileMatchesConformanceOracle(t *testing.T) {
 	}
 }
 
+func TestTouchValidatesDateBeforeMissingFileOperand(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "touch -d invalid\n")
+	if got, want := result.ExitCode, 1; got != want {
+		t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+	}
+	if got, want := result.Stderr, "touch: invalid date format \"invalid\"\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
 func TestMkfifoCreatesNamedPipesAndSupportsReadWriteRedirects(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
