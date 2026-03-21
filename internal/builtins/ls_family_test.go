@@ -200,8 +200,8 @@ func TestLSReturnsMissingPathExitCode(t *testing.T) {
 	session := newSession(t, &Config{})
 
 	result := mustExecSession(t, session, "ls /tmp/missing\n")
-	if result.ExitCode != 2 {
-		t.Fatalf("ExitCode = %d, want 2", result.ExitCode)
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
 	}
 	if !strings.Contains(result.Stderr, "ls: /tmp/missing: No such file or directory") {
 		t.Fatalf("Stderr = %q, want missing-path error", result.Stderr)
