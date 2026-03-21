@@ -285,7 +285,7 @@ func (r *Runner) expandErr(err error) {
 	}
 	fatalExpansionErr := r.commandString && !r.interactive
 	errMsg := err.Error()
-	if r.commandString && !r.interactive && errors.As(err, &divErr) {
+	if r.commandString && !r.interactive && runtime.GOOS == "darwin" && errors.As(err, &divErr) {
 		errMsg = strings.Replace(errMsg, `error token is "0 "`, `error token is " "`, 1)
 	}
 	var (
