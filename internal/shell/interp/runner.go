@@ -1781,6 +1781,12 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		onlyFlagOperands := true
 		processNamedOperand := func(ref *syntax.VarRef, as *syntax.Assign, isAssign bool, raw string) bool {
 			name := ref.Name.Value
+			if declQuery != "-f" && declQuery != "-F" && ref.Index != nil &&
+				(declName == "export" || declName == "readonly") {
+				r.errf("%s: `%s': not a valid identifier\n", declName, printVarRef(ref))
+				r.exit.code = 1
+				return false
+			}
 			if declQuery != "-f" && declQuery != "-F" && !syntax.ValidName(name) {
 				if allowPlusFlags && strings.HasPrefix(raw, "+") && !strings.ContainsAny(name, "[]") {
 					r.errf("%s: invalid name %q\n", declName, name)
@@ -2159,6 +2165,29 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				return true
 			})
 		}
+		operands := cm.Operands
+		if len(operands) > 1 {
+			rebuilt := make([]syntax.DeclOperand, 0, len(operands))
+			for i := 0; i < len(operands); i++ {
+				operand := operands[i]
+				src := strings.TrimSpace(r.sourceForNode(operand))
+				if src == "$" && i+1 < len(operands) {
+					nextSrc := strings.TrimSpace(r.sourceForNode(operands[i+1]))
+					if nextSrc != "" {
+						reparsed, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).DeclOperand(strings.NewReader(src + nextSrc))
+						if err == nil && reparsed != nil {
+							if _, ok := reparsed.(*syntax.DeclDynamicWord); ok {
+								rebuilt = append(rebuilt, reparsed)
+								i++
+								continue
+							}
+						}
+					}
+				}
+				rebuilt = append(rebuilt, operand)
+			}
+			operands = rebuilt
+		}
 		var processOperand func(syntax.DeclOperand) bool
 		processOperand = func(operand syntax.DeclOperand) bool {
 			switch operand := operand.(type) {
@@ -2295,7 +2324,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				panic(fmt.Sprintf("unexpected declaration operand: %T", operand))
 			}
 		}
-		for _, operand := range cm.Operands {
+		for _, operand := range operands {
 			if !processOperand(operand) {
 				return
 			}
@@ -2564,11 +2593,17 @@ type restoreVar struct {
 	secondsEnv       expand.WriteEnviron
 	secondsStartTime time.Time
 	restoreSeconds   bool
+	popWriteEnv      expand.WriteEnviron
 }
 
 func (r *Runner) restoreCallAssigns(restores []restoreVar) {
+	var popWriteEnv expand.WriteEnviron
 	for i := len(restores) - 1; i >= 0; i-- {
 		restore := restores[i]
+		if restore.popWriteEnv != nil {
+			popWriteEnv = restore.popWriteEnv
+			continue
+		}
 		if restore.restoreSeconds {
 			if err := r.writeEnv.Set(restore.name, restore.vr); err != nil {
 				r.errf("%s: %v\n", restore.name, err)
@@ -2582,6 +2617,14 @@ func (r *Runner) restoreCallAssigns(restores []restoreVar) {
 			continue
 		}
 		r.setVar(restore.name, restore.vr)
+	}
+	if popWriteEnv != nil {
+		if cenv, ok := r.writeEnv.(*callAssignWriteEnviron); ok {
+			if _, hasPath := cenv.values[cenv.normalize("PATH")]; hasPath {
+				r.commandHashClear()
+			}
+		}
+		r.writeEnv = popWriteEnv
 	}
 }
 
@@ -2603,11 +2646,11 @@ func (r *Runner) expandAssignsForSideEffects(assigns []*syntax.Assign) bool {
 }
 
 func (r *Runner) runCallAssigns(assigns []*syntax.Assign) []restoreVar {
-	return r.runCallAssignsWithExport(assigns, true)
+	return r.runCallAssignsWithExport(assigns, true, true)
 }
 
 func (r *Runner) runSpecialCallAssigns(assigns []*syntax.Assign) []restoreVar {
-	return r.runCallAssignsWithExport(assigns, true)
+	return r.runCallAssignsWithExport(assigns, true, false)
 }
 
 func (r *Runner) callAssignRestoreVar(name string, vr expand.Variable) restoreVar {
@@ -2629,8 +2672,13 @@ func (r *Runner) callAssignRestoreVar(name string, vr expand.Variable) restoreVa
 	return restore
 }
 
-func (r *Runner) runCallAssignsWithExport(assigns []*syntax.Assign, forceExport bool) []restoreVar {
+func (r *Runner) runCallAssignsWithExport(assigns []*syntax.Assign, forceExport, temporary bool) []restoreVar {
 	var restores []restoreVar
+	if temporary && len(assigns) > 0 {
+		parentEnv := r.writeEnv
+		r.writeEnv = newCallAssignWriteEnviron(parentEnv)
+		restores = append(restores, restoreVar{popWriteEnv: parentEnv})
+	}
 	for _, as := range assigns {
 		name := as.Ref.Name.Value
 		prev := r.lookupVar(name)
@@ -2655,16 +2703,25 @@ func (r *Runner) runCallAssignsWithExport(assigns []*syntax.Assign, forceExport 
 			} else {
 				vr.Exported = resolvedPrev.Exported
 			}
-			restore := r.callAssignRestoreVar(resolvedRef.Name.Value, resolvedPrev)
-			if err := r.setVarByRef(prev, as.Ref, vr, as.Append, attrUpdate{}); err != nil {
-				r.errf("%v\n", err)
-				r.exit.code = 1
-				return restores
+			if temporary {
+				if err := r.writeEnv.(*callAssignWriteEnviron).bind(resolvedRef.Name.Value, resolvedPrev, vr); err != nil {
+					r.errf("%s: %v\n", resolvedRef.Name.Value, err)
+					r.exit.code = 1
+					return restores
+				}
+				r.afterSetVar(resolvedRef.Name.Value, vr)
+			} else {
+				restore := r.callAssignRestoreVar(resolvedRef.Name.Value, resolvedPrev)
+				if err := r.setVarByRef(prev, as.Ref, vr, as.Append, attrUpdate{}); err != nil {
+					r.errf("%v\n", err)
+					r.exit.code = 1
+					return restores
+				}
+				restores = append(restores, restore)
 			}
 			if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
 				return restores
 			}
-			restores = append(restores, restore)
 			continue
 		}
 
@@ -2684,16 +2741,25 @@ func (r *Runner) runCallAssignsWithExport(assigns []*syntax.Assign, forceExport 
 		} else {
 			vr.Exported = resolvedPrev.Exported
 		}
-		restore := r.callAssignRestoreVar(resolvedRef.Name.Value, resolvedPrev)
-		if err := r.setVarByRef(prev, as.Ref, vr, as.Append, attrUpdate{}); err != nil {
-			r.errf("%v\n", err)
-			r.exit.code = 1
-			return restores
+		if temporary {
+			if err := r.writeEnv.(*callAssignWriteEnviron).bind(resolvedRef.Name.Value, resolvedPrev, vr); err != nil {
+				r.errf("%s: %v\n", resolvedRef.Name.Value, err)
+				r.exit.code = 1
+				return restores
+			}
+			r.afterSetVar(resolvedRef.Name.Value, vr)
+		} else {
+			restore := r.callAssignRestoreVar(resolvedRef.Name.Value, resolvedPrev)
+			if err := r.setVarByRef(prev, as.Ref, vr, as.Append, attrUpdate{}); err != nil {
+				r.errf("%v\n", err)
+				r.exit.code = 1
+				return restores
+			}
+			restores = append(restores, restore)
 		}
 		if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
 			return restores
 		}
-		restores = append(restores, restore)
 	}
 	return restores
 }
