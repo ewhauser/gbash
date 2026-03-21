@@ -4964,7 +4964,9 @@ func (p *Parser) testClause(s *Stmt) {
 	old := p.preNested(testExpr)
 	p.next()
 	if tc.X = p.condExprBinary(false); tc.X == nil {
-		if p.tok == rightParen {
+		if p.tok == _LitWord && p.val == "]]" {
+			p.posErr(p.pos, "syntax error near %s", bashQuoteString(dblRightBrack.String()))
+		} else if p.tok == rightParen {
 			p.curErrSecondary(
 				fmt.Sprintf("syntax error near %s", p.tok.bashQuote()),
 				"unexpected token %s in conditional command",
@@ -5083,6 +5085,85 @@ func (p *Parser) followCondRegex(tok token, pos Pos) *CondRegex {
 		}
 	}
 	return &CondRegex{Word: w}
+}
+
+func condUnexpectedTokenFragment(src string) string {
+	if src == "" {
+		return ""
+	}
+	var b strings.Builder
+	for i := 0; i < len(src); {
+		if b.Len() > 0 && strings.HasPrefix(src[i:], "]]") {
+			break
+		}
+		r, size := utf8.DecodeRuneInString(src[i:])
+		if r == utf8.RuneError && size == 1 {
+			break
+		}
+		switch r {
+		case ' ', '\t', '\n', ';', '&', '|', ')':
+			return b.String()
+		}
+		b.WriteString(src[i : i+size])
+		i += size
+		if r == '<' || r == '>' {
+			return b.String()
+		}
+	}
+	return b.String()
+}
+
+func (p *Parser) condUnexpectedTokenTextAndNear(pos Pos) (string, string) {
+	near := condUnexpectedTokenFragment(p.sourceFromPos(pos))
+	tokenText := p.currentTokenSource()
+	switch p.tok {
+	case _Lit, dollar:
+		if near != "" {
+			tokenText = near
+		}
+	case _LitRedir:
+		if tokenText == "" {
+			tokenText = near
+		}
+	default:
+		if tokenText == "" {
+			tokenText = near
+		}
+	}
+	if near == "" {
+		near = tokenText
+	}
+	return tokenText, near
+}
+
+func (p *Parser) condBinaryOperatorExpected(pos Pos) {
+	tokenText, near := p.condUnexpectedTokenTextAndNear(pos)
+	p.posErrSecondary(
+		pos,
+		fmt.Sprintf("syntax error near %s", bashQuoteString(near)),
+		"unexpected token %s, conditional binary operator expected",
+		bashQuoteString(tokenText),
+	)
+}
+
+func (p *Parser) condUnaryUnexpectedArgument(pos Pos) {
+	tokenText, near := p.condUnexpectedTokenTextAndNear(pos)
+	p.posErrSecondary(
+		pos,
+		fmt.Sprintf("syntax error near %s", bashQuoteString(near)),
+		"unexpected argument %s to conditional unary operator",
+		bashQuoteString(tokenText),
+	)
+}
+
+func (p *Parser) condUnexpectedToken(pos Pos) {
+	tokenText, near := p.condUnexpectedTokenTextAndNear(pos)
+	p.posErrSecondary(
+		pos,
+		fmt.Sprintf("syntax error near %s", bashQuoteString(near)),
+		"syntax error in conditional expression: unexpected token %s",
+		bashQuoteString(tokenText),
+	)
 }
 
 func (p *Parser) condBinaryUnexpectedToken(expr *CondBinary, pos Pos, tokenText string) {
@@ -5642,6 +5723,8 @@ func (p *Parser) condExprBinary(pastAndOr bool) CondExpr {
 			} else {
 				if b, ok := left.(*CondBinary); ok {
 					p.condBinaryUnexpectedToken(b, p.pos, p.val)
+				} else if _, ok := left.(*CondUnary); ok {
+					p.condUnexpectedToken(p.pos)
 				} else {
 					p.curErr("not a valid test operator: %#q", p.val)
 				}
@@ -5649,11 +5732,21 @@ func (p *Parser) condExprBinary(pastAndOr bool) CondExpr {
 			return left
 		}
 		if opTok == illegalTok {
-			p.curErr("not a valid test operator: %#q", p.val)
+			p.condBinaryOperatorExpected(p.pos)
 		}
 		p.tok = opTok
 	case _Lit:
-		p.curErr("test operator words must consist of a single literal")
+		if _, ok := left.(*CondWord); ok {
+			p.condBinaryOperatorExpected(p.pos)
+		} else {
+			p.curErr("test operator words must consist of a single literal")
+		}
+	case _LitRedir:
+		if _, ok := left.(*CondWord); ok {
+			p.condBinaryOperatorExpected(p.pos)
+		} else {
+			p.curErr("not a valid test operator: %#q", p.currentTokenSource())
+		}
 	case rdrIn, rdrOut:
 		if _, ok := left.(*CondWord); !ok {
 			p.posErr(p.pos, "expected %#q, %#q or %#q after complex expr",
@@ -5665,6 +5758,10 @@ func (p *Parser) condExprBinary(pastAndOr bool) CondExpr {
 	default:
 		if b, ok := left.(*CondBinary); ok {
 			p.condBinaryUnexpectedToken(b, p.pos, p.tok.String())
+		} else if _, ok := left.(*CondWord); ok {
+			p.condBinaryOperatorExpected(p.pos)
+		} else if _, ok := left.(*CondUnary); ok {
+			p.condUnexpectedToken(p.pos)
 		} else {
 			p.curErr("not a valid test operator: %#q", p.tok)
 		}
@@ -5730,6 +5827,14 @@ func (p *Parser) condExprUnary() CondExpr {
 		tsFdTerm, tsEmpStr, tsNempStr, tsOptSet, tsVarSet, tsRefVar:
 		u := &CondUnary{OpPos: p.pos, Op: UnTestOperator(p.tok)}
 		p.next()
+		switch {
+		case p.tok == _LitWord && p.val == "]]":
+			p.condUnaryUnexpectedArgument(p.pos)
+			return nil
+		case p.tok == rdrIn || p.tok == rdrOut || p.tok == _LitRedir:
+			p.condUnaryUnexpectedArgument(p.pos)
+			return nil
+		}
 		if u.Op == TsVarSet || u.Op == TsRefVar {
 			context := VarRefDefault
 			if u.Op == TsVarSet {

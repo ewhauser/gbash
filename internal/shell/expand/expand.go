@@ -399,6 +399,20 @@ func Literal(cfg *Config, word *syntax.Word) (string, error) {
 	return cfg.fieldJoin(field), nil
 }
 
+// LiteralNoTilde expands a single shell word like [Literal], but leaves a
+// leading bare `~` untouched.
+func LiteralNoTilde(cfg *Config, word *syntax.Word) (string, error) {
+	if word == nil {
+		return "", nil
+	}
+	cfg = prepareConfig(cfg)
+	field, err := cfg.wordField(word.Parts, quoteNoTilde)
+	if err != nil {
+		return "", err
+	}
+	return cfg.fieldJoin(field), nil
+}
+
 // AssignmentLiteral expands a single shell word using assignment-value
 // semantics. It matches [Literal] except that backslashes in unquoted literal
 // text consume the following byte, as they do in shell assignments.
@@ -496,6 +510,16 @@ func Pattern(cfg *Config, pat *syntax.Pattern) (string, error) {
 	}
 	cfg = prepareConfig(cfg)
 	return cfg.patternString(pat, true)
+}
+
+// PatternNoTilde expands a pattern AST like [Pattern], but leaves a leading
+// bare `~` untouched.
+func PatternNoTilde(cfg *Config, pat *syntax.Pattern) (string, error) {
+	if pat == nil {
+		return "", nil
+	}
+	cfg = prepareConfig(cfg)
+	return cfg.patternString(pat, false)
 }
 
 // PatternWord expands a single shell word as a pattern. It is retained for
@@ -737,7 +761,7 @@ func Regexp(cfg *Config, word *syntax.Word) (string, error) {
 		return "", nil
 	}
 	cfg = prepareConfig(cfg)
-	field, err := cfg.wordField(word.Parts, quoteNone)
+	field, err := cfg.wordField(word.Parts, quoteNoTilde)
 	if err != nil {
 		return "", err
 	}
@@ -1346,6 +1370,7 @@ type quoteLevel uint
 
 const (
 	quoteNone quoteLevel = iota
+	quoteNoTilde
 	quoteAssign
 	quoteAssignNoTilde
 	quoteDouble

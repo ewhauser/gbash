@@ -221,13 +221,13 @@ func (r *Runner) bashCond(ctx context.Context, expr syntax.CondExpr) string {
 func (r *Runner) evalCond(ctx context.Context, expr syntax.CondExpr, trace *tracer) condEval {
 	switch x := expr.(type) {
 	case *syntax.CondWord:
-		value := r.literal(x.Word)
+		value := r.condLiteral(x.Word)
 		return condEval{value: value, trace: condTraceArg(trace, value)}
 	case *syntax.CondPattern:
-		value := r.pattern(x.Pattern)
+		value := r.condPattern(x.Pattern)
 		return condEval{value: value, trace: condTracePattern(trace, value)}
 	case *syntax.CondRegex:
-		value := r.literal(x.Word)
+		value := r.condLiteral(x.Word)
 		return condEval{value: value, trace: condTraceArg(trace, value)}
 	case *syntax.CondVarRef:
 		value := printVarRef(x.Ref)
@@ -244,7 +244,11 @@ func (r *Runner) evalCond(ctx context.Context, expr syntax.CondExpr, trace *trac
 	case *syntax.CondBinary:
 		switch x.Op {
 		case syntax.TsReMatch:
-			left, ok := r.testExpandWord(x.X.(*syntax.CondWord).Word, expand.Literal)
+			expandLeft := expand.Literal
+			if !condTildeExpandsInDBrackets() {
+				expandLeft = expand.LiteralNoTilde
+			}
+			left, ok := r.testExpandWord(x.X.(*syntax.CondWord).Word, expandLeft)
 			if !ok {
 				r.clearBASH_REMATCH()
 				return condEval{}
@@ -260,8 +264,8 @@ func (r *Runner) evalCond(ctx context.Context, expr syntax.CondExpr, trace *trac
 				trace: condTraceBinary(condTraceArg(trace, left), x.Op, condTraceArg(trace, right)),
 			}
 		case syntax.TsMatchShort, syntax.TsMatch, syntax.TsNoMatch:
-			str := r.literal(x.X.(*syntax.CondWord).Word)
-			pattern := r.pattern(x.Y.(*syntax.CondPattern).Pattern)
+			str := r.condLiteral(x.X.(*syntax.CondWord).Word)
+			pattern := r.condPattern(x.Y.(*syntax.CondPattern).Pattern)
 			return condEval{
 				value: condBoolString(match(pattern, str) == (x.Op != syntax.TsNoMatch)),
 				trace: condTraceBinary(condTraceArg(trace, str), x.Op, condTracePattern(trace, pattern)),
