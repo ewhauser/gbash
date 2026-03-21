@@ -13,6 +13,7 @@ GORELEASER_VERSION ?= v2.14.3
 GOLANGCI_LINT_VERSION ?= v2.11.3
 GOLANGCI_LINT_BASE := GOTOOLCHAIN=go1.26.1 CGO_ENABLED=0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 CUSTOM_GCL := $(CURDIR)/custom-gcl
+CUSTOM_GCL_REPO ?= ewhauser/gbash
 GOLANGCI_LINT := $(if $(wildcard .custom-gcl.yml),$(CUSTOM_GCL),$(GOLANGCI_LINT_BASE))
 # Discover every main module in the active go.work so local lint matches CI.
 LINT_MODULE_DIRS_CMD = go list -m -f '{{if .Main}}{{.Dir}}{{end}}' all
@@ -159,8 +160,17 @@ FUZZ_FULL_TARGETS := \
 	$(FUZZ_FULL_SHARD_5)
 
 $(CUSTOM_GCL): .custom-gcl.yml
-	@echo "==> building custom golangci-lint"; \
-	$(GOLANGCI_LINT_BASE) custom
+	@hash=$$(if command -v sha256sum >/dev/null 2>&1; then sha256sum .custom-gcl.yml; else shasum -a 256 .custom-gcl.yml; fi | cut -c1-12); \
+	tag="custom-gcl/$${hash}"; \
+	asset="custom-gcl-$$(go env GOOS)-$$(go env GOARCH).tar.gz"; \
+	echo "==> downloading custom golangci-lint ($${tag})"; \
+	if gh release download "$${tag}" --repo "$(CUSTOM_GCL_REPO)" --pattern "$${asset}" --dir "$(CURDIR)" 2>/dev/null; then \
+		tar xzf "$(CURDIR)/$${asset}" -C "$(CURDIR)" && rm -f "$(CURDIR)/$${asset}"; \
+	else \
+		echo "==> release not found, building from source"; \
+		$(GOLANGCI_LINT_BASE) custom; \
+	fi
+	@chmod +x $(CUSTOM_GCL)
 
 lint: $(if $(wildcard .custom-gcl.yml),$(CUSTOM_GCL))
 	@echo "==> lint ."; \
