@@ -7,6 +7,13 @@ import (
 	"testing"
 )
 
+func helpTestEnv() map[string]string {
+	return map[string]string{
+		archEnvKey:         "aarch64",
+		unameReleaseEnvKey: "25.2.0",
+	}
+}
+
 func runHelpCommand(t *testing.T, args ...string) (string, string, error) {
 	t.Helper()
 
@@ -15,10 +22,7 @@ func runHelpCommand(t *testing.T, args ...string) (string, string, error) {
 		Args:   args,
 		Stdout: &stdout,
 		Stderr: &stderr,
-		Env: map[string]string{
-			archEnvKey:         "aarch64",
-			unameReleaseEnvKey: "25.2.0",
-		},
+		Env:    helpTestEnv(),
 	})
 	return stdout.String(), stderr.String(), err
 }
@@ -30,7 +34,7 @@ func TestHelpDefaultOutputMatchesBashListShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	want := "GNU bash, version 5.3.9(1)-release (aarch64-apple-darwin25.2.0)\n" + bashHelpListBody
+	want := bashHelpVersionLine(&Invocation{Env: helpTestEnv()}) + "\n" + bashHelpListBody
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
