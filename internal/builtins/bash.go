@@ -140,7 +140,16 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 	if err != nil {
 		return err
 	}
-	result, err := inv.Exec(ctx, parsed.BuildExecutionRequest(inv.Env, inv.Cwd, stdin, script))
+	req := parsed.BuildExecutionRequest(inv.Env, inv.Cwd, stdin, script)
+	// When stdout and stderr point to the same writer (e.g. 2>&1),
+	// pass them through so the child session writes directly and
+	// output interleaving between trace and command output is preserved.
+	passthrough := inv.Stdout != nil && inv.Stdout == inv.Stderr
+	if passthrough {
+		req.Stdout = inv.Stdout
+		req.Stderr = inv.Stderr
+	}
+	result, err := inv.Exec(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -156,6 +165,16 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 	if result != nil && result.Stderr != "" {
 		result.Stderr = prefixNestedShellCommandNotFound(c.name, result.Stderr)
 		result.Stderr = prefixNestedShellBuiltinWarnings(c.name, result.Stderr)
+	}
+	if passthrough {
+		// Output was already written via the passthrough writers,
+		// so skip writeExecutionOutputs to avoid duplicated output.
+		// Note: stderr normalization above (bash: prefix, etc.) runs on
+		// the captured result but cannot retroactively fix what was
+		// already streamed. This means error prefixes are lost when
+		// stderr is merged with stdout; the proper fix is for the child
+		// session to emit the prefix itself.
+		return exitForExecutionResult(result)
 	}
 	if err := writeExecutionOutputs(inv, result); err != nil {
 		return err

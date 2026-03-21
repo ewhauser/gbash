@@ -491,6 +491,7 @@ type RunnerConfig struct {
 func newRunnerBase() *Runner {
 	r := &Runner{}
 	r.dirStack = r.dirBootstrap[:0]
+	r.opts[optBraceExpand] = true // braceexpand is on by default in bash
 	// turn "on" the default Bash options
 	for i, opt := range &bashOptsTable {
 		r.opts[len(posixOptsTable)+i] = opt.defaultState
@@ -666,6 +667,7 @@ type bashOpt struct {
 var posixOptsTable = [...]posixOpt{
 	// sorted alphabetically by name
 	{'a', "allexport"},
+	{'B', "braceexpand"},
 	{'E', "errtrace"},
 	{'e', "errexit"},
 	{'T', "functrace"},
@@ -816,8 +818,9 @@ var bashOptsTable = [...]bashOpt{
 // know which option we're after at compile time. First come the shell options,
 // then the bash options.
 const (
-	// These correspond to indexes in [shellOptsTable]
+	// These correspond to indexes in [posixOptsTable]
 	optAllExport = iota
+	optBraceExpand
 	optErrTrace
 	optErrExit
 	optFuncTrace
@@ -1009,6 +1012,16 @@ func (r *Runner) Reset() {
 			home = defaultVirtualHomeDir
 		}
 		r.setVarString("HISTFILE", path.Join(home, ".bash_history"))
+	}
+
+	// When a parent shell exports SHELLOPTS, apply the inherited
+	// options so that the child mirrors the parent's set -o state.
+	if shellOpts := r.writeEnv.Get("SHELLOPTS"); shellOpts.IsSet() && shellOpts.Exported {
+		for _, optName := range strings.Split(shellOpts.String(), ":") {
+			if opt := r.posixOptByName(optName); opt != nil {
+				*opt = true
+			}
+		}
 	}
 
 	r.dirStack = append(r.dirStack, r.logicalDir)
