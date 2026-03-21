@@ -4,6 +4,7 @@
 package interp
 
 import (
+	"context"
 	cryptorand "crypto/rand"
 	"encoding/binary"
 	"fmt"
@@ -1223,6 +1224,9 @@ func (r *Runner) assignLiteral(as *syntax.Assign) string {
 			panic("interp: literalized assignment missing scalar literal")
 		}
 		return raw
+	}
+	if r.ecfg == nil {
+		r.fillExpandConfig(context.Background())
 	}
 	str, err := expand.AssignmentLiteral(r.ecfg, as.Value)
 	r.expandErr(err)

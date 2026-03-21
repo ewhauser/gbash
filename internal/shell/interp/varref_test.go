@@ -26,6 +26,7 @@ func runInterpScriptConfig(t *testing.T, cfg *RunnerConfig, src string) (string,
 		cfg = &RunnerConfig{Dir: "/tmp"}
 	}
 	cfg = &RunnerConfig{
+		StartupHome:      cfg.StartupHome,
 		Env:              cfg.Env,
 		Dir:              cfg.Dir,
 		Params:           cfg.Params,

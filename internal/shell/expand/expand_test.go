@@ -1702,6 +1702,26 @@ func TestFieldsReparseBraceExpandedWords(t *testing.T) {
 			src:  `~{/src,root}`,
 			want: []string{"/home/bob/src", "/root"},
 		},
+		{
+			name: "QuotedBraceElementsStillQuoteAfterReparse",
+			src:  `{'a',b}_{c,"d"}`,
+			want: []string{"a_c", "a_d", "b_c", "b_d"},
+		},
+		{
+			name: "MixedQuotesPreserveLiteralValue",
+			src:  `-{\X"b",'cd'}-`,
+			want: []string{"-Xb-", "-cd-"},
+		},
+		{
+			name: "EmptyAlternativesRemainWords",
+			src:  `{X,,Y,}`,
+			want: []string{"X", "Y"},
+		},
+		{
+			name: "EmptyAlternativesPreserveQuotedSuffix",
+			src:  `{X,,Y,}''`,
+			want: []string{"X", "", "Y", ""},
+		},
 	}
 
 	for _, tc := range tests {
