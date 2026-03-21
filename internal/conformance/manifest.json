@@ -724,13 +724,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/errexit.test.sh::set -e in function #2": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
         "oils/errexit.test.sh::set errexit while it's ignored in a subshell (moot with strict_errexit)": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"

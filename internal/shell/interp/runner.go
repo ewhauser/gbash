@@ -618,7 +618,12 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 	oldFDs := cloneFDTable(r.fds)
 	oldTraceOutput := r.traceOutput
 	oldExpandBaseFDs := r.expandBaseFDs
+	oldNoErrExit := r.noErrExit
+	if st.Negated {
+		r.noErrExit = true
+	}
 	defer func() {
+		r.noErrExit = oldNoErrExit
 		r.traceOutput = oldTraceOutput
 		r.expandBaseFDs = oldExpandBaseFDs
 	}()
