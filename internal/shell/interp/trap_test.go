@@ -791,6 +791,60 @@ func TestSourceReturnTrapUsesPreSourceStatusForQuestionMark(t *testing.T) {
 	}
 }
 
+func TestSourceReturnTrapUsesSourceStatusOnNormalEOF(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	helperPath := filepath.Join(dir, "return-helper.sh")
+	if err := os.WriteFile(helperPath, []byte("false\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", helperPath, err)
+	}
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir:         dir,
+		OpenHandler: sourceTestOpenHandler,
+	}, "true\n"+
+		"trap 'echo ret:$?' RETURN\n"+
+		fmt.Sprintf(". %q\n", helperPath))
+	var status ExitStatus
+	if !errors.As(err, &status) || status != 1 {
+		t.Fatalf("Run error = %v, want exit status 1", err)
+	}
+	const want = "ret:1\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestSourceReturnTrapSkipsExit(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	helperPath := filepath.Join(dir, "exit-helper.sh")
+	if err := os.WriteFile(helperPath, []byte("exit 7\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", helperPath, err)
+	}
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir:         dir,
+		OpenHandler: sourceTestOpenHandler,
+	}, "trap 'echo ret:$?' RETURN\n"+
+		fmt.Sprintf(". %q\n", helperPath))
+	var status ExitStatus
+	if !errors.As(err, &status) || status != 7 {
+		t.Fatalf("Run error = %v, want exit status 7", err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestDebugAndReturnTrapInheritance(t *testing.T) {
 	t.Parallel()
 

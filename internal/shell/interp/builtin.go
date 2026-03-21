@@ -1820,8 +1820,12 @@ func (r *Runner) sourceBuiltin(ctx context.Context, pos syntax.Pos, name string,
 	}
 	r.inSource = true
 	runErr := r.runShellReader(ctx, f, sourceName, frame)
-	if !r.exit.fatalExit {
-		r.runSourceReturnTrap(ctx, pos.Line(), preSourceStatus)
+	if !r.exit.fatalExit && !r.exit.exiting {
+		sourceTrapStatus := preSourceStatus
+		if !r.exit.returning {
+			sourceTrapStatus = r.exit.code
+		}
+		r.runSourceReturnTrap(ctx, pos.Line(), sourceTrapStatus)
 	}
 
 	if sourceArgs && !r.sourceSetParams {
