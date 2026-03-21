@@ -166,14 +166,14 @@ lint: $(if $(wildcard .custom-gcl.yml),$(CUSTOM_GCL))
 	@echo "==> lint ."; \
 	$(GOLANGCI_LINT) run ./...
 
-lint-contrib:
+lint-contrib: $(if $(wildcard .custom-gcl.yml),$(CUSTOM_GCL))
 	@set -eu; \
 	for dir in $$($(LINT_MODULE_DIRS_CMD) | grep '/contrib/'); do \
 		echo "==> lint $$dir"; \
 		( cd "$$dir" && $(GOLANGCI_LINT) run ./... ); \
 	done
 
-lint-examples:
+lint-examples: $(if $(wildcard .custom-gcl.yml),$(CUSTOM_GCL))
 	@set -eu; \
 	for dir in $$($(LINT_MODULE_DIRS_CMD) | grep '/examples'); do \
 		echo "==> lint $$dir"; \
