@@ -1286,6 +1286,11 @@ func TestCommandStringArithmeticErrorsUseShellNamePrefix(t *testing.T) {
 func TestCommandStringDivisionByZeroFatality(t *testing.T) {
 	t.Parallel()
 
+	wantDivZeroStderr := "42 / 0 : division by 0 (error token is \"0 \")\n"
+	if runtime.GOOS == "darwin" {
+		wantDivZeroStderr = "42 / 0 : division by 0 (error token is \" \")\n"
+	}
+
 	t.Run("command arg aborts shell", func(t *testing.T) {
 		t.Parallel()
 
@@ -1296,9 +1301,8 @@ func TestCommandStringDivisionByZeroFatality(t *testing.T) {
 		if got, want := stdout, "inside=1\n"; got != want {
 			t.Fatalf("stdout = %q, want %q", got, want)
 		}
-		const wantStderr = "42 / 0 : division by 0 (error token is \" \")\n"
-		if stderr != wantStderr {
-			t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+		if stderr != wantDivZeroStderr {
+			t.Fatalf("stderr = %q, want %q", stderr, wantDivZeroStderr)
 		}
 	})
 
@@ -1312,9 +1316,8 @@ func TestCommandStringDivisionByZeroFatality(t *testing.T) {
 		if got, want := stdout, "inside=1\n"; got != want {
 			t.Fatalf("stdout = %q, want %q", got, want)
 		}
-		const wantStderr = "42 / 0 : division by 0 (error token is \" \")\n"
-		if stderr != wantStderr {
-			t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+		if stderr != wantDivZeroStderr {
+			t.Fatalf("stderr = %q, want %q", stderr, wantDivZeroStderr)
 		}
 	})
 
@@ -1328,9 +1331,8 @@ func TestCommandStringDivisionByZeroFatality(t *testing.T) {
 		if got, want := stdout, "inside=1\n"; got != want {
 			t.Fatalf("stdout = %q, want %q", got, want)
 		}
-		const wantStderr = "42 / 0 : division by 0 (error token is \" \")\n"
-		if stderr != wantStderr {
-			t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+		if stderr != wantDivZeroStderr {
+			t.Fatalf("stderr = %q, want %q", stderr, wantDivZeroStderr)
 		}
 	})
 
@@ -1344,9 +1346,8 @@ func TestCommandStringDivisionByZeroFatality(t *testing.T) {
 		if got, want := stdout, "inside=1\n"; got != want {
 			t.Fatalf("stdout = %q, want %q", got, want)
 		}
-		const wantStderr = "42 / 0 : division by 0 (error token is \" \")\n"
-		if stderr != wantStderr {
-			t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+		if stderr != wantDivZeroStderr {
+			t.Fatalf("stderr = %q, want %q", stderr, wantDivZeroStderr)
 		}
 	})
 
@@ -1360,9 +1361,8 @@ func TestCommandStringDivisionByZeroFatality(t *testing.T) {
 		if got, want := stdout, "inside=1\n"; got != want {
 			t.Fatalf("stdout = %q, want %q", got, want)
 		}
-		const wantStderr = "42 / 0 : division by 0 (error token is \" \")\n"
-		if stderr != wantStderr {
-			t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+		if stderr != wantDivZeroStderr {
+			t.Fatalf("stderr = %q, want %q", stderr, wantDivZeroStderr)
 		}
 	})
 }
