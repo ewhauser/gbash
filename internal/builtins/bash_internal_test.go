@@ -18,6 +18,38 @@ func TestNormalizeNestedShellArithStderr(t *testing.T) {
 	}
 }
 
+func TestNormalizeNestedShellArithStderrPreservesOtherLines(t *testing.T) {
+	t.Parallel()
+
+	script := "echo before >&2\necho $(( 1 +\r\n2))\necho after >&2\n"
+	stderr := "before\nline 2: not a valid arithmetic operator: `2`\nline 2: `2))'\nafter\n"
+
+	got, ok := normalizeNestedShellArithStderr(script, stderr)
+	if !ok {
+		t.Fatal("normalizeNestedShellArithStderr() ok = false, want true")
+	}
+	const want = "before\n1 +\r\n2: syntax error: operand expected (error token is \"\r\n2\")\nafter\n"
+	if got != want {
+		t.Fatalf("normalizeNestedShellArithStderr() = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeNestedShellArithStderrDropsBareContinuationLine(t *testing.T) {
+	t.Parallel()
+
+	script := "echo $(( 1 +\r\n2))\n"
+	stderr := "line 1: not a valid arithmetic operator: `2`\n`2))'\n"
+
+	got, ok := normalizeNestedShellArithStderr(script, stderr)
+	if !ok {
+		t.Fatal("normalizeNestedShellArithStderr() ok = false, want true")
+	}
+	const want = "1 +\r\n2: syntax error: operand expected (error token is \"\r\n2\")\n"
+	if got != want {
+		t.Fatalf("normalizeNestedShellArithStderr() = %q, want %q", got, want)
+	}
+}
+
 func TestPrefixNestedShellDiagnosticPreservesOperandSpacing(t *testing.T) {
 	t.Parallel()
 

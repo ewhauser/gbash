@@ -539,6 +539,7 @@ func normalizeBashStderr(value string) string {
 	value = normalizeNestedShellPrefixes(value)
 	value = normalizeMultiLineNestedShellPrefixes(value)
 	value = normalizeCommandStringOperandPrefix(value)
+	value = normalizeArithOperandContinuation(value)
 	value = procFDLsMissingPattern.ReplaceAllString(value, "")
 	value = strings.ReplaceAll(value, "shopt: usage: shopt [-pqsu] [-o long-option] optname [optname...]\n", "shopt: usage: shopt [-pqsu] [-o] [optname ...]\n")
 	value = bashCannotOpenNoSuchFilePattern.ReplaceAllString(value, "$1: $2: No such file or directory")
@@ -576,6 +577,26 @@ func normalizeCommandStringOperandPrefix(value string) string {
 		lines[i] = rest + line[len(trimmed):]
 	}
 	return strings.Join(lines, "")
+}
+
+func normalizeArithOperandContinuation(value string) string {
+	lines := strings.SplitAfter(value, "\n")
+	out := make([]string, 0, len(lines))
+	continuationWindow := 0
+	for _, line := range lines {
+		trimmed := strings.TrimRight(line, "\n")
+		if continuationWindow > 0 && strings.HasPrefix(strings.TrimLeft(trimmed, " \t"), "`") {
+			continuationWindow = 0
+			continue
+		}
+		if strings.Contains(trimmed, "syntax error: operand expected") {
+			continuationWindow = 4
+		} else if continuationWindow > 0 {
+			continuationWindow--
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "")
 }
 
 func normalizeBadFDInterleave(value string) string {

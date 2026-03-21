@@ -163,9 +163,6 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 }
 
 func normalizeNestedShellArithStderr(script, stderr string) (string, bool) {
-	if !strings.Contains(stderr, "not a valid arithmetic operator") {
-		return "", false
-	}
 	for search := 0; search < len(script); {
 		startRel := strings.Index(script[search:], "$((")
 		if startRel < 0 {
@@ -184,11 +181,82 @@ func normalizeNestedShellArithStderr(script, stderr string) (string, bool) {
 			if exprText == "" {
 				return "", false
 			}
-			return fmt.Sprintf("%s: syntax error: operand expected (error token is %s)\n", exprText, bashQuoteArithToken(tokenText)), true
+			replacement := fmt.Sprintf("%s: syntax error: operand expected (error token is %s)\n", exprText, bashQuoteArithToken(tokenText))
+			normalized := stderr
+			replaced := false
+			if strings.Contains(stderr, "not a valid arithmetic operator") {
+				var ok bool
+				normalized, ok = replaceNestedShellArithDiagnostic(stderr, replacement)
+				replaced = ok
+			}
+			withoutContinuation, stripped := stripNestedShellArithContinuation(normalized)
+			if replaced || stripped {
+				return withoutContinuation, true
+			}
+			return "", false
 		}
 		search = exprEnd + len("))")
 	}
 	return "", false
+}
+
+func replaceNestedShellArithDiagnostic(stderr, replacement string) (string, bool) {
+	lines := strings.SplitAfter(stderr, "\n")
+	out := make([]string, 0, len(lines))
+	replaced := false
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimRight(lines[i], "\n")
+		if !strings.Contains(trimmed, "not a valid arithmetic operator") {
+			out = append(out, lines[i])
+			continue
+		}
+		out = append(out, replacement)
+		replaced = true
+		for i+1 < len(lines) {
+			next := strings.TrimLeft(strings.TrimRight(lines[i+1], "\n"), " \t")
+			if strings.HasPrefix(next, "`") || (strings.HasPrefix(next, "line ") && strings.Contains(next, ": `")) {
+				i++
+				continue
+			}
+			break
+		}
+	}
+	if !replaced {
+		return "", false
+	}
+	return strings.Join(out, ""), true
+}
+
+func stripNestedShellArithContinuation(stderr string) (string, bool) {
+	lines := strings.SplitAfter(stderr, "\n")
+	out := make([]string, 0, len(lines))
+	stripped := false
+	sawOperandExpected := false
+	for _, line := range lines {
+		trimmed := strings.TrimRight(line, "\n")
+		switch {
+		case strings.Contains(trimmed, "syntax error: operand expected"):
+			sawOperandExpected = true
+			out = append(out, line)
+		case sawOperandExpected && isNestedShellArithContinuationLine(trimmed):
+			stripped = true
+		default:
+			sawOperandExpected = false
+			out = append(out, line)
+		}
+	}
+	if !stripped {
+		return stderr, false
+	}
+	return strings.Join(out, ""), true
+}
+
+func isNestedShellArithContinuationLine(line string) bool {
+	line = strings.TrimLeft(line, " \t")
+	if strings.HasPrefix(line, "`") {
+		return true
+	}
+	return strings.HasPrefix(line, "bash: line ") && strings.Contains(line, ": `")
 }
 
 func nestedShellArithCRToken(exprRaw string) (string, bool) {
