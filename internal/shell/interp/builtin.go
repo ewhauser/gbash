@@ -1829,6 +1829,7 @@ func (r *Runner) commandBuiltin(ctx context.Context, pos syntax.Pos, args []stri
 	restorePath := func() {}
 	if useDefaultPath {
 		restorePath = r.setTemporaryPath(defaultExecPath)
+		ctx = withDisabledCommandHash(ctx)
 		defer restorePath()
 	}
 	if !forcePath && !useDefaultPath && IsBuiltin(args[0]) {
@@ -1840,10 +1841,16 @@ func (r *Runner) commandBuiltin(ctx context.Context, pos syntax.Pos, args []stri
 
 func (r *Runner) setTemporaryPath(pathValue string) func() {
 	prev := r.writeEnv.Get("PATH")
-	r.setVar("PATH", expand.Variable{Set: true, Kind: expand.String, Str: pathValue})
+	temp := prev
+	temp.Set = true
+	temp.Kind = expand.String
+	temp.Str = pathValue
+	temp.List = nil
+	temp.Map = nil
+	temp.Indices = nil
+	_ = r.writeEnv.Set("PATH", temp)
 	return func() {
 		_ = r.writeEnv.Set("PATH", prev)
-		r.afterSetVar("PATH", prev)
 	}
 }
 
@@ -1879,6 +1886,9 @@ func (r *Runner) hashBuiltin(ctx context.Context, args []string) (exit exitStatu
 		if err != nil {
 			r.errf("hash: %s: not found\n", name)
 			exit.code = 1
+			continue
+		}
+		if strings.ContainsRune(name, '/') {
 			continue
 		}
 		r.commandHashRemember(name, path)
