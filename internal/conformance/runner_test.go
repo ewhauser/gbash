@@ -325,7 +325,22 @@ func TestPrepareWorkspaceUsesScopedFixtureBaseDirForGlobSpecs(t *testing.T) {
 		t.Fatalf("Stat(glob bin/bash) error = %v, want not exist", err)
 	}
 
-	defaultWorkspace, err := prepareWorkspace(cfg, "oils/assign-extended.test.sh", bashPath)
+	repoRootWorkspace, err := prepareWorkspace(cfg, "oils/assign-extended.test.sh", bashPath)
+	if err != nil {
+		t.Fatalf("prepareWorkspace(assign-extended) error = %v", err)
+	}
+	defer removeAll(repoRootWorkspace)
+	if _, err := os.Stat(filepath.Join(repoRootWorkspace, "spec", "testdata", "echo.sz")); err != nil {
+		t.Fatalf("Stat(assign-extended spec/testdata/echo.sz) error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoRootWorkspace, "testdata", "echo.sz")); !os.IsNotExist(err) {
+		t.Fatalf("Stat(assign-extended testdata/echo.sz) error = %v, want not exist", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoRootWorkspace, "bin", "bash")); !os.IsNotExist(err) {
+		t.Fatalf("Stat(assign-extended bin/bash) error = %v, want not exist", err)
+	}
+
+	defaultWorkspace, err := prepareWorkspace(cfg, "oils/serialize.test.sh", bashPath)
 	if err != nil {
 		t.Fatalf("prepareWorkspace(default) error = %v", err)
 	}
