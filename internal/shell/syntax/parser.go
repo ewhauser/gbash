@@ -1487,6 +1487,8 @@ func (e ParseError) bashCompat() ParseError {
 		e.noSourceLine = true
 	case e.Text == "`for` must be followed by a literal" && strings.HasSuffix(sourceLine, "for"):
 		e.bashText = "syntax error near unexpected token `newline'"
+	case e.Text == "`case` must be followed by a word" && strings.HasSuffix(sourceLine, "case"):
+		e.bashText = "syntax error near unexpected token `newline'"
 	case e.Text == "reached EOF without matching `$(` with `)`":
 		e.bashText = "unexpected EOF while looking for matching `)'"
 		e.SourceLine = ""
@@ -4857,7 +4859,13 @@ func (p *Parser) caseClause(s *Stmt) {
 	p.next()
 	cc.Word = p.getWord()
 	if cc.Word == nil {
-		p.followErr(cc.Case, "case", noQuote("a word"))
+		if p.recoverError() {
+			cc.Word = p.wordOne(&Lit{ValuePos: recoveredPos})
+		} else {
+			p.followErr(cc.Case, "case", noQuote("a word"))
+			s.Cmd = cc
+			return
+		}
 	}
 	end := rsrvEsac
 	p.got(_Newl)

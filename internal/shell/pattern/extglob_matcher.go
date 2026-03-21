@@ -11,40 +11,52 @@ import (
 	"unicode/utf8"
 )
 
-// ExtendedPatternMatcher returns a [regexp.Regexp.MatchString]-like function.
-// It falls back to a recursive matcher when [Regexp] reports a negated extglob
-// !(...) group, since Go's regexp package cannot express that directly.
-func ExtendedPatternMatcher(pat string, mode Mode) (func(string) bool, error) {
+// Match reports whether name matches pat under the supplied shell pattern mode.
+// It falls back to the recursive matcher for patterns or inputs containing
+// invalid UTF-8 bytes, since Go's regexp engine operates on UTF-8 code points.
+func Match(pat, name string, mode Mode) (bool, error) {
 	if mode&ExtendedOperators != 0 && mode&EntireString == 0 {
 		panic("ExtendedOperators is only supported with EntireString")
 	}
 
-	expr, err := Regexp(pat, mode)
-	if err == nil {
-		rx := regexp.MustCompile(expr)
-		return rx.MatchString, nil
-	}
-	var negErr *NegExtGlobError
-	if !errors.As(err, &negErr) {
-		return nil, err
+	if utf8.ValidString(pat) && utf8.ValidString(name) {
+		expr, err := Regexp(pat, mode)
+		if err == nil {
+			return regexp.MustCompile(expr).MatchString(name), nil
+		}
+		var negErr *NegExtGlobError
+		if !errors.As(err, &negErr) {
+			return false, err
+		}
 	}
 	root, err := parseExtPattern(pat, mode)
 	if err != nil {
+		return false, err
+	}
+	m := extMatcher{
+		mode:       mode,
+		memo:       make(map[extMemoKey][]int),
+		repeatMemo: make(map[extMemoKey][]int),
+		stack:      make(map[extMemoKey]struct{}),
+	}
+	for _, end := range m.ends(root, 0, name, 0) {
+		if end == len(name) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// ExtendedPatternMatcher returns a [regexp.Regexp.MatchString]-like function.
+// It falls back to a recursive matcher when [Regexp] reports a negated extglob
+// !(...) group, since Go's regexp package cannot express that directly.
+func ExtendedPatternMatcher(pat string, mode Mode) (func(string) bool, error) {
+	if _, err := Match(pat, pat, mode); err != nil {
 		return nil, err
 	}
 	return func(name string) bool {
-		m := extMatcher{
-			mode:       mode,
-			memo:       make(map[extMemoKey][]int),
-			repeatMemo: make(map[extMemoKey][]int),
-			stack:      make(map[extMemoKey]struct{}),
-		}
-		for _, end := range m.ends(root, 0, name, 0) {
-			if end == len(name) {
-				return true
-			}
-		}
-		return false
+		ok, err := Match(pat, name, mode)
+		return err == nil && ok
 	}, nil
 }
 

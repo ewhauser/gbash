@@ -1909,6 +1909,10 @@ var errorCases = []errorCase{
 		langErr("1:1: `case x` must be followed by `in`"),
 	),
 	errCase(
+		"case\nin esac",
+		langErr("1:1: `case` must be followed by a word"),
+	),
+	errCase(
 		"case i in 3) foo;",
 		langErr("1:1: `case` statement must end with `esac`"),
 	),
