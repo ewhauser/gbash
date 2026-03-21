@@ -12,6 +12,15 @@ const bashHelpRelease = "5.3.9"
 
 type Help struct{}
 
+type helpMode uint8
+
+const (
+	helpModeDefault helpMode = iota
+	helpModeShort
+	helpModeManpage
+	helpModeDescribe
+)
+
 type helpTopic struct {
 	Synopsis string
 	Summary  string
@@ -172,26 +181,36 @@ func (c *Help) Name() string {
 }
 
 func (c *Help) Run(_ context.Context, inv *Invocation) error {
-	short := false
-	describe := false
-	manpage := false
+	mode := helpModeDefault
 	args := inv.Args
 	for len(args) > 0 {
-		switch args[0] {
-		case "-s":
-			short = true
-			args = args[1:]
-		case "-d":
-			describe = true
-			args = args[1:]
-		case "-m":
-			manpage = true
-			args = args[1:]
-		case "--":
+		arg := args[0]
+		switch {
+		case arg == "--":
 			args = args[1:]
 			goto done
+		case len(arg) <= 1 || arg[0] != '-':
+			goto done
+		case strings.HasPrefix(arg, "--"):
+			return exitf(inv, 2, "help: --: invalid option\nhelp: usage: help [-dms] [pattern ...]")
 		default:
-			goto done
+			for i := 1; i < len(arg); i++ {
+				switch arg[i] {
+				case 's':
+					if mode < helpModeShort {
+						mode = helpModeShort
+					}
+				case 'm':
+					if mode < helpModeManpage {
+						mode = helpModeManpage
+					}
+				case 'd':
+					mode = helpModeDescribe
+				default:
+					return exitf(inv, 2, "help: -%c: invalid option\nhelp: usage: help [-dms] [pattern ...]", arg[i])
+				}
+			}
+			args = args[1:]
 		}
 	}
 done:
@@ -208,20 +227,20 @@ done:
 			_, _ = fmt.Fprintf(inv.Stderr, "help: no help topics match `%s'.  Try `help help' or `man -k %s' or `info %s'.\n", arg, arg, arg)
 			continue
 		}
-		if i > 0 && !short && !describe {
+		if i > 0 && mode != helpModeShort && mode != helpModeDescribe {
 			_, _ = io.WriteString(inv.Stdout, "\n")
 		}
-		switch {
-		case short:
-			_, _ = fmt.Fprintf(inv.Stdout, "%s: %s\n", arg, topic.Synopsis)
-		case describe:
-			_, _ = fmt.Fprintf(inv.Stdout, "%-15s %s\n", arg, topic.Summary)
-		case manpage:
+		switch mode {
+		case helpModeDescribe:
+			_, _ = fmt.Fprintf(inv.Stdout, "%s - %s\n", arg, topic.Summary)
+		case helpModeManpage:
 			body := strings.TrimSuffix(topic.Body, "\n")
 			if body == "" {
 				body = fmt.Sprintf("%s: %s\n    %s", arg, topic.Synopsis, topic.Summary)
 			}
 			_, _ = fmt.Fprintln(inv.Stdout, body)
+		case helpModeShort:
+			_, _ = fmt.Fprintf(inv.Stdout, "%s: %s\n", arg, topic.Synopsis)
 		default:
 			body := topic.Body
 			if body == "" {

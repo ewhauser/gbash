@@ -578,6 +578,7 @@ func TestBashQuoteValueMatchesSingleQuoteEdgeCases(t *testing.T) {
 		{"spam", "'spam'"},
 		{"''", "''\\'''\\'''"},
 		{"a'b", "'a'\\''b'"},
+		{"é μ", "'é μ'"},
 		{"a\nb\x01c'd", "$'a\\nb\\001c\\'d'"},
 	}
 	for _, tc := range tests {

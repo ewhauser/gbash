@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/ewhauser/gbash/internal/shell/pattern"
 	"github.com/ewhauser/gbash/internal/shell/syntax"
@@ -888,10 +889,15 @@ func bashQuoteValue(str string) (string, error) {
 }
 
 func bashQuoteNeedsANSI(str string) bool {
-	for i := 0; i < len(str); i++ {
-		if str[i] < 0x20 || str[i] >= 0x7f {
+	for i := 0; i < len(str); {
+		r, size := utf8.DecodeRuneInString(str[i:])
+		if r == utf8.RuneError && size == 1 {
 			return true
 		}
+		if !unicode.IsPrint(r) {
+			return true
+		}
+		i += size
 	}
 	return false
 }

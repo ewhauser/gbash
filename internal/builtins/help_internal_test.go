@@ -3,6 +3,7 @@ package builtins
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -65,5 +66,109 @@ func TestHelpShortSynopsisMatchesBash(t *testing.T) {
 	}
 	if stderr != "" {
 		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestHelpModePrecedenceMatchesBash(t *testing.T) {
+	t.Parallel()
+
+	describeOut, stderr, err := runHelpCommand(t, "-d", "help")
+	if err != nil {
+		t.Fatalf("Run(-d) error = %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+
+	for _, args := range [][]string{
+		{"-s", "-d", "help"},
+		{"-d", "-s", "help"},
+		{"-d", "-m", "help"},
+		{"-m", "-d", "help"},
+		{"-sd", "help"},
+		{"-md", "help"},
+	} {
+		stdout, stderr, err := runHelpCommand(t, args...)
+		if err != nil {
+			t.Fatalf("Run(%v) error = %v", args, err)
+		}
+		if stdout != describeOut {
+			t.Fatalf("stdout for %v = %q, want %q", args, stdout, describeOut)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr for %v = %q, want empty", args, stderr)
+		}
+	}
+
+	manpageOut, stderr, err := runHelpCommand(t, "-m", "help")
+	if err != nil {
+		t.Fatalf("Run(-m) error = %v", err)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+
+	for _, args := range [][]string{
+		{"-m", "-s", "help"},
+		{"-s", "-m", "help"},
+		{"-ms", "help"},
+	} {
+		stdout, stderr, err := runHelpCommand(t, args...)
+		if err != nil {
+			t.Fatalf("Run(%v) error = %v", args, err)
+		}
+		if stdout != manpageOut {
+			t.Fatalf("stdout for %v = %q, want %q", args, stdout, manpageOut)
+		}
+		if stderr != "" {
+			t.Fatalf("stderr for %v = %q, want empty", args, stderr)
+		}
+	}
+}
+
+func TestHelpRejectsInvalidOptionsLikeBash(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "short",
+			args: []string{"-z", "help"},
+			want: "help: -z: invalid option\nhelp: usage: help [-dms] [pattern ...]\n",
+		},
+		{
+			name: "clustered",
+			args: []string{"-sz", "help"},
+			want: "help: -z: invalid option\nhelp: usage: help [-dms] [pattern ...]\n",
+		},
+		{
+			name: "long",
+			args: []string{"--foo", "help"},
+			want: "help: --: invalid option\nhelp: usage: help [-dms] [pattern ...]\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			stdout, stderr, err := runHelpCommand(t, tc.args...)
+			if stdout != "" {
+				t.Fatalf("stdout = %q, want empty", stdout)
+			}
+
+			var exitErr *ExitError
+			if !errors.As(err, &exitErr) {
+				t.Fatalf("error = %v, want ExitError", err)
+			}
+			if exitErr.Code != 2 {
+				t.Fatalf("exit code = %d, want 2", exitErr.Code)
+			}
+			if stderr != tc.want {
+				t.Fatalf("stderr = %q, want %q", stderr, tc.want)
+			}
+		})
 	}
 }
