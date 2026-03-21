@@ -178,6 +178,18 @@ func TestNormalizeOracleResultScopesOverridesToTargetedSpecs(t *testing.T) {
 	}
 }
 
+func TestNormalizeOracleResultNormalizesBuiltinBracketTouchOracleAcrossPlatforms(t *testing.T) {
+	t.Parallel()
+
+	specCase := SpecCase{Name: "-ot and -nt"}
+	got := normalizeOracleResult(OracleBash, "oils/builtin-bracket.test.sh", specCase, ExecutionResult{
+		Stderr: "touch: out of range or illegal time specification: YYYY-MM-DDThh:mm:SS[.frac][tz]\ntouch: out of range or illegal time specification: YYYY-MM-DDThh:mm:SS[.frac][tz]\n",
+	})
+	if want := "touch: missing file operand\nTry 'touch --help' for more information.\n"; got.Stderr != want {
+		t.Fatalf("stderr = %q, want %q", got.Stderr, want)
+	}
+}
+
 func TestLoadWorkspaceIntoMemoryPreservesFixturesAndMutability(t *testing.T) {
 	t.Parallel()
 

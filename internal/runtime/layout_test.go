@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"io"
+	stdfs "io/fs"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -50,8 +51,10 @@ func TestDefaultSandboxLayout(t *testing.T) {
 	if containsLine(lines, "__jb_cd_resolve") {
 		t.Fatalf("Stdout should not expose internal command stubs: %q", result.Stdout)
 	}
-	if !containsLine(lines, "null") {
-		t.Fatalf("Stdout missing /dev entry %q: %q", "null", result.Stdout)
+	for _, entry := range []string{"null", "zero"} {
+		if !containsLine(lines, entry) {
+			t.Fatalf("Stdout missing /dev entry %q: %q", entry, result.Stdout)
+		}
 	}
 }
 
@@ -68,6 +71,16 @@ func TestNewSessionHasPreparedDefaultLayout(t *testing.T) {
 	}
 	if _, err := session.FileSystem().Stat(context.Background(), defaultHomeDir); err != nil {
 		t.Fatalf("Stat(%q) error = %v", defaultHomeDir, err)
+	}
+	tmpInfo, err := session.FileSystem().Stat(context.Background(), defaultTempDir)
+	if err != nil {
+		t.Fatalf("Stat(%q) error = %v", defaultTempDir, err)
+	}
+	if tmpInfo.Mode()&stdfs.ModeSticky == 0 {
+		t.Fatalf("%q mode = %v, want sticky bit", defaultTempDir, tmpInfo.Mode())
+	}
+	if _, err := session.FileSystem().Stat(context.Background(), "/dev/zero"); err != nil {
+		t.Fatalf("Stat(/dev/zero) error = %v", err)
 	}
 }
 

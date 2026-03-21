@@ -214,42 +214,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-bracket.test.sh::( ) ! -a -o with system version of [": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-bracket.test.sh::-h and -L test for symlink": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-bracket.test.sh::-k for sticky bit": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-bracket.test.sh::-ot and -nt": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-bracket.test.sh::-u for setuid, -g too": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-bracket.test.sh::[ -t invalid ]": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-bracket.test.sh::] syntax errors": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-bracket.test.sh::test -c": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-bracket.test.sh::test with extra args is syntax error": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-cd.test.sh::Survey of getcwd() syscall": {
           "mode": "xfail",
           "reason": "conformance: parse error wording for this builtin-cd probe still differs from bash"
@@ -851,11 +815,17 @@
         },
         "oils/parse-errors.test.sh::Long Token - 65535 bytes": {
           "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
+          "reason": "conformance: Darwin wc still differs from GNU bash harness behavior for this case",
+          "goos": [
+            "darwin"
+          ]
         },
         "oils/parse-errors.test.sh::Token that's too long for Oils - 65536 bytes": {
           "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
+          "reason": "conformance: Darwin wc still differs from GNU bash harness behavior for this case",
+          "goos": [
+            "darwin"
+          ]
         },
         "oils/parse-errors.test.sh::array literal in case": {
           "mode": "xfail",

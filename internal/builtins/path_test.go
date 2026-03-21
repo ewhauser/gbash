@@ -64,6 +64,35 @@ func TestTouchSupportsNoCreateAndDateParsing(t *testing.T) {
 	}
 }
 
+func TestTouchDateWithoutFileMatchesConformanceOracle(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "touch -d 2024/01/02 > /tmp/out\nprintf 'status=%s\\n' \"$?\"\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "status=1\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, "touch: missing file operand\nTry 'touch --help' for more information.\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
+func TestTouchValidatesDateBeforeMissingFileOperand(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "touch -d invalid\n")
+	if got, want := result.ExitCode, 1; got != want {
+		t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+	}
+	if got, want := result.Stderr, "touch: invalid date format \"invalid\"\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
 func TestMkfifoCreatesNamedPipesAndSupportsReadWriteRedirects(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})

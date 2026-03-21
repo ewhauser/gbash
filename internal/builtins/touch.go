@@ -58,7 +58,7 @@ func (c *Touch) Spec() CommandSpec {
 			{Name: "posix-stamp", Long: "posix-stamp", Arity: OptionRequiredValue, ValueName: "STAMP", Hidden: true},
 		},
 		Args: []ArgSpec{
-			{Name: "file", ValueName: "FILE", Repeatable: true, Required: true},
+			{Name: "file", ValueName: "FILE", Repeatable: true},
 		},
 		Parse: ParseConfig{
 			InferLongOptions:         true,
@@ -95,6 +95,9 @@ func (c *Touch) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedC
 	times, err := resolveTouchTimes(ctx, inv, &opts)
 	if err != nil {
 		return err
+	}
+	if len(opts.files) == 0 {
+		return exitf(inv, 1, "touch: missing file operand\nTry 'touch --help' for more information.")
 	}
 
 	for _, name := range opts.files {

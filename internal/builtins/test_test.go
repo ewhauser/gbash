@@ -94,6 +94,44 @@ func TestTestReportsParseErrorsAndBracketMismatch(t *testing.T) {
 	}
 }
 
+func TestTestClassicDiagnosticsMatchBashConformanceOracle(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session,
+		"test -n x ]\n"+
+			"printf 'test-bracket=%s\\n' \"$?\"\n"+
+			"test -n x y\n"+
+			"printf 'test-extra=%s\\n' \"$?\"\n"+
+			"[\n"+
+			"printf 'open-bracket=%s\\n' \"$?\"\n"+
+			"[ -n x\n"+
+			"printf 'missing-close=%s\\n' \"$?\"\n"+
+			"[ -n x ] y\n"+
+			"printf 'extra-after=%s\\n' \"$?\"\n"+
+			"command [ --version\n"+
+			"printf 'command-bracket=%s\\n' \"$?\"\n"+
+			"[ -t invalid ]\n"+
+			"printf 'tty=%s\\n' \"$?\"\n",
+	)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "test-bracket=2\ntest-extra=2\nopen-bracket=2\nmissing-close=2\nextra-after=2\ncommand-bracket=2\ntty=2\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, ""+
+		"test: x: binary operator expected\n"+
+		"test: x: binary operator expected\n"+
+		"[: missing `]'\n"+
+		"[: missing `]'\n"+
+		"[: missing `]'\n"+
+		"[: missing `]'\n"+
+		"[: invalid: integer expected\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
 func TestTestMatchesBashAmbiguousClassicForms(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
@@ -110,6 +148,36 @@ func TestTestMatchesBashAmbiguousClassicForms(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
 	if got, want := result.Stdout, "triple\nquint\nparen_eq\ntrailing_word\nfile_eq\nfile_eqeq\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestTestSupportsSpecialModeDeviceAndSymlinkPredicates(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session,
+		"mkdir /tmp/sticky\n"+
+			"touch /tmp/setuid /tmp/setgid\n"+
+			"ln -s /tmp/setuid /tmp/file.link\n"+
+			"ln -s /tmp/missing /tmp/dangling.link\n"+
+			"chmod +t /tmp/sticky\n"+
+			"chmod u+s /tmp/setuid\n"+
+			"chmod g+s /tmp/setgid\n"+
+			"test -k /tmp && echo tmp-sticky\n"+
+			"test -k /tmp/sticky && echo sticky\n"+
+			"test -u /tmp/setuid && echo setuid\n"+
+			"test -g /tmp/setgid && echo setgid\n"+
+			"test -c /dev/zero && echo zero-char\n"+
+			"test -L /tmp/file.link && echo link-L\n"+
+			"test -h /tmp/file.link && echo link-h\n"+
+			"test -L /tmp/dangling.link && echo dangling-L\n"+
+			"test -h /tmp/dangling.link && echo dangling-h\n",
+	)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "tmp-sticky\nsticky\nsetuid\nsetgid\nzero-char\nlink-L\nlink-h\ndangling-L\ndangling-h\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }

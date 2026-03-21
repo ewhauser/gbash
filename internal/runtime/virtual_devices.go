@@ -18,6 +18,7 @@ import (
 const (
 	virtualDeviceDir  = "/dev"
 	virtualNullDevice = "/dev/null"
+	virtualZeroDevice = "/dev/zero"
 )
 
 var virtualDeviceModTime = time.Unix(0, 0).UTC()
@@ -57,8 +58,13 @@ func (f *virtualDeviceFS) OpenFile(ctx context.Context, name string, flag int, p
 		if flag&os.O_CREATE != 0 && flag&os.O_EXCL != 0 {
 			return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrExist}
 		}
-		return &nullDeviceFile{path: abs, flag: flag}, nil
-	case abs == virtualDeviceDir || strings.HasPrefix(abs, virtualNullDevice+"/"):
+		return &virtualDeviceFile{path: abs, flag: flag}, nil
+	case abs == virtualZeroDevice:
+		if flag&os.O_CREATE != 0 && flag&os.O_EXCL != 0 {
+			return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrExist}
+		}
+		return &virtualDeviceFile{path: abs, flag: flag}, nil
+	case abs == virtualDeviceDir || isReservedVirtualDeviceChild(abs):
 		return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrInvalid}
 	default:
 		if isVirtualDeviceChild(abs) && openMayCreateOrWrite(flag) {
@@ -77,7 +83,9 @@ func (f *virtualDeviceFS) Stat(ctx context.Context, name string) (stdfs.FileInfo
 		return virtualDirInfo("dev"), nil
 	case abs == virtualNullDevice:
 		return virtualNullInfo(), nil
-	case strings.HasPrefix(abs, virtualNullDevice+"/"):
+	case abs == virtualZeroDevice:
+		return virtualZeroInfo(), nil
+	case isReservedVirtualDeviceChild(abs):
 		return nil, &os.PathError{Op: "stat", Path: abs, Err: stdfs.ErrInvalid}
 	default:
 		return f.base.Stat(ctx, abs)
@@ -91,7 +99,9 @@ func (f *virtualDeviceFS) Lstat(ctx context.Context, name string) (stdfs.FileInf
 		return virtualDirInfo("dev"), nil
 	case abs == virtualNullDevice:
 		return virtualNullInfo(), nil
-	case strings.HasPrefix(abs, virtualNullDevice+"/"):
+	case abs == virtualZeroDevice:
+		return virtualZeroInfo(), nil
+	case isReservedVirtualDeviceChild(abs):
 		return nil, &os.PathError{Op: "lstat", Path: abs, Err: stdfs.ErrInvalid}
 	default:
 		return f.base.Lstat(ctx, abs)
@@ -105,7 +115,7 @@ func (f *virtualDeviceFS) ReadDir(ctx context.Context, name string) ([]stdfs.Dir
 		return f.readRootDir(ctx)
 	case abs == virtualDeviceDir:
 		return f.readVirtualDeviceDir(ctx)
-	case abs == virtualNullDevice || strings.HasPrefix(abs, virtualNullDevice+"/"):
+	case isReservedVirtualDevice(abs) || isReservedVirtualDeviceChild(abs):
 		return nil, &os.PathError{Op: "readdir", Path: abs, Err: stdfs.ErrInvalid}
 	default:
 		return f.base.ReadDir(ctx, abs)
@@ -115,9 +125,9 @@ func (f *virtualDeviceFS) ReadDir(ctx context.Context, name string) ([]stdfs.Dir
 func (f *virtualDeviceFS) Readlink(ctx context.Context, name string) (string, error) {
 	abs := f.resolve(name)
 	switch {
-	case abs == virtualDeviceDir, abs == virtualNullDevice:
+	case abs == virtualDeviceDir, isReservedVirtualDevice(abs):
 		return "", &os.PathError{Op: "readlink", Path: abs, Err: stdfs.ErrInvalid}
-	case strings.HasPrefix(abs, virtualNullDevice+"/"):
+	case isReservedVirtualDeviceChild(abs):
 		return "", &os.PathError{Op: "readlink", Path: abs, Err: stdfs.ErrInvalid}
 	default:
 		return f.base.Readlink(ctx, abs)
@@ -127,9 +137,9 @@ func (f *virtualDeviceFS) Readlink(ctx context.Context, name string) (string, er
 func (f *virtualDeviceFS) Realpath(ctx context.Context, name string) (string, error) {
 	abs := f.resolve(name)
 	switch {
-	case abs == virtualDeviceDir || abs == virtualNullDevice:
+	case abs == virtualDeviceDir || isReservedVirtualDevice(abs):
 		return abs, nil
-	case strings.HasPrefix(abs, virtualNullDevice+"/"):
+	case isReservedVirtualDeviceChild(abs):
 		return "", &os.PathError{Op: "realpath", Path: abs, Err: stdfs.ErrInvalid}
 	default:
 		return f.base.Realpath(ctx, abs)
@@ -195,7 +205,7 @@ func (f *virtualDeviceFS) MkdirAll(ctx context.Context, name string, perm stdfs.
 	switch {
 	case abs == virtualDeviceDir:
 		return f.ensureVirtualDeviceDir(ctx)
-	case abs == virtualNullDevice || strings.HasPrefix(abs, virtualNullDevice+"/"):
+	case isReservedVirtualDevice(abs) || isReservedVirtualDeviceChild(abs):
 		return &os.PathError{Op: "mkdir", Path: abs, Err: stdfs.ErrInvalid}
 	default:
 		return f.base.MkdirAll(ctx, abs, perm)
@@ -205,7 +215,7 @@ func (f *virtualDeviceFS) MkdirAll(ctx context.Context, name string, perm stdfs.
 func (f *virtualDeviceFS) Mkfifo(ctx context.Context, name string, perm stdfs.FileMode) error {
 	abs := f.resolve(name)
 	switch {
-	case abs == virtualDeviceDir, abs == virtualNullDevice, strings.HasPrefix(abs, virtualNullDevice+"/"):
+	case abs == virtualDeviceDir, isReservedVirtualDevice(abs), isReservedVirtualDeviceChild(abs):
 		return &os.PathError{Op: "mkfifo", Path: abs, Err: stdfs.ErrInvalid}
 	default:
 		if isVirtualDeviceChild(abs) {
@@ -256,7 +266,7 @@ func (f *virtualDeviceFS) Chdir(name string) error {
 		f.cwd = abs
 		f.mu.Unlock()
 		return nil
-	case abs == virtualNullDevice || strings.HasPrefix(abs, virtualNullDevice+"/"):
+	case isReservedVirtualDevice(abs) || isReservedVirtualDeviceChild(abs):
 		return &os.PathError{Op: "chdir", Path: abs, Err: stdfs.ErrInvalid}
 	default:
 	}
@@ -279,8 +289,16 @@ func (f *virtualDeviceFS) ensureVirtualDeviceDir(ctx context.Context) error {
 
 func isVirtualDeviceChild(abs string) bool {
 	return strings.HasPrefix(abs, virtualDeviceDir+"/") &&
-		abs != virtualNullDevice &&
-		!strings.HasPrefix(abs, virtualNullDevice+"/")
+		!isReservedVirtualDevice(abs) &&
+		!isReservedVirtualDeviceChild(abs)
+}
+
+func isReservedVirtualDevice(abs string) bool {
+	return abs == virtualNullDevice || abs == virtualZeroDevice
+}
+
+func isReservedVirtualDeviceChild(abs string) bool {
+	return strings.HasPrefix(abs, virtualNullDevice+"/") || strings.HasPrefix(abs, virtualZeroDevice+"/")
 }
 
 func openMayCreateOrWrite(flag int) bool {
@@ -320,6 +338,7 @@ func (f *virtualDeviceFS) readVirtualDeviceDir(ctx context.Context) ([]stdfs.Dir
 		byName[entry.Name()] = entry
 	}
 	byName["null"] = stdfs.FileInfoToDirEntry(virtualNullInfo())
+	byName["zero"] = stdfs.FileInfoToDirEntry(virtualZeroInfo())
 	return sortedDirEntries(byName), nil
 }
 
@@ -338,9 +357,9 @@ func sortedDirEntries(entries map[string]stdfs.DirEntry) []stdfs.DirEntry {
 
 func rejectVirtualDeviceMutation(op, abs string) error {
 	switch {
-	case abs == virtualDeviceDir || abs == virtualNullDevice:
+	case abs == virtualDeviceDir || isReservedVirtualDevice(abs):
 		return &os.PathError{Op: op, Path: abs, Err: stdfs.ErrPermission}
-	case strings.HasPrefix(abs, virtualNullDevice+"/"):
+	case isReservedVirtualDeviceChild(abs):
 		return &os.PathError{Op: op, Path: abs, Err: stdfs.ErrInvalid}
 	default:
 		return nil
@@ -367,6 +386,16 @@ func virtualNullInfo() stdfs.FileInfo {
 	}
 }
 
+func virtualZeroInfo() stdfs.FileInfo {
+	return virtualFileInfo{
+		name:    "zero",
+		mode:    stdfs.ModeDevice | stdfs.ModeCharDevice | 0o666,
+		modTime: virtualDeviceModTime,
+		uid:     gbfs.DefaultOwnerUID,
+		gid:     gbfs.DefaultOwnerGID,
+	}
+}
+
 type virtualFileInfo struct {
 	name    string
 	mode    stdfs.FileMode
@@ -385,23 +414,31 @@ func (fi virtualFileInfo) Ownership() (gbfs.FileOwnership, bool) {
 	return gbfs.FileOwnership{UID: fi.uid, GID: fi.gid}, true
 }
 
-type nullDeviceFile struct {
+type virtualDeviceFile struct {
 	path   string
 	flag   int
 	closed atomic.Bool
 }
 
-func (f *nullDeviceFile) Read(_ []byte) (int, error) {
+func (f *virtualDeviceFile) Read(p []byte) (int, error) {
 	if f.closed.Load() {
 		return 0, stdfs.ErrClosed
 	}
 	if !canReadVirtualDevice(f.flag) {
 		return 0, &os.PathError{Op: "read", Path: f.path, Err: stdfs.ErrPermission}
 	}
-	return 0, io.EOF
+	switch f.path {
+	case virtualNullDevice:
+		return 0, io.EOF
+	case virtualZeroDevice:
+		clear(p)
+		return len(p), nil
+	default:
+		return 0, &os.PathError{Op: "read", Path: f.path, Err: stdfs.ErrInvalid}
+	}
 }
 
-func (f *nullDeviceFile) Write(p []byte) (int, error) {
+func (f *virtualDeviceFile) Write(p []byte) (int, error) {
 	if f.closed.Load() {
 		return 0, stdfs.ErrClosed
 	}
@@ -411,16 +448,23 @@ func (f *nullDeviceFile) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (f *nullDeviceFile) Close() error {
+func (f *virtualDeviceFile) Close() error {
 	f.closed.Store(true)
 	return nil
 }
 
-func (f *nullDeviceFile) Stat() (stdfs.FileInfo, error) {
+func (f *virtualDeviceFile) Stat() (stdfs.FileInfo, error) {
 	if f.closed.Load() {
 		return nil, stdfs.ErrClosed
 	}
-	return virtualNullInfo(), nil
+	switch f.path {
+	case virtualNullDevice:
+		return virtualNullInfo(), nil
+	case virtualZeroDevice:
+		return virtualZeroInfo(), nil
+	default:
+		return nil, &os.PathError{Op: "stat", Path: f.path, Err: stdfs.ErrInvalid}
+	}
 }
 
 func canReadVirtualDevice(flag int) bool {
@@ -441,4 +485,4 @@ func gbfsMkfifo(ctx context.Context, fsys gbfs.FileSystem, name string, perm std
 	return fifoFS.Mkfifo(ctx, name, perm)
 }
 
-var _ gbfs.File = (*nullDeviceFile)(nil)
+var _ gbfs.File = (*virtualDeviceFile)(nil)
