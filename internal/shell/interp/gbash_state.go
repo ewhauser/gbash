@@ -196,3 +196,10 @@ func (hc HandlerContext) SignalFamily() shellstate.SignalFamily {
 		ParentBASHPID: hc.runner.bashPID,
 	}
 }
+
+func (hc HandlerContext) ProcessGroup() (int, bool) {
+	if hc.runner == nil {
+		return 0, false
+	}
+	return shellstate.ProcessGroupFromContext(hc.runner.ectx)
+}
