@@ -816,10 +816,25 @@ func conformanceLocale() string {
 }
 
 func normalizeOracleResult(mode OracleMode, specPath string, specCase SpecCase, result ExecutionResult) ExecutionResult {
+	result = normalizePlatformSpecificOracleResult(mode, specPath, specCase, result)
 	if !shouldApplyOracleOverrides(specPath) {
 		return result
 	}
 	return applyOracleOverrides(mode, specCase, result)
+}
+
+func normalizePlatformSpecificOracleResult(mode OracleMode, specPath string, specCase SpecCase, result ExecutionResult) ExecutionResult {
+	if mode != OracleBash {
+		return result
+	}
+	if specPath == "oils/builtin-bracket.test.sh" && specCase.Name == "-ot and -nt" {
+		const bsdTouchDateNoOperand = "touch: out of range or illegal time specification: YYYY-MM-DDThh:mm:SS[.frac][tz]\ntouch: out of range or illegal time specification: YYYY-MM-DDThh:mm:SS[.frac][tz]\n"
+		const gnuTouchDateNoOperand = "touch: missing file operand\nTry 'touch --help' for more information.\n"
+		if result.Stderr == bsdTouchDateNoOperand {
+			result.Stderr = gnuTouchDateNoOperand
+		}
+	}
+	return result
 }
 
 func gbashWorkspaceRoot(specPath string) string {

@@ -1027,11 +1027,17 @@
         },
         "oils/parse-errors.test.sh::Long Token - 65535 bytes": {
           "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
+          "reason": "conformance: Darwin wc still differs from GNU bash harness behavior for this case",
+          "goos": [
+            "darwin"
+          ]
         },
         "oils/parse-errors.test.sh::Token that's too long for Oils - 65536 bytes": {
           "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
+          "reason": "conformance: Darwin wc still differs from GNU bash harness behavior for this case",
+          "goos": [
+            "darwin"
+          ]
         },
         "oils/parse-errors.test.sh::array literal in case": {
           "mode": "xfail",

@@ -75,7 +75,7 @@ func TestTouchDateWithoutFileMatchesConformanceOracle(t *testing.T) {
 	if got, want := result.Stdout, "status=1\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
-	if got, want := result.Stderr, "touch: out of range or illegal time specification: YYYY-MM-DDThh:mm:SS[.frac][tz]\ntouch: out of range or illegal time specification: YYYY-MM-DDThh:mm:SS[.frac][tz]\n"; got != want {
+	if got, want := result.Stderr, "touch: missing file operand\nTry 'touch --help' for more information.\n"; got != want {
 		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }
