@@ -140,7 +140,16 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 	if err != nil {
 		return err
 	}
-	result, err := inv.Exec(ctx, parsed.BuildExecutionRequest(inv.Env, inv.Cwd, stdin, script))
+	req := parsed.BuildExecutionRequest(inv.Env, inv.Cwd, stdin, script)
+	// When stdout and stderr point to the same writer (e.g. 2>&1),
+	// pass them through so the child session writes directly and
+	// output interleaving between trace and command output is preserved.
+	passthrough := inv.Stdout != nil && inv.Stdout == inv.Stderr
+	if passthrough {
+		req.Stdout = inv.Stdout
+		req.Stderr = inv.Stderr
+	}
+	result, err := inv.Exec(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -156,6 +165,11 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 	if result != nil && result.Stderr != "" {
 		result.Stderr = prefixNestedShellCommandNotFound(c.name, result.Stderr)
 		result.Stderr = prefixNestedShellBuiltinWarnings(c.name, result.Stderr)
+	}
+	if passthrough {
+		// Output was already written via the passthrough writers,
+		// so skip writeExecutionOutputs to avoid duplicated output.
+		return exitForExecutionResult(result)
 	}
 	if err := writeExecutionOutputs(inv, result); err != nil {
 		return err

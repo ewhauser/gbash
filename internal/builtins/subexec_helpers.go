@@ -172,13 +172,15 @@ func writeExecutionOutputs(inv *Invocation, result *ExecutionResult) error {
 	if result == nil {
 		return nil
 	}
-	if result.Stdout != "" {
-		if _, err := fmt.Fprint(inv.Stdout, result.Stdout); err != nil {
+	// Write stderr before stdout so that trace output (xtrace) precedes
+	// command output when both streams share the same writer (e.g. 2>&1).
+	if result.Stderr != "" {
+		if _, err := fmt.Fprint(inv.Stderr, result.Stderr); err != nil {
 			return &ExitError{Code: 1, Err: err}
 		}
 	}
-	if result.Stderr != "" {
-		if _, err := fmt.Fprint(inv.Stderr, result.Stderr); err != nil {
+	if result.Stdout != "" {
+		if _, err := fmt.Fprint(inv.Stdout, result.Stdout); err != nil {
 			return &ExitError{Code: 1, Err: err}
 		}
 	}

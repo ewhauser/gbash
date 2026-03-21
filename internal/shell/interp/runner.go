@@ -600,10 +600,25 @@ func defaultNamedUserHome(user string) (string, bool) {
 var todoPos syntax.Pos // for handlerCtx callers where we don't yet have a position
 
 func (r *Runner) handlerCtx(ctx context.Context, kind handlerKind, pos syntax.Pos) context.Context {
+	overlay := &overlayEnviron{parent: r.writeEnv}
+	if kind == handlerKindExec {
+		// When SHELLOPTS is exported, update the env overlay with the
+		// current dynamic value so child processes inherit the active
+		// options (e.g. xtrace enabled after the export).
+		if shellOpts := r.writeEnv.Get("SHELLOPTS"); shellOpts.Exported {
+			overlay.Set("SHELLOPTS", expand.Variable{
+				Set:      true,
+				Kind:     expand.String,
+				Str:      r.shellOptsValue(),
+				Exported: true,
+				ReadOnly: true,
+			})
+		}
+	}
 	hc := HandlerContext{
 		runner:             r,
 		kind:               kind,
-		Env:                &overlayEnviron{parent: r.writeEnv},
+		Env:                overlay,
 		Dir:                r.Dir,
 		ExecFile:           r.currentExecFile(),
 		Internal:           r.currentInternal(),
@@ -778,6 +793,12 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 			keepClosedFDs[fd] = struct{}{}
 		}
 		releasedNamedFDs = append(releasedNamedFDs, result.releasedNamedFDs...)
+	}
+	// Sync r.stdin/stdout/stderr from the fd table so that redirections
+	// like 2>&1 are visible to the command (the fd table was updated by
+	// redir, but the convenience fields were not).
+	if len(st.Redirs) > 0 {
+		r.syncStandardFDs()
 	}
 	if r.exit.ok() && st.Cmd != nil {
 		ranCmd = true

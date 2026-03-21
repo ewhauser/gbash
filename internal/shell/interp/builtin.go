@@ -1067,6 +1067,10 @@ func (r *Runner) printOptLine(name string, enabled, supported bool) {
 	r.outf("%s\t%s\n", name, r.optStatusText(enabled))
 }
 
+func (r *Runner) printSetOptLine(name string, enabled bool) {
+	r.outf("%-15s\t%s\n", name, r.optStatusText(enabled))
+}
+
 func (r *Runner) printShoptLine(name string, enabled, reusable, posix bool) {
 	if !reusable {
 		r.printOptLine(name, enabled, true)

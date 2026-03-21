@@ -54,7 +54,7 @@ func (r *Runner) setParams(args ...string) error {
 		value := fp.value()
 		if value == "" && enable {
 			for i, opt := range &posixOptsTable {
-				r.printOptLine(opt.name, r.opts[i], true)
+				r.printSetOptLine(opt.name, r.opts[i])
 			}
 			continue
 		}

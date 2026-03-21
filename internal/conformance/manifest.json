@@ -474,18 +474,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/sh-options-bash.test.sh::SHELLOPTS and BASHOPTS are non-empty": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/sh-options-bash.test.sh::export SHELLOPTS does cross-process tracing": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/sh-options-bash.test.sh::export SHELLOPTS does cross-process tracing with bash": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/smoke.test.sh::failed command": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"

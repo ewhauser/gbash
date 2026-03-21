@@ -546,6 +546,9 @@ func (r *Runner) lookupVar(name string) expand.Variable {
 	case "SHELLOPTS":
 		vr.Kind, vr.Str = expand.String, r.shellOptsValue()
 		vr.ReadOnly = true
+	case "BASHOPTS":
+		vr.Kind, vr.Str = expand.String, r.bashOptsValue()
+		vr.ReadOnly = true
 	case "DIRSTACK":
 		vr.Kind, vr.List = expand.Indexed, r.dirStack
 	case "BASH_SOURCE":
@@ -725,7 +728,6 @@ func (r *Runner) defaultOSType() string {
 
 func (r *Runner) shellOptsValue() string {
 	names := []string{
-		"braceexpand",
 		"hashall",
 		"interactive-comments",
 	}
@@ -735,6 +737,17 @@ func (r *Runner) shellOptsValue() string {
 			continue
 		}
 		names = append(names, opt.name)
+	}
+	slices.Sort(names)
+	return strings.Join(names, ":")
+}
+
+func (r *Runner) bashOptsValue() string {
+	var names []string
+	for i, opt := range &bashOptsTable {
+		if r.opts[len(posixOptsTable)+i] {
+			names = append(names, opt.name)
+		}
 	}
 	slices.Sort(names)
 	return strings.Join(names, ":")

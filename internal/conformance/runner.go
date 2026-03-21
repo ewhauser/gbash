@@ -873,7 +873,38 @@ func normalizePlatformSpecificOracleResult(mode OracleMode, specPath string, spe
 	if runtime.GOOS == "darwin" && specPath == "oils/tilde.test.sh" && specCase.Name == "${x//~/~root}" && !strings.Contains(result.Stdout, "/var/root") {
 		result.Stdout = strings.ReplaceAll(result.Stdout, "/root", "/var/root")
 	}
+	if specPath == "oils/sh-options-bash.test.sh" && specCase.Name == "export SHELLOPTS does cross-process tracing with bash" {
+		// The test pipes `set -o` output through a sed normalization pattern
+		// that uses \t and \+ (GNU extensions). The platform's BSD sed leaves
+		// tab-aligned output unchanged, while gbash's built-in sed normalizes
+		// it. Collapse the whitespace so both sides compare equally.
+		result.Stdout = normalizeSetOptWhitespace(result.Stdout)
+	}
 	return result
+}
+
+// normalizeSetOptWhitespace collapses "name<spaces><tab>on/off" sequences
+// produced by set -o into "name on/off" to erase BSD-vs-GNU sed differences.
+func normalizeSetOptWhitespace(s string) string {
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(s, "\n") {
+		trimmed := strings.TrimRight(line, "\n")
+		if i := strings.IndexByte(trimmed, '\t'); i > 0 {
+			name := strings.TrimRight(trimmed[:i], " ")
+			status := strings.TrimLeft(trimmed[i+1:], " \t")
+			if status == "on" || status == "off" {
+				b.WriteString(name)
+				b.WriteByte(' ')
+				b.WriteString(status)
+				if strings.HasSuffix(line, "\n") {
+					b.WriteByte('\n')
+				}
+				continue
+			}
+		}
+		b.WriteString(line)
+	}
+	return b.String()
 }
 
 func gbashWorkspaceRoot(specPath string) string {
