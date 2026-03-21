@@ -1302,46 +1302,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/pipeline.test.sh::Evaluation of argv[0] in pipeline occurs in child": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
-        "oils/pipeline.test.sh::Nested pipelines": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
-        "oils/pipeline.test.sh::PIPESTATUS": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/pipeline.test.sh::PIPESTATUS is set on simple commands": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/pipeline.test.sh::PIPESTATUS with shopt -s lastpipe": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/pipeline.test.sh::Pipeline in eval": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
-        "oils/pipeline.test.sh::Redirect in Pipeline": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
         "oils/pipeline.test.sh::SIGPIPE causes pipeline to die (regression for issue #295)": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -1531,59 +1491,39 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/vars-bash.test.sh::$SHELL is set to what is in /etc/passwd": {
+        "oils/vars-special.test.sh::$_ and ${_}": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/vars-special.test.sh::$1 .. $9 are scoped, while $0 is not": {
+        "oils/vars-special.test.sh::$_ is not reset with (( and [[": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/vars-special.test.sh::$BASHPID DOES change with subshell and command sub": {
+        "oils/vars-special.test.sh::$_ is not undefined on first use": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/vars-special.test.sh::$HOSTNAME": {
+        "oils/vars-special.test.sh::$_ with && and ||": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/vars-special.test.sh::$LINENO in ((": {
+        "oils/vars-special.test.sh::$_ with assignments, arrays, etc.": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/vars-special.test.sh::$LINENO in for loop": {
+        "oils/vars-special.test.sh::$_ with loop": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/vars-special.test.sh::$OSTYPE is non-empty": {
+        "oils/vars-special.test.sh::$_ with pipeline and subshell": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/vars-special.test.sh::$PIPESTATUS": {
+        "oils/vars-special.test.sh::$_ with simple command and evaluation": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/vars-special.test.sh::$PPID": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/vars-special.test.sh::$RANDOM": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/vars-special.test.sh::$SECONDS": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/vars-special.test.sh::Some vars are set, even without startup file, or env: PATH, PWD": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/vars-special.test.sh::UID EUID PPID can't be changed": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/vars-special.test.sh::Vars set interactively only: $HISTFILE": {
+        "oils/vars-special.test.sh::$_ with word splitting": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
