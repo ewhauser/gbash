@@ -421,6 +421,13 @@ func runSedProgram(program []sedCommand, lines []string, quiet, trailingNewline 
 			output = append(output, current)
 		}
 		if quit {
+			// When quitting before the last line, the processed lines
+			// were newline-terminated in the input, so output should
+			// end with a newline regardless of whether the file itself
+			// ended with one.
+			if index+1 < totalLines {
+				trailingNewline = true
+			}
 			break
 		}
 	}
