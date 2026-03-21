@@ -1022,9 +1022,21 @@ func (r *Runner) Reset() {
 
 	// When a parent shell exports SHELLOPTS, apply the inherited
 	// options so that the child mirrors the parent's set -o state.
+	// Only enable options present in the value; bash does not clear
+	// defaults when importing SHELLOPTS (e.g. braceexpand stays on).
 	if shellOpts := r.writeEnv.Get("SHELLOPTS"); shellOpts.IsSet() && shellOpts.Exported {
 		for _, optName := range strings.Split(shellOpts.String(), ":") {
 			if opt := r.posixOptByName(optName); opt != nil {
+				*opt = true
+			}
+		}
+	}
+
+	// Similarly, when a parent shell exports BASHOPTS, apply the
+	// inherited shopt options so the child mirrors the parent's state.
+	if bashOpts := r.writeEnv.Get("BASHOPTS"); bashOpts.IsSet() && bashOpts.Exported {
+		for _, optName := range strings.Split(bashOpts.String(), ":") {
+			if opt, _ := r.bashOptByName(optName); opt != nil {
 				*opt = true
 			}
 		}
