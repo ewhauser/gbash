@@ -209,6 +209,76 @@ func TestAssignmentLiteralHonorsEscapedColonsForTildes(t *testing.T) {
 	}
 }
 
+func TestAssignmentLiteralExpandsTildesInParamDefaults(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `~:${undef-~:~}`)
+	got, err := AssignmentLiteral(&Config{
+		StartupHome: "/startup",
+		Env: testEnv{
+			"HOME": {Set: true, Kind: String, Str: "/home/bar"},
+		},
+	}, word)
+	if err != nil {
+		t.Fatalf("AssignmentLiteral() error = %v", err)
+	}
+	if got != "/home/bar:/home/bar:/home/bar" {
+		t.Fatalf("AssignmentLiteral() = %q, want %q", got, "/home/bar:/home/bar:/home/bar")
+	}
+}
+
+func TestFieldsExpandTildeInAssignmentLikeArgs(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{
+		StartupHome: "/startup",
+		Env: testEnv{
+			"HOME": {Set: true, Kind: String, Str: "/home/bob"},
+		},
+	}
+	tests := []struct {
+		src  string
+		want []string
+	}{
+		{src: `x=~`, want: []string{"x=/home/bob"}},
+		{src: `x=~:${undef-~:~}`, want: []string{"x=/home/bob:/home/bob:/home/bob"}},
+		{src: `x=${undef}~`, want: []string{"x=~"}},
+	}
+	for _, tc := range tests {
+		word := parseCommandWord(t, tc.src)
+		got, err := Fields(cfg, word)
+		if err != nil {
+			t.Fatalf("Fields(%q) error = %v", tc.src, err)
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("Fields(%q) = %#v, want %#v", tc.src, got, tc.want)
+		}
+	}
+}
+
+func TestFieldsPreserveQuotedIndirectArrayParamWord(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `${!hooksSlice+"${!hooksSlice}"}`)
+	got, err := Fields(&Config{
+		Env: testEnv{
+			"hooksSlice": {Set: true, Kind: String, Str: "preHooks[@]"},
+			"preHooks": {
+				Set:  true,
+				Kind: Indexed,
+				List: []string{"foo bar", "baz"},
+			},
+		},
+	}, word)
+	if err != nil {
+		t.Fatalf("Fields() error = %v", err)
+	}
+	want := []string{"foo bar", "baz"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Fields() = %#v, want %#v", got, want)
+	}
+}
+
 func TestRegexpExpandsLeadingTildeAsLiteralRegex(t *testing.T) {
 	t.Parallel()
 

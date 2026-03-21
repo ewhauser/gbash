@@ -438,12 +438,28 @@ func AssignmentWordLiteral(cfg *Config, word *syntax.Word) (string, error) {
 	return cfg.fieldJoin(field), nil
 }
 
-func (cfg *Config) expandAssignmentTildeLiteral(s string, moreFields bool) string {
+func assignmentLikeWordPrefix(s string) (prefix, value string, ok bool) {
+	eq := strings.IndexByte(s, '=')
+	if eq <= 0 {
+		return "", "", false
+	}
+	name := s[:eq]
+	if strings.HasSuffix(name, "+") {
+		name = name[:len(name)-1]
+	}
+	if !syntax.ValidName(name) {
+		return "", "", false
+	}
+	return s[:eq+1], s[eq+1:], true
+}
+
+func (cfg *Config) expandAssignmentTildeLiteral(s string, hasMoreParts bool, allowLeading bool) string {
 	if !strings.ContainsRune(s, '~') {
 		return s
 	}
 	var b strings.Builder
 	start := 0
+	firstSegment := true
 	for i := 0; i <= len(s); i++ {
 		if i < len(s) {
 			if s[i] != ':' || assignmentTildeColonEscaped(s, i) {
@@ -451,9 +467,14 @@ func (cfg *Config) expandAssignmentTildeLiteral(s string, moreFields bool) strin
 			}
 		}
 		segment := s[start:i]
-		if prefix, suffix, expanded := cfg.expandAssignmentUser(segment, moreFields); expanded {
-			b.WriteString(prefix)
-			b.WriteString(suffix)
+		segmentMoreFields := hasMoreParts && i == len(s)
+		if (allowLeading && firstSegment) || !firstSegment {
+			if prefix, suffix, expanded := cfg.expandAssignmentUser(segment, segmentMoreFields); expanded {
+				b.WriteString(prefix)
+				b.WriteString(suffix)
+			} else {
+				b.WriteString(segment)
+			}
 		} else {
 			b.WriteString(segment)
 		}
@@ -462,7 +483,7 @@ func (cfg *Config) expandAssignmentTildeLiteral(s string, moreFields bool) strin
 		}
 		b.WriteByte(':')
 		start = i + 1
-		moreFields = false
+		firstSegment = false
 	}
 	return b.String()
 }
@@ -1433,11 +1454,16 @@ const (
 	quoteRegexp
 	quoteRegexpNoTilde
 	quoteAssign
+	quoteAssignArgs
 	quoteAssignNoTilde
 	quoteDouble
 	quoteHeredoc
 	quoteSingle
 )
+
+func assignmentTildeQuote(ql quoteLevel) bool {
+	return ql == quoteAssign || ql == quoteAssignArgs
+}
 
 func (cfg *Config) braceFieldParts(br *syntax.BraceExp, ql quoteLevel, fieldFn func(*syntax.Word, quoteLevel) ([]fieldPart, error)) ([]fieldPart, error) {
 	parts := []fieldPart{{val: "{"}}
@@ -1465,8 +1491,8 @@ func (cfg *Config) wordField(wps []syntax.WordPart, ql quoteLevel) ([]fieldPart,
 		switch wp := wp.(type) {
 		case *syntax.Lit:
 			s := wp.Value
-			if i == 0 && ql == quoteAssign {
-				s = cfg.expandAssignmentTildeLiteral(s, len(wps) > 1)
+			if assignmentTildeQuote(ql) {
+				s = cfg.expandAssignmentTildeLiteral(s, i+1 < len(wps), i == 0)
 			} else if i == 0 && (ql == quoteNone || ql == quoteRegexp) {
 				if prefix, rest, expanded := cfg.expandUser(s, len(wps) > 1); expanded {
 					if ql == quoteRegexp && (prefix != "" || rest == "") {
@@ -1619,11 +1645,33 @@ func (cfg *Config) cmdSubst(cs *syntax.CmdSubst) (string, error) {
 
 func (cfg *Config) wordFields(wps []syntax.WordPart) ([][]fieldPart, error) {
 	splitter := newFieldSplitter(cfg)
+	assignmentLike := false
+	assignmentPrefix := ""
+	assignmentValue := ""
+	paramQL := quoteNone
+	if len(wps) > 0 {
+		if lit, ok := wps[0].(*syntax.Lit); ok {
+			assignmentPrefix, assignmentValue, assignmentLike = assignmentLikeWordPrefix(lit.Value)
+			if assignmentLike {
+				paramQL = quoteAssignArgs
+			}
+		}
+	}
 	for i, wp := range wps {
 		switch wp := wp.(type) {
 		case *syntax.Lit:
 			s := wp.Value
-			if i == 0 {
+			if assignmentLike {
+				if i == 0 {
+					if assignmentPrefix != "" {
+						splitter.appendPart(fieldPart{val: assignmentPrefix})
+					}
+					s = assignmentValue
+					s = cfg.expandAssignmentTildeLiteral(s, i+1 < len(wps), true)
+				} else {
+					s = cfg.expandAssignmentTildeLiteral(s, i+1 < len(wps), false)
+				}
+			} else if i == 0 {
 				prefix, rest, expanded := cfg.expandUser(s, len(wps) > 1)
 				if expanded && (prefix != "" || rest == "") {
 					splitter.appendPart(fieldPart{
@@ -1684,16 +1732,16 @@ func (cfg *Config) wordFields(wps []syntax.WordPart) ([][]fieldPart, error) {
 				splitter.appendPart(part)
 			}
 		case *syntax.ParamExp:
-			if fields2, ok, elideEmpty, err := cfg.paramExpFields(wp); err != nil {
+			if fields2, ok, elideEmpty, err := cfg.paramExpFields(wp, paramQL); err != nil {
 				return nil, err
 			} else if ok {
 				splitter.appendSplitFields(fields2, elideEmpty)
-			} else if parts, ok, err := cfg.paramExpSplitValue(wp); err != nil {
+			} else if parts, ok, err := cfg.paramExpSplitValue(wp, paramQL); err != nil {
 				return nil, err
 			} else if ok {
 				splitter.appendFieldParts(parts)
 			} else {
-				val, err := cfg.paramExp(wp, quoteNone)
+				val, err := cfg.paramExp(wp, paramQL)
 				if err != nil {
 					return nil, err
 				}

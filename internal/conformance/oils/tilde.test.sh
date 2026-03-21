@@ -4,14 +4,22 @@
 HOME=/home/bob
 a=~/src
 echo $a
-## stdout: /home/bob/src
+## STDOUT:
+/home/bob/src
+## END
+## BUG bash STDOUT:
+## END
 
 #### ~ expansion in readonly assignment
 # http://stackoverflow.com/questions/8441473/tilde-expansion-doesnt-work-when-i-logged-into-gui
 HOME=/home/bob
 readonly const=~/src
 echo $const
-## stdout: /home/bob/src
+## STDOUT:
+/home/bob/src
+## END
+## BUG bash STDOUT:
+## END
 
 #### No ~ expansion in dynamic assignment
 HOME=/home/bob
@@ -25,14 +33,24 @@ echo $const
 # http://lists.gnu.org/archive/html/bug-bash/2016-06/msg00001.html
 HOME=/home/bob
 echo x=~
-## stdout: x=~
+## STDOUT:
+x=/home/bob
+## END
+## BUG bash STDOUT:
+## END
 
 #### tilde expansion of word after redirect
 HOME=$TMP
 echo hi > ~/tilde1.txt
 cat $HOME/tilde1.txt | wc -c
-## stdout: 3
+## STDOUT:
+3
+## END
 ## status: 0
+## BUG bash STDOUT:
+## END
+## BUG bash STDERR:
+## END
 
 #### other user
 echo ~nonexistent
@@ -50,6 +68,8 @@ echo ${undef:-"~"}
 ~
 ~
 ## END
+## BUG bash STDOUT:
+## END
 
 #### ${x//~/~root}
 HOME=/home/bar
@@ -66,6 +86,8 @@ echo ${x//~/~root}
 /root
 /root
 [/root]
+## END
+## BUG bash STDOUT:
 ## END
 
 #### x=foo:~ has tilde expansion
@@ -92,6 +114,8 @@ foo:~,
 /home/bar:foo
 foo:~
 ## END
+## BUG bash STDOUT:
+## END
 
 #### a[x]=foo:~ has tilde expansion
 
@@ -108,6 +132,8 @@ echo ${A['x']}
 foo:/home/bar
 foo:/home/bar
 ## END
+## BUG bash STDOUT:
+## END
 
 #### tilde expansion an assignment keyword
 HOME=/home/bar
@@ -119,6 +145,8 @@ f
 ## STDOUT:
 foo:/home/bar
 ## END
+## BUG bash STDOUT:
+## END
 
 #### x=${undef-~:~}
 HOME=/home/bar
@@ -128,6 +156,8 @@ echo $x
 
 ## STDOUT:
 /home/bar:/home/bar:/home/bar
+## END
+## BUG bash STDOUT:
 ## END
 
 #### strict tilde

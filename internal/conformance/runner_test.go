@@ -218,6 +218,11 @@ func TestNormalizeOracleResultScopesOverridesToTargetedSpecs(t *testing.T) {
 	if got.Stdout != wantStdout {
 		t.Fatalf("stdout for builtin-getopts targeted spec = %q, want %q", got.Stdout, wantStdout)
 	}
+
+	got = normalizeOracleResult(OracleBash, "oils/tilde.test.sh", specCase, ExecutionResult{Stdout: actualStdout})
+	if got.Stdout != wantStdout {
+		t.Fatalf("stdout for tilde targeted spec = %q, want %q", got.Stdout, wantStdout)
+	}
 }
 
 func TestNormalizeOracleResultNormalizesBuiltinBracketTouchOracleAcrossPlatforms(t *testing.T) {
@@ -229,6 +234,32 @@ func TestNormalizeOracleResultNormalizesBuiltinBracketTouchOracleAcrossPlatforms
 	})
 	if want := "touch: missing file operand\nTry 'touch --help' for more information.\n"; got.Stderr != want {
 		t.Fatalf("stderr = %q, want %q", got.Stderr, want)
+	}
+}
+
+func TestNormalizeOracleResultNormalizesTildeRootFallbackAcrossPlatforms(t *testing.T) {
+	t.Parallel()
+
+	got := normalizeOracleResult(OracleBash, "oils/tilde.test.sh", SpecCase{Name: "${x//~/~root}"}, ExecutionResult{
+		Stdout: "/root\n/root\n[/root]\n",
+	})
+	want := "/root\n/root\n[/root]\n"
+	if runtime.GOOS == "darwin" {
+		want = "/var/root\n/var/root\n[/var/root]\n"
+	}
+	if got.Stdout != want {
+		t.Fatalf("stdout = %q, want %q", got.Stdout, want)
+	}
+}
+
+func TestNormalizeCaseResultTrimsWcPaddingForTildeRedirect(t *testing.T) {
+	t.Parallel()
+
+	got := normalizeCaseResult("oils/tilde.test.sh", SpecCase{Name: "tilde expansion of word after redirect"}, ExecutionResult{
+		Stdout: "       3\n",
+	})
+	if want := "3\n"; got.Stdout != want {
+		t.Fatalf("stdout = %q, want %q", got.Stdout, want)
 	}
 }
 

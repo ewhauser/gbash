@@ -965,7 +965,7 @@ func (cfg *Config) arrayParamFields(pe *syntax.ParamExp, state paramExpState, el
 	return cfg.splitElemsAsFields(elems), true, nil
 }
 
-func (cfg *Config) indirectParamArrayFields(state paramExpState) ([][]fieldPart, bool, bool, error) {
+func (cfg *Config) indirectParamArrayFields(state paramExpState, ql quoteLevel) ([][]fieldPart, bool, bool, error) {
 	if state.orig.Kind == NameRef || state.str == "" {
 		return nil, false, false, nil
 	}
@@ -976,12 +976,12 @@ func (cfg *Config) indirectParamArrayFields(state paramExpState) ([][]fieldPart,
 	if !quotedIndirectArrayTarget(target) {
 		return nil, false, false, nil
 	}
-	if fields, ok, elideEmpty, err := cfg.paramExpFields(target); err != nil {
+	if fields, ok, elideEmpty, err := cfg.paramExpFields(target, ql); err != nil {
 		return nil, false, false, err
 	} else if ok {
 		return fields, true, elideEmpty, nil
 	}
-	if parts, ok, err := cfg.paramExpSplitValue(target); err != nil {
+	if parts, ok, err := cfg.paramExpSplitValue(target, ql); err != nil {
 		return nil, false, false, err
 	} else if ok {
 		return cfg.splitFieldParts(parts), true, false, nil
@@ -989,7 +989,7 @@ func (cfg *Config) indirectParamArrayFields(state paramExpState) ([][]fieldPart,
 	return nil, false, false, nil
 }
 
-func (cfg *Config) paramExpSplitValue(pe *syntax.ParamExp) ([]fieldPart, bool, error) {
+func (cfg *Config) paramExpSplitValue(pe *syntax.ParamExp, ql quoteLevel) ([]fieldPart, bool, error) {
 	if cfg.ifs == "" || pe == nil || pe.Length || pe.Width || pe.IsSet || pe.Excl {
 		return nil, false, nil
 	}
@@ -1014,7 +1014,7 @@ func (cfg *Config) paramExpSplitValue(pe *syntax.ParamExp) ([]fieldPart, bool, e
 		if word == nil {
 			return nil, nil
 		}
-		return cfg.paramArgField(word, quoteNone)
+		return cfg.paramArgField(word, ql)
 	}
 
 	hasElems := len(elems) > 0
@@ -1260,7 +1260,9 @@ func (cfg *Config) paramArgField(word *syntax.Word, ql quoteLevel) ([]fieldPart,
 		switch wp := wp.(type) {
 		case *syntax.Lit:
 			s := wp.Value
-			if i == 0 && (ql == quoteNone || ql == quoteRegexp) {
+			if assignmentTildeQuote(ql) {
+				s = cfg.expandAssignmentTildeLiteral(s, i+1 < len(word.Parts), i == 0)
+			} else if i == 0 && (ql == quoteNone || ql == quoteRegexp) {
 				if prefix, rest, expanded := cfg.expandUser(s, len(word.Parts) > 1); expanded {
 					if ql == quoteRegexp && (prefix != "" || rest == "") {
 						field = append(field, fieldPart{
@@ -1315,7 +1317,7 @@ func (cfg *Config) paramArgField(word *syntax.Word, ql quoteLevel) ([]fieldPart,
 			}
 			field = append(field, fp)
 		case *syntax.DblQuoted:
-			if ql == quoteNone {
+			if ql == quoteNone || ql == quoteAssignArgs {
 				if fields, ok, err := cfg.dblQuotedFields(wp.Parts); err != nil {
 					return nil, err
 				} else if ok {
@@ -1506,7 +1508,7 @@ func (cfg *Config) paramExpWordField(pe *syntax.ParamExp, ql quoteLevel) ([]fiel
 			return cfg.paramExpWordField(&targetCopy, ql)
 		}
 		if target != nil && !simpleIndirectTarget(target) {
-			if fields, ok, _, err := cfg.paramExpFields(target); err != nil {
+			if fields, ok, _, err := cfg.paramExpFields(target, ql); err != nil {
 				return nil, false, err
 			} else if ok {
 				if len(fields) == 0 {
@@ -1577,7 +1579,7 @@ func (cfg *Config) paramExpWordField(pe *syntax.ParamExp, ql quoteLevel) ([]fiel
 	return nil, false, nil
 }
 
-func (cfg *Config) paramExpFields(pe *syntax.ParamExp) ([][]fieldPart, bool, bool, error) {
+func (cfg *Config) paramExpFields(pe *syntax.ParamExp, ql quoteLevel) ([][]fieldPart, bool, bool, error) {
 	if pe.Length || pe.Width || pe.IsSet {
 		return nil, false, false, nil
 	}
@@ -1613,10 +1615,23 @@ func (cfg *Config) paramExpFields(pe *syntax.ParamExp) ([][]fieldPart, bool, boo
 		}
 		if target != nil && quotedIndirectArrayTarget(target) && pe.Exp != nil {
 			hasElems := len(resolved.elems) > 0
+			indirectArgFields := func() ([][]fieldPart, error) {
+				if pe.Exp.Word == nil {
+					return nil, nil
+				}
+				// Unquoted param-op words must preserve quoted-array field
+				// boundaries. Assignment-like argv expansion still needs the
+				// quoteAssignArgs path for nested tilde handling.
+				if ql == quoteNone {
+					return cfg.wordFields(pe.Exp.Word.Parts)
+				}
+				fields, _, err := cfg.paramOpArgFields(pe.Exp.Word, ql)
+				return fields, err
+			}
 			switch pe.Exp.Op {
 			case syntax.AlternateUnset:
 				if hasElems {
-					fields, err := cfg.wordFields(pe.Exp.Word.Parts)
+					fields, err := indirectArgFields()
 					return fields, true, false, err
 				}
 				if resolved.indexAllElements {
@@ -1630,7 +1645,7 @@ func (cfg *Config) paramExpFields(pe *syntax.ParamExp) ([][]fieldPart, bool, boo
 				}
 				null := arrayExpansionNull(target, fields0, resolved.elems)
 				if !null {
-					fields, err := cfg.wordFields(pe.Exp.Word.Parts)
+					fields, err := indirectArgFields()
 					return fields, true, false, err
 				}
 				if resolved.indexAllElements {
@@ -1640,33 +1655,33 @@ func (cfg *Config) paramExpFields(pe *syntax.ParamExp) ([][]fieldPart, bool, boo
 			default:
 				targetCopy := *target
 				targetCopy.Exp = pe.Exp
-				return cfg.paramExpFields(&targetCopy)
+				return cfg.paramExpFields(&targetCopy, ql)
 			}
 		}
 		if target != nil && quotedIndirectArrayTarget(target) && !paramExpHasOuterOps(pe) {
-			if fields, ok, elideEmpty, err := cfg.paramExpFields(target); err != nil {
+			if fields, ok, elideEmpty, err := cfg.paramExpFields(target, ql); err != nil {
 				return nil, false, false, err
 			} else if ok {
 				return fields, true, elideEmpty, nil
 			}
-			if parts, ok, err := cfg.paramExpSplitValue(target); err != nil {
+			if parts, ok, err := cfg.paramExpSplitValue(target, ql); err != nil {
 				return nil, false, false, err
 			} else if ok {
 				return cfg.splitFieldParts(parts), true, false, nil
 			}
-			val, err := cfg.paramExp(target, quoteNone)
+			val, err := cfg.paramExp(target, ql)
 			if err != nil {
 				return nil, false, false, err
 			}
 			return cfg.splitFieldParts([]fieldPart{{val: val}}), true, false, nil
 		}
 		if target != nil && !simpleIndirectTarget(target) {
-			if fields, ok, elideEmpty, err := cfg.paramExpFields(target); err != nil {
+			if fields, ok, elideEmpty, err := cfg.paramExpFields(target, ql); err != nil {
 				return nil, false, false, err
 			} else if ok {
 				return fields, true, elideEmpty, nil
 			}
-			val, err := cfg.paramExp(target, quoteNone)
+			val, err := cfg.paramExp(target, ql)
 			if err != nil {
 				return nil, false, false, err
 			}
@@ -1681,7 +1696,7 @@ func (cfg *Config) paramExpFields(pe *syntax.ParamExp) ([][]fieldPart, bool, boo
 	}
 	if pe.Excl && indMode != indirectResolve {
 		if pe.Names == 0 && pe.Index == nil {
-			if fields, ok, elideEmpty, err := cfg.indirectParamArrayFields(state); err != nil {
+			if fields, ok, elideEmpty, err := cfg.indirectParamArrayFields(state, ql); err != nil {
 				return nil, false, false, err
 			} else if ok {
 				return fields, true, elideEmpty, nil
@@ -1745,7 +1760,7 @@ func (cfg *Config) paramExpFields(pe *syntax.ParamExp) ([][]fieldPart, bool, boo
 			return nil, false, false, nil
 		}
 		argFields := func() ([][]fieldPart, string, error) {
-			return cfg.paramOpArgFields(pe.Exp.Word, quoteNone)
+			return cfg.paramOpArgFields(pe.Exp.Word, ql)
 		}
 		hasElems := len(elems) > 0
 		null := arrayExpansionNull(pe, fields0, elems)
@@ -1826,7 +1841,7 @@ func (cfg *Config) paramExpFields(pe *syntax.ParamExp) ([][]fieldPart, bool, boo
 		return nil, false, false, nil
 	}
 	argFields := func() ([][]fieldPart, string, error) {
-		return cfg.paramOpArgFields(pe.Exp.Word, quoteNone)
+		return cfg.paramOpArgFields(pe.Exp.Word, ql)
 	}
 
 	switch op := pe.Exp.Op; op {
@@ -2207,7 +2222,7 @@ func (cfg *Config) paramOpArg(word *syntax.Word, ql quoteLevel) ([]fieldPart, st
 	if word == nil {
 		return nil, "", nil
 	}
-	if ql == quoteNone {
+	if ql == quoteNone || ql == quoteAssignArgs {
 		fields, arg, err := cfg.paramOpArgFields(word, ql)
 		if err != nil {
 			return nil, "", err
@@ -2238,7 +2253,7 @@ func (cfg *Config) paramOpArgFields(word *syntax.Word, ql quoteLevel) ([][]field
 	if word == nil {
 		return nil, "", nil
 	}
-	if ql == quoteNone {
+	if ql == quoteNone || ql == quoteAssignArgs {
 		parts, err := cfg.paramArgField(word, ql)
 		if err != nil {
 			return nil, "", err
