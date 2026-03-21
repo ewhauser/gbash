@@ -656,10 +656,6 @@
           "mode": "xfail",
           "reason": "gbash still applies substring operators to FUNCNAME differently from bash's scalarized stack semantics"
         },
-        "oils/known-differences.test.sh::`set` output format - ifupdown-ng": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/let.test.sh::let": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -837,14 +833,6 @@
           ]
         },
         "oils/serialize.test.sh::${var@Q}": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/serialize.test.sh::declare": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/serialize.test.sh::set": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },

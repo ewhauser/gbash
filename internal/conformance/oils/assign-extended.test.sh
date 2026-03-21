@@ -514,15 +514,15 @@ f() {
 
 files='de ty'
 
-wc -l $files
+wc -l $files | sed 's/^ *//'
 #cat $files
 
 ## STDOUT:
 declare -rx x="42"
 declare -rx x="42"
-  2 de
-  2 ty
-  4 total
+2 de
+2 ty
+4 total
 ## END
 
 #### typeset -f 
