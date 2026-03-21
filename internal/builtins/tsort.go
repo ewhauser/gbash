@@ -165,7 +165,7 @@ func (g *tsortGraph) run(ctx context.Context, inv *Invocation) error {
 
 		node := g.nodes[current]
 		delete(g.nodes, current)
-		for i := len(node.successors) - 1; i >= 0; i-- {
+		for i := len(node.successors) - 1; i >= 0; i-- { //nolint:nilaway // node guaranteed to exist in graph
 			successor := node.successors[i]
 			successorNode := g.nodes[successor]
 			if successorNode == nil {
@@ -221,7 +221,7 @@ func (g *tsortGraph) detectCycle() []string {
 
 		for len(stack) > 0 {
 			top := &stack[len(stack)-1]
-			successors := g.nodes[top.node].successors
+			successors := g.nodes[top.node].successors //nolint:nilaway // node guaranteed to exist in graph
 			if top.next >= len(successors) {
 				visited[top.node] = tsortVisitedClosed
 				delete(pathIndex, top.node)

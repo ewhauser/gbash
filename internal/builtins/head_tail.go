@@ -107,7 +107,7 @@ func parseHeadTailNumber(value string) (int, error) {
 
 func splitLines(data []byte) [][]byte {
 	if len(data) == 0 {
-		return nil
+		return [][]byte{}
 	}
 	lines := bytes.SplitAfter(data, []byte{'\n'})
 	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {

@@ -11,7 +11,9 @@ FUZZ_SMOKE_TIME ?= 3s
 FUZZ_DEEP_TIME ?= 15s
 GORELEASER_VERSION ?= v2.14.3
 GOLANGCI_LINT_VERSION ?= v2.11.3
-GOLANGCI_LINT := GOTOOLCHAIN=go1.26.1 CGO_ENABLED=0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+GOLANGCI_LINT_BASE := GOTOOLCHAIN=go1.26.1 CGO_ENABLED=0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+CUSTOM_GCL := ./custom-gcl
+GOLANGCI_LINT := $(if $(wildcard .custom-gcl.yml),$(CUSTOM_GCL),$(GOLANGCI_LINT_BASE))
 # Discover every main module in the active go.work so local lint matches CI.
 LINT_MODULE_DIRS_CMD = go list -m -f '{{if .Main}}{{.Dir}}{{end}}' all
 GH ?= gh
@@ -156,7 +158,11 @@ FUZZ_FULL_TARGETS := \
 	$(FUZZ_FULL_SHARD_4) \
 	$(FUZZ_FULL_SHARD_5)
 
-lint:
+$(CUSTOM_GCL): .custom-gcl.yml
+	@echo "==> building custom golangci-lint"; \
+	$(GOLANGCI_LINT_BASE) custom
+
+lint: $(if $(wildcard .custom-gcl.yml),$(CUSTOM_GCL))
 	@echo "==> lint ."; \
 	$(GOLANGCI_LINT) run ./...
 

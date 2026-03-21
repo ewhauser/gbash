@@ -455,7 +455,7 @@ func realpathMakeRelative(target, base string) string {
 	for i := common; i < len(baseParts); i++ {
 		parts = append(parts, "..")
 	}
-	parts = append(parts, targetParts[common:]...)
+	parts = append(parts, targetParts[common:]...) //nolint:nilaway // nil slice is valid to slice at zero index
 	if len(parts) == 0 {
 		return "."
 	}

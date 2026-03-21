@@ -34,7 +34,7 @@ func (p *Parser) DeclOperandField(r io.Reader) (DeclOperand, error) {
 		case nil:
 			op = &DeclFlag{Word: &Word{Parts: []WordPart{&Lit{Value: src}}}}
 		case *DeclDynamicWord:
-			op = &DeclFlag{Word: literalizeDeclFieldWord(src, typed.Word)}
+			op = &DeclFlag{Word: literalizeDeclFieldWord(src, typed.Word)} //nolint:nilaway // parser guarantees non-nil when matched in type switch
 		}
 	}
 
@@ -121,7 +121,7 @@ func literalizeDeclFieldWord(src string, word *Word) *Word {
 func literalizeDeclFieldWordPart(src string, part WordPart) WordPart {
 	switch part := part.(type) {
 	case *Lit:
-		dup := *part
+		dup := *part //nolint:nilaway // non-nil when matched by type switch
 		return &dup
 	case *SglQuoted:
 		dup := *part

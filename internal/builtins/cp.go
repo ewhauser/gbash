@@ -253,7 +253,7 @@ func resolveCPDestination(ctx context.Context, inv *Invocation, opts cpOptions, 
 	}
 	destIsDir := false
 	if destExists {
-		if destInfo.IsDir() {
+		if destInfo.IsDir() { //nolint:nilaway // destInfo is non-nil when destExists is true
 			destIsDir = true
 		} else if destInfo.Mode()&stdfs.ModeSymlink != 0 {
 			if resolvedInfo, _, statErr := statPath(ctx, inv, destArg); statErr == nil {

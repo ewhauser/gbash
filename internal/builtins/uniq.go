@@ -419,8 +419,8 @@ func uniqIsCLocale(inv *Invocation) bool {
 }
 
 func uniqKeysEqual(left []byte, leftMeta uniqLineMeta, right []byte, rightMeta uniqLineMeta, opts *uniqOptions) bool {
-	leftSlice := left[leftMeta.keyStart:leftMeta.keyEnd]
-	rightSlice := right[rightMeta.keyStart:rightMeta.keyEnd]
+	leftSlice := left[leftMeta.keyStart:leftMeta.keyEnd]     //nolint:nilaway // next[:0] is a non-nil zero-length slice
+	rightSlice := right[rightMeta.keyStart:rightMeta.keyEnd] //nolint:nilaway // next[:0] is a non-nil zero-length slice
 	if opts.ignoreCase {
 		return uniqEqualFoldASCII(leftSlice, rightSlice)
 	}

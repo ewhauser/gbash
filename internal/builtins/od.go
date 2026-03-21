@@ -551,7 +551,7 @@ func readODInputs(ctx context.Context, inv *Invocation, opts *odOptions) ([]byte
 
 func runODStrings(inv *Invocation, data []byte, opts *odOptions) error {
 	start := minUint64(opts.skipBytes, uint64(len(data)))
-	data = data[start:]
+	data = data[start:] //nolint:nilaway // nil byte slice is valid to slice at zero index
 	limit := uint64(len(data))
 	if opts.readBytes != nil && *opts.readBytes < limit {
 		limit = *opts.readBytes
@@ -607,7 +607,7 @@ func runODStrings(inv *Invocation, data []byte, opts *odOptions) error {
 
 func runODDump(inv *Invocation, data []byte, opts *odOptions) error {
 	start := minUint64(opts.skipBytes, uint64(len(data)))
-	data = data[start:]
+	data = data[start:] //nolint:nilaway // nil byte slice is valid to slice at zero index
 	if opts.readBytes != nil && uint64(len(data)) > *opts.readBytes {
 		data = data[:*opts.readBytes]
 	}

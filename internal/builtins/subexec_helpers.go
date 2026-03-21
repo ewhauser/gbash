@@ -48,7 +48,7 @@ func executeCommand(ctx context.Context, inv *Invocation, opts *executeCommandOp
 		return &ExecutionResult{ExitCode: 127}, nil
 	}
 
-	argv := append([]string{resolved.Path}, opts.Argv[1:]...)
+	argv := append([]string{resolved.Path}, opts.Argv[1:]...) //nolint:nilaway // resolved is non-nil when ok is true
 	return inv.Exec(ctx, &ExecutionRequest{
 		Command:    argv,
 		Env:        env,

@@ -325,7 +325,7 @@ func readCsplitLines(ctx context.Context, inv *Invocation, name string) ([]strin
 		reader = inv.Stdin
 	} else {
 		info, _, exists, err := statMaybe(ctx, inv, name)
-		if err == nil && exists && info.IsDir() {
+		if err == nil && exists && info.IsDir() { //nolint:nilaway // info is non-nil when exists is true
 			return nil, errors.New("read error: Is a directory")
 		}
 

@@ -21,7 +21,7 @@ func resolveFindExpr(ctx context.Context, inv *Invocation, expr findExpr) error 
 		e.referenceReady = true
 		e.referenceFound = exists
 		if exists {
-			e.resolvedTime = info.ModTime()
+			e.resolvedTime = info.ModTime() //nolint:nilaway // info is non-nil when exists is true
 		}
 		return nil
 	case *findNotExpr:

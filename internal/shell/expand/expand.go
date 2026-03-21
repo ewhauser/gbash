@@ -1921,7 +1921,7 @@ func (cfg *Config) sliceElems(pe *syntax.ParamExp, elems []string, indices []int
 					break
 				}
 			}
-			elems = elems[start:]
+			elems = elems[start:] //nolint:nilaway // elems is non-nil here: start is set by iterating indices which is non-empty (len(indices)>0 guard above)
 			indices = indices[start:]
 		}
 		if pe.Slice.Length != nil {

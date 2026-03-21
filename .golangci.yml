@@ -26,8 +26,16 @@ linters:
     - testifylint
     - unconvert
     - unparam
+    - nilaway
 
   settings:
+    custom:
+      nilaway:
+        type: module
+        description: Static analysis tool to detect potential nil panics in Go code.
+        settings:
+          include-pkgs: github.com/ewhauser/gbash
+
     revive:
       rules:
         - name: exported
@@ -306,6 +314,9 @@ linters:
       - path: _test\.go$
         linters:
           - forbidigo
+      - path: _test\.go$
+        linters:
+          - nilaway
       - path: commands/invocation_capabilities\.go$
         text: "use of `fs\\.raw` forbidden because \"Do not bypass CommandFS policy checks; use inv\\.FS methods instead\\.\""
         linters:
@@ -353,6 +364,9 @@ linters:
         text: "use of `exec\\.LookPath` forbidden"
         linters:
           - forbidigo
+      - text: "INTERNAL ERROR"
+        linters:
+          - nilaway
 
 issues:
   max-issues-per-linter: 50

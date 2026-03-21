@@ -150,7 +150,7 @@ func (m *MemoryFS) seedInitialFileLocked(name string, file InitialFile, now time
 		node.lazy = nil
 	}
 	m.nodes[abs] = node
-	m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{}
+	m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{} //nolint:nilaway // parent guaranteed by mkdirAllLocked above
 	return nil
 }
 
@@ -170,7 +170,7 @@ func (m *MemoryFS) materializePath(ctx context.Context, name string, followFinal
 			m.mu.RUnlock()
 			return abs, nil
 		}
-		lazy := node.lazy
+		lazy := node.lazy //nolint:nilaway // isLazyFileNode guarantees node != nil
 		m.mu.RUnlock()
 
 		data, err := lazy(ctx)
@@ -259,7 +259,7 @@ func (m *MemoryFS) Symlink(_ context.Context, target, linkName string) error {
 		uid:     DefaultOwnerUID,
 		gid:     DefaultOwnerGID,
 	}
-	m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{}
+	m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{} //nolint:nilaway // parent guaranteed by mkdirAllLocked above
 	return nil
 }
 
@@ -285,7 +285,7 @@ func (m *MemoryFS) Link(_ context.Context, oldName, newName string) error {
 		return err
 	}
 	m.nodes[newAbs] = node
-	m.nodes[parentDir(newAbs)].children[path.Base(newAbs)] = struct{}{}
+	m.nodes[parentDir(newAbs)].children[path.Base(newAbs)] = struct{}{} //nolint:nilaway // parent guaranteed by mkdirAllLocked above
 	node.modTime = time.Now().UTC()
 	return nil
 }
@@ -343,7 +343,7 @@ func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm std
 			gid:     DefaultOwnerGID,
 		}
 		m.nodes[abs] = node
-		m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{}
+		m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{} //nolint:nilaway // parent guaranteed by mkdirAllLocked above
 	} else if flag&os.O_CREATE != 0 && flag&os.O_EXCL != 0 {
 		return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrExist}
 	}
@@ -434,12 +434,12 @@ func (m *MemoryFS) ReadDir(_ context.Context, name string) ([]stdfs.DirEntry, er
 	entries := make([]stdfs.DirEntry, 0, len(names))
 	for _, child := range names {
 		childPath := Resolve(abs, child)
-		childNode := m.nodes[childPath]
+		childNode := m.nodes[childPath] //nolint:nilaway // children are registered via mkdirAllLocked/OpenFile, so node always exists
 		entries = append(entries, memoryDirEntry{
 			fs:   m,
 			name: child,
 			path: childPath,
-			mode: childNode.mode,
+			mode: childNode.mode, //nolint:nilaway // node existence validated above
 		})
 	}
 	return entries, nil
@@ -559,7 +559,7 @@ func (m *MemoryFS) Mkfifo(_ context.Context, name string, perm stdfs.FileMode) e
 		uid:     DefaultOwnerUID,
 		gid:     DefaultOwnerGID,
 	}
-	m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{}
+	parentNode.children[path.Base(abs)] = struct{}{}
 	return nil
 }
 
@@ -584,7 +584,7 @@ func (m *MemoryFS) Remove(_ context.Context, name string, recursive bool) error 
 			delete(m.nodes, candidate)
 		}
 	}
-	delete(m.nodes[parentDir(abs)].children, path.Base(abs))
+	delete(m.nodes[parentDir(abs)].children, path.Base(abs)) //nolint:nilaway // abs was resolved successfully above, so parent exists
 	return nil
 }
 
@@ -617,7 +617,7 @@ func (m *MemoryFS) Rename(_ context.Context, oldName, newName string) error {
 		}
 	}
 
-	delete(m.nodes[parentDir(oldAbs)].children, path.Base(oldAbs))
+	delete(m.nodes[parentDir(oldAbs)].children, path.Base(oldAbs)) //nolint:nilaway // oldAbs was resolved successfully above, so parent exists
 	for candidate := range toMove {
 		delete(m.nodes, candidate)
 	}
@@ -626,7 +626,7 @@ func (m *MemoryFS) Rename(_ context.Context, oldName, newName string) error {
 		newPath := strings.Replace(oldPath, oldAbs, newAbs, 1)
 		m.nodes[newPath] = moveNode
 	}
-	m.nodes[parentDir(newAbs)].children[path.Base(newAbs)] = struct{}{}
+	m.nodes[parentDir(newAbs)].children[path.Base(newAbs)] = struct{}{} //nolint:nilaway // parent guaranteed by mkdirAllLocked above
 	m.rebuildDirectoryChildrenLocked()
 	return nil
 }
@@ -670,6 +670,9 @@ func (m *MemoryFS) mkdirAllLocked(name string, perm stdfs.FileMode) error {
 				if err != nil {
 					return &os.PathError{Op: "mkdir", Path: next, Err: err}
 				}
+				if resolvedNode == nil {
+					return &os.PathError{Op: "mkdir", Path: next, Err: stdfs.ErrNotExist}
+				}
 				if !resolvedNode.mode.IsDir() {
 					return &os.PathError{Op: "mkdir", Path: next, Err: stdfs.ErrInvalid}
 				}
@@ -694,7 +697,7 @@ func (m *MemoryFS) mkdirAllLocked(name string, perm stdfs.FileMode) error {
 			uid:      DefaultOwnerUID,
 			gid:      DefaultOwnerGID,
 		}
-		m.nodes[current].children[part] = struct{}{}
+		m.nodes[current].children[part] = struct{}{} //nolint:nilaway // current was verified as a directory node in prior loop iterations
 		current = next
 	}
 	return nil
