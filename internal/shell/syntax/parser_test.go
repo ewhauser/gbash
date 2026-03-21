@@ -844,26 +844,32 @@ var errorCases = []errorCase{
 	errCase(
 		"then",
 		langErr("1:1: `then` can only be used in an `if`"),
+		langErr("1:1: syntax error near unexpected token `then'", LangBash|LangBats),
 	),
 	errCase(
 		"elif",
 		langErr("1:1: `elif` can only be used in an `if`"),
+		langErr("1:1: syntax error near unexpected token `elif'", LangBash|LangBats),
 	),
 	errCase(
 		"fi",
 		langErr("1:1: `fi` can only be used to end an `if`"),
+		langErr("1:1: syntax error near unexpected token `fi'", LangBash|LangBats),
 	),
 	errCase(
 		"do",
 		langErr("1:1: `do` can only be used in a loop"),
+		langErr("1:1: syntax error near unexpected token `do'", LangBash|LangBats),
 	),
 	errCase(
 		"done",
 		langErr("1:1: `done` can only be used to end a loop"),
+		langErr("1:1: syntax error near unexpected token `done'", LangBash|LangBats),
 	),
 	errCase(
 		"esac",
 		langErr("1:1: `esac` can only be used to end a `case`"),
+		langErr("1:1: syntax error near unexpected token `esac'", LangBash|LangBats),
 	),
 	errCase(
 		"a=b { foo; }",
@@ -876,25 +882,30 @@ var errorCases = []errorCase{
 	errCase(
 		"a=b if foo; then bar; fi",
 		langErr("1:13: `then` can only be used in an `if`"),
+		langErr("1:13: syntax error near unexpected token `then'", LangBash|LangBats),
 	),
 	errCase(
 		">f { foo; }",
-		langErr("1:1: redirects before compound commands are a zsh feature; tried parsing as LANG"),
+		langErr("1:1: redirects before compound commands are a zsh feature; tried parsing as LANG", LangPOSIX|LangMirBSDKorn),
+		langErr("", LangBash|LangBats),
 		langErr("", LangZsh),
 	),
 	errCase(
 		">f foo() { bar; }",
-		langErr("1:1: redirects before compound commands are a zsh feature; tried parsing as LANG"),
+		langErr("1:1: redirects before compound commands are a zsh feature; tried parsing as LANG", LangPOSIX|LangMirBSDKorn),
+		langErr("", LangBash|LangBats),
 		langErr("", LangZsh),
 	),
 	errCase(
 		">f if foo; then bar; fi",
-		langErr("1:1: redirects before compound commands are a zsh feature; tried parsing as LANG"),
+		langErr("1:1: redirects before compound commands are a zsh feature; tried parsing as LANG", LangPOSIX|LangMirBSDKorn),
+		langErr("", LangBash|LangBats),
 		langErr("", LangZsh),
 	),
 	errCase(
 		"if done; then b; fi",
 		langErr("1:4: `done` can only be used to end a loop"),
+		langErr("1:4: syntax error near unexpected token `done'", LangBash|LangBats),
 	),
 	errCase(
 		"'",

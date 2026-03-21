@@ -1,7 +1,7 @@
 # gbash
 
 Status: Draft v0.1
-Last updated: 2026-03-18
+Last updated: 2026-03-20
 
 ## 1. Purpose
 
@@ -83,7 +83,7 @@ Process substitution is supported as a sandbox-native shell feature. The shell c
 
 Registry-backed replacements for Bash builtins should preserve shell-visible Bash coercions when practical. `printf` is a concrete compatibility boundary: numeric conversions must accept quoted character constants such as `"'A"` and `"\"B"`, `%q` and `${var@Q}` must emit Bash-compatible shell-escaped strings, `%b` and bare format-string escapes must honor Bash's escape decoding rules, `%(... )T` must consult only exported `TZ`, and write failures must still surface shell status `1` after any partial output or diagnostics.
 
-Shell builtins that remain implemented inside the in-tree interpreter should preserve the Bash-facing option contracts we depend on for conformance. One current requirement is Bash-compatible `type` resolution and reporting for `-a`, `-f`, `-p`, `-P`, and `-t` across aliases, functions, builtins, keywords, and PATH files.
+Shell builtins that remain implemented inside the in-tree interpreter should preserve the Bash-facing option contracts we depend on for conformance. Current requirements include Bash-compatible `type` resolution and reporting for `-a`, `-f`, `-p`, `-P`, and `-t` across aliases, functions, builtins, keywords, and PATH files, plus Bash-compatible `set -C` / `set +C` and `set -o noclobber` / `set +o noclobber` handling for redirect clobber semantics.
 
 ### 5.3 Project-owned boundaries
 
@@ -263,7 +263,7 @@ Package responsibilities:
 - `internal/shell/`: concrete shell core entrypoints plus the in-tree `syntax`, `expand`, `pattern`, and `interp` packages; no product policy lives here
 - `fs/`: POSIX-like path normalization, memory filesystem, host-backed lower layers, overlay, and snapshot backends
 - `network/`: runtime-owned HTTP sandbox with origin- and path-boundary-aware allowlists, method controls, redirect revalidation, and response-size limits
-- `commands/`: registry and Go-native command implementations such as `clear`, `compadjust`, `complete`, `compgen`, `compopt`, `echo`, `egrep`, `fgrep`, `grep`, `history`, `ls`, `pwd`, `strings`, and `xan`
+- `commands/`: registry and Go-native command implementations such as `clear`, `compadjust`, `complete`, `compgen`, `compopt`, `echo`, `egrep`, `fgrep`, `grep`, `history`, `ls`, `mkfifo`, `pwd`, `strings`, and `xan`
 - `contrib/`: opt-in command modules that stay outside the root module dependency graph so heavyweight helpers do not inflate the core runtime. The repository may also expose umbrella contrib helpers such as `contrib/extras` to register the stable official contrib command set without changing the default runtime surface, and may ship official opt-in binaries such as `contrib/extras/cmd/gbash-extras` from the corresponding contrib module. Current examples include `awk`, `html-to-markdown`, `jq`, `nodejs`, `sqlite3`, and `yq`.
 - `packages/`: publishable JavaScript and TypeScript packages. `packages/gbash-wasm` owns the `js/wasm` assets plus explicit host entrypoints such as `@ewhauser/gbash-wasm/browser` and `@ewhauser/gbash-wasm/node`.
 - `policy/`: allowlists, root restrictions, size limits, network stance, and decision helpers
@@ -386,6 +386,7 @@ type FileSystem interface {
     Stat(ctx context.Context, name string) (fs.FileInfo, error)
     ReadDir(ctx context.Context, name string) ([]fs.DirEntry, error)
     MkdirAll(ctx context.Context, name string, perm fs.FileMode) error
+    Mkfifo(ctx context.Context, name string, perm fs.FileMode) error
     Remove(ctx context.Context, name string, recursive bool) error
     Rename(ctx context.Context, oldName, newName string) error
     Getwd() string
@@ -421,6 +422,7 @@ type CommandFS struct {
 
 func ReadAll(ctx context.Context, inv *Invocation, reader io.Reader) ([]byte, error)
 func ReadAllStdin(ctx context.Context, inv *Invocation) ([]byte, error)
+func (*CommandFS) Mkfifo(ctx context.Context, name string, perm fs.FileMode) error
 func (*CommandFS) ReadFile(ctx context.Context, name string) ([]byte, error)
 
 type FetchFunc func(context.Context, *network.Request) (*network.Response, error)
@@ -549,6 +551,7 @@ Implementation detail for the current runtime:
 - all project path handlers resolve relative paths from virtual `PWD`, not from host cwd
 - the in-tree runner keeps an execution-frame stack for `main`, `source`, and shell-function calls and derives `BASH_SOURCE`, `BASH_LINENO`, `FUNCNAME`, and `caller` from that stack
 - shell vars, `BASH_HISTORY`, and `GBASH_UMASK` are synchronized through direct runner mutation APIs rather than bootstrap `eval` calls
+- redirect compatibility work must not implicitly expand the product contract for background execution: job control remains unsupported, and this runtime does not promise separate asynchronous redirect-restoration semantics for `cmd &`
 
 ### 9.3 Stdio
 
@@ -623,6 +626,7 @@ The filesystem abstraction is deliberately smaller than `os`:
 - readlink
 - realpath
 - mkdir
+- mkfifo
 - remove
 - rename
 - working directory state
@@ -645,6 +649,7 @@ Implementation detail for the current runtime:
 
 - `Lstat`, `Readlink`, and `Realpath` are now part of the core interface because path introspection is needed for future agent commands and safer path handling
 - command-facing copy semantics stay in `commands/`, where policy and shell-facing errors already live
+- `mkfifo` is a shipped registry command, so the filesystem interface exposes named-pipe creation directly and `MemoryFS` can persist FIFO entries alongside regular files and symlinks
 - `fs/` may use private clone helpers internally for backend composition, but that is not the same as moving user-visible `cp` semantics into the filesystem layer
 - the runtime wraps the configured backend with a tiny virtual-device layer; today that layer reserves `/dev` and `/dev/null`, while non-reserved `/dev/*` entries still come from the underlying sandbox filesystem when present
 - `MemoryFS` stores symlink entries directly for testing and path-safety enforcement, but the runtime still defaults to `SymlinkDeny`

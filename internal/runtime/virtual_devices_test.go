@@ -2,9 +2,19 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"os"
+	goruntime "runtime"
 	"testing"
 )
+
+func wcExpectedField(value int) string {
+	width := 1
+	if goruntime.GOOS == "darwin" {
+		width = 8
+	}
+	return fmt.Sprintf("%*d", width, value)
+}
 
 func TestNullDeviceSemanticsAcrossSandboxBackends(t *testing.T) {
 	t.Parallel()
@@ -46,7 +56,7 @@ func TestNullDeviceSemanticsAcrossSandboxBackends(t *testing.T) {
 			if result.ExitCode != 0 {
 				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 			}
-			if got, want := result.Stdout, "empty\n0\n"; got != want {
+			if got, want := result.Stdout, "empty\n"+wcExpectedField(0)+"\n"; got != want {
 				t.Fatalf("Stdout = %q, want %q", got, want)
 			}
 		})

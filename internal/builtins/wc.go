@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	goruntime "runtime"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -45,10 +46,15 @@ type wcLineResult struct {
 	counts wcCounts
 }
 
-const wcMinimumWidth = 7
-
 func NewWC() *WC {
 	return &WC{}
+}
+
+func wcMinimumWidth() int {
+	if goruntime.GOOS == "darwin" {
+		return 8
+	}
+	return 1
 }
 
 func (c *WC) Name() string {
@@ -380,28 +386,30 @@ func wcMaxLineLength(data []byte) int {
 }
 
 func wcOutputWidth(opts wcOptions, results []wcLineResult, hasStdinInput bool, numInputs int) int {
+	minWidth := wcMinimumWidth()
 	if opts.totalWhen == wcTotalOnly {
 		return 1
 	}
 
 	enabled := wcEnabledCount(opts)
 	if len(results) == 0 {
-		if enabled == 1 {
-			return 1
-		}
-		return wcMinimumWidth
+		return minWidth
 	}
 	if enabled == 1 {
-		if opts.words && len(results) > 1 {
-			// GNU preserves width alignment for words-only multi-file output.
-		} else {
+		if len(results) == 1 {
+			if hasStdinInput && numInputs == 1 && results[0].label == "-" {
+				return 1
+			}
+			return minWidth
+		}
+		if !opts.lines && !opts.words {
 			return 1
 		}
 	}
 
 	width := 1
-	if hasStdinInput {
-		width = wcMinimumWidth
+	if hasStdinInput || (enabled == 1 && (opts.lines || opts.words)) {
+		width = minWidth
 	}
 	for _, result := range results {
 		width = max(width, wcCountsWidth(result.counts, opts))

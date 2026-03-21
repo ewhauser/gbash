@@ -1819,6 +1819,44 @@ var fileTests = []fileTestCase{
 	),
 	fileTest(
 		[]string{
+			"echo {myvar}>/dev/stdout",
+		},
+		langFile(&Stmt{
+			Cmd: litCall("echo"),
+			Redirs: []*Redirect{
+				{Op: RdrOut, N: lit("{myvar}"), Word: litWord("/dev/stdout")},
+			},
+		}, LangBash|LangBats),
+	),
+	fileTest(
+		[]string{"echo x=1 >/dev/stdout", "echo x=1>/dev/stdout"},
+		langFile(&Stmt{
+			Cmd: litCall("echo", "x=1"),
+			Redirs: []*Redirect{
+				{Op: RdrOut, Word: litWord("/dev/stdout")},
+			},
+		}),
+	),
+	fileTest(
+		[]string{"echo x={myvar} >/dev/stdout", "echo x={myvar}>/dev/stdout"},
+		langFile(&Stmt{
+			Cmd: litCall("echo", "x={myvar}"),
+			Redirs: []*Redirect{
+				{Op: RdrOut, Word: litWord("/dev/stdout")},
+			},
+		}, LangBash|LangBats),
+	),
+	fileTest(
+		[]string{"echo +{myvar} >/dev/stdout", "echo +{myvar}>/dev/stdout"},
+		langFile(&Stmt{
+			Cmd: litCall("echo", "+{myvar}"),
+			Redirs: []*Redirect{
+				{Op: RdrOut, Word: litWord("/dev/stdout")},
+			},
+		}, LangBash|LangBats),
+	),
+	fileTest(
+		[]string{
 			"foo bar >file",
 			"foo bar>file",
 		},

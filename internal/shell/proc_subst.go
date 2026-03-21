@@ -362,6 +362,17 @@ func (f *procSubstFS) OpenFile(ctx context.Context, name string, flag int, perm 
 	return f.inner.OpenFile(ctx, name, flag, perm)
 }
 
+func (f *procSubstFS) Mkfifo(ctx context.Context, name string, perm stdfs.FileMode) error {
+	if abs, ok := f.procSubstPath(name); ok {
+		return &os.PathError{Op: "mkfifo", Path: abs, Err: stdfs.ErrPermission}
+	}
+	fifoFS, ok := f.inner.(gbfs.FIFOFileSystem)
+	if !ok {
+		return &os.PathError{Op: "mkfifo", Path: gbfs.Clean(name), Err: stdfs.ErrPermission}
+	}
+	return fifoFS.Mkfifo(ctx, name, perm)
+}
+
 func (f *procSubstFS) Stat(ctx context.Context, name string) (stdfs.FileInfo, error) {
 	if abs, ok := f.procSubstPath(name); ok {
 		if info, ok := f.manager.stat(abs); ok {

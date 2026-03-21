@@ -69,6 +69,10 @@ func (r *Runner) fillExpandConfig(ctx context.Context) {
 				return err
 			}
 			r2 := r.subshell(false)
+			if r.expandBaseFDs != nil {
+				r2.fds = cloneFDTable(r.expandBaseFDs)
+				r2.syncStandardFDs()
+			}
 			r2.opts[optVerbose] = false
 			r2.setStdoutWriter(w)
 			r2.stmts(ctx, cs.Stmts)
@@ -580,24 +584,47 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 	r.ensureFDTable()
 	oldIn, oldOut, oldErr := r.stdin, r.stdout, r.stderr
 	oldFDs := cloneFDTable(r.fds)
+	oldTraceOutput := r.traceOutput
+	oldExpandBaseFDs := r.expandBaseFDs
+	defer func() {
+		r.traceOutput = oldTraceOutput
+		r.expandBaseFDs = oldExpandBaseFDs
+	}()
+	if len(st.Redirs) > 0 && usesPreRedirectExpandFDs(st.Cmd) {
+		if r.traceOutput == nil {
+			r.traceOutput = oldErr
+		}
+		r.expandBaseFDs = oldFDs
+	}
 	r.pushFDSnapshot(oldFDs)
 	procSubstStart := len(r.bgProcs)
 	closers := make([]io.Closer, 0, len(st.Redirs))
+	keepClosedFDs := make(map[int]struct{}, len(st.Redirs))
+	releasedNamedFDs := make([]string, 0, len(st.Redirs))
 	for _, rd := range st.Redirs {
-		cls, err := r.redir(ctx, rd)
+		result, err := r.redir(ctx, rd)
 		if err != nil {
 			r.exit.code = 1
 			break
 		}
-		if cls != nil {
-			closers = append(closers, cls)
+		if result.closer != nil {
+			closers = append(closers, result.closer)
 		}
+		for _, fd := range result.keepClosed {
+			keepClosedFDs[fd] = struct{}{}
+		}
+		releasedNamedFDs = append(releasedNamedFDs, result.releasedNamedFDs...)
 	}
 	if r.exit.ok() && st.Cmd != nil {
 		r.cmd(ctx, st.Cmd)
 	}
 	keepRedirs := r.keepRedirs
 	r.keepRedirs = false
+	if keepRedirs {
+		for _, name := range releasedNamedFDs {
+			r.markNamedFDReleased(name)
+		}
+	}
 	if !keepRedirs {
 		for i := len(closers) - 1; i >= 0; i-- {
 			_ = closers[i].Close()
@@ -625,6 +652,9 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 	if !keepRedirs {
 		r.stdin, r.stdout, r.stderr = oldIn, oldOut, oldErr
 		r.fds = oldFDs
+		for fd := range keepClosedFDs {
+			r.setFD(fd, nil)
+		}
 		r.popFDSnapshot()
 		r.syncStandardFDs()
 	} else {
@@ -632,6 +662,26 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 		r.closeUnusedSnapshotFDs(oldFDs)
 		r.syncStandardFDs()
 	}
+}
+
+func usesPreRedirectExpandFDs(cmd syntax.Command) bool {
+	switch cmd.(type) {
+	case *syntax.CallExpr, *syntax.DeclClause:
+		return true
+	default:
+		return false
+	}
+}
+
+type redirResult struct {
+	closer           io.Closer
+	keepClosed       []int
+	releasedNamedFDs []string
+}
+
+type redirectDupSpec struct {
+	sourceFD int
+	move     bool
 }
 
 func (r *Runner) waitProcSubsts(start int) {
@@ -2359,7 +2409,8 @@ func (r *Runner) hdocReader(rd *syntax.Redirect) (StdinReader, error) {
 	return pr, nil
 }
 
-func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (io.Closer, error) {
+func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (redirResult, error) {
+	var result redirResult
 	r.ensureFDTable()
 	arg := ""
 	wordText := ""
@@ -2367,14 +2418,14 @@ func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (io.Closer, err
 		wordText = printSyntaxNode(rd.Word)
 	}
 	switch rd.Op {
-	case syntax.RdrIn, syntax.RdrOut, syntax.AppOut, syntax.RdrInOut,
-		syntax.RdrAll, syntax.AppAll:
+	case syntax.RdrIn, syntax.RdrOut, syntax.RdrClob, syntax.AppOut, syntax.AppClob, syntax.RdrInOut,
+		syntax.RdrAll, syntax.RdrAllClob, syntax.AppAll, syntax.AppAllClob:
 		r.inRedirectWord++
 		fields, err := expand.RedirectFields(r.ecfg, rd.Word)
 		r.inRedirectWord--
 		r.expandErr(err)
 		if err != nil {
-			return nil, err
+			return result, err
 		}
 		if len(fields) != 1 {
 			if wordText != "" {
@@ -2382,7 +2433,7 @@ func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (io.Closer, err
 			} else {
 				r.errf("ambiguous redirect\n")
 			}
-			return nil, errors.New("ambiguous redirect")
+			return result, errors.New("ambiguous redirect")
 		}
 		arg = fields[0]
 	default:
@@ -2393,17 +2444,18 @@ func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (io.Closer, err
 
 	targetFD, allocated, err := r.redirectTargetFD(rd, arg)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 
 	switch rd.Op {
 	case syntax.Hdoc, syntax.DashHdoc:
 		pr, err := r.hdocReader(rd)
 		if err != nil {
-			return nil, err
+			return result, err
 		}
 		r.setFD(targetFD, newOwnedShellInputFD(pr))
-		return pr, nil
+		result.closer = pr
+		return result, nil
 	case syntax.WordHdoc:
 		pr, pw := r.newPipe()
 		r.setFD(targetFD, newOwnedShellInputFD(pr))
@@ -2414,7 +2466,8 @@ func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (io.Closer, err
 			io.WriteString(pw, "\n")
 			pw.Close()
 		}()
-		return pr, nil
+		result.closer = pr
+		return result, nil
 	case syntax.DplOut:
 		switch arg {
 		case "-":
@@ -2423,102 +2476,110 @@ func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (io.Closer, err
 			} else {
 				r.setFD(targetFD, nil)
 			}
+			if rd.N != nil {
+				if name, ok := redirectNamedFD(rd.N.Value); ok {
+					result.releasedNamedFDs = append(result.releasedNamedFDs, name)
+				}
+			}
 		default:
-			sourceFD, err := parseRedirectFDNumber(arg)
+			dup, err := parseRedirectDupSpec(arg)
 			if err != nil {
 				// Bash treats >&word with a non-numeric word as "redirect stdout and
 				// stderr to file". That path is unrelated to the read work, so leave it
 				// on the existing file-opening implementation for fd 1.
-				if targetFD != 1 && !allocated {
-					r.errf("%s: Bad file descriptor\n", arg)
-					return nil, errors.New("bad file descriptor")
+				if targetFD != 1 || allocated {
+					diag := redirectBadFDText(rd, arg, wordText)
+					r.errf("%s: Bad file descriptor\n", diag)
+					return result, errors.New("bad file descriptor")
 				}
-				f, err := r.open(ctx, arg, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o666, true)
+				fd, closer, err := r.openRedirectTarget(ctx, arg, syntax.RdrAll)
 				if err != nil {
-					return nil, err
+					return result, err
 				}
-				fd := newShellReadWriteFD(f, false, true)
 				r.setFD(1, fd)
 				r.setFD(2, fd)
-				return fd, nil
+				result.closer = closer
+				return result, nil
 			}
-			src := r.getFD(sourceFD)
+			if targetFD == dup.sourceFD {
+				return result, nil
+			}
+			src := r.getFD(dup.sourceFD)
 			if src == nil || src.writer == nil {
-				r.errf("%s: Bad file descriptor\n", arg)
-				return nil, errors.New("bad file descriptor")
+				diag := redirectBadFDText(rd, arg, wordText)
+				r.errf("%s: Bad file descriptor\n", diag)
+				return result, errors.New("bad file descriptor")
 			}
-			r.setFD(targetFD, src)
+			if targetFD != dup.sourceFD {
+				r.setFD(targetFD, src)
+			}
+			if dup.move && targetFD != dup.sourceFD {
+				r.setFD(dup.sourceFD, nil)
+				if !r.keepRedirs {
+					result.keepClosed = append(result.keepClosed, dup.sourceFD)
+				}
+			}
 		}
-		return nil, nil
+		return result, nil
 	case syntax.DplIn:
 		switch arg {
 		case "-":
 			r.setFD(targetFD, nil)
+			if rd.N != nil {
+				if name, ok := redirectNamedFD(rd.N.Value); ok {
+					result.releasedNamedFDs = append(result.releasedNamedFDs, name)
+				}
+			}
 		default:
-			sourceFD, err := parseRedirectFDNumber(arg)
+			dup, err := parseRedirectDupSpec(arg)
 			if err != nil {
-				r.errf("%s: Bad file descriptor\n", arg)
-				return nil, errors.New("bad file descriptor")
+				diag := redirectBadFDText(rd, arg, wordText)
+				r.errf("%s: Bad file descriptor\n", diag)
+				return result, errors.New("bad file descriptor")
 			}
-			src := r.getFD(sourceFD)
-			if src == nil || src.reader == nil {
-				r.errf("%s: Bad file descriptor\n", arg)
-				return nil, errors.New("bad file descriptor")
+			if targetFD == dup.sourceFD {
+				return result, nil
 			}
-			r.setFD(targetFD, src)
+			src := r.getFD(dup.sourceFD)
+			if src == nil {
+				diag := redirectBadFDText(rd, arg, wordText)
+				r.errf("%s: Bad file descriptor\n", diag)
+				return result, errors.New("bad file descriptor")
+			}
+			if targetFD != dup.sourceFD {
+				r.setFD(targetFD, src)
+			}
+			if dup.move && targetFD != dup.sourceFD {
+				r.setFD(dup.sourceFD, nil)
+				if !r.keepRedirs {
+					result.keepClosed = append(result.keepClosed, dup.sourceFD)
+				}
+			}
 		}
-		return nil, nil
-	case syntax.RdrIn, syntax.RdrOut, syntax.AppOut, syntax.RdrInOut,
-		syntax.RdrAll, syntax.AppAll:
+		return result, nil
+	case syntax.RdrIn, syntax.RdrOut, syntax.RdrClob, syntax.AppOut, syntax.AppClob, syntax.RdrInOut,
+		syntax.RdrAll, syntax.RdrAllClob, syntax.AppAll, syntax.AppAllClob:
 		// done further below
 	default:
 		panic(fmt.Sprintf("unhandled redirect op: %v", rd.Op))
 	}
-	mode := os.O_RDONLY
-	readable := false
-	writable := false
-	switch rd.Op {
-	case syntax.RdrIn:
-		readable = true
-	case syntax.RdrInOut:
-		readable = true
-		writable = true
-		mode = os.O_RDWR | os.O_CREATE
-	case syntax.AppOut, syntax.AppAll:
-		writable = true
-		mode = os.O_WRONLY | os.O_CREATE | os.O_APPEND
-	case syntax.RdrOut, syntax.RdrAll:
-		writable = true
-		mode = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
-	}
-	if arg == "" {
-		err := &os.PathError{Op: "open", Path: arg, Err: syscall.ENOENT}
-		r.errf(": No such file or directory\n")
-		return nil, err
-	}
-	f, err := r.open(ctx, arg, mode, 0o666, false)
+	fd, closer, err := r.openRedirectTarget(ctx, arg, rd.Op)
 	if err != nil {
-		if rd.Op == syntax.RdrIn && (errors.Is(err, syscall.EISDIR) || strings.Contains(err.Error(), "Is a directory")) {
-			fd := newOwnedShellInputFD(&directoryReadCloser{path: arg})
-			r.setFD(targetFD, fd)
-			return fd, nil
-		}
-		r.errf("%v\n", err)
-		return nil, err
+		return result, err
 	}
-	fd := newShellReadWriteFD(f, readable, writable)
 	switch rd.Op {
 	case syntax.RdrIn:
 		r.setFD(targetFD, fd)
-	case syntax.RdrOut, syntax.AppOut, syntax.RdrInOut:
+	case syntax.RdrOut, syntax.RdrClob, syntax.AppOut, syntax.AppClob, syntax.RdrInOut:
 		r.setFD(targetFD, fd)
-	case syntax.RdrAll, syntax.AppAll:
+	case syntax.RdrAll, syntax.RdrAllClob, syntax.AppAll, syntax.AppAllClob:
 		r.setFD(1, fd)
 		r.setFD(2, fd)
 	default:
 		panic(fmt.Sprintf("unhandled redirect op: %v", rd.Op))
 	}
-	return fd, nil
+	result.closer = closer
+	return result, nil
 }
 
 type directoryReadCloser struct {
@@ -2541,6 +2602,158 @@ func parseRedirectFDNumber(s string) (int, error) {
 	return fd, nil
 }
 
+func parseRedirectDupSpec(s string) (redirectDupSpec, error) {
+	spec := redirectDupSpec{}
+	if strings.HasSuffix(s, "-") && len(s) > 1 {
+		fd, err := parseRedirectFDNumber(s[:len(s)-1])
+		if err != nil {
+			return spec, err
+		}
+		spec.sourceFD = fd
+		spec.move = true
+		return spec, nil
+	}
+	fd, err := parseRedirectFDNumber(s)
+	if err != nil {
+		return spec, err
+	}
+	spec.sourceFD = fd
+	return spec, nil
+}
+
+func redirectBadFDText(rd *syntax.Redirect, arg, wordText string) string {
+	if rd != nil && redirectWordIsLiteral(rd.Word, arg) {
+		return arg
+	}
+	if wordText != "" {
+		return wordText
+	}
+	return arg
+}
+
+func redirectWordIsLiteral(word *syntax.Word, lit string) bool {
+	if word == nil || len(word.Parts) != 1 {
+		return false
+	}
+	part, ok := word.Parts[0].(*syntax.Lit)
+	if !ok {
+		return false
+	}
+	return part.Value == lit
+}
+
+func redirectOpSpec(op syntax.RedirOperator) (mode int, readable, writable, truncates, allOutputs, ignoreNoClobber bool) {
+	mode = os.O_RDONLY
+	switch op {
+	case syntax.RdrIn:
+		readable = true
+	case syntax.RdrInOut:
+		readable = true
+		writable = true
+		mode = os.O_RDWR | os.O_CREATE
+	case syntax.AppOut, syntax.AppClob:
+		writable = true
+		mode = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+		ignoreNoClobber = true
+	case syntax.AppAll, syntax.AppAllClob:
+		writable = true
+		allOutputs = true
+		mode = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+		ignoreNoClobber = true
+	case syntax.RdrClob:
+		writable = true
+		truncates = true
+		mode = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+		ignoreNoClobber = true
+	case syntax.RdrAllClob:
+		writable = true
+		truncates = true
+		allOutputs = true
+		mode = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+		ignoreNoClobber = true
+	case syntax.RdrOut:
+		writable = true
+		truncates = true
+		mode = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	case syntax.RdrAll:
+		writable = true
+		truncates = true
+		allOutputs = true
+		mode = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	}
+	return
+}
+
+func shellStdDeviceFD(path string) (int, bool) {
+	switch path {
+	case "/dev/stdin":
+		return 0, true
+	case "/dev/stdout":
+		return 1, true
+	case "/dev/stderr":
+		return 2, true
+	default:
+		return 0, false
+	}
+}
+
+type shellStdDeviceFile struct {
+	path string
+	fd   *shellFD
+}
+
+func (f *shellStdDeviceFile) Read(p []byte) (int, error) {
+	if f == nil || f.fd == nil || f.fd.reader == nil {
+		return 0, &os.PathError{Op: "read", Path: f.path, Err: syscall.EBADF}
+	}
+	return f.fd.Read(p)
+}
+
+func (f *shellStdDeviceFile) Write(p []byte) (int, error) {
+	if f == nil || f.fd == nil || f.fd.writer == nil {
+		return 0, &os.PathError{Op: "write", Path: f.path, Err: syscall.EBADF}
+	}
+	return f.fd.writer.Write(p)
+}
+
+func (f *shellStdDeviceFile) Close() error { return nil }
+
+func (r *Runner) openRedirectTarget(ctx context.Context, arg string, op syntax.RedirOperator) (*shellFD, io.Closer, error) {
+	mode, readable, writable, truncates, _, ignoreNoClobber := redirectOpSpec(op)
+	if arg == "" {
+		err := &os.PathError{Op: "open", Path: arg, Err: syscall.ENOENT}
+		r.errf(": No such file or directory\n")
+		return nil, nil, err
+	}
+	if truncates && r.opts[optNoClobber] && !ignoreNoClobber {
+		if _, ok := shellStdDeviceFD(absPath(r.Dir, arg)); !ok {
+			info, statErr := r.stat(ctx, arg)
+			switch {
+			case statErr == nil && info.Mode().IsRegular():
+				err := errors.New("cannot overwrite existing file")
+				r.errf("%s: cannot overwrite existing file\n", arg)
+				return nil, nil, err
+			case statErr == nil:
+				// noclobber still allows non-regular files like /dev/null.
+			case errors.Is(statErr, fs.ErrNotExist), errors.Is(statErr, syscall.ENOENT):
+			default:
+				// Let open surface the original error if the stat failure matters.
+			}
+		}
+	}
+	f, err := r.open(ctx, arg, mode, 0o666, false)
+	if err != nil {
+		if op == syntax.RdrIn && (errors.Is(err, syscall.EISDIR) || strings.Contains(err.Error(), "Is a directory")) {
+			fd := newOwnedShellInputFD(&directoryReadCloser{path: arg})
+			return fd, fd, nil
+		}
+		r.errf("%v\n", err)
+		return nil, nil, err
+	}
+	fd := newShellReadWriteFD(f, readable, writable)
+	return fd, fd, nil
+}
+
 func redirectDefaultFD(op syntax.RedirOperator) int {
 	switch op {
 	case syntax.RdrIn, syntax.RdrInOut, syntax.DplIn, syntax.Hdoc, syntax.DashHdoc, syntax.WordHdoc:
@@ -2557,6 +2770,23 @@ func redirectNamedFD(value string) (string, bool) {
 	return value[1 : len(value)-1], true
 }
 
+func (r *Runner) markNamedFDReleased(name string) {
+	if name == "" {
+		return
+	}
+	if r.namedFDReleased == nil {
+		r.namedFDReleased = make(map[string]bool)
+	}
+	r.namedFDReleased[name] = true
+}
+
+func (r *Runner) clearNamedFDReleased(name string) {
+	if name == "" || r.namedFDReleased == nil {
+		return
+	}
+	delete(r.namedFDReleased, name)
+}
+
 func (r *Runner) redirectTargetFD(rd *syntax.Redirect, arg string) (fd int, allocated bool, err error) {
 	if rd.N == nil {
 		return redirectDefaultFD(rd.Op), false, nil
@@ -2566,8 +2796,16 @@ func (r *Runner) redirectTargetFD(rd *syntax.Redirect, arg string) (fd int, allo
 			fd, err := r.lookupNamedFD(name)
 			return fd, false, err
 		}
-		fd = r.allocateFD()
+		start := shellNamedFDStart
+		if prev, err := r.lookupNamedFD(name); err == nil && prev >= shellNamedFDStart {
+			start = prev + 1
+			if r.namedFDReleased != nil && r.namedFDReleased[name] {
+				start = prev
+			}
+		}
+		fd = r.allocateFDFrom(start)
 		r.setVarString(name, strconv.Itoa(fd))
+		r.clearNamedFDReleased(name)
 		return fd, true, nil
 	}
 	fd, err = parseRedirectFDNumber(rd.N.Value)
@@ -2662,6 +2900,12 @@ func (r *Runner) exec(ctx context.Context, pos syntax.Pos, args []string) {
 }
 
 func (r *Runner) open(ctx context.Context, path string, flags int, mode os.FileMode, printErr bool) (io.ReadWriteCloser, error) {
+	if special, handled, err := r.openShellStdDevice(path, flags); handled {
+		if err != nil && printErr {
+			r.errf("%v\n", err)
+		}
+		return special, err
+	}
 	mode = r.applyShellUmask(flags, mode)
 	f, err := r.openHandler(r.handlerCtx(ctx, handlerKindOpen, todoPos), path, flags, mode)
 	var pathErr *os.PathError
@@ -2676,6 +2920,26 @@ func (r *Runner) open(ctx context.Context, path string, flags int, mode os.FileM
 		r.exit.fatal(err)
 	}
 	return nil, err
+}
+
+func (r *Runner) openShellStdDevice(path string, flags int) (io.ReadWriteCloser, bool, error) {
+	fdNum, ok := shellStdDeviceFD(absPath(r.Dir, path))
+	if !ok {
+		return nil, false, nil
+	}
+	fd := r.getFD(fdNum)
+	if fd == nil {
+		return nil, true, &os.PathError{Op: "open", Path: path, Err: syscall.EBADF}
+	}
+	if flags&(os.O_WRONLY|os.O_RDWR) != 0 && fd.writer == nil {
+		return nil, true, &os.PathError{Op: "open", Path: path, Err: syscall.EBADF}
+	}
+	if flags&(os.O_WRONLY|os.O_RDWR) != os.O_WRONLY && fd.reader == nil && flags&os.O_RDONLY == 0 {
+		if flags&(os.O_WRONLY|os.O_RDWR) == os.O_RDWR {
+			return nil, true, &os.PathError{Op: "open", Path: path, Err: syscall.EBADF}
+		}
+	}
+	return &shellStdDeviceFile{path: path, fd: fd}, true, nil
 }
 
 func (r *Runner) applyShellUmask(flags int, mode os.FileMode) os.FileMode {

@@ -113,6 +113,18 @@ type Runner struct {
 	stderr io.Writer
 	fds    map[int]*shellFD
 
+	// namedFDReleased tracks named redirect variables whose descriptor was
+	// explicitly closed with a persistent redirect such as `exec {fd}>&-`.
+	namedFDReleased map[string]bool
+
+	// traceOutput keeps xtrace on the shell's stderr even when a statement
+	// temporarily redirects fd 2.
+	traceOutput io.Writer
+
+	// expandBaseFDs are the file descriptors visible while expanding the
+	// current statement's words, before the statement's own redirects apply.
+	expandBaseFDs map[int]*shellFD
+
 	ecfg *expand.Config
 	ectx context.Context // just so that Runner.Subshell can use it again
 
@@ -514,12 +526,13 @@ var posixOptsTable = [...]posixOpt{
 	// sorted alphabetically by name
 	{'a', "allexport"},
 	{'e', "errexit"},
+	{'C', "noclobber"},
 	{'n', "noexec"},
 	{'f', "noglob"},
 	{'u', "nounset"},
+	{' ', "pipefail"},
 	{'v', "verbose"},
 	{'x', "xtrace"},
-	{' ', "pipefail"},
 }
 
 var bashOptsTable = [...]bashOpt{
@@ -662,12 +675,13 @@ const (
 	// These correspond to indexes in [shellOptsTable]
 	optAllExport = iota
 	optErrExit
+	optNoClobber
 	optNoExec
 	optNoGlob
 	optNoUnset
+	optPipeFail
 	optVerbose
 	optXTrace
-	optPipeFail
 
 	// These correspond to indexes (offset by the above seven items) of
 	// supported options in [bashOptsTable]
@@ -938,6 +952,9 @@ func (r *Runner) subshell(background bool) *Runner {
 		stdout:                  r.stdout,
 		stderr:                  r.stderr,
 		fds:                     cloneFDTable(r.fds),
+		namedFDReleased:         maps.Clone(r.namedFDReleased),
+		traceOutput:             r.traceOutput,
+		expandBaseFDs:           cloneFDTable(r.expandBaseFDs),
 		filename:                r.filename,
 		topLevelScriptPath:      r.topLevelScriptPath,
 		internalRun:             r.internalRun,

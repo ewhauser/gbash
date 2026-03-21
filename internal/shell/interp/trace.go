@@ -29,16 +29,33 @@ func (r *Runner) tracer() *tracer {
 	if !r.opts[optXTrace] || r.suppressXTrace {
 		return nil
 	}
+	output := r.stderr
+	if r.traceOutput != nil {
+		output = r.traceOutput
+	}
 
 	return &tracer{
 		printer:      syntax.NewPrinter(),
-		output:       r.stderr,
+		output:       output,
 		activeRunner: r,
 		prefixRunner: r.subshell(true),
 		syncedVars:   traceVarsSnapshot(r.writeEnv),
 		needsPrefix:  true,
 		cLocale:      runnerUsesCLocale(r),
 	}
+}
+
+func (r *Runner) traceErrorWriter() io.Writer {
+	if r == nil {
+		return io.Discard
+	}
+	if r.traceOutput != nil {
+		return r.traceOutput
+	}
+	if r.stderr != nil {
+		return r.stderr
+	}
+	return io.Discard
 }
 
 func (r *Runner) tracePrefix() string {
@@ -52,11 +69,11 @@ func (r *Runner) tracePrefix() string {
 		msg := err.Error()
 		switch {
 		case strings.Contains(msg, "reached EOF without matching `${` with `}`"):
-			fmt.Fprintf(r.stderr, "%s: bad substitution\n", src)
+			fmt.Fprintf(r.traceErrorWriter(), "%s: bad substitution\n", src)
 		case strings.Contains(msg, "reached EOF without matching `$(` with `)`"):
-			fmt.Fprintln(r.stderr, "unexpected EOF while looking for matching `)'")
+			fmt.Fprintln(r.traceErrorWriter(), "unexpected EOF while looking for matching `)'")
 		default:
-			fmt.Fprintln(r.stderr, msg)
+			fmt.Fprintln(r.traceErrorWriter(), msg)
 		}
 		return ps4ParseFallback(src, err)
 	}
@@ -75,15 +92,15 @@ func (r *Runner) tracePrefix() string {
 
 	cfg := *r.ecfg
 	cfg.ReportError = func(err error) {
-		fmt.Fprintln(r.stderr, err.Error())
+		fmt.Fprintln(r.traceErrorWriter(), err.Error())
 	}
 
 	prefix, err := expand.Literal(&cfg, word)
 	if err != nil {
 		if msg, ok := ps4ArithmeticError(src, err); ok {
-			fmt.Fprintln(r.stderr, msg)
+			fmt.Fprintln(r.traceErrorWriter(), msg)
 		} else {
-			fmt.Fprintln(r.stderr, err.Error())
+			fmt.Fprintln(r.traceErrorWriter(), err.Error())
 		}
 		return src
 	}

@@ -224,3 +224,176 @@ printf 'literal=%%s\n' "$(< %q)"
 		t.Fatalf("stderr = %q, want empty", stderr)
 	}
 }
+
+func TestSelfDupRedirectOnClosedFDIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, ": 3>&3\n: 4<&4\necho hello\n")
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "hello\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "hello\n")
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestDupRedirectRequiresCompatibleDescriptorMode(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, "echo hi 1>&0\necho status=$?\n")
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "status=1\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "status=1\n")
+	}
+	if stderr != "0: Bad file descriptor\n" {
+		t.Fatalf("stderr = %q, want %q", stderr, "0: Bad file descriptor\n")
+	}
+}
+
+func TestInputDupRedirectCanReuseOutputDescriptor(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, "echo one 1>&2\necho two 1<&2\n")
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if stderr != "one\ntwo\n" {
+		t.Fatalf("stderr = %q, want %q", stderr, "one\ntwo\n")
+	}
+}
+
+func TestArithmeticCommandRedirectCoversCommandSubstitution(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	errFile := filepath.Join(dir, "arith.err")
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir: dir,
+		OpenHandler: func(_ context.Context, name string, flag int, perm os.FileMode) (io.ReadWriteCloser, error) {
+			return os.OpenFile(name, flag, perm)
+		},
+	}, fmt.Sprintf(`
+emit_num() {
+  echo 42
+  echo STDERR >&2
+}
+(( a = $(emit_num) + 10 )) 2> %q
+printf 'a=%%s\n' "$a"
+printf '%%s\n' --
+printf '%%s\n' "$(< %q)"
+`, errFile, errFile))
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "a=52\n--\nSTDERR\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "a=52\n--\nSTDERR\n")
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestConditionalRedirectCoversCommandSubstitution(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	errFile := filepath.Join(dir, "cond.err")
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir: dir,
+		OpenHandler: func(_ context.Context, name string, flag int, perm os.FileMode) (io.ReadWriteCloser, error) {
+			return os.OpenFile(name, flag, perm)
+		},
+	}, fmt.Sprintf(`
+emit_word() {
+  echo STDOUT
+  echo STDERR >&2
+}
+[[ $(emit_word) == STDOUT ]] 2> %q
+printf '%%s\n' "$?"
+printf '%%s\n' --
+printf '%%s\n' "$(< %q)"
+`, errFile, errFile))
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "0\n--\nSTDERR\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "0\n--\nSTDERR\n")
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestLoopRedirectCoversCommandSubstitution(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	errFile := filepath.Join(dir, "loop.err")
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir: dir,
+		OpenHandler: func(_ context.Context, name string, flag int, perm os.FileMode) (io.ReadWriteCloser, error) {
+			return os.OpenFile(name, flag, perm)
+		},
+	}, fmt.Sprintf(`
+emit_item() {
+  echo item
+  echo LOOPERR >&2
+}
+for item in $(emit_item); do
+  printf '%%s\n' "$item"
+done 2> %q
+printf '%%s\n' --
+printf '%%s\n' "$(< %q)"
+`, errFile, errFile))
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "item\n--\nLOOPERR\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "item\n--\nLOOPERR\n")
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestNamedRedirectFDReusesClosedDescriptor(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first.txt")
+	second := filepath.Join(dir, "second.txt")
+
+	stdout, stderr, err := runInterpScriptConfig(t, &RunnerConfig{
+		Dir: dir,
+		OpenHandler: func(_ context.Context, name string, flag int, perm os.FileMode) (io.ReadWriteCloser, error) {
+			return os.OpenFile(name, flag, perm)
+		},
+	}, fmt.Sprintf(`
+exec {fd}> %q
+printf 'first=%%s\n' "$fd"
+exec {fd}>&-
+exec {fd}> %q
+printf 'second=%%s\n' "$fd"
+exec {fd}>&-
+`, first, second))
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if stdout != "first=10\nsecond=10\n" {
+		t.Fatalf("stdout = %q, want %q", stdout, "first=10\nsecond=10\n")
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}

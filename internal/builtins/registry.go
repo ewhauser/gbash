@@ -99,6 +99,7 @@ func DefaultRegistry() *commands.Registry {
 		NewInstall(),
 		NewKill(),
 		NewMkdir(),
+		NewMkfifo(),
 		NewLogname(),
 		NewMktemp(),
 		NewRM(),

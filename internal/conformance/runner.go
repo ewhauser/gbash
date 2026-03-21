@@ -31,6 +31,8 @@ var bashShellPrefixPattern = regexp.MustCompile(`^(?:[^:\n]+/)?[A-Za-z0-9_-]*sh:
 var bashAnsiCQuotedCommandNotFoundPattern = regexp.MustCompile(`\$'((?:[^'\\]|\\.)*)': command not found`)
 var bashQuotedNoSuchFilePattern = regexp.MustCompile(`(?m)^([-.[:alnum:]_]+): '([^']+)': No such file or directory$`)
 var bashCannotOpenNoSuchFilePattern = regexp.MustCompile(`(?m)^([-.[:alnum:]_]+): cannot (?:open|remove) '([^']+)'(?: for reading)?: No such file or directory$`)
+var procFDPathPattern = regexp.MustCompile(`/proc/\d+/fd`)
+var procFDLsMissingPattern = regexp.MustCompile(`(?m)^ls: /proc/PID/fd(?:[^\n]*)?: No such file or directory\n?`)
 
 var (
 	conformanceLocaleOnce sync.Once
@@ -507,15 +509,19 @@ func normalizeOutput(value, workspace, sandboxRoot string) string {
 		value = strings.ReplaceAll(value, "/private/tmp/", "/tmp/")
 		value = strings.ReplaceAll(value, "/private/tmp\n", "/tmp\n")
 	}
+	value = procFDPathPattern.ReplaceAllString(value, "/proc/PID/fd")
 	return value
 }
 
 func normalizeBashStderr(value string) string {
 	value = bashLinePrefixPattern.ReplaceAllString(filepath.ToSlash(value), "")
 	value = normalizeNestedShellPrefixes(value)
+	value = procFDLsMissingPattern.ReplaceAllString(value, "")
 	value = strings.ReplaceAll(value, "shopt: usage: shopt [-pqsu] [-o long-option] optname [optname...]\n", "shopt: usage: shopt [-pqsu] [-o] [optname ...]\n")
 	value = bashCannotOpenNoSuchFilePattern.ReplaceAllString(value, "$1: $2: No such file or directory")
 	value = bashQuotedNoSuchFilePattern.ReplaceAllString(value, "$1: $2: No such file or directory")
+	value = strings.ReplaceAll(value, "/: Is a directory\n", "/: redirect target is a directory\n")
+	value = strings.ReplaceAll(value, "/: File exists\n", "/: redirect target is a directory\n")
 	return bashAnsiCQuotedCommandNotFoundPattern.ReplaceAllStringFunc(value, func(match string) string {
 		parts := bashAnsiCQuotedCommandNotFoundPattern.FindStringSubmatch(match)
 		if len(parts) != 2 {

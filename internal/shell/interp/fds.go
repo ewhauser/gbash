@@ -227,8 +227,15 @@ func (r *Runner) setStderrWriter(err io.Writer) {
 }
 
 func (r *Runner) allocateFD() int {
+	return r.allocateFDFrom(shellNamedFDStart)
+}
+
+func (r *Runner) allocateFDFrom(start int) int {
 	r.ensureFDTable()
-	for fd := shellNamedFDStart; ; fd++ {
+	if start < shellNamedFDStart {
+		start = shellNamedFDStart
+	}
+	for fd := start; ; fd++ {
 		if _, ok := r.fds[fd]; !ok {
 			return fd
 		}

@@ -66,6 +66,9 @@ func TestNormalizeOutputAndBashStderr(t *testing.T) {
 	if got, want := normalizeOutput("/work/spec/testdata/echo.sz\n", workspace, isolatedGBashWorkspaceRoot), "/spec/testdata/echo.sz\n"; got != want {
 		t.Fatalf("normalizeOutput(/work) = %q, want %q", got, want)
 	}
+	if got, want := normalizeOutput("/proc/12345/fd\n", workspace, "/"), "/proc/PID/fd\n"; got != want {
+		t.Fatalf("normalizeOutput(/proc fd) = %q, want %q", got, want)
+	}
 	if got, want := normalizeBashStderr("/tmp/x/bash: line 2: parse error\n"), "parse error\n"; got != want {
 		t.Fatalf("normalizeBashStderr() = %q, want %q", got, want)
 	}
@@ -80,6 +83,12 @@ func TestNormalizeOutputAndBashStderr(t *testing.T) {
 	}
 	if got, want := normalizeBashStderr("$'echo\\rTEST': command not found\n"), "echo\rTEST: command not found\n"; got != want {
 		t.Fatalf("normalizeBashStderr() = %q, want %q", got, want)
+	}
+	if got, want := normalizeBashStderr("/: Is a directory\n"), "/: redirect target is a directory\n"; got != want {
+		t.Fatalf("normalizeBashStderr(directory) = %q, want %q", got, want)
+	}
+	if got, want := normalizeBashStderr("/: File exists\n"), "/: redirect target is a directory\n"; got != want {
+		t.Fatalf("normalizeBashStderr(file exists) = %q, want %q", got, want)
 	}
 }
 

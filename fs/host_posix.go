@@ -293,6 +293,10 @@ func (h *HostFS) MkdirAll(_ context.Context, name string, _ stdfs.FileMode) erro
 	return h.readOnlyError("mkdir", h.resolve(name))
 }
 
+func (h *HostFS) Mkfifo(_ context.Context, name string, _ stdfs.FileMode) error {
+	return h.readOnlyError("mkfifo", h.resolve(name))
+}
+
 func (h *HostFS) Remove(_ context.Context, name string, _ bool) error {
 	return h.readOnlyError("remove", h.resolve(name))
 }

@@ -368,6 +368,25 @@ func (m *MountableFS) MkdirAll(ctx context.Context, name string, perm stdfs.File
 	return fsys.MkdirAll(ctx, rel, perm)
 }
 
+func (m *MountableFS) Mkfifo(ctx context.Context, name string, perm stdfs.FileMode) error {
+	abs := m.resolve(name)
+	entry, rel, mounted, synthetic := m.route(abs)
+	if synthetic {
+		if _, err := m.Stat(ctx, abs); err == nil {
+			return &os.PathError{Op: "mkfifo", Path: abs, Err: stdfs.ErrExist}
+		} else if !errors.Is(err, stdfs.ErrNotExist) {
+			return err
+		}
+	}
+	if mounted && rel == "/" {
+		return &os.PathError{Op: "mkfifo", Path: abs, Err: stdfs.ErrExist}
+	}
+	if mounted {
+		return namespacedFS{mountPoint: entry.mountPoint, inner: entry.fs}.Mkfifo(ctx, rel, perm)
+	}
+	return mkfifoViaOptional(ctx, m.base, abs, perm)
+}
+
 func (m *MountableFS) Remove(ctx context.Context, name string, recursive bool) error {
 	abs := m.resolve(name)
 	if m.pathContainsMount(abs) {
@@ -656,6 +675,10 @@ func (f namespacedFS) MkdirAll(ctx context.Context, name string, perm stdfs.File
 	return namespaceError(f.inner.MkdirAll(ctx, name, perm), f.mountPoint)
 }
 
+func (f namespacedFS) Mkfifo(ctx context.Context, name string, perm stdfs.FileMode) error {
+	return namespaceError(mkfifoViaOptional(ctx, f.inner, name, perm), f.mountPoint)
+}
+
 func (f namespacedFS) Remove(ctx context.Context, name string, recursive bool) error {
 	return namespaceError(f.inner.Remove(ctx, name, recursive), f.mountPoint)
 }
@@ -756,3 +779,4 @@ func (i mountableStaticInfo) Ownership() (FileOwnership, bool) {
 }
 
 var _ FileSystem = (*MountableFS)(nil)
+var _ FIFOFileSystem = (*MountableFS)(nil)

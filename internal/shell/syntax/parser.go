@@ -3950,84 +3950,107 @@ func (p *Parser) gotStmtPipe(s *Stmt, binCmd bool) *Stmt {
 		p.doRedirect(s)
 	}
 	redirsStart := len(s.Redirs)
+	allowCompound := redirsStart == 0 || !p.lang.in(langBashLike) || p.lang.in(LangZsh)
 	p.expandCommandAliases(true)
 	switch p.tok {
 	case _LitWord:
-		switch rsrv := reservedWord(p.val); rsrv {
-		case rsrvLeftBrace:
-			p.block(s)
-		case "{}":
-			// Zsh treats closing braces in a special way, allowing this.
-			if p.lang.in(LangZsh) {
-				s.Cmd = &Block{Lbrace: p.pos, Rbrace: posAddCol(p.pos, 1)}
-				p.next()
-			}
-		case rsrvIf:
-			p.ifClause(s)
-		case rsrvWhile, rsrvUntil:
-			// TODO(zsh): "repeat"
-			p.whileClause(s, rsrv == rsrvUntil)
-		case rsrvFor:
-			p.forClause(s)
-		case rsrvCase:
-			p.caseClause(s)
-		// TODO(zsh): { try-list } "always" { always-list }
-		case rsrvRightBrace:
-			p.curErr(`%#q can only be used to close a block`, rightBrace)
-		case rsrvThen, rsrvElif:
-			p.curErr("%#q can only be used in an `if`", p.val)
-		case rsrvFi:
-			p.curErr("%#q can only be used to end an `if`", p.val)
-		case rsrvDo:
-			p.curErr(`%#q can only be used in a loop`, p.val)
-		case rsrvDone:
-			p.curErr(`%#q can only be used to end a loop`, p.val)
-		case rsrvEsac:
-			p.curErr("%#q can only be used to end a `case`", p.val)
-		case "!":
-			if !s.Negated {
-				p.curErr(`%#q can only be used in full statements`, exclMark)
-				break
-			}
-		case "[[":
-			if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
-				p.testClause(s)
-			}
-		case "]]":
-			if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
-				p.curErr(`%#q can only be used to close a test`, dblRightBrack)
-			}
-		case "let":
-			if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
-				p.letClause(s)
-			}
-		case "function":
-			if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
-				p.bashFuncDecl(s)
-			}
-		case "declare":
-			if p.lang.in(langBashLike | LangZsh) { // Note that mksh lacks this one.
-				p.declClause(s)
-			}
-		case "local", "export", "readonly", "typeset", "nameref":
-			if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
-				p.declClause(s)
-			}
-		case "time":
-			if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
-				p.timeClause(s)
-			}
-		case "coproc":
-			if p.lang.in(langBashLike) { // Note that mksh lacks this one.
-				p.coprocClause(s)
-			}
-		case rsrvSelect:
-			if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
-				p.selectClause(s)
-			}
-		case "@test":
-			if p.lang.in(LangBats) {
-				p.testDecl(s)
+		if allowCompound {
+			switch rsrv := reservedWord(p.val); rsrv {
+			case rsrvLeftBrace:
+				p.block(s)
+			case "{}":
+				// Zsh treats closing braces in a special way, allowing this.
+				if p.lang.in(LangZsh) {
+					s.Cmd = &Block{Lbrace: p.pos, Rbrace: posAddCol(p.pos, 1)}
+					p.next()
+				}
+			case rsrvIf:
+				p.ifClause(s)
+			case rsrvWhile, rsrvUntil:
+				// TODO(zsh): "repeat"
+				p.whileClause(s, rsrv == rsrvUntil)
+			case rsrvFor:
+				p.forClause(s)
+			case rsrvCase:
+				p.caseClause(s)
+			// TODO(zsh): { try-list } "always" { always-list }
+			case rsrvRightBrace:
+				p.curErr(`%#q can only be used to close a block`, rightBrace)
+			case rsrvThen, rsrvElif:
+				if p.lang.in(LangBash | LangBats) {
+					p.curErr("syntax error near unexpected token %s", bashQuoteString(p.val))
+					break
+				}
+				p.curErr("%#q can only be used in an `if`", p.val)
+			case rsrvFi:
+				if p.lang.in(LangBash | LangBats) {
+					p.curErr("syntax error near unexpected token %s", bashQuoteString(p.val))
+					break
+				}
+				p.curErr("%#q can only be used to end an `if`", p.val)
+			case rsrvDo:
+				if p.lang.in(LangBash | LangBats) {
+					p.curErr("syntax error near unexpected token %s", bashQuoteString(p.val))
+					break
+				}
+				p.curErr(`%#q can only be used in a loop`, p.val)
+			case rsrvDone:
+				if p.lang.in(LangBash | LangBats) {
+					p.curErr("syntax error near unexpected token %s", bashQuoteString(p.val))
+					break
+				}
+				p.curErr(`%#q can only be used to end a loop`, p.val)
+			case rsrvEsac:
+				if p.lang.in(LangBash | LangBats) {
+					p.curErr("syntax error near unexpected token %s", bashQuoteString(p.val))
+					break
+				}
+				p.curErr("%#q can only be used to end a `case`", p.val)
+			case "!":
+				if !s.Negated {
+					p.curErr(`%#q can only be used in full statements`, exclMark)
+					break
+				}
+			case "[[":
+				if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
+					p.testClause(s)
+				}
+			case "]]":
+				if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
+					p.curErr(`%#q can only be used to close a test`, dblRightBrack)
+				}
+			case "let":
+				if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
+					p.letClause(s)
+				}
+			case "function":
+				if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
+					p.bashFuncDecl(s)
+				}
+			case "declare":
+				if p.lang.in(langBashLike | LangZsh) { // Note that mksh lacks this one.
+					p.declClause(s)
+				}
+			case "local", "export", "readonly", "typeset", "nameref":
+				if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
+					p.declClause(s)
+				}
+			case "time":
+				if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
+					p.timeClause(s)
+				}
+			case "coproc":
+				if p.lang.in(langBashLike) { // Note that mksh lacks this one.
+					p.coprocClause(s)
+				}
+			case rsrvSelect:
+				if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
+					p.selectClause(s)
+				}
+			case "@test":
+				if p.lang.in(LangBats) {
+					p.testDecl(s)
+				}
 			}
 		}
 		if s.Cmd != nil {

@@ -26,6 +26,7 @@ type memoryNode struct {
 	id       uint64
 	mode     stdfs.FileMode
 	data     []byte
+	fifo     *memoryFIFO
 	lazy     LazyFileProvider
 	target   string
 	children map[string]struct{}
@@ -69,6 +70,7 @@ func (m *MemoryFS) Clone() *MemoryFS {
 		cloned := &memoryNode{
 			id:      node.id,
 			mode:    node.mode,
+			fifo:    node.fifo.clone(),
 			lazy:    node.lazy,
 			target:  node.target,
 			atime:   node.atime,
@@ -134,13 +136,18 @@ func (m *MemoryFS) seedInitialFileLocked(name string, file InitialFile, now time
 
 	node := &memoryNode{
 		id:      m.newNodeIDLocked(),
-		mode:    mode,
+		mode:    file.Mode.Type() | mode,
 		lazy:    file.Lazy,
 		data:    append([]byte(nil), file.Content...),
 		atime:   modTime,
 		modTime: modTime,
 		uid:     DefaultOwnerUID,
 		gid:     DefaultOwnerGID,
+	}
+	if file.Mode&stdfs.ModeNamedPipe != 0 {
+		node.fifo = newMemoryFIFO()
+		node.data = nil
+		node.lazy = nil
 	}
 	m.nodes[abs] = node
 	m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{}
@@ -344,6 +351,12 @@ func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm std
 	if node.mode.IsDir() {
 		return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrInvalid}
 	}
+	if node.mode&stdfs.ModeNamedPipe != 0 {
+		if node.fifo == nil {
+			node.fifo = newMemoryFIFO()
+		}
+		return newMemoryFIFOFile(m, abs, node.fifo, flag), nil
+	}
 
 	if flag&os.O_TRUNC != 0 && canWrite(flag) {
 		node.lazy = nil
@@ -511,6 +524,43 @@ func (m *MemoryFS) MkdirAll(_ context.Context, name string, perm stdfs.FileMode)
 	defer m.mu.Unlock()
 
 	return m.mkdirAllLocked(Resolve(m.cwd, name), perm)
+}
+
+func (m *MemoryFS) Mkfifo(_ context.Context, name string, perm stdfs.FileMode) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	requested := Resolve(m.cwd, name)
+	abs, node, err := m.resolvePathLocked(name, false, true)
+	if err != nil {
+		return &os.PathError{Op: "mkfifo", Path: requested, Err: err}
+	}
+	if node != nil {
+		return &os.PathError{Op: "mkfifo", Path: abs, Err: stdfs.ErrExist}
+	}
+
+	parentAbs, parentNode, err := m.resolveAbsLocked(parentDir(abs), true, false, 0)
+	if err != nil {
+		return &os.PathError{Op: "mkfifo", Path: requested, Err: err}
+	}
+	if parentNode == nil || !parentNode.mode.IsDir() {
+		return &os.PathError{Op: "mkfifo", Path: parentAbs, Err: stdfs.ErrInvalid}
+	}
+	if perm == 0 {
+		perm = 0o666
+	}
+	now := time.Now().UTC()
+	m.nodes[abs] = &memoryNode{
+		id:      m.newNodeIDLocked(),
+		mode:    stdfs.ModeNamedPipe | perm.Perm(),
+		fifo:    newMemoryFIFO(),
+		atime:   now,
+		modTime: now,
+		uid:     DefaultOwnerUID,
+		gid:     DefaultOwnerGID,
+	}
+	m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{}
+	return nil
 }
 
 func (m *MemoryFS) Remove(_ context.Context, name string, recursive bool) error {
@@ -989,9 +1039,12 @@ func (e memoryDirEntry) Info() (stdfs.FileInfo, error) {
 
 func newFileInfo(name string, node *memoryNode) *fileInfo {
 	size := int64(len(node.data))
-	if node.mode.IsDir() {
+	switch {
+	case node.mode.IsDir():
 		size = 0
-	} else if node.mode&stdfs.ModeSymlink != 0 {
+	case node.mode&stdfs.ModeNamedPipe != 0:
+		size = 0
+	case node.mode&stdfs.ModeSymlink != 0:
 		size = int64(len(node.target))
 	}
 	return &fileInfo{
@@ -1040,5 +1093,6 @@ func firstNonZeroTime(values ...time.Time) time.Time {
 var _ FileSystem = (*MemoryFS)(nil)
 var _ File = (*memoryFile)(nil)
 var _ stdfs.FileInfo = (*fileInfo)(nil)
+var _ FIFOFileSystem = (*MemoryFS)(nil)
 
 var _ = errors.New
