@@ -57,7 +57,10 @@ func Braces(word *syntax.Word) ([]*syntax.Word, error) {
 				incr = -1
 			}
 			if len(br.Elems) > 2 {
-				n, _ := strconv.Atoi(br.Elems[2].Lit())
+				n, ok := braceSequenceStep(br.Elems[2].Lit())
+				if !ok {
+					return literalBrace(word, left, i, br)
+				}
 				if n != 0 {
 					incr = absInt(n)
 					if !upward {
@@ -120,11 +123,10 @@ func formatBraceSequenceNumber(n int, fixedWidth bool, targetWidth int) string {
 }
 
 func hasLeadingZero(s string) bool {
-	start := 0
-	if len(s) > 0 && (s[0] == '-' || s[0] == '+') {
-		start = 1
+	if len(s) > 0 && s[0] == '-' {
+		s = s[1:]
 	}
-	return len(s[start:]) > 1 && s[start] == '0'
+	return len(s) > 1 && s[0] == '0'
 }
 
 func mixedCaseBraceRange(from, to byte) bool {
@@ -144,11 +146,41 @@ func mixedCaseBraceRangeError(suffix string) error {
 	return fmt.Errorf("bad substitution: no closing %q in `%s", "`", suffix)
 }
 
+func literalBrace(word *syntax.Word, left []syntax.WordPart, i int, br *syntax.BraceExp) ([]*syntax.Word, error) {
+	next := *word
+	next.Parts = next.Parts[i+1:]
+	next.Parts = append([]syntax.WordPart{&syntax.Lit{Value: wordPartsSource([]syntax.WordPart{br})}}, next.Parts...)
+	exp, err := Braces(&next)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range exp {
+		w.Parts = append(left, w.Parts...)
+	}
+	return exp, nil
+}
+
+func braceSequenceStep(s string) (int, bool) {
+	n, err := strconv.Atoi(s)
+	if err != nil || n == minInt() {
+		return 0, false
+	}
+	return n, true
+}
+
 func absInt(n int) int {
 	if n < 0 {
 		return -n
 	}
 	return n
+}
+
+func minInt() int {
+	return -maxInt() - 1
+}
+
+func maxInt() int {
+	return int(^uint(0) >> 1)
 }
 
 func asciiLower(b byte) bool {

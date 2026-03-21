@@ -159,6 +159,14 @@ var braceTests = []struct {
 		want: []string{"12", "11", "10", "09", "08", "07"},
 	},
 	{
+		src:  "{-02..4}",
+		want: []string{"-02", "-01", "000", "001", "002", "003", "004"},
+	},
+	{
+		src:  "{+02..4}",
+		want: []string{"2", "3", "4"},
+	},
+	{
 		src:  "{0001..05..2}",
 		want: []string{"0001", "0003", "0005"},
 	},
@@ -257,6 +265,38 @@ func TestFieldsMixedCaseCharRangeError(t *testing.T) {
 	const want = "bad substitution: no closing \"`\" in `-"
 	if err.Error() != want {
 		t.Fatalf("Fields() error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestBracesInvalidSequenceStepLiteralizes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		src  string
+		want []string
+	}{
+		{
+			src:  "a{1..2..-9223372036854775808}b{c,d}",
+			want: []string{"a{1..2..-9223372036854775808}bc", "a{1..2..-9223372036854775808}bd"},
+		},
+		{
+			src:  "a{1..2..9223372036854775808}b{c,d}",
+			want: []string{"a{1..2..9223372036854775808}bc", "a{1..2..9223372036854775808}bd"},
+		},
+	}
+
+	for _, src := range tests {
+		t.Run(src.src, func(t *testing.T) {
+			word := parseCommandWord(t, src.src)
+			got, err := Braces(word)
+			if err != nil {
+				t.Fatalf("Braces(%q) error = %v", src.src, err)
+			}
+			want := printWords(litWords(src.want...)...)
+			if gotStr := printWords(got...); gotStr != want {
+				t.Fatalf("Braces(%q) = %q, want %q", src.src, gotStr, want)
+			}
+		})
 	}
 }
 
