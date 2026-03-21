@@ -141,7 +141,7 @@ func (p *Printer) Print(w io.Writer, node Node) error {
 
 	p.w.Reset(w)
 	switch node := node.(type) {
-	case *File:
+	case *File: //nolint:nilaway // Parse() callers (e.g. example_test.go) check error before passing result; printer callers guarantee non-nil File
 		p.stmtList(node.Stmts, node.Last)
 		p.newline(Pos{})
 	case *Stmt:
@@ -1315,7 +1315,7 @@ func (p *Printer) stmt(s *Stmt) {
 }
 
 func (p *Printer) printRedirsUntil(redirs []*Redirect, startRedirs int, pos Pos) int {
-	for _, r := range redirs[startRedirs:] {
+	for _, r := range redirs[startRedirs:] { //nolint:nilaway // startRedirs begins at 0 and only advances past elements already seen; slicing nil at 0 is safe
 		if r.Pos().After(pos) || r.Op == Hdoc || r.Op == DashHdoc {
 			break
 		}

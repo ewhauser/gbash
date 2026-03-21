@@ -42,7 +42,7 @@ func writeArithExpr(buf *bytes.Buffer, expr syntax.ArithmExpr) {
 	switch expr := expr.(type) {
 	case *syntax.Word:
 		// For a Word, concatenate all its parts
-		for _, part := range expr.Parts {
+		for _, part := range expr.Parts { //nolint:nilaway // parse error is returned before reaching this; expr is never nil here
 			writeLiteral(buf, part)
 		}
 	case *syntax.BinaryArithm:

@@ -100,6 +100,9 @@ func (c *Factor) RunParsed(ctx context.Context, inv *Invocation, matches *Parsed
 
 func factorSpecialAction(matches *ParsedCommand) string {
 	order := matches.OptionOrder()
+	if order == nil {
+		return ""
+	}
 	for i := len(order) - 1; i >= 0; i-- {
 		switch order[i] {
 		case "help", "version":

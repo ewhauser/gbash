@@ -76,7 +76,7 @@ func (c *Dir) listPath(ctx context.Context, inv *Invocation, commandName, target
 		return "", 2, lsRenderResult{}, nil
 	}
 
-	if opts.directoryOnly || !info.IsDir() {
+	if opts.directoryOnly || !info.IsDir() { //nolint:nilaway // info is non-nil when exists is true
 		out, rendered, err := c.renderPathEntry(ctx, inv, target, abs, info, opts, defaultColumns)
 		return out, 0, rendered, err
 	}

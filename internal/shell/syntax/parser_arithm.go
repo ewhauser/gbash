@@ -293,7 +293,7 @@ func (p *Parser) appendArithmSuffix(expr ArithmExpr, start, end Pos, src string)
 	part := p.rawLit(start, end, src)
 	switch expr := expr.(type) {
 	case *Word:
-		expr.Parts = append(expr.Parts, part)
+		expr.Parts = append(expr.Parts, part) //nolint:nilaway // expr non-nil when matched by type switch
 		return expr
 	case *BinaryArithm:
 		expr.Y = p.appendArithmSuffix(expr.Y, start, end, src)

@@ -309,9 +309,9 @@ func commInputError(name, label string, err error) string {
 
 func commSplitRecords(data []byte, delim byte) [][]byte {
 	if len(data) == 0 {
-		return nil
+		return [][]byte{}
 	}
-	var records [][]byte
+	records := [][]byte{}
 	start := 0
 	for i, b := range data {
 		if b != delim {

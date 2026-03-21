@@ -6,7 +6,7 @@ import (
 
 func textLines(data []byte) []string {
 	if len(data) == 0 {
-		return nil
+		return []string{}
 	}
 	lines := make([]string, 0, bytes.Count(data, []byte{'\n'})+1)
 	visitTextLines(data, func(line []byte, _ int) bool {

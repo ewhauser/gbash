@@ -248,7 +248,7 @@ func touchOne(ctx context.Context, inv *Invocation, opts *touchOptions, times to
 			atime = currentAtime
 		}
 		if !opts.affectMtime {
-			mtime = info.ModTime()
+			mtime = info.ModTime() //nolint:nilaway // info is non-nil when exists is true
 		}
 	}
 	if err := inv.FS.Chtimes(ctx, abs, atime, mtime); err != nil {

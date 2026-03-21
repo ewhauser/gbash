@@ -587,7 +587,7 @@ func testSameFile(a, b stdfs.FileInfo) bool {
 }
 
 func testDeviceAndInode(info stdfs.FileInfo) (dev, ino uint64, ok bool) {
-	sys := reflect.ValueOf(info.Sys())
+	sys := reflect.ValueOf(info.Sys()) //nolint:nilaway // caller guarantees non-nil info
 	if !sys.IsValid() {
 		return 0, 0, false
 	}
@@ -625,7 +625,7 @@ func testCurrentGroupOwns(inv *Invocation, info stdfs.FileInfo) bool {
 }
 
 func testHasPermission(inv *Invocation, info stdfs.FileInfo, mask stdfs.FileMode) bool {
-	mode := info.Mode().Perm()
+	mode := info.Mode().Perm() //nolint:nilaway // caller guarantees non-nil info
 	currentUID := testCurrentID(inv, "EUID")
 	currentGID := testCurrentID(inv, "EGID")
 	ownerUID, ownerGID, ok := testOwnerIDs(info)
@@ -647,7 +647,7 @@ func testOwnerIDs(info stdfs.FileInfo) (uid, gid int, ok bool) {
 	if ownership, ok := gbfs.OwnershipFromFileInfo(info); ok {
 		return int(ownership.UID), int(ownership.GID), true
 	}
-	sys := reflect.ValueOf(info.Sys())
+	sys := reflect.ValueOf(info.Sys()) //nolint:nilaway // caller guarantees non-nil info
 	if !sys.IsValid() {
 		return 0, 0, false
 	}
@@ -673,11 +673,11 @@ func testModifiedAfterAccess(info stdfs.FileInfo) bool {
 	if !ok {
 		return false
 	}
-	return atime.Before(info.ModTime())
+	return atime.Before(info.ModTime()) //nolint:nilaway // caller guarantees non-nil info
 }
 
 func testAccessTime(info stdfs.FileInfo) (time.Time, bool) {
-	sys := reflect.ValueOf(info.Sys())
+	sys := reflect.ValueOf(info.Sys()) //nolint:nilaway // caller guarantees non-nil info
 	if !sys.IsValid() {
 		return time.Time{}, false
 	}

@@ -112,7 +112,7 @@ func (o *OverlayFS) ReadDir(ctx context.Context, name string) ([]stdfs.DirEntry,
 	if err != nil {
 		return nil, toPathError("readdir", abs, err)
 	}
-	if lowerExists && !lowerInfo.IsDir() && !upperExists {
+	if lowerExists && !lowerInfo.IsDir() && !upperExists { //nolint:nilaway // lowerInfo is non-nil when lowerExists is true; nilaway cannot track the boolean correlation
 		return nil, &os.PathError{Op: "readdir", Path: abs, Err: stdfs.ErrInvalid}
 	}
 	if !upperExists && !lowerExists {

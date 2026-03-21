@@ -96,7 +96,7 @@ func (m *core) executeCommand(ctx context.Context, exec *Execution, req *command
 		recordCommand(exec.Trace, trace.EventCommandExit, traceCommandInfo(req.Argv, false, &commandTraceResolution{
 			Dir:              req.VirtualWD,
 			Position:         req.Position,
-			ResolvedName:     resolved.name,
+			ResolvedName:     resolved.name, //nolint:nilaway // resolved is non-nil when ok is true (guarded above)
 			ResolvedPath:     resolved.path,
 			ResolutionSource: resolved.source,
 			ExitCode:         exitCode,

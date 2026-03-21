@@ -4418,7 +4418,7 @@ func (p *Parser) caseItems(stop reservedWord) (items []*CaseItem) {
 			}
 			split = i
 		}
-		ci.Comments = append(ci.Comments, p.accComs[:split]...)
+		ci.Comments = append(ci.Comments, p.accComs[:split]...) //nolint:nilaway // split is initialised to len(p.accComs), so [:split] on nil is [:0] which is safe
 		p.accComs = p.accComs[split:]
 
 		items = append(items, ci)

@@ -666,7 +666,7 @@ type Word struct {
 	AliasExpansions []*AliasExpansion
 }
 
-func (w *Word) Pos() Pos { return w.Parts[0].Pos() }
+func (w *Word) Pos() Pos { return w.Parts[0].Pos() } //nolint:nilaway // callers ensure w and w.Parts are non-nil; Word always has at least one part
 func (w *Word) End() Pos { return w.Parts[len(w.Parts)-1].End() }
 
 // AliasExpansion records one alias expansion applied while parsing.

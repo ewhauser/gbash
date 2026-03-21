@@ -406,6 +406,10 @@ func (f *TrieFS) ReadDir(_ context.Context, name string) ([]stdfs.DirEntry, erro
 		f.mu.RUnlock()
 		return nil, &os.PathError{Op: "readdir", Path: requested, Err: err}
 	}
+	if entry == nil {
+		f.mu.RUnlock()
+		return nil, &os.PathError{Op: "readdir", Path: abs, Err: stdfs.ErrNotExist}
+	}
 	if !entry.inode.mode.IsDir() {
 		f.mu.RUnlock()
 		return nil, &os.PathError{Op: "readdir", Path: abs, Err: stdfs.ErrInvalid}
@@ -424,6 +428,9 @@ func (f *TrieFS) ReadDir(_ context.Context, name string) ([]stdfs.DirEntry, erro
 	if err != nil {
 		return nil, &os.PathError{Op: "readdir", Path: requested, Err: err}
 	}
+	if entry == nil {
+		return nil, &os.PathError{Op: "readdir", Path: abs, Err: stdfs.ErrNotExist}
+	}
 	if !entry.inode.mode.IsDir() {
 		return nil, &os.PathError{Op: "readdir", Path: abs, Err: stdfs.ErrInvalid}
 	}
@@ -438,6 +445,9 @@ func (f *TrieFS) Readlink(_ context.Context, name string) (string, error) {
 	abs, entry, err := f.resolvePathLocked(name, false, false)
 	if err != nil {
 		return "", &os.PathError{Op: "readlink", Path: Resolve(f.cwd, name), Err: err}
+	}
+	if entry == nil {
+		return "", &os.PathError{Op: "readlink", Path: Resolve(f.cwd, name), Err: stdfs.ErrNotExist}
 	}
 	if entry.inode.mode&stdfs.ModeSymlink == 0 {
 		return "", &os.PathError{Op: "readlink", Path: abs, Err: stdfs.ErrInvalid}
@@ -512,6 +522,9 @@ func (f *TrieFS) Link(_ context.Context, oldName, newName string) error {
 	if err != nil {
 		return &os.PathError{Op: "link", Path: Resolve(f.cwd, oldName), Err: err}
 	}
+	if oldEntry == nil {
+		return &os.PathError{Op: "link", Path: Resolve(f.cwd, oldName), Err: stdfs.ErrNotExist}
+	}
 	if oldEntry.inode.mode.IsDir() {
 		return &os.PathError{Op: "link", Path: oldAbs, Err: stdfs.ErrInvalid}
 	}
@@ -546,6 +559,9 @@ func (f *TrieFS) Chown(_ context.Context, name string, uid, gid uint32, follow b
 	abs, entry, err := f.resolvePathLocked(name, follow, false)
 	if err != nil {
 		return &os.PathError{Op: "chown", Path: Resolve(f.cwd, name), Err: err}
+	}
+	if entry == nil {
+		return &os.PathError{Op: "chown", Path: Resolve(f.cwd, name), Err: stdfs.ErrNotExist}
 	}
 	entry.inode.uid = uid
 	entry.inode.gid = gid
@@ -740,7 +756,11 @@ func (f *TrieFS) materializeResolvedPath(ctx context.Context, abs string) error 
 }
 
 func (f *TrieFS) resolvePathLocked(name string, followFinal, allowMissingFinal bool) (string, *trieDentry, error) {
-	return f.resolveAbsLocked(Resolve(f.cwd, name), followFinal, allowMissingFinal, 0)
+	abs, entry, err := f.resolveAbsLocked(Resolve(f.cwd, name), followFinal, allowMissingFinal, 0)
+	if err == nil && entry == nil && !allowMissingFinal {
+		return abs, nil, stdfs.ErrNotExist
+	}
+	return abs, entry, err
 }
 
 func (f *TrieFS) resolveAbsLocked(abs string, followFinal, allowMissingFinal bool, depth int) (string, *trieDentry, error) {
@@ -856,6 +876,9 @@ func (f *TrieFS) mkdirAllLocked(name string, perm stdfs.FileMode) error {
 				resolvedAbs, resolvedEntry, err := f.resolveAbsLocked(nextAbs, true, false, 0)
 				if err != nil {
 					return &os.PathError{Op: "mkdir", Path: nextAbs, Err: err}
+				}
+				if resolvedEntry == nil {
+					return &os.PathError{Op: "mkdir", Path: nextAbs, Err: stdfs.ErrNotExist}
 				}
 				if !resolvedEntry.inode.mode.IsDir() {
 					return &os.PathError{Op: "mkdir", Path: nextAbs, Err: stdfs.ErrInvalid}

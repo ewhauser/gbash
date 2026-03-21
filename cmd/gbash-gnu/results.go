@@ -48,7 +48,9 @@ func parseReportedTestResults(logData []byte, selectedTests []string) (selectedR
 
 	extras := make([]testResult, 0, len(extraKeys))
 	for _, name := range extraKeys {
-		extras = append(extras, *extraResults[name])
+		if r := extraResults[name]; r != nil {
+			extras = append(extras, *r)
+		}
 	}
 	return results, extras
 }

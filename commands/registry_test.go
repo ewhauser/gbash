@@ -56,6 +56,9 @@ func TestRegistryLazyCommandLoadsOnce(t *testing.T) {
 	if !ok {
 		t.Fatalf("Lookup(lazyprobe) ok = false, want true")
 	}
+	if cmd == nil {
+		t.Fatalf("Lookup(lazyprobe) returned nil command, want non-nil")
+	}
 	if loads != 0 {
 		t.Fatalf("loader count = %d after lookup, want 0", loads)
 	}

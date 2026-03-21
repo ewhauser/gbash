@@ -474,7 +474,7 @@ func (c *LS) listPath(ctx context.Context, inv *Invocation, target string, opts 
 		return "", 2, lsRenderResult{}, nil
 	}
 
-	if opts.directoryOnly || !info.IsDir() {
+	if opts.directoryOnly || !info.IsDir() { //nolint:nilaway // info is non-nil when exists is true
 		return c.renderPathEntry(ctx, inv, target, abs, info, opts)
 	}
 
@@ -1573,7 +1573,7 @@ func lsSuffixAndInfo(ctx context.Context, inv *Invocation, abs string, info stdf
 			}
 			return fileTypeLSSuffix(info), info, nil
 		case lsIndicatorSlash:
-			if info.IsDir() {
+			if info.IsDir() { //nolint:nilaway // caller guarantees non-nil info
 				return "/", info, nil
 			}
 		}
@@ -1693,7 +1693,7 @@ func parseLSColorsEnv(value string) lsParsedColors {
 }
 
 func lsColorIndicator(ctx context.Context, inv *Invocation, abs string, info, linfo stdfs.FileInfo, entries map[string]string) (string, error) {
-	if linfo.Mode()&stdfs.ModeSymlink != 0 {
+	if linfo.Mode()&stdfs.ModeSymlink != 0 { //nolint:nilaway // caller guarantees non-nil linfo
 		if entries["ln"] == "target" {
 			targetInfo, _, exists, err := statMaybe(ctx, inv, abs)
 			if err != nil {
@@ -1719,7 +1719,7 @@ func lsColorIndicator(ctx context.Context, inv *Invocation, abs string, info, li
 		return "ln", nil
 	}
 	switch {
-	case info.IsDir():
+	case info.IsDir(): //nolint:nilaway // caller guarantees non-nil info
 		otherWritable := linfo.Mode().Perm()&0o002 != 0
 		sticky := linfo.Mode()&stdfs.ModeSticky != 0
 		switch {
@@ -1948,7 +1948,7 @@ func lsGroupsAsDirectory(ctx context.Context, inv *Invocation, abs string, info 
 		return false
 	}
 	targetInfo, _, err := lsResolveSymlinkInfo(ctx, inv, abs)
-	return err == nil && targetInfo.IsDir()
+	return err == nil && targetInfo != nil && targetInfo.IsDir()
 }
 
 func lsCanListBrokenImplicitSymlink(opts *lsOptions, info stdfs.FileInfo) bool {
@@ -2082,7 +2082,7 @@ func formatLSLongLine(name string, info stdfs.FileInfo, opts *lsOptions, nameRan
 	if opts.showAllocSize {
 		fields = append(fields, formatLSBlockCount(info, opts))
 	}
-	fields = append(fields, formatModeLong(info.Mode()), "1")
+	fields = append(fields, formatModeLong(info.Mode()), "1") //nolint:nilaway // caller guarantees non-nil info
 	if opts.showOwner {
 		fields = append(fields, userToken)
 	}
@@ -2147,7 +2147,7 @@ func formatHumanSizeBase(bytes int64, base float64, suffixes []string) string {
 }
 
 func formatLSSize(info stdfs.FileInfo, opts *lsOptions) string {
-	size := info.Size()
+	size := info.Size() //nolint:nilaway // caller guarantees non-nil info
 	switch {
 	case opts.si:
 		return formatHumanSizeBase(size, 1000, []string{"K", "M", "G", "T", "P", "E"})
@@ -2165,7 +2165,7 @@ func lsBlockCountValue(info stdfs.FileInfo, opts *lsOptions) int64 {
 	if blockSize <= 0 {
 		blockSize = 1024
 	}
-	size := info.Size()
+	size := info.Size() //nolint:nilaway // caller guarantees non-nil info
 	return (size + blockSize - 1) / blockSize
 }
 
@@ -2259,7 +2259,7 @@ func formatLSDateStyle(ts time.Time, opts *lsOptions) string {
 }
 
 func classifyLSSuffix(info stdfs.FileInfo) string {
-	if info.Mode()&stdfs.ModeSymlink != 0 {
+	if info.Mode()&stdfs.ModeSymlink != 0 { //nolint:nilaway // caller guarantees non-nil info
 		return "@"
 	}
 	if info.IsDir() {
@@ -2272,7 +2272,7 @@ func classifyLSSuffix(info stdfs.FileInfo) string {
 }
 
 func fileTypeLSSuffix(info stdfs.FileInfo) string {
-	if info.Mode()&stdfs.ModeSymlink != 0 {
+	if info.Mode()&stdfs.ModeSymlink != 0 { //nolint:nilaway // caller guarantees non-nil info
 		return "@"
 	}
 	if info.IsDir() {
