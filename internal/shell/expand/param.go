@@ -2137,7 +2137,7 @@ func (cfg *Config) paramOpArg(word *syntax.Word, ql quoteLevel) ([]fieldPart, st
 		parts := make([]fieldPart, 0, len(fields)*2)
 		for i, field := range fields {
 			if i > 0 {
-				parts = append(parts, fieldPart{quote: quoteDouble, val: " "})
+				parts = append(parts, fieldPart{val: " "})
 			}
 			parts = append(parts, field...)
 		}
