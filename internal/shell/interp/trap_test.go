@@ -335,6 +335,33 @@ trap -- 'echo bye' EXIT
 	}
 }
 
+func TestRunDebugTrapTreatsParseErrorAsFailureWithExtdebug(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	runner, err := NewRunner(&RunnerConfig{
+		Dir:    t.TempDir(),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner error = %v", err)
+	}
+	runner.opts[optExtDebug] = true
+	runner.setTrapAction(trapIDDebug, trapAction{kind: trapActionCommand, command: "echo <"})
+
+	if got := runner.runDebugTrap(context.Background(), 12); !got {
+		t.Fatalf("runDebugTrap() = false, want true")
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+	const wantStderr = "syntax error near unexpected token `newline'\n`echo <'\n"
+	if got := stderr.String(); got != wantStderr {
+		t.Fatalf("stderr = %q, want %q", got, wantStderr)
+	}
+}
+
 func TestErrTrapHonorsErrtraceInFunctions(t *testing.T) {
 	t.Parallel()
 

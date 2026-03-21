@@ -363,6 +363,8 @@ func (r *Runner) runTrap(ctx context.Context, id trapID, line uint, status uint8
 					parseErr.SourceLine = action.command
 				}
 				r.errf("%s\n", trimTrapParseError(parseErr))
+				handler.code = 2
+				handler.err = parseErr
 				break
 			}
 			r.errf("%s trap: %v\n", name, err)
