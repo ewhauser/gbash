@@ -494,18 +494,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/sh-func.test.sh::Return without args gives previous": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/sh-func.test.sh::Scope of global variable when sourced in function (Shell Functions aren't Closures)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/sh-func.test.sh::return \"\" (a lot of disagreement)": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/sh-options-bash.test.sh::SHELLOPTS and BASHOPTS are non-empty": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
