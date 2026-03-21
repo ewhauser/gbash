@@ -861,26 +861,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/case_.test.sh::Case statement with ;&": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/case_.test.sh::Case statement with ;;&": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/case_.test.sh::case \\n bug regression": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/case_.test.sh::matching every byte against itself": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/case_.test.sh::matching the byte 0xff against empty string - DISABLED - CI only bug?": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/command-sub.test.sh::Double Quotes in Command Sub in Double Quotes": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"

@@ -1050,13 +1050,32 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 		trace.string(" in")
 		trace.newLineFlush()
 		str := r.literal(cm.Word)
+		fallthroughNext := false
 		for _, ci := range cm.Items {
-			for _, word := range ci.Patterns {
-				pat := r.pattern(word)
-				if match(pat, str) {
-					r.stmts(ctx, ci.Stmts)
-					return
+			matched := fallthroughNext
+			if !matched {
+				for _, word := range ci.Patterns {
+					pat := r.pattern(word)
+					if match(pat, str) {
+						matched = true
+						break
+					}
 				}
+			}
+			if !matched {
+				continue
+			}
+			r.stmts(ctx, ci.Stmts)
+			if r.stop(ctx) || r.breakEnclosing > 0 || r.contnEnclosing > 0 {
+				return
+			}
+			switch ci.Op {
+			case syntax.Fallthrough:
+				fallthroughNext = true
+			case syntax.Resume, syntax.ResumeKorn:
+				fallthroughNext = false
+			default:
+				return
 			}
 		}
 	case *syntax.TestClause:
@@ -2411,9 +2430,9 @@ func declStringifiedArrayAssign(as *syntax.Assign) *syntax.DeclAssign {
 }
 
 func match(pat, name string) bool {
-	matcher, err := pattern.ExtendedPatternMatcher(pat, pattern.EntireString|pattern.ExtendedOperators)
+	ok, err := pattern.Match(pat, name, pattern.EntireString|pattern.ExtendedOperators)
 	_ = err // TODO: report these errors
-	return matcher != nil && matcher(name)
+	return ok
 }
 
 func elapsedString(d time.Duration, posix bool) string {
