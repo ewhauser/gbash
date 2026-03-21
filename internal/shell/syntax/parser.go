@@ -1465,12 +1465,16 @@ func (e ParseError) bashCompat() ParseError {
 	}
 	sourceLine := strings.TrimSpace(e.SourceLine)
 	switch {
-	case (e.Text == "`if` must be followed by a statement list" || e.Text == "`if <cond>` must be followed by `then`") && strings.HasSuffix(sourceLine, "if"):
+	case e.Incomplete &&
+		(e.Text == "`if` must be followed by a statement list" || e.Text == "`if <cond>` must be followed by `then`") &&
+		strings.HasSuffix(sourceLine, "if"):
 		e.bashText = fmt.Sprintf("syntax error: unexpected end of file from `if' command on line %d", e.Pos.Line())
 		e.SourceLine = ""
 		e.SourceLinePos = Pos{}
 		e.noSourceLine = true
-	case (e.Text == "`while` must be followed by a statement list" || e.Text == "`while <cond>` must be followed by `do`") && strings.HasSuffix(sourceLine, "while"):
+	case e.Incomplete &&
+		(e.Text == "`while` must be followed by a statement list" || e.Text == "`while <cond>` must be followed by `do`") &&
+		strings.HasSuffix(sourceLine, "while"):
 		e.bashText = fmt.Sprintf("syntax error: unexpected end of file from `while' command on line %d", e.Pos.Line())
 		e.SourceLine = ""
 		e.SourceLinePos = Pos{}

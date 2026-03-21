@@ -298,6 +298,47 @@ func TestParseErrorBashErrorParseCompatibility(t *testing.T) {
 	}
 }
 
+func TestParseErrorBashCompatRequiresIncompleteForIfAndWhile(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  ParseError
+		want string
+	}{
+		{
+			name: "if without incomplete flag",
+			err: ParseError{
+				Filename:   "stdin",
+				Pos:        NewPos(0, 1, 1),
+				Text:       "`if` must be followed by a statement list",
+				SourceLine: "if",
+			},
+			want: "stdin: line 1: `if` must be followed by a statement list\nstdin: line 1: `if'",
+		},
+		{
+			name: "while without incomplete flag",
+			err: ParseError{
+				Filename:   "stdin",
+				Pos:        NewPos(0, 1, 1),
+				Text:       "`while` must be followed by a statement list",
+				SourceLine: "while",
+			},
+			want: "stdin: line 1: `while` must be followed by a statement list\nstdin: line 1: `while'",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := tc.err.BashError(); got != tc.want {
+				t.Fatalf("BashError() mismatch\nwant: %s\ngot:  %s", tc.want, got)
+			}
+		})
+	}
+}
+
 func TestParseHeredocDelimiterMetadata(t *testing.T) {
 	t.Parallel()
 
