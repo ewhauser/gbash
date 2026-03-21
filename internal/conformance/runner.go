@@ -507,7 +507,7 @@ func OracleCommandArgs(mode OracleMode, script string) []string {
 
 func normalizeExecutionResult(result ExecutionResult, workspace, sandboxRoot string) ExecutionResult {
 	result.Stdout = normalizeOutput(result.Stdout, workspace, sandboxRoot)
-	result.Stderr = normalizeOutput(result.Stderr, workspace, sandboxRoot)
+	result.Stderr = normalizeBashStderr(normalizeOutput(result.Stderr, workspace, sandboxRoot))
 	return result
 }
 
