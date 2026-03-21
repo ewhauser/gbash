@@ -522,10 +522,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/temp-binding.test.sh::Temp bindings with unset": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/var-op-test.test.sh::op-test for ${!array} with array=\"a[@]\" or array=\"a[*]\"": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
