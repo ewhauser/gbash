@@ -1491,42 +1491,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/vars-special.test.sh::$_ and ${_}": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/vars-special.test.sh::$_ is not reset with (( and [[": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/vars-special.test.sh::$_ is not undefined on first use": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/vars-special.test.sh::$_ with && and ||": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/vars-special.test.sh::$_ with assignments, arrays, etc.": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/vars-special.test.sh::$_ with loop": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/vars-special.test.sh::$_ with pipeline and subshell": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/vars-special.test.sh::$_ with simple command and evaluation": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/vars-special.test.sh::$_ with word splitting": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/whitespace.test.sh::\\r in arith expression is allowed by some shells, but not most!": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
