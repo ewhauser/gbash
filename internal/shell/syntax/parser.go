@@ -2083,6 +2083,11 @@ func keepParenAmbiguityArithError(stmts []*Stmt, last []Comment) bool {
 	return len(sub.Stmts) != 1 || len(sub.Last) != 0
 }
 
+func hasInternalNewline(src []byte) bool {
+	trimmed := strings.TrimRight(string(src), "\r\n")
+	return strings.Contains(trimmed, "\n")
+}
+
 func hasNestedDblRightParen(src []byte) bool {
 	return bytes.Count(src, []byte("))")) > 1
 }
@@ -2321,7 +2326,7 @@ func (p *Parser) parenAmbiguityWordPart() WordPart {
 	cmd.loadReplay(fallbackPos, fallbackSrc, err)
 	cmd.setSourceBuffer(start, fullSrc)
 	cs := cmd.cmdSubst()
-	fallbackIncomplete := cmd.err != nil && IsIncomplete(cmd.err) && strings.Contains(string(afterToken), "\n")
+	fallbackIncomplete := cmd.err != nil && IsIncomplete(cmd.err) && hasInternalNewline(afterToken)
 	if fallbackIncomplete {
 		p.tok = dollParen
 		p.pos = start
@@ -4575,7 +4580,7 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 	sub.subshell(probeStmt)
 	fallbackIncomplete := false
 	if sub.err != nil && IsIncomplete(sub.err) {
-		fallbackIncomplete = strings.Contains(string(afterToken), "\n")
+		fallbackIncomplete = hasInternalNewline(afterToken)
 	}
 	if fallbackIncomplete {
 		p.tok = leftParen

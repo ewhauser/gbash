@@ -600,9 +600,6 @@ func arithParseErrorToken(source string, pos syntax.Pos) string {
 	if start < 0 || start >= len(source) {
 		return source
 	}
-	for start > 0 && (source[start-1] == ' ' || source[start-1] == '\t') {
-		start--
-	}
 	if start > 0 {
 		switch source[start-1] {
 		case '#', '[', '.':
@@ -630,7 +627,7 @@ func arithRuntimeErrorToken(source string, parseErr syntax.ParseError) string {
 	if start < 0 || start >= len(source) {
 		return source
 	}
-	return source[start:]
+	return strings.TrimLeft(source[start:], " \t")
 }
 
 func arithRuntimeIsExpressionError(tokenText string) bool {

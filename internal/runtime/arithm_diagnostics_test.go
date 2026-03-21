@@ -1,6 +1,9 @@
 package runtime
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestArithmCommandRegressionIncludesStandaloneExpression(t *testing.T) {
 	t.Parallel()
@@ -104,7 +107,10 @@ func TestArithmCommandRegressionPreservesParenAmbiguityParseError(t *testing.T) 
 	if got, want := result.ExitCode, 1; got != want {
 		t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
 	}
-	const want = "echo 1\necho 2\n(( x ))\n: 0\necho 3\n: syntax error in expression (error token is \"1\necho 2\n(( x ))\n: 0\necho 3\n\")\n"
+	want := "echo 1\necho 2\n(( x ))\n: 0\necho 3\n: syntax error in expression (error token is \"1\necho 2\n(( x ))\n: 0\necho 3\n\")\n"
+	if runtime.GOOS != "darwin" {
+		want = "((: " + want
+	}
 	if got := result.Stderr; got != want {
 		t.Fatalf("Stderr = %q, want %q", got, want)
 	}

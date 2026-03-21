@@ -164,6 +164,24 @@ func TestParseParenAmbiguityFallback(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "dynamic base arithmetic stays arithmetic",
+			src:  "echo $(( ${base}#a ))",
+			check: func(t *testing.T, prog *File) {
+				t.Helper()
+				call, ok := prog.Stmts[0].Cmd.(*CallExpr)
+				if !ok {
+					t.Fatalf("root cmd = %T, want *CallExpr", prog.Stmts[0].Cmd)
+				}
+				part, ok := call.Args[1].Parts[0].(*ArithmExp)
+				if !ok {
+					t.Fatalf("word part = %T, want *ArithmExp", call.Args[1].Parts[0])
+				}
+				if got, want := part.Source, " ${base}#a "; got != want {
+					t.Fatalf("arith source = %q, want %q", got, want)
+				}
+			},
+		},
 	}
 
 	for _, tc := range tests {

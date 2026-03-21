@@ -807,7 +807,7 @@ var fileTests = []fileTestCase{
 		}),
 	),
 	fileTest(
-		[]string{"((test x = y) || (test a = a))"},
+		[]string{"( (test x = y) || (test a = a))", "((test x = y) || (test a = a))"},
 		langFile(subshell(stmt(&BinaryCmd{
 			Op: OrStmt,
 			X:  stmt(subshell(litStmt("test", "x", "=", "y"))),

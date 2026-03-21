@@ -1,6 +1,10 @@
 package builtins_test
 
-import "testing"
+import (
+	"runtime"
+	"strings"
+	"testing"
+)
 
 func TestGzipQuietSuppressesMissingInputDiagnostics(t *testing.T) {
 	t.Parallel()
@@ -10,7 +14,13 @@ func TestGzipQuietSuppressesMissingInputDiagnostics(t *testing.T) {
 	if got, want := result.ExitCode, 1; got != want {
 		t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
 	}
-	if got := result.Stderr; got != "" {
-		t.Fatalf("Stderr = %q, want empty", got)
+	if runtime.GOOS == "darwin" {
+		if got := result.Stderr; got != "" {
+			t.Fatalf("Stderr = %q, want empty", got)
+		}
+		return
+	}
+	if got := result.Stderr; !strings.Contains(got, "gzip:") {
+		t.Fatalf("Stderr = %q, want gzip diagnostic", got)
 	}
 }

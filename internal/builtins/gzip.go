@@ -8,6 +8,7 @@ import (
 	stdfs "io/fs"
 	"os"
 	"path"
+	"runtime"
 	"strings"
 )
 
@@ -122,7 +123,7 @@ func (c *Gzip) defaultOptions() gzipOptions {
 }
 
 func gzipMaybeQuietError(err error, quiet bool) error {
-	if err == nil || !quiet {
+	if err == nil || !quiet || runtime.GOOS != "darwin" {
 		return err
 	}
 	if code, ok := ExitCode(err); ok {
@@ -132,7 +133,7 @@ func gzipMaybeQuietError(err error, quiet bool) error {
 }
 
 func gzipExitf(inv *Invocation, quiet bool, format string, args ...any) error {
-	if quiet {
+	if quiet && runtime.GOOS == "darwin" {
 		return &ExitError{Code: 1}
 	}
 	return exitf(inv, 1, format, args...)
