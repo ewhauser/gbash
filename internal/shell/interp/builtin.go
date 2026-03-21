@@ -182,14 +182,14 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		}
 	case "printf":
 		if len(args) == 0 {
-			return failf(2, "usage: printf format [arguments]\n")
+			return failf(2, "printf: usage: printf [-v var] format [arguments]\n")
 		}
 		var destRef *syntax.VarRef
 		switch args[0] {
 		case "--":
 			args = args[1:]
 			if len(args) == 0 {
-				return failf(2, "usage: printf format [arguments]\n")
+				return failf(2, "printf: usage: printf [-v var] format [arguments]\n")
 			}
 		case "-v":
 			if len(args) < 2 {
@@ -198,14 +198,14 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 			var err error
 			destRef, err = r.strictVarRef(args[1])
 			if err != nil {
-				return failf(2, "printf: %q: invalid variable name for -v\n", args[1])
+				return failf(2, "printf: `%s': not a valid identifier\n", args[1])
 			}
 			args = args[2:]
 			if len(args) > 0 && args[0] == "--" {
 				args = args[1:]
 			}
 			if len(args) == 0 {
-				return failf(2, "usage: printf format [arguments]\n")
+				return failf(2, "printf: usage: printf [-v var] format [arguments]\n")
 			}
 		}
 		format, args := args[0], args[1:]

@@ -498,43 +498,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-printf.test.sh::bash truncates long strftime string at 128": {
-          "mode": "xfail",
-          "reason": "darwin bash uses BSD wc, so this portability probe still differs from the linux oracle",
-          "goos": [
-            "darwin"
-          ]
-        },
-        "oils/builtin-printf.test.sh::printf # flag": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf %b with truncated octal escapes": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
-        "oils/builtin-printf.test.sh::printf %c unicode - prints the first BYTE of a string - it does not respect UTF-8": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
-        "oils/builtin-printf.test.sh::printf -v syntax error": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf eE fF gG": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/builtin-printf.test.sh::printf with no args": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-process.test.sh::Changing resource limit is denied": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
@@ -1707,10 +1670,6 @@
         "oils/xtrace.test.sh::xtrace with unprintable chars": {
           "mode": "xfail",
           "reason": "conformance: xtrace escape style for unprintable bytes still differs from bash"
-        },
-        "oils/builtin-printf.test.sh::Too large": {
-          "mode": "xfail",
-          "reason": "conformance: printf integer formatting for oversized values still differs from bash"
         },
         "oils/glob.test.sh::Glob unicode char": {
           "mode": "xfail",

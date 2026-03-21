@@ -98,7 +98,11 @@ func formatUnsigned(arg string, present bool, spec formatSpec) (string, string) 
 	if verb == 'u' {
 		verb = 'd'
 	}
-	return fmt.Sprintf(buildNumericFormat(spec, verb), value), diag
+	unsignedSpec := spec
+	if value == 0 && unsignedSpec.alternate && (verb == 'x' || verb == 'X') {
+		unsignedSpec.alternate = false
+	}
+	return fmt.Sprintf(buildNumericFormat(unsignedSpec, verb), value), diag
 }
 
 func formatFloat(arg string, present bool, spec formatSpec) (string, string) {
