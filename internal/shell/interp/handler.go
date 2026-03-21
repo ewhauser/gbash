@@ -33,6 +33,7 @@ func mustHandlerCtx(ctx context.Context) *HandlerContext {
 }
 
 type handlerCtxKey struct{}
+type disableCommandHashKey struct{}
 
 type handlerKind int
 
@@ -70,6 +71,11 @@ type HandlerContext struct {
 	// interpreter bootstrap code rather than user-supplied shell code.
 	Internal bool
 
+	// DisableCommandHash bypasses the runner's cached command lookup table for
+	// this handler context without clearing the user-visible hash state. Fresh
+	// resolutions still update the table.
+	DisableCommandHash bool
+
 	// Pos is the source position which relates to the operation,
 	// such as a [syntax.CallExpr] when calling an [ExecHandlerFunc].
 	// It may be invalid if the operation has no relevant position information.
@@ -84,7 +90,7 @@ type HandlerContext struct {
 }
 
 func (hc *HandlerContext) LookupCommandHash(name string) (string, bool) {
-	if hc == nil || hc.runner == nil {
+	if hc == nil || hc.runner == nil || hc.DisableCommandHash {
 		return "", false
 	}
 	entry, ok := hc.runner.commandHashLookup(name)
@@ -113,6 +119,21 @@ func (hc *HandlerContext) ClearCommandHash() {
 		return
 	}
 	hc.runner.commandHashClear()
+}
+
+func withDisabledCommandHash(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, disableCommandHashKey{}, true)
+}
+
+func commandHashDisabled(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	disabled, _ := ctx.Value(disableCommandHashKey{}).(bool)
+	return disabled
 }
 
 // CallHandlerFunc is a handler which runs on every [syntax.CallExpr].

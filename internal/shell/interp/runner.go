@@ -583,15 +583,16 @@ var todoPos syntax.Pos // for handlerCtx callers where we don't yet have a posit
 
 func (r *Runner) handlerCtx(ctx context.Context, kind handlerKind, pos syntax.Pos) context.Context {
 	hc := HandlerContext{
-		runner:   r,
-		kind:     kind,
-		Env:      &overlayEnviron{parent: r.writeEnv},
-		Dir:      r.Dir,
-		ExecFile: r.currentExecFile(),
-		Internal: r.currentInternal(),
-		Pos:      pos,
-		Stdout:   r.stdout,
-		Stderr:   r.stderr,
+		runner:             r,
+		kind:               kind,
+		Env:                &overlayEnviron{parent: r.writeEnv},
+		Dir:                r.Dir,
+		ExecFile:           r.currentExecFile(),
+		Internal:           r.currentInternal(),
+		DisableCommandHash: commandHashDisabled(ctx),
+		Pos:                pos,
+		Stdout:             r.stdout,
+		Stderr:             r.stderr,
 	}
 	if r.stdin != nil { // do not leave hc.Stdin as a typed nil
 		hc.Stdin = r.stdin
