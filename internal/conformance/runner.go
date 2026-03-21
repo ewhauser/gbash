@@ -610,10 +610,8 @@ func normalizeBadFDInterleave(value string) string {
 			first := strings.TrimSuffix(lines[i], "\n")
 			second := strings.TrimSuffix(lines[i+1], "\n")
 			third := strings.TrimSuffix(lines[i+2], "\n")
-			if first == third &&
-				strings.Contains(first, ": No such file or directory") &&
-				strings.HasSuffix(second, ": Bad file descriptor") {
-				out = append(out, lines[i+1], lines[i], lines[i+2])
+			if missing, badFD, ok := reorderBadFDTriplet(first, second, third); ok {
+				out = append(out, badFD+"\n", missing+"\n", missing+"\n")
 				i += 3
 				continue
 			}
@@ -622,6 +620,34 @@ func normalizeBadFDInterleave(value string) string {
 		i++
 	}
 	return strings.Join(out, "")
+}
+
+func reorderBadFDTriplet(first, second, third string) (missing, badFD string, ok bool) {
+	lines := []string{first, second, third}
+	badFDIndex := -1
+	missingCounts := make(map[string]int, 2)
+	for i, line := range lines {
+		switch {
+		case strings.HasSuffix(line, ": Bad file descriptor"):
+			if badFDIndex != -1 {
+				return "", "", false
+			}
+			badFDIndex = i
+		case strings.Contains(line, ": No such file or directory"):
+			missingCounts[line]++
+		default:
+			return "", "", false
+		}
+	}
+	if badFDIndex == -1 || len(missingCounts) != 1 {
+		return "", "", false
+	}
+	for line, count := range missingCounts {
+		if count == 2 {
+			return line, lines[badFDIndex], true
+		}
+	}
+	return "", "", false
 }
 
 func normalizeNestedShellPrefixes(value string) string {

@@ -50,6 +50,22 @@ func TestNormalizeNestedShellArithStderrDropsBareContinuationLine(t *testing.T) 
 	}
 }
 
+func TestNormalizeNestedShellArithStderrMatchesFailingExpression(t *testing.T) {
+	t.Parallel()
+
+	script := "f() { : $(( 1 +\r\n2)); }\n: $(( 3 +\r\n4))\n"
+	stderr := "line 4: not a valid arithmetic operator: `4`\nline 4: `4))'\n"
+
+	got, ok := normalizeNestedShellArithStderr(script, stderr)
+	if !ok {
+		t.Fatal("normalizeNestedShellArithStderr() ok = false, want true")
+	}
+	const want = "3 +\r\n4: syntax error: operand expected (error token is \"\r\n4\")\n"
+	if got != want {
+		t.Fatalf("normalizeNestedShellArithStderr() = %q, want %q", got, want)
+	}
+}
+
 func TestPrefixNestedShellDiagnosticPreservesOperandSpacing(t *testing.T) {
 	t.Parallel()
 

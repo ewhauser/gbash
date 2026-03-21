@@ -93,6 +93,9 @@ func TestNormalizeOutputAndBashStderr(t *testing.T) {
 	if got, want := normalizeBashStderr("gzip: .gz: No such file or directory\n3: Bad file descriptor\ngzip: .gz: No such file or directory\n"), "3: Bad file descriptor\ngzip: .gz: No such file or directory\ngzip: .gz: No such file or directory\n"; got != want {
 		t.Fatalf("normalizeBashStderr(bad fd interleave) = %q, want %q", got, want)
 	}
+	if got, want := normalizeBashStderr("gzip: .gz: No such file or directory\ngzip: .gz: No such file or directory\n3: Bad file descriptor\n"), "3: Bad file descriptor\ngzip: .gz: No such file or directory\ngzip: .gz: No such file or directory\n"; got != want {
+		t.Fatalf("normalizeBashStderr(bad fd trailing) = %q, want %q", got, want)
+	}
 }
 
 func TestResolvedSuiteConfigUsesPackagePaths(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	stdfs "io/fs"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ewhauser/gbash/internal/completionutil"
@@ -163,10 +164,15 @@ func (c *Bash) executeInlineScript(ctx context.Context, inv *Invocation, parsed 
 }
 
 func normalizeNestedShellArithStderr(script, stderr string) (string, bool) {
+	failureLine, failureToken, ok := nestedShellArithFailure(stderr)
+	if !ok {
+		return "", false
+	}
+	replacement := ""
 	for search := 0; search < len(script); {
 		startRel := strings.Index(script[search:], "$((")
 		if startRel < 0 {
-			return "", false
+			break
 		}
 		exprStart := search + startRel + len("$((")
 		endRel := strings.Index(script[exprStart:], "))")
@@ -175,29 +181,71 @@ func normalizeNestedShellArithStderr(script, stderr string) (string, bool) {
 		}
 		exprEnd := exprStart + endRel
 		exprRaw := script[exprStart:exprEnd]
-		tokenText, ok := nestedShellArithCRToken(exprRaw)
+		tokenText, tokenStart, ok := nestedShellArithCRToken(exprRaw)
 		if ok {
+			exprLine := nestedShellArithLine(script, exprStart)
+			tokenLine := nestedShellArithTokenLine(script, exprStart+tokenStart, tokenText)
+			if nestedShellArithFailureToken(tokenText) != failureToken {
+				search = exprEnd + len("))")
+				continue
+			}
+			if failureLine > 0 && exprLine != failureLine && tokenLine != failureLine {
+				search = exprEnd + len("))")
+				continue
+			}
+			if replacement != "" {
+				return "", false
+			}
 			exprText := strings.Trim(exprRaw, " \t\n")
 			if exprText == "" {
 				return "", false
 			}
-			replacement := fmt.Sprintf("%s: syntax error: operand expected (error token is %s)\n", exprText, bashQuoteArithToken(tokenText))
-			normalized := stderr
-			replaced := false
-			if strings.Contains(stderr, "not a valid arithmetic operator") {
-				var ok bool
-				normalized, ok = replaceNestedShellArithDiagnostic(stderr, replacement)
-				replaced = ok
-			}
-			withoutContinuation, stripped := stripNestedShellArithContinuation(normalized)
-			if replaced || stripped {
-				return withoutContinuation, true
-			}
-			return "", false
+			replacement = fmt.Sprintf("%s: syntax error: operand expected (error token is %s)\n", exprText, bashQuoteArithToken(tokenText))
 		}
 		search = exprEnd + len("))")
 	}
+	if replacement == "" {
+		return "", false
+	}
+	normalized := stderr
+	replaced := false
+	if strings.Contains(stderr, "not a valid arithmetic operator") {
+		normalized, replaced = replaceNestedShellArithDiagnostic(stderr, replacement)
+	}
+	withoutContinuation, stripped := stripNestedShellArithContinuation(normalized)
+	if replaced || stripped {
+		return withoutContinuation, true
+	}
 	return "", false
+}
+
+func nestedShellArithFailure(stderr string) (lineNum int, token string, ok bool) {
+	for line := range strings.SplitSeq(stderr, "\n") {
+		prefix, remainder, found := strings.Cut(line, "not a valid arithmetic operator: `")
+		if !found {
+			continue
+		}
+		token, _, found = strings.Cut(remainder, "`")
+		if !found {
+			continue
+		}
+		linePrefix := strings.TrimSuffix(strings.TrimSpace(prefix), ":")
+		if linePrefix != "" {
+			if trimmed, found := strings.CutPrefix(linePrefix, "bash: "); found {
+				linePrefix = trimmed
+			}
+			if !strings.HasPrefix(linePrefix, "line ") {
+				continue
+			}
+			parsedLine, err := strconv.Atoi(strings.TrimPrefix(linePrefix, "line "))
+			if err != nil {
+				return 0, "", false
+			}
+			lineNum = parsedLine
+		}
+		return lineNum, token, true
+	}
+	return 0, "", false
 }
 
 func replaceNestedShellArithDiagnostic(stderr, replacement string) (string, bool) {
@@ -259,10 +307,10 @@ func isNestedShellArithContinuationLine(line string) bool {
 	return strings.HasPrefix(line, "bash: line ") && strings.Contains(line, ": `")
 }
 
-func nestedShellArithCRToken(exprRaw string) (string, bool) {
+func nestedShellArithCRToken(exprRaw string) (string, int, bool) {
 	tokenStart := strings.IndexByte(exprRaw, '\r')
 	if tokenStart < 0 {
-		return "", false
+		return "", 0, false
 	}
 	tokenEnd := tokenStart + 1
 	if tokenEnd < len(exprRaw) && exprRaw[tokenEnd] == '\n' {
@@ -272,9 +320,25 @@ func nestedShellArithCRToken(exprRaw string) (string, bool) {
 		tokenEnd++
 	}
 	if tokenEnd <= tokenStart {
-		return "", false
+		return "", 0, false
 	}
-	return exprRaw[tokenStart:tokenEnd], true
+	return exprRaw[tokenStart:tokenEnd], tokenStart, true
+}
+
+func nestedShellArithTokenLine(script string, tokenPos int, tokenText string) int {
+	offset := 0
+	for offset < len(tokenText) && (tokenText[offset] == '\r' || tokenText[offset] == '\n') {
+		offset++
+	}
+	return nestedShellArithLine(script, tokenPos+offset)
+}
+
+func nestedShellArithLine(script string, pos int) int {
+	return 1 + strings.Count(script[:pos], "\n")
+}
+
+func nestedShellArithFailureToken(tokenText string) string {
+	return strings.Trim(tokenText, "\r\n")
 }
 
 func isNestedShellArithTokenDelimiter(b byte) bool {
