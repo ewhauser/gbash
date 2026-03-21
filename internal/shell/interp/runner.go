@@ -283,6 +283,11 @@ func (r *Runner) expandErr(err error) {
 		arithSyntaxErr expand.ArithmSyntaxError
 		arithDiagErr   *expand.ArithmDiagnosticError
 	)
+	if errors.As(err, &unsetErr) && unsetErr.Node != nil {
+		if file := r.currentExecFile(); file != "" {
+			errMsg = fmt.Sprintf("%s: line %d: %s", file, unsetErr.Node.Pos().Line(), errMsg)
+		}
+	}
 	if r.commandString && !r.interactive &&
 		(errors.As(err, &arithSyntaxErr) || errors.As(err, &arithDiagErr)) {
 		if name := r.lookupVar("0").String(); name != "" && name != "gosh" {
