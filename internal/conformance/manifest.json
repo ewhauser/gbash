@@ -254,10 +254,6 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
         },
-        "oils/builtin-bracket.test.sh::Looks like octal, but digit is too big": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
         "oils/builtin-bracket.test.sh::[ -t invalid ]": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
