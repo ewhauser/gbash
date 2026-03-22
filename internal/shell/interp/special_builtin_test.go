@@ -1,6 +1,11 @@
 package interp
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"strings"
+	"testing"
+)
 
 func TestSetPosixOptionUpdatesShellOpts(t *testing.T) {
 	t.Parallel()
@@ -239,4 +244,48 @@ echo hi
 			t.Fatalf("stderr = %q, want %q", got, want)
 		}
 	})
+}
+
+func TestInteractivePosixReadonlyAssignmentDoesNotExitShell(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	runner, err := NewRunner(&RunnerConfig{
+		Dir:         "/tmp",
+		Interactive: true,
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner error = %v", err)
+	}
+
+	runLine := func(src string) error {
+		t.Helper()
+		return runner.runShellReader(context.Background(), strings.NewReader(src), "interactive-readonly.sh", nil)
+	}
+
+	if err := runLine("set -o posix\n"); err != nil {
+		t.Fatalf("set -o posix error = %v", err)
+	}
+	if err := runLine("readonly x=1\n"); err != nil {
+		t.Fatalf("readonly error = %v", err)
+	}
+	if err := runLine("x=2\n"); err == nil {
+		t.Fatalf("readonly assignment error = nil, want exit status 127")
+	} else {
+		requireInterpExitStatus(t, err, 127)
+	}
+	if runner.Exited() {
+		t.Fatalf("runner should remain interactive after readonly assignment error")
+	}
+	if err := runLine("echo next\n"); err != nil {
+		t.Fatalf("echo next error = %v", err)
+	}
+	if got, want := stdout.String(), "next\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got, want := stderr.String(), "x: readonly variable\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
 }
