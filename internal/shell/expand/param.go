@@ -351,26 +351,41 @@ func (cfg *Config) replacementWordPart(wp syntax.WordPart, leading, more bool) (
 	}
 }
 
-func (cfg *Config) findParamPatternAllIndex(pat, name string, n int, anchor syntax.ReplaceAnchor) ([][]int, error) {
+func replaceParamPatternAt(name, with string, loc []int) string {
+	if loc == nil {
+		return name
+	}
+	return name[:loc[0]] + with + name[loc[1]:]
+}
+
+func (cfg *Config) replaceParamPattern(pat, name, with string, all bool, anchor syntax.ReplaceAnchor) (string, error) {
 	expr, err := cfg.paramPatternExpr(pat, pattern.ExtendedOperators)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	switch anchor {
 	case syntax.ReplaceAnchorPrefix:
-		loc := cfg.compileParamPattern("^(" + expr + ")").findStringSubmatchIndex(name)
-		if loc == nil {
-			return nil, nil
-		}
-		return [][]int{{loc[2], loc[3]}}, nil
+		return replaceParamPatternAt(name, with, cfg.compileParamPattern("^"+expr).findStringIndex(name)), nil
 	case syntax.ReplaceAnchorSuffix:
-		loc := cfg.compileParamPattern("(" + expr + ")$").findStringSubmatchIndex(name)
-		if loc == nil {
-			return nil, nil
-		}
-		return [][]int{{loc[2], loc[3]}}, nil
+		return replaceParamPatternAt(name, with, cfg.compileParamPattern(expr+"$").findStringIndex(name)), nil
 	default:
-		return cfg.compileParamPattern(expr).findAllStringIndex(name, n), nil
+		rx := cfg.compileParamPattern(expr)
+		if !all {
+			return replaceParamPatternAt(name, with, rx.findStringIndex(name)), nil
+		}
+		locs := rx.findAllStringIndex(name, -1)
+		if len(locs) == 0 {
+			return name, nil
+		}
+		sb := cfg.strBuilder()
+		last := 0
+		for _, loc := range locs {
+			sb.WriteString(name[last:loc[0]])
+			sb.WriteString(with)
+			last = loc[1]
+		}
+		sb.WriteString(name[last:])
+		return sb.String(), nil
 	}
 }
 
@@ -715,9 +730,15 @@ func indirectModeFor(pe *syntax.ParamExp, state paramExpState) indirectMode {
 func directKeyExpansionValues(vr Variable) ([]string, bool) {
 	switch vr.Kind {
 	case Indexed:
-		keys := make([]string, 0, vr.IndexedCount())
-		for _, key := range vr.IndexedIndices() {
-			keys = append(keys, strconv.Itoa(key))
+		keys := make([]string, len(vr.List))
+		if vr.Indices == nil {
+			for i := range vr.List {
+				keys[i] = strconv.Itoa(i)
+			}
+			return keys, true
+		}
+		for i, key := range vr.Indices {
+			keys[i] = strconv.Itoa(key)
 		}
 		return keys, true
 	case Associative:
@@ -820,26 +841,43 @@ func (cfg *Config) joinArrayElemsForString(pe *syntax.ParamExp, elems []string) 
 
 func elemsAsFields(elems []string) [][]fieldPart {
 	fields := make([][]fieldPart, len(elems))
+	parts := make([]fieldPart, 0, len(elems))
 	for i, elem := range elems {
 		if elem == "" {
-			fields[i] = []fieldPart{}
 			continue
 		}
-		fields[i] = []fieldPart{{val: elem}}
+		parts = append(parts, fieldPart{val: elem})
+		fields[i] = parts[len(parts)-1 : len(parts) : len(parts)]
 	}
 	return fields
 }
 
 func (cfg *Config) splitElemsAsFields(elems []string) [][]fieldPart {
-	var fields [][]fieldPart
+	if len(elems) == 0 {
+		return nil
+	}
+	allSimple := cfg.ifs == ""
+	if !allSimple {
+		allSimple = true
+		for _, elem := range elems {
+			if elem != "" && cfg.stringHasIFS(elem) {
+				allSimple = false
+				break
+			}
+		}
+	}
+	if allSimple {
+		return elemsAsFields(elems)
+	}
+
+	fields := make([][]fieldPart, 0, len(elems))
 	for _, elem := range elems {
 		elemFields := cfg.splitFieldParts([]fieldPart{{val: elem}})
 		if len(elemFields) == 0 && elem == "" {
-			elemFields = [][]fieldPart{{}}
+			fields = append(fields, nil)
+			continue
 		}
-		for _, field := range elemFields {
-			fields = append(fields, append([]fieldPart(nil), field...))
-		}
+		fields = append(fields, elemFields...)
 	}
 	return fields
 }
@@ -1054,7 +1092,6 @@ func otherParamCaseTransform(arg string) (syntax.ParExpOperator, bool) {
 }
 
 func (cfg *Config) transformArrayElems(pe *syntax.ParamExp, state paramExpState, elems []string) ([]string, error) {
-	elems = slices.Clone(elems)
 	if pe.Repl != nil {
 		orig, err := Pattern(cfg, pe.Repl.Orig)
 		if err != nil {
@@ -1067,30 +1104,19 @@ func (cfg *Config) transformArrayElems(pe *syntax.ParamExp, state paramExpState,
 		if err != nil {
 			return nil, err
 		}
-		n := 1
-		if pe.Repl.All {
-			n = -1
-		}
+		elems = slices.Clone(elems)
 		for i, elem := range elems {
-			locs, err := cfg.findParamPatternAllIndex(orig, elem, n, pe.Repl.Anchor)
+			elems[i], err = cfg.replaceParamPattern(orig, elem, with, pe.Repl.All, pe.Repl.Anchor)
 			if err != nil {
 				return nil, err
 			}
-			sb := cfg.strBuilder()
-			last := 0
-			for _, loc := range locs {
-				sb.WriteString(elem[last:loc[0]])
-				sb.WriteString(with)
-				last = loc[1]
-			}
-			sb.WriteString(elem[last:])
-			elems[i] = sb.String()
 		}
 		return elems, nil
 	}
 	if pe.Exp == nil {
 		return elems, nil
 	}
+	elems = slices.Clone(elems)
 
 	switch op := pe.Exp.Op; op {
 	case syntax.RemSmallPrefix, syntax.RemLargePrefix,
@@ -1371,7 +1397,7 @@ func (cfg *Config) paramExpState(pe *syntax.ParamExp) (paramExpState, error) {
 		case Indexed:
 			state.indexAllElements = true
 			state.callVarInd = false
-			state.elems = cfg.sliceElems(pe, state.vr.IndexedValues(), state.vr.IndexedIndices(), state.name == "@" || state.name == "*", false)
+			state.elems = cfg.sliceElems(pe, state.vr.List, state.vr.Indices, state.name == "@" || state.name == "*", false)
 			state.str = cfg.joinArrayElemsForString(pe, state.elems)
 		case Associative:
 			state.indexAllElements = true
@@ -2325,23 +2351,10 @@ func (cfg *Config) paramExp(pe *syntax.ParamExp, ql quoteLevel) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		n := 1
-		if pe.Repl.All {
-			n = -1
-		}
-		locs, err := cfg.findParamPatternAllIndex(orig, str, n, pe.Repl.Anchor)
+		str, err = cfg.replaceParamPattern(orig, str, with, pe.Repl.All, pe.Repl.Anchor)
 		if err != nil {
 			return "", err
 		}
-		sb := cfg.strBuilder()
-		last := 0
-		for _, loc := range locs {
-			sb.WriteString(str[last:loc[0]])
-			sb.WriteString(with)
-			last = loc[1]
-		}
-		sb.WriteString(str[last:])
-		str = sb.String()
 	case pe.Exp != nil:
 		switch op := pe.Exp.Op; op {
 		case syntax.AlternateUnsetOrNull, syntax.AlternateUnset,
@@ -2630,9 +2643,9 @@ func (cfg *Config) varInd(name string, vr Variable, idx *syntax.Subscript) (stri
 			return vr.Str, nil
 		case Indexed:
 			if idx.Kind == syntax.SubscriptStar {
-				return cfg.ifsJoin(vr.IndexedValues()), nil
+				return cfg.ifsJoin(vr.List), nil
 			}
-			return strings.Join(vr.IndexedValues(), " "), nil
+			return strings.Join(vr.List, " "), nil
 		case Associative:
 			// Iterate values in bash-compatible key order.
 			keys := sortedMapKeys(vr.Map)

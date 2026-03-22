@@ -335,6 +335,17 @@ func (cfg *Config) classifyIFSStringAt(s string, start int) (ifsRuneType, int) {
 	return cfg.classifyIFSRune(r), width
 }
 
+func (cfg *Config) stringHasIFS(s string) bool {
+	for i := 0; i < len(s); {
+		rType, width := cfg.classifyIFSStringAt(s, i)
+		if rType != ifsRuneNone {
+			return true
+		}
+		i += width
+	}
+	return false
+}
+
 func (cfg *Config) ifsJoin(strs []string) string {
 	sep := ""
 	if cfg.ifs != "" {
@@ -2172,10 +2183,10 @@ func (cfg *Config) quotedParamWord(word *syntax.Word) ([]string, error) {
 func (cfg *Config) quotedArrayFields(pe *syntax.ParamExp) ([]string, []string, bool) {
 	switch name := pe.Param.Value; name {
 	case "*": // "${*}" or "${*:offset:length}"
-		elems := cfg.sliceElems(pe, cfg.Env.Get(name).IndexedValues(), nil, true, false)
+		elems := cfg.sliceElems(pe, cfg.Env.Get(name).List, nil, true, false)
 		return []string{cfg.ifsJoin(elems)}, elems, true
 	case "@": // "${@}" or "${@:offset:length}"
-		elems := cfg.sliceElems(pe, cfg.Env.Get(name).IndexedValues(), nil, true, false)
+		elems := cfg.sliceElems(pe, cfg.Env.Get(name).List, nil, true, false)
 		return elems, elems, true
 	}
 
@@ -2195,7 +2206,7 @@ func (cfg *Config) quotedArrayFields(pe *syntax.ParamExp) ([]string, []string, b
 	case "@": // "${name[@]}"
 		switch vr.Kind {
 		case Indexed:
-			elems := cfg.sliceElems(pe, vr.IndexedValues(), vr.IndexedIndices(), false, false)
+			elems := cfg.sliceElems(pe, vr.List, vr.Indices, false, false)
 			return elems, elems, true
 		case Associative:
 			elems := cfg.sliceElems(pe, sortedMapValues(vr.Map), nil, false, true)
@@ -2209,7 +2220,7 @@ func (cfg *Config) quotedArrayFields(pe *syntax.ParamExp) ([]string, []string, b
 		}
 	case "*": // "${name[*]}"
 		if vr.Kind == Indexed {
-			elems := cfg.sliceElems(pe, vr.IndexedValues(), vr.IndexedIndices(), false, false)
+			elems := cfg.sliceElems(pe, vr.List, vr.Indices, false, false)
 			return []string{cfg.ifsJoin(elems)}, elems, true
 		}
 		if vr.Kind == Associative {

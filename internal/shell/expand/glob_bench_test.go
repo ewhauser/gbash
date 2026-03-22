@@ -11,6 +11,67 @@ import (
 	"testing"
 )
 
+var benchmarkExpandPathFieldSink []string
+
+func BenchmarkExpandPathField(b *testing.B) {
+	for _, tc := range []struct {
+		name  string
+		field []fieldPart
+		want  []string
+	}{
+		{
+			name:  "literal",
+			field: []fieldPart{{val: "workspace/project/cmd/script.sh"}},
+			want:  []string{"workspace/project/cmd/script.sh"},
+		},
+		{
+			name:  "quoted_meta_literal",
+			field: []fieldPart{{quote: quoteSingle, val: "workspace/*/[abc].sh"}},
+			want:  []string{"workspace/*/[abc].sh"},
+		},
+		{
+			name: "multipart_literal",
+			field: []fieldPart{
+				{val: "workspace/"},
+				{quote: quoteSingle, val: "*literal*"},
+				{val: "/cmd.sh"},
+			},
+			want: []string{"workspace/*literal*/cmd.sh"},
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			spy := newTrackedGlobReadDirSpy(nil)
+			cfg := prepareConfig(&Config{ReadDir: spy.ReadDir})
+
+			got, err := cfg.expandPathField("/", tc.field)
+			if err != nil {
+				b.Fatalf("expandPathField(%q) error = %v", tc.name, err)
+			}
+			if !slices.Equal(got, tc.want) {
+				b.Fatalf("expandPathField(%q) = %#v, want %#v", tc.name, got, tc.want)
+			}
+			if spy.totalCalls != 0 {
+				b.Fatalf("expandPathField(%q) read %d directories during setup, want 0", tc.name, spy.totalCalls)
+			}
+			spy.resetCounts()
+
+			var totalReadDir int
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				before := spy.totalCalls
+				got, err := cfg.expandPathField("/", tc.field)
+				if err != nil {
+					b.Fatalf("expandPathField(%q) error = %v", tc.name, err)
+				}
+				benchmarkExpandPathFieldSink = got
+				totalReadDir += spy.totalCalls - before
+			}
+			b.ReportMetric(float64(totalReadDir)/float64(b.N), "readdir/op")
+		})
+	}
+}
+
 func BenchmarkGlob(b *testing.B) {
 	for _, tc := range []struct {
 		name  string
