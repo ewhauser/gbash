@@ -2,6 +2,10 @@
   "suites": {
     "bash": {
       "entries": {
+        "oils/alias.test.sh::alias with word of multiple lines": {
+          "mode": "xfail",
+          "reason": "conformance: gbash ls error message format differs from GNU coreutils ls"
+        },
         "oils/builtin-completion.test.sh::compgen -A user": {
           "mode": "xfail",
           "reason": "conformance: gbash uses sandbox-visible passwd data instead of the host account database"
