@@ -137,7 +137,14 @@ func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 		// outward until they reach the defining scope, including caller locals.
 		return o.parent.(expand.WriteEnviron).Set(name, vr)
 	}
-	if o.tempScope && !inOverlay && o.tempUnset[normalized] {
+	if o.tempScope && !vr.Local && !inOverlay {
+		// Temp scope: variables not originally bound in this overlay pass
+		// through to the parent so that assignments and unsets inside eval,
+		// source, or function calls are not silently swallowed when the
+		// overlay is discarded.
+		return o.parent.(expand.WriteEnviron).Set(name, vr)
+	}
+	if o.tempScope && inOverlay && o.tempUnset[normalized] {
 		// A temp binding was explicitly unset; pass writes through to the
 		// parent so they land in the correct outer scope rather than being
 		// recaptured by the temp overlay.

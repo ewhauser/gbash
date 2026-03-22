@@ -2768,7 +2768,6 @@ const (
 func (r *Runner) runCallAssignOverlay(assigns []*syntax.Assign, forceExport, consumeLocals bool) (*overlayEnviron, bool) {
 	overlay := &overlayEnviron{
 		parent:                  r.writeEnv,
-		tempScope:               true,
 		tempScopeConsumesLocals: consumeLocals,
 	}
 	origEnv := r.writeEnv
@@ -2780,6 +2779,9 @@ func (r *Runner) runCallAssignOverlay(assigns []*syntax.Assign, forceExport, con
 	if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
 		return nil, false
 	}
+	// Enable tempScope after bindings are populated so that Set during
+	// binding populates the overlay rather than passing through.
+	overlay.tempScope = true
 	return overlay, true
 }
 
@@ -2804,6 +2806,17 @@ func (r *Runner) commitCallAssignOverlay(overlay *overlayEnviron) {
 		origEnv := r.writeEnv
 		r.writeEnv = parent
 		r.setVar(vr.Name, vr.Variable)
+		r.writeEnv = origEnv
+	}
+	// Commit any temp bindings that were explicitly unset during
+	// execution so the unset propagates to the parent scope.
+	for normalized := range overlay.tempUnset {
+		if _, inValues := overlay.values[normalized]; inValues {
+			continue // still has a value, already committed above
+		}
+		origEnv := r.writeEnv
+		r.writeEnv = parent
+		r.delVar(normalized)
 		r.writeEnv = origEnv
 	}
 }
