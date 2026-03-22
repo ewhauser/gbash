@@ -118,7 +118,69 @@ type Config struct {
 	// rather than the current token.
 	CurrentLine func() uint
 
-	reportedParamErrors map[*syntax.ParamExp]map[string]struct{}
+	paramPatternExprCache     *boundedFIFOCache[paramPatternExprCacheKey, string]
+	compiledParamPatternCache *boundedFIFOCache[compiledParamPatternCacheKey, *compiledParamPattern]
+	reportedParamErrors       map[*syntax.ParamExp]map[string]struct{}
+}
+
+const paramPatternCacheSize = 128
+
+type paramPatternExprCacheKey struct {
+	pattern    string
+	mode       pattern.Mode
+	byteLocale bool
+}
+
+type compiledParamPatternCacheKey struct {
+	expr       string
+	byteLocale bool
+}
+
+type boundedFIFOCache[K comparable, V any] struct {
+	limit   int
+	entries []boundedFIFOCacheEntry[K, V]
+}
+
+type boundedFIFOCacheEntry[K comparable, V any] struct {
+	key   K
+	value V
+}
+
+func newBoundedFIFOCache[K comparable, V any](limit int) *boundedFIFOCache[K, V] {
+	return &boundedFIFOCache[K, V]{
+		limit:   limit,
+		entries: make([]boundedFIFOCacheEntry[K, V], 0, limit),
+	}
+}
+
+func (c *boundedFIFOCache[K, V]) get(key K) (V, bool) {
+	for i := len(c.entries) - 1; i >= 0; i-- {
+		if c.entries[i].key == key {
+			return c.entries[i].value, true
+		}
+	}
+	var zero V
+	return zero, false
+}
+
+func (c *boundedFIFOCache[K, V]) set(key K, value V) {
+	if c.limit <= 0 {
+		return
+	}
+	for i := range c.entries {
+		if c.entries[i].key == key {
+			c.entries[i].value = value
+			return
+		}
+	}
+	if len(c.entries) == c.limit {
+		copy(c.entries, c.entries[1:])
+		c.entries = c.entries[:c.limit-1]
+	}
+	c.entries = append(c.entries, boundedFIFOCacheEntry[K, V]{
+		key:   key,
+		value: value,
+	})
 }
 
 // UnexpectedCommandError is returned if a command substitution is encountered
@@ -153,9 +215,19 @@ func prepareConfig(cfg *Config) *Config {
 	if cfg.reportedParamErrors == nil {
 		cfg.reportedParamErrors = make(map[*syntax.ParamExp]map[string]struct{})
 	}
+	cfg.prepareParamPatternCaches()
 	cfg.prepareGlobIgnore()
 
 	return cfg
+}
+
+func (cfg *Config) prepareParamPatternCaches() {
+	if cfg.paramPatternExprCache == nil {
+		cfg.paramPatternExprCache = newBoundedFIFOCache[paramPatternExprCacheKey, string](paramPatternCacheSize)
+	}
+	if cfg.compiledParamPatternCache == nil {
+		cfg.compiledParamPatternCache = newBoundedFIFOCache[compiledParamPatternCacheKey, *compiledParamPattern](paramPatternCacheSize)
+	}
 }
 
 func (cfg *Config) swallowNonFatal(err error) bool {

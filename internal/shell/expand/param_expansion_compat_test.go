@@ -130,6 +130,36 @@ func TestParamReplacementVectorizesAnchorsOnArrays(t *testing.T) {
 	}
 }
 
+func TestQuotedParamReplacementStaysElementWiseOnArrays(t *testing.T) {
+	t.Parallel()
+
+	got, err := fieldsExpand(t, testEnv{
+		"array": {Set: true, Kind: Indexed, List: []string{"_a_", "_b_", ""}},
+	}, `"${array[@]//_?_/foo}"`)
+	if err != nil {
+		t.Fatalf("Fields(quoted array replacement) error = %v", err)
+	}
+	want := []string{"foo", "foo", ""}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Fields(quoted array replacement) = %#v, want %#v", got, want)
+	}
+}
+
+func TestQuotedParamCaseTransformStaysElementWiseOnArrays(t *testing.T) {
+	t.Parallel()
+
+	got, err := fieldsExpand(t, testEnv{
+		"array": {Set: true, Kind: Indexed, List: []string{"afoo", "bfoo", ""}},
+	}, `"${array[@]^^[a-z]}"`)
+	if err != nil {
+		t.Fatalf("Fields(quoted array case transform) error = %v", err)
+	}
+	want := []string{"AFOO", "BFOO", ""}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Fields(quoted array case transform) = %#v, want %#v", got, want)
+	}
+}
+
 func TestParamPatternReplacementRespectsLocale(t *testing.T) {
 	t.Parallel()
 
@@ -232,6 +262,22 @@ func TestParamPatternReplacementRespectsLocale(t *testing.T) {
 				t.Fatalf("Literal(%q) = %q, want %q", tt.src, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParamPatternReplacementRespectsCLocaleOnArrays(t *testing.T) {
+	t.Parallel()
+
+	got, err := fieldsExpand(t, testEnv{
+		"LC_ALL": {Set: true, Kind: String, Str: "C"},
+		"array":  {Set: true, Kind: Indexed, List: []string{"_x_", "_μ_"}},
+	}, `"${array[@]//_?_/foo}"`)
+	if err != nil {
+		t.Fatalf("Fields(C locale array replacement) error = %v", err)
+	}
+	want := []string{"foo", "_μ_"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Fields(C locale array replacement) = %#v, want %#v", got, want)
 	}
 }
 

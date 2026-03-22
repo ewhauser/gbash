@@ -89,6 +89,15 @@ func encodeByteLocaleString(str string) (string, map[int]int) {
 	return sb.String(), offsets
 }
 
+func encodeByteLocaleMatcherString(str string) string {
+	var sb strings.Builder
+	sb.Grow(len(str))
+	for i := 0; i < len(str); i++ {
+		sb.WriteRune(rune(str[i]))
+	}
+	return sb.String()
+}
+
 func remapParamPatternIndices(locs []int, offsets map[int]int) []int {
 	if locs == nil {
 		return nil
@@ -135,6 +144,13 @@ func (m *compiledParamPattern) findStringSubmatchIndex(name string) []int {
 	return remapParamPatternIndices(m.rx.FindStringSubmatchIndex(encoded), offsets)
 }
 
+func (m *compiledParamPattern) matchString(name string) bool {
+	if !m.byteLocale {
+		return m.rx.MatchString(name)
+	}
+	return m.rx.MatchString(encodeByteLocaleMatcherString(name))
+}
+
 func shouldQuoteParamPattern(pat string, err error) bool {
 	switch pat {
 	case "[", "[]", "[^]]":
@@ -154,26 +170,51 @@ func shouldQuoteParamPattern(pat string, err error) bool {
 }
 
 func (cfg *Config) paramPatternExpr(pat string, mode pattern.Mode) (string, error) {
+	cfg.prepareParamPatternCaches()
+	byteLocale := cfg.bashByteLocale()
+	key := paramPatternExprCacheKey{
+		pattern:    pat,
+		mode:       mode,
+		byteLocale: byteLocale,
+	}
+	if expr, ok := cfg.paramPatternExprCache.get(key); ok {
+		return expr, nil
+	}
 	source := pat
-	if cfg.bashByteLocale() {
+	if byteLocale {
 		source, _ = encodeByteLocaleString(pat)
 	}
 	expr, err := pattern.Regexp(source, mode)
 	if err == nil && !shouldQuoteParamPattern(pat, nil) {
+		cfg.paramPatternExprCache.set(key, expr)
 		return expr, nil
 	}
 	if err != nil && !shouldQuoteParamPattern(pat, err) {
 		return "", err
 	}
 	quoted := pattern.QuoteMeta(source, pattern.ExtendedOperators)
-	return pattern.Regexp(quoted, mode)
+	expr, err = pattern.Regexp(quoted, mode)
+	if err == nil {
+		cfg.paramPatternExprCache.set(key, expr)
+	}
+	return expr, err
 }
 
 func (cfg *Config) compileParamPattern(expr string) *compiledParamPattern {
-	return &compiledParamPattern{
-		rx:         regexp.MustCompile(expr),
+	cfg.prepareParamPatternCaches()
+	key := compiledParamPatternCacheKey{
+		expr:       expr,
 		byteLocale: cfg.bashByteLocale(),
 	}
+	if compiled, ok := cfg.compiledParamPatternCache.get(key); ok {
+		return compiled
+	}
+	compiled := &compiledParamPattern{
+		rx:         regexp.MustCompile(expr),
+		byteLocale: key.byteLocale,
+	}
+	cfg.compiledParamPatternCache.set(key, compiled)
+	return compiled
 }
 
 func consumeParamReplacementLiteralEscapes(s string) string {
@@ -974,21 +1015,21 @@ func bashANSIQuote(str string) string {
 	return sb.String()
 }
 
-func transformCasePattern(arg string, op syntax.ParExpOperator) (func(string) string, error) {
+func (cfg *Config) transformCasePattern(arg string, op syntax.ParExpOperator) (func(string) string, error) {
 	caseFunc := unicode.ToLower
 	if op == syntax.UpperFirst || op == syntax.UpperAll {
 		caseFunc = unicode.ToUpper
 	}
 	all := op == syntax.UpperAll || op == syntax.LowerAll
-	expr, err := pattern.Regexp(arg, pattern.ExtendedOperators)
+	expr, err := cfg.paramPatternExpr(arg, pattern.ExtendedOperators)
 	if err != nil {
 		return func(s string) string { return s }, err
 	}
-	rx := regexp.MustCompile(expr)
+	rx := cfg.compileParamPattern(expr)
 	return func(elem string) string {
 		rs := []rune(elem)
 		for ri, r := range rs {
-			if rx.MatchString(string(r)) {
+			if rx.matchString(string(r)) {
 				rs[ri] = caseFunc(r)
 				if !all {
 					break
@@ -1072,7 +1113,7 @@ func (cfg *Config) transformArrayElems(pe *syntax.ParamExp, state paramExpState,
 		if err != nil {
 			return nil, err
 		}
-		transform, err := transformCasePattern(arg, op)
+		transform, err := cfg.transformCasePattern(arg, op)
 		if err != nil {
 			return elems, err
 		}
@@ -1111,7 +1152,7 @@ func (cfg *Config) transformArrayElems(pe *syntax.ParamExp, state paramExpState,
 			}
 		case "u", "U", "L":
 			caseOp, _ := otherParamCaseTransform(arg)
-			transform, err := transformCasePattern("", caseOp)
+			transform, err := cfg.transformCasePattern("", caseOp)
 			if err != nil {
 				return nil, err
 			}
@@ -2478,7 +2519,7 @@ func (cfg *Config) paramExp(pe *syntax.ParamExp, ql quoteLevel) (string, error) 
 					str = decodePromptEscapes(str)
 				case "u", "U", "L":
 					caseOp, _ := otherParamCaseTransform(arg)
-					transform, err := transformCasePattern("", caseOp)
+					transform, err := cfg.transformCasePattern("", caseOp)
 					if err != nil {
 						return "", err
 					}
