@@ -70,9 +70,8 @@ func writeLiteral(buf *bytes.Buffer, part syntax.WordPart) {
 	case *syntax.Lit:
 		buf.WriteString(p.Value)
 	case *syntax.SglQuoted:
-		if p.Dollar {
-			buf.WriteByte('$')
-		}
+		// Bash normalizes $'...' (ANSI-C quotes) to '...' in arithmetic
+		// diagnostics, so we omit the $ prefix unconditionally.
 		buf.WriteByte('\'')
 		buf.WriteString(p.Value)
 		buf.WriteByte('\'')
@@ -147,10 +146,35 @@ func (e ArithmSyntaxError) Error() string {
 	if fromSource, ok := arithTokenDiagnosticSource(e.Token, e.Source, e.SourceStart, e.SourceEnd, e.Replacements); ok {
 		tokenText = fromSource
 	}
+	// Bash normalizes $'...' (ANSI-C quotes) to '...' in arithmetic
+	// diagnostics. Apply the same normalization to both texts.
+	exprText = normalizeAnsiCQuotes(exprText)
+	tokenText = normalizeAnsiCQuotes(tokenText)
 	if exprText != "" {
 		return fmt.Sprintf("%s: arithmetic syntax error: operand expected (error token is %s)", exprText, bashQuoteErrorToken(tokenText))
 	}
 	return fmt.Sprintf("arithmetic syntax error: operand expected (error token is %s)", bashQuoteErrorToken(tokenText))
+}
+
+// normalizeAnsiCQuotes replaces $'...' with '...' to match bash's arithmetic
+// diagnostic formatting which strips the $ prefix from ANSI-C quotes.
+func normalizeAnsiCQuotes(s string) string {
+	for {
+		idx := strings.Index(s, "$'")
+		if idx < 0 {
+			return s
+		}
+		// Only strip if preceded by start-of-string or a non-identifier char,
+		// so we don't accidentally mangle e.g. variable names ending in $.
+		if idx > 0 {
+			prev := s[idx-1]
+			if prev == '_' || (prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z') || (prev >= '0' && prev <= '9') {
+				break
+			}
+		}
+		s = s[:idx] + s[idx+1:]
+	}
+	return s
 }
 
 // ArithmDiagnosticError preserves bash-style arithmetic diagnostics that are

@@ -98,7 +98,7 @@ func TestArithmSingleQuoteRejection(t *testing.T) {
 			wantErr:    true,
 			errExpr:    "$'1'",
 			errTok:     "$'1'",
-			errMessage: "$'1': arithmetic syntax error: operand expected (error token is \"$'1'\")",
+			errMessage: "'1': arithmetic syntax error: operand expected (error token is \"'1'\")",
 		},
 		{
 			name:       "ansi-c quoted with escape",
@@ -106,7 +106,7 @@ func TestArithmSingleQuoteRejection(t *testing.T) {
 			wantErr:    true,
 			errExpr:    "$'\\n'",
 			errTok:     "$'\\n'",
-			errMessage: "$'\\n': arithmetic syntax error: operand expected (error token is \"$'\\\\n'\")",
+			errMessage: "'\\n': arithmetic syntax error: operand expected (error token is \"'\\\\n'\")",
 		},
 		{
 			name:       "assignment with single quoted",
