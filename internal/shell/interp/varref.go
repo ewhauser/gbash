@@ -523,16 +523,12 @@ func (r *Runner) unsetVarByRef(ref *syntax.VarRef, strictType bool) error {
 		return fmt.Errorf("%s: cannot unset: readonly variable", ref.Name.Value)
 	}
 	if ref == nil || ref.Index == nil {
-		if ownerEnv, _, ok := visibleBindingWriteEnv(r.writeEnv, ref.Name.Value); ok {
-			if _, isCallAssign := ownerEnv.(*callAssignWriteEnviron); isCallAssign {
+		if ownerEnv, ownerVar, ok := visibleBindingWriteEnv(r.writeEnv, ref.Name.Value); ok {
+			if (envHasTempScope(ownerEnv) && (!ownerVar.Local || (ownerEnv != r.writeEnv && envAllowsDynamicUnset(r.writeEnv)))) ||
+				(ownerVar.Local && ownerEnv != r.writeEnv && envAllowsDynamicUnset(r.writeEnv)) {
 				if deleteCurrentScopeVar(ownerEnv, ref.Name.Value) {
 					return nil
 				}
-			}
-		}
-		if ownerEnv, ownerVar, ok := visibleBindingWriteEnv(r.writeEnv, ref.Name.Value); ok && ownerVar.Local && ownerEnv != r.writeEnv {
-			if deleteCurrentScopeVar(ownerEnv, ref.Name.Value) {
-				return nil
 			}
 		}
 		r.delVar(ref.Name.Value)

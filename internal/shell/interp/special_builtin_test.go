@@ -54,6 +54,73 @@ printf 'foo=%s z=%s spam=%s\n' "$foo" "${z-unset}" "$spam"
 	}
 }
 
+func TestFunctionAndEvalPrefixAssignmentsUseDistinctTempScopes(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+unlocal() { unset -v "$1"; }
+f() {
+  local v
+  printf 'local=%s\n' "${v-unset}"
+  ( unlocal v; printf 'after=%s\n' "${v-unset}"; )
+}
+v=global
+v=temp f
+v=global
+v=temp eval 'f'
+printf 'outer=%s\n' "${v-unset}"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "" +
+		"local=temp\n" +
+		"after=global\n" +
+		"local=temp\n" +
+		"after=temp\n" +
+		"outer=global\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestEvalPrefixAssignmentsKeepLocalsInFunctionScope(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+v=x
+f() {
+  IFS= eval 'local   v=1'
+  printf 'first=%s\n' "$v"
+}
+f
+printf 'global=%s\n' "$v"
+
+set -u
+g() {
+  IFS= eval "local v=\"\$*\""
+  printf 'second=%s\n' "$v"
+}
+g h e l l o
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "" +
+		"first=1\n" +
+		"global=x\n" +
+		"second=hello\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestPosixSpecialBuiltinDispatchShadowsFunctions(t *testing.T) {
 	t.Parallel()
 
