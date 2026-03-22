@@ -80,7 +80,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 
 		for _, b := range sf.Blocks {
 			var skipped bool
-			if strings.HasPrefix(sf.Name(), "main") {
+			if sf.Name() == "main" {
 				skipped = true
 			}
 
@@ -114,36 +114,60 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	return nil, nil
 }
 
-// isCalledFromSyncOnce reports whether sf is an anonymous function that is
-// passed to (*sync.Once).Do in its parent function, meaning it executes at
-// most once.
+// isCalledFromSyncOnce reports whether sf is an anonymous function whose only
+// referrers are (*sync.Once).Do calls, meaning it executes at most once.
 func isCalledFromSyncOnce(sf *ssa.Function) bool {
 	parent := sf.Parent()
 	if parent == nil {
 		return false
 	}
-	for _, b := range parent.Blocks {
-		for _, instr := range b.Instrs {
-			call, ok := instr.(*ssa.Call)
-			if !ok {
-				continue
+	refs := sf.Referrers()
+	if refs == nil || len(*refs) == 0 {
+		return false
+	}
+	for _, ref := range *refs {
+		if !isSyncOnceDo(ref, sf) {
+			return false
+		}
+	}
+	return true
+}
+
+// isSyncOnceDo reports whether instr is a (*sync.Once).Do call that passes sf
+// (directly or via MakeClosure) as the callback.
+func isSyncOnceDo(instr ssa.Instruction, sf *ssa.Function) bool {
+	if _, ok := instr.(*ssa.Call); !ok {
+		// sf might be referenced via a MakeClosure; check if that closure
+		// is exclusively used in sync.Once.Do calls.
+		if mc, ok := instr.(*ssa.MakeClosure); ok && mc.Fn == sf {
+			mcRefs := mc.Referrers()
+			if mcRefs == nil || len(*mcRefs) == 0 {
+				return false
 			}
-			callee := call.Call.StaticCallee()
-			if callee == nil {
-				continue
-			}
-			if callee.RelString(nil) != "(*sync.Once).Do" {
-				continue
-			}
-			// Check if sf (or a MakeClosure wrapping sf) is an arg.
-			for _, arg := range call.Call.Args {
-				if arg == sf {
-					return true
+			for _, mcRef := range *mcRefs {
+				if !isSyncOnceDoCall(mcRef, mc) {
+					return false
 				}
-				if mc, ok := arg.(*ssa.MakeClosure); ok && mc.Fn == sf {
-					return true
-				}
 			}
+			return true
+		}
+		return false
+	}
+	return isSyncOnceDoCall(instr, sf)
+}
+
+func isSyncOnceDoCall(instr ssa.Instruction, arg ssa.Value) bool {
+	call, ok := instr.(*ssa.Call)
+	if !ok {
+		return false
+	}
+	callee := call.Call.StaticCallee()
+	if callee == nil || callee.RelString(nil) != "(*sync.Once).Do" {
+		return false
+	}
+	for _, a := range call.Call.Args {
+		if a == arg {
+			return true
 		}
 	}
 	return false
