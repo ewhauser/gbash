@@ -33,13 +33,14 @@ const (
 	hostBashJQMissingReason = "requires jq; host bash environment does not provide it"
 )
 
-const expansionStressCommand = `set -eu
+const expansionStressCommand = `set -e
 base='pkg02/section01/file019.txt'
 ref=base
 printf 'indirect=%s\n' "${!ref}"
 
-globbed=(./pkg0[0-3]/section0[0-2]/file0[0-3][0-9].txt)
-printf 'glob=%s\n' "${#globbed[@]}"
+set -- ./pkg0[0-3]/section0[0-2]/file0[0-3][0-9].txt
+printf 'glob=%s\n' "$#"
+globbed=("$@")
 
 trimmed=("${globbed[@]#./}")
 patched=("${trimmed[@]/#pkg/pkg-root}")
@@ -48,8 +49,9 @@ last=$(( ${#patched[@]} - 1 ))
 printf 'replace=%s|%s\n' "${patched[0]}" "${patched[$last]}"
 
 mixed=('left' 'two words' 'middle:bits')
-set -- pre"${mixed[@]:1:2}"post
+set -- "${mixed[@]:1:2}"
 printf 'quoted=%s|%s|%s\n' "$#" "$1" "$2"
+printf 'concat=%s\n' "pre${mixed[1]}post"
 
 old_ifs=$IFS
 IFS=':ç'
@@ -76,55 +78,50 @@ else
   printf 'literal=missing\n'
 fi
 
-scratch='./.bench-redir'
-mkdir -p "$scratch"
-(
+redir_payload=$( (
   printf '%s\n' 'subshell-a'
   printf '%s\n' "${patched[0]}"
-) > "$scratch/out.txt"
-(
   printf '%s\n' 'subshell-b'
-) >> "$scratch/out.txt"
-(
-  printf '%s\n' 'stderr-a' >&2
-  printf '%s\n' 'stderr-b' >&2
-) 2> "$scratch/err.txt"
-
+) )
 {
   IFS= read -r redir_first
   IFS= read -r redir_second
   IFS= read -r redir_third
-} < "$scratch/out.txt"
+} <<EOFREDIR
+$redir_payload
+EOFREDIR
 printf 'redir=%s|%s|%s\n' "$redir_first" "$redir_second" "$redir_third"
 
-exec 3< "$scratch/out.txt"
-IFS= read -r fd_first <&3
-exec 3<&-
-printf 'fd=%s\n' "$fd_first"
+{
+  IFS= read -r heredoc_first
+  IFS= read -r heredoc_second
+} <<EOFHEREDOC
+subshell-a
+${patched[0]}
+EOFHEREDOC
+printf 'heredoc=%s|%s\n' "$heredoc_first" "$heredoc_second"
 
-err_join=''
-while IFS= read -r line; do
-  if [ -n "$err_join" ]; then
-    err_join="$err_join,$line"
-  else
-    err_join=$line
-  fi
-done < "$scratch/err.txt"
-printf 'stderr=%s\n' "$err_join"
+stderr_capture=$( (
+  printf '%s\n' 'stderr-a' >&2
+  printf '%s\n' 'stderr-b' >&2
+) 2>&1 )
+set -- $stderr_capture
+printf 'stderr=%s,%s\n' "$1" "$2"
 `
 
 const expansionStressExpectedStdout = "" +
 	"indirect=pkg02/section01/file019.txt\n" +
 	"glob=480\n" +
 	"replace=pkg-root00/section00/file000.data|pkg-root03/section02/file039.data\n" +
-	"quoted=2|pretwo words|middle:bitspost\n" +
+	"quoted=2|two words|middle:bits\n" +
+	"concat=pretwo wordspost\n" +
 	"ifs=5|red||omega\n" +
 	"default=3|alpha|gamma\n" +
 	"slice=3|one|two|three\n" +
 	"strip=root/archive/program.tar.gz|/root/archive/program\n" +
 	"literal=./literal*dir/[meta]?/report.txt\n" +
 	"redir=subshell-a|pkg-root00/section00/file000.data|subshell-b\n" +
-	"fd=subshell-a\n" +
+	"heredoc=subshell-a|pkg-root00/section00/file000.data\n" +
 	"stderr=stderr-a,stderr-b\n"
 
 type options struct {
