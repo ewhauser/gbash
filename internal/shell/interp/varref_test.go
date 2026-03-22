@@ -1309,6 +1309,50 @@ echo $x $y $z $z2
 	}
 }
 
+func TestLetDivByZeroInIfConditionRunsElse(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+if let '42/0'; then
+  echo then
+else
+  echo else
+fi
+echo status=$?
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if got, want := stdout, "else\nstatus=0\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if !strings.Contains(stderr, "division by 0") {
+		t.Fatalf("stderr = %q, want diagnostic containing 'division by 0'", stderr)
+	}
+}
+
+func TestArithmCmdDivByZeroInIfConditionRunsElse(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+if (( 42/0 )); then
+  echo then
+else
+  echo else
+fi
+echo status=$?
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if got, want := stdout, "else\nstatus=0\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if !strings.Contains(stderr, "division by 0") {
+		t.Fatalf("stderr = %q, want diagnostic containing 'division by 0'", stderr)
+	}
+}
+
 func TestLetAcceptsSpacedGrouping(t *testing.T) {
 	t.Parallel()
 
