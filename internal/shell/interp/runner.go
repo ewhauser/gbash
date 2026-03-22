@@ -1302,6 +1302,9 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			if assignOverlayMode == callAssignOverlayCommit && !r.exit.fatalExit {
 				r.commitCallAssignOverlay(assignOverlay)
 			}
+			if _, hasPath := assignOverlay.values[assignOverlay.normalize("PATH")]; hasPath {
+				r.commandHashClear()
+			}
 			r.writeEnv = restoreEnv
 		} else {
 			r.restoreCallAssigns(restores)
