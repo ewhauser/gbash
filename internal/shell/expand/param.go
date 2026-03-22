@@ -77,6 +77,12 @@ type compiledParamPattern struct {
 	byteLocale bool
 }
 
+type compiledParamReplacer struct {
+	rx   *compiledParamPattern
+	with string
+	all  bool
+}
+
 func encodeByteLocaleString(str string) (string, map[int]int) {
 	offsets := make(map[int]int, len(str)+1)
 	var sb strings.Builder
@@ -358,35 +364,71 @@ func replaceParamPatternAt(name, with string, loc []int) string {
 	return name[:loc[0]] + with + name[loc[1]:]
 }
 
-func (cfg *Config) replaceParamPattern(pat, name, with string, all bool, anchor syntax.ReplaceAnchor) (string, error) {
+func (cfg *Config) compileParamReplacer(pat, with string, all bool, anchor syntax.ReplaceAnchor) (*compiledParamReplacer, error) {
 	expr, err := cfg.paramPatternExpr(pat, pattern.ExtendedOperators)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	switch anchor {
 	case syntax.ReplaceAnchorPrefix:
-		return replaceParamPatternAt(name, with, cfg.compileParamPattern("^"+expr).findStringIndex(name)), nil
+		expr = "^" + expr
+		all = false
 	case syntax.ReplaceAnchorSuffix:
-		return replaceParamPatternAt(name, with, cfg.compileParamPattern(expr+"$").findStringIndex(name)), nil
-	default:
-		rx := cfg.compileParamPattern(expr)
-		if !all {
-			return replaceParamPatternAt(name, with, rx.findStringIndex(name)), nil
-		}
-		locs := rx.findAllStringIndex(name, -1)
-		if len(locs) == 0 {
-			return name, nil
-		}
-		sb := cfg.strBuilder()
-		last := 0
-		for _, loc := range locs {
-			sb.WriteString(name[last:loc[0]])
-			sb.WriteString(with)
-			last = loc[1]
-		}
-		sb.WriteString(name[last:])
-		return sb.String(), nil
+		expr += "$"
+		all = false
 	}
+	return &compiledParamReplacer{
+		rx:   cfg.compileParamPattern(expr),
+		with: with,
+		all:  all,
+	}, nil
+}
+
+func (r *compiledParamReplacer) replace(name string) (string, bool) {
+	if !r.all {
+		loc := r.rx.findStringIndex(name)
+		if loc == nil {
+			return name, false
+		}
+		return replaceParamPatternAt(name, r.with, loc), true
+	}
+	if !r.rx.byteLocale {
+		loc := r.rx.rx.FindStringIndex(name)
+		if loc == nil {
+			return name, false
+		}
+		if r.rx.rx.FindStringIndex(name[loc[1]:]) == nil {
+			return replaceParamPatternAt(name, r.with, loc), true
+		}
+		return r.rx.rx.ReplaceAllLiteralString(name, r.with), true
+	}
+	locs := r.rx.findAllStringIndex(name, 2)
+	switch len(locs) {
+	case 0:
+		return name, false
+	case 1:
+		return replaceParamPatternAt(name, r.with, locs[0]), true
+	}
+	locs = r.rx.findAllStringIndex(name, -1)
+	sb := strings.Builder{}
+	sb.Grow(len(name))
+	last := 0
+	for _, loc := range locs {
+		sb.WriteString(name[last:loc[0]])
+		sb.WriteString(r.with)
+		last = loc[1]
+	}
+	sb.WriteString(name[last:])
+	return sb.String(), true
+}
+
+func (cfg *Config) replaceParamPattern(pat, name, with string, all bool, anchor syntax.ReplaceAnchor) (string, error) {
+	replacer, err := cfg.compileParamReplacer(pat, with, all, anchor)
+	if err != nil {
+		return "", err
+	}
+	replaced, _ := replacer.replace(name)
+	return replaced, nil
 }
 
 func (cfg *Config) associativeSubscriptKey(sub *syntax.Subscript) (string, error) {
@@ -1104,14 +1146,25 @@ func (cfg *Config) transformArrayElems(pe *syntax.ParamExp, state paramExpState,
 		if err != nil {
 			return nil, err
 		}
-		elems = slices.Clone(elems)
-		for i, elem := range elems {
-			elems[i], err = cfg.replaceParamPattern(orig, elem, with, pe.Repl.All, pe.Repl.Anchor)
-			if err != nil {
-				return nil, err
-			}
+		replacer, err := cfg.compileParamReplacer(orig, with, pe.Repl.All, pe.Repl.Anchor)
+		if err != nil {
+			return nil, err
 		}
-		return elems, nil
+		var transformed []string
+		for i, elem := range elems {
+			replaced, changed := replacer.replace(elem)
+			if !changed {
+				continue
+			}
+			if transformed == nil {
+				transformed = slices.Clone(elems)
+			}
+			transformed[i] = replaced
+		}
+		if transformed == nil {
+			return elems, nil
+		}
+		return transformed, nil
 	}
 	if pe.Exp == nil {
 		return elems, nil
