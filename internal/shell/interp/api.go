@@ -1305,7 +1305,6 @@ func (r *Runner) subshell(_ bool) *Runner {
 
 		origStdout: r.origStdout, // used for process substitutions
 	}
-<<<<<<< HEAD
 	if shareMapForSubshell(r.fds, &r.fdsShared) {
 		r2.fdsShared = true
 	}
