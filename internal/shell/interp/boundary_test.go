@@ -156,6 +156,57 @@ func TestShellStateAccessors(t *testing.T) {
 	}
 }
 
+func TestShellEnvReturnsCallerOwnedCopy(t *testing.T) {
+	t.Parallel()
+
+	runner, err := NewRunner(&RunnerConfig{
+		Env: expand.ListEnviron("HOME=/sandbox"),
+		Dir: "/sandbox",
+	})
+	if err != nil {
+		t.Fatalf("NewRunner error = %v", err)
+	}
+	if err := runner.SetShellVar("FOO", expand.Variable{Set: true, Kind: expand.String, Str: "bar"}); err != nil {
+		t.Fatalf("SetShellVar error = %v", err)
+	}
+
+	env := runner.ShellEnv()
+	env["FOO"] = "mutated"
+	delete(env, "HOME")
+
+	next := runner.ShellEnv()
+	if got := next["FOO"]; got != "bar" {
+		t.Fatalf("ShellEnv copy mutated FOO = %q, want bar", got)
+	}
+	if got := next["HOME"]; got != "/sandbox" {
+		t.Fatalf("ShellEnv copy deleted HOME = %q, want /sandbox", got)
+	}
+}
+
+func TestShellEnvDoesNotCacheMutableBaseEnv(t *testing.T) {
+	t.Parallel()
+
+	base := newMutableTestEnviron("HOME=/sandbox", "FOO=base")
+	runner, err := NewRunner(&RunnerConfig{
+		Env: base,
+		Dir: "/sandbox",
+	})
+	if err != nil {
+		t.Fatalf("NewRunner error = %v", err)
+	}
+	runner.Reset()
+
+	if got := runner.ShellEnv()["FOO"]; got != "base" {
+		t.Fatalf("initial ShellEnv[FOO] = %q, want base", got)
+	}
+
+	base.Set("FOO", expand.Variable{Set: true, Exported: true, Kind: expand.String, Str: "updated"})
+
+	if got := runner.ShellEnv()["FOO"]; got != "updated" {
+		t.Fatalf("ShellEnv[FOO] after mutable base update = %q, want updated", got)
+	}
+}
+
 type nopWriteCloser struct {
 	io.Writer
 }

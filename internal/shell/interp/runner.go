@@ -777,10 +777,7 @@ func defaultNamedUserHome(user string) (string, bool) {
 var todoPos syntax.Pos // for handlerCtx callers where we don't yet have a position
 
 func (r *Runner) handlerCtx(ctx context.Context, kind handlerKind, pos syntax.Pos) context.Context {
-	overlay := &overlayEnviron{
-		parent:          r.writeEnv,
-		caseInsensitive: r.platform.UsesCaseInsensitiveEnv(),
-	}
+	overlay := newScopedOverlayEnviron(r.writeEnv, r.platform.UsesCaseInsensitiveEnv())
 	if kind == handlerKindExec {
 		// When SHELLOPTS is exported, update the env overlay with the
 		// current dynamic value so child processes inherit the active
@@ -1282,12 +1279,9 @@ const (
 )
 
 func (r *Runner) runCallAssignOverlay(assigns []*syntax.Assign, forceExport, consumeLocals, crossesFuncScope bool) (*overlayEnviron, bool) {
-	overlay := &overlayEnviron{
-		caseInsensitive:           r.platform.UsesCaseInsensitiveEnv(),
-		parent:                    r.writeEnv,
-		tempScopeConsumesLocals:   consumeLocals,
-		tempScopeCrossesFuncScope: crossesFuncScope,
-	}
+	overlay := newScopedOverlayEnviron(r.writeEnv, r.platform.UsesCaseInsensitiveEnv())
+	overlay.tempScopeConsumesLocals = consumeLocals
+	overlay.tempScopeCrossesFuncScope = crossesFuncScope
 	origEnv := r.writeEnv
 	r.writeEnv = overlay
 	defer func() {
@@ -2095,11 +2089,9 @@ func (r *Runner) call(ctx context.Context, pos syntax.Pos, args []string) {
 		// Functions run in a nested scope.
 		// Note that [Runner.exec] below does something similar.
 		origEnv := r.writeEnv
-		r.writeEnv = &overlayEnviron{
-			parent:          r.writeEnv,
-			caseInsensitive: r.platform.UsesCaseInsensitiveEnv(),
-			funcScope:       true,
-		}
+		scopeEnv := newScopedOverlayEnviron(r.writeEnv, r.platform.UsesCaseInsensitiveEnv())
+		scopeEnv.funcScope = true
+		r.writeEnv = scopeEnv
 		prevChunkSource := r.currentChunkSource
 		prevChunkSourceBase := r.currentChunkSourceBase
 		if bodySource, ok := r.funcBodySource(name); ok {

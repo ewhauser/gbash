@@ -266,6 +266,46 @@ func TestSubshellTempScopeUnsetIsolation(t *testing.T) {
 	}
 }
 
+func TestSubshellSnapshotDeepWriteInvalidatesTopLevelCaches(t *testing.T) {
+	t.Parallel()
+
+	runner := newTestSubshellCOWRunner(t)
+	runner.setVarString("ROOT", "parent")
+
+	funcScope := newScopedOverlayEnviron(runner.writeEnv, false)
+	funcScope.funcScope = true
+	runner.writeEnv = funcScope
+
+	child := runner.subshell(true)
+
+	if _, entries := collectEachEntries(child.writeEnv); entries["ROOT"][0].String() != "parent" {
+		t.Fatalf("initial child Each ROOT = %q, want parent", entries["ROOT"][0].String())
+	}
+	if got := child.ShellEnv()["ROOT"]; got != "parent" {
+		t.Fatalf("initial child ShellEnv[ROOT] = %q, want parent", got)
+	}
+	vars, _ := child.materializedSetVars()
+	if got := materializedSetVarString(vars, "ROOT"); got != "parent" {
+		t.Fatalf("initial child set ROOT = %q, want parent", got)
+	}
+
+	globalEnv := globalWriteEnv(child.writeEnv)
+	if err := globalEnv.Set("ROOT", expand.Variable{Set: true, Kind: expand.String, Str: "child"}); err != nil {
+		t.Fatalf("globalEnv.Set(ROOT): %v", err)
+	}
+
+	if _, entries := collectEachEntries(child.writeEnv); entries["ROOT"][0].String() != "child" {
+		t.Fatalf("updated child Each ROOT = %q, want child", entries["ROOT"][0].String())
+	}
+	if got := child.ShellEnv()["ROOT"]; got != "child" {
+		t.Fatalf("updated child ShellEnv[ROOT] = %q, want child", got)
+	}
+	vars, _ = child.materializedSetVars()
+	if got := materializedSetVarString(vars, "ROOT"); got != "child" {
+		t.Fatalf("updated child set ROOT = %q, want child", got)
+	}
+}
+
 func newTestSubshellCOWRunner(tb testing.TB) *Runner {
 	tb.Helper()
 
@@ -279,4 +319,13 @@ func newTestSubshellCOWRunner(tb testing.TB) *Runner {
 	}
 	runner.Reset()
 	return runner
+}
+
+func materializedSetVarString(vars []namedVariable, name string) string {
+	for _, vr := range vars {
+		if vr.Name == name {
+			return vr.String()
+		}
+	}
+	return ""
 }

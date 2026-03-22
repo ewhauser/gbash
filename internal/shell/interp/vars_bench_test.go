@@ -97,7 +97,7 @@ func benchmarkOverlayFixture(size, depth int) expand.WriteEnviron {
 
 	var env expand.Environ = expand.ListEnviron(pairs...)
 	for level := range depth {
-		overlay := &overlayEnviron{parent: env}
+		overlay := newScopedOverlayEnviron(env, false)
 		for i := range size {
 			name := fmt.Sprintf("VAR_%03d", i)
 			switch {
@@ -133,7 +133,7 @@ func benchmarkOverlayFixture(size, depth int) expand.WriteEnviron {
 		env = overlay
 	}
 
-	top := &overlayEnviron{parent: env}
+	top := newScopedOverlayEnviron(env, false)
 	benchmarkMustSetVar(top, "SHELLOPTS", expand.Variable{
 		Set:      true,
 		Exported: true,

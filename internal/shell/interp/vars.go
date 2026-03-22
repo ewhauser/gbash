@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,12 +22,24 @@ import (
 
 const loopIterHelperCommand = "__jb_loop_iter"
 
+func newScopedOverlayEnviron(parent expand.Environ, caseInsensitive bool) *overlayEnviron {
+	return &overlayEnviron{
+		parent:          parent,
+		caseInsensitive: caseInsensitive,
+		envEpoch:        newOverlayEnvEpoch(parent, false),
+	}
+}
+
 func newOverlayEnviron(parent expand.Environ, snapshot, caseInsensitive bool) *overlayEnviron {
-	oenv := &overlayEnviron{caseInsensitive: caseInsensitive}
+	epoch := newOverlayEnvEpoch(parent, snapshot)
+	oenv := &overlayEnviron{
+		caseInsensitive: caseInsensitive,
+		envEpoch:        epoch,
+	}
 	if !snapshot {
 		oenv.parent = parent
 	} else if parentWrite, ok := parent.(expand.WriteEnviron); ok {
-		oenv.parent = forkWriteEnviron(parentWrite)
+		oenv.parent = forkWriteEnvironWithEpoch(parentWrite, epoch)
 	} else {
 		oenv.parent = parent
 	}
@@ -61,19 +74,34 @@ func forkEnviron(parent expand.Environ) expand.Environ {
 }
 
 func forkWriteEnviron(parent expand.WriteEnviron) expand.WriteEnviron {
+	return forkWriteEnvironWithEpoch(parent, newEnvEpoch())
+}
+
+func forkEnvironWithEpoch(parent expand.Environ, epoch *envEpoch) expand.Environ {
+	if parentWrite, ok := parent.(expand.WriteEnviron); ok {
+		return forkWriteEnvironWithEpoch(parentWrite, epoch)
+	}
+	return parent
+}
+
+func forkWriteEnvironWithEpoch(parent expand.WriteEnviron, epoch *envEpoch) expand.WriteEnviron {
 	switch parent := parent.(type) {
 	case *overlayEnviron:
 		clone := *parent
-		clone.parent = forkEnviron(parent.parent)
+		clone.parent = forkEnvironWithEpoch(parent.parent, epoch)
 		clone.valuesShared = shareMapForSubshell(parent.values, &parent.valuesShared)
 		clone.tempUnsetShared = shareMapForSubshell(parent.tempUnset, &parent.tempUnsetShared)
+		clone.envEpoch = epoch
+		clone.visibleCache = nil
+		clone.visibleCacheEpoch = 0
+		clone.visibleCacheReady = false
 		return &clone
 	case *shadowWriteEnviron:
 		clone := *parent
-		clone.parent = forkWriteEnviron(parent.parent)
+		clone.parent = forkWriteEnvironWithEpoch(parent.parent, epoch)
 		return &clone
 	default:
-		oenv := &overlayEnviron{}
+		oenv := &overlayEnviron{envEpoch: epoch}
 		for name, vr := range parent.Each() {
 			if err := oenv.Set(name, vr); err != nil {
 				panic(fmt.Sprintf("copy %s into overlay: %v", name, err))
@@ -108,6 +136,15 @@ type overlayEnviron struct {
 	// valuesShared tracks whether values is shared with another environ and
 	// must be cloned before mutation.
 	valuesShared bool
+
+	// envEpoch tracks visible-binding mutations across a shared overlay chain.
+	envEpoch *envEpoch
+	// visibleCache stores the flattened visible bindings for the current envEpoch.
+	visibleCache []visibleBinding
+	// visibleCacheEpoch is the envEpoch value used to build visibleCache.
+	visibleCacheEpoch uint64
+	// visibleCacheReady reports whether visibleCache contains a valid snapshot.
+	visibleCacheReady bool
 
 	// We need to know if the current scope is a function's scope, because
 	// functions can modify global variables. When true, [parent] must not be nil.
@@ -158,6 +195,64 @@ type namedVariable struct {
 	expand.Variable
 }
 
+type visibleBinding struct {
+	Name       string
+	Normalized string
+	Variable   expand.Variable
+}
+
+type envEpoch struct {
+	value uint64
+}
+
+var immutableListEnvironType = reflect.TypeOf(expand.ListEnviron())
+
+func newEnvEpoch() *envEpoch {
+	return &envEpoch{value: 1}
+}
+
+func newOverlayEnvEpoch(parent expand.Environ, snapshot bool) *envEpoch {
+	if snapshot {
+		return newEnvEpoch()
+	}
+	if epoch := sharedEnvEpoch(parent); epoch != nil {
+		return epoch
+	}
+	return newEnvEpoch()
+}
+
+func sharedEnvEpoch(env expand.Environ) *envEpoch {
+	switch env := env.(type) {
+	case *overlayEnviron:
+		return env.ensureEnvEpoch()
+	case *shadowWriteEnviron:
+		return sharedEnvEpoch(env.parent)
+	default:
+		return nil
+	}
+}
+
+func isKnownImmutableEnviron(env expand.Environ) bool {
+	if env == nil {
+		return true
+	}
+	typ := reflect.TypeOf(env)
+	return typ == immutableListEnvironType
+}
+
+func cacheableParentEnviron(env expand.Environ) bool {
+	switch env := env.(type) {
+	case nil:
+		return true
+	case *overlayEnviron:
+		return env.canCacheVisibleBindings()
+	case *shadowWriteEnviron:
+		return cacheableParentEnviron(env.parent)
+	default:
+		return isKnownImmutableEnviron(env)
+	}
+}
+
 func (o *overlayEnviron) normalize(name string) string {
 	return normalizeEnvName(name, o.caseInsensitive)
 }
@@ -167,6 +262,56 @@ func normalizeEnvName(name string, caseInsensitive bool) string {
 		return strings.ToUpper(name)
 	}
 	return name
+}
+
+func (o *overlayEnviron) ensureEnvEpoch() *envEpoch {
+	if o.envEpoch != nil {
+		return o.envEpoch
+	}
+	if epoch := sharedEnvEpoch(o.parent); epoch != nil {
+		o.envEpoch = epoch
+		return epoch
+	}
+	o.envEpoch = newEnvEpoch()
+	return o.envEpoch
+}
+
+func (o *overlayEnviron) envEpochValue() uint64 {
+	return o.ensureEnvEpoch().value
+}
+
+func (o *overlayEnviron) bumpEnvEpoch() {
+	o.ensureEnvEpoch().value++
+}
+
+func (o *overlayEnviron) canCacheVisibleBindings() bool {
+	if o == nil {
+		return false
+	}
+	return cacheableParentEnviron(o.parent)
+}
+
+func writeEnvEpoch(env expand.WriteEnviron) (uint64, bool) {
+	switch env := env.(type) {
+	case *overlayEnviron:
+		if !env.canCacheVisibleBindings() {
+			return 0, false
+		}
+		return env.envEpochValue(), true
+	default:
+		return 0, false
+	}
+}
+
+func (r *Runner) currentWriteEnvCacheToken() (expand.WriteEnviron, uint64, bool) {
+	if r == nil || r.writeEnv == nil {
+		return nil, 0, false
+	}
+	epoch, ok := writeEnvEpoch(r.writeEnv)
+	if !ok {
+		return nil, 0, false
+	}
+	return r.writeEnv, epoch, true
 }
 
 func (o *overlayEnviron) Get(name string) expand.Variable {
@@ -223,40 +368,105 @@ func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 		// the next outer binding inside the same function scope.
 		vr.Local = prev.Local || vr.Local
 		o.values[normalized] = namedVariable{name, vr}
+		o.bumpEnvEpoch()
 		return nil
 	}
 	// modifying the entire variable
 	vr.Local = prev.Local || vr.Local
 	o.values[normalized] = namedVariable{name, vr}
+	o.bumpEnvEpoch()
 	return nil
 }
 
 func (o *overlayEnviron) Each() expand.VarSeq {
 	return func(yield func(string, expand.Variable) bool) {
-		if o.parent != nil {
-			if len(o.values) == 0 {
-				for name, vr := range o.parent.Each() {
-					if !yield(name, vr) {
-						return
-					}
-				}
-			} else {
-				for name, vr := range o.parent.Each() {
-					if _, shadowed := o.values[o.normalize(name)]; shadowed {
-						continue
-					}
-					if !yield(name, vr) {
-						return
-					}
-				}
-			}
-		}
-		for _, vr := range o.values {
-			if !yield(vr.Name, vr.Variable) {
+		for _, binding := range o.visibleBindings() {
+			if !yield(binding.Name, binding.Variable) {
 				return
 			}
 		}
 	}
+}
+
+func (o *overlayEnviron) visibleBindings() []visibleBinding {
+	if !o.canCacheVisibleBindings() {
+		return o.buildVisibleBindings()
+	}
+	epoch := o.envEpochValue()
+	if o.visibleCacheReady && o.visibleCacheEpoch == epoch {
+		return o.visibleCache
+	}
+	bindings := o.buildVisibleBindings()
+	if bindings == nil {
+		bindings = []visibleBinding{}
+	}
+	o.visibleCache = bindings
+	o.visibleCacheEpoch = epoch
+	o.visibleCacheReady = true
+	return bindings
+}
+
+func (o *overlayEnviron) buildVisibleBindings() []visibleBinding {
+	if len(o.values) == 0 {
+		if parent, ok := o.parent.(*overlayEnviron); ok {
+			return parent.visibleBindings()
+		}
+		if o.parent == nil {
+			return nil
+		}
+	}
+
+	capHint := len(o.values)
+	if parent, ok := o.parent.(*overlayEnviron); ok {
+		capHint += len(parent.visibleBindings())
+	}
+	bindings := make([]visibleBinding, 0, capHint)
+	hidden := make([]bool, 0, capHint)
+	indices := make(map[string]int, capHint)
+	appendBinding := func(binding visibleBinding) {
+		if prev, ok := indices[binding.Normalized]; ok {
+			hidden[prev] = true
+		}
+		indices[binding.Normalized] = len(bindings)
+		bindings = append(bindings, binding)
+		hidden = append(hidden, false)
+	}
+
+	switch parent := o.parent.(type) {
+	case *overlayEnviron:
+		for _, binding := range parent.visibleBindings() {
+			appendBinding(binding)
+		}
+	case nil:
+	default:
+		for name, vr := range parent.Each() {
+			appendBinding(visibleBinding{
+				Name:       name,
+				Normalized: o.normalize(name),
+				Variable:   vr,
+			})
+		}
+	}
+	for normalized, vr := range o.values {
+		appendBinding(visibleBinding{
+			Name:       vr.Name,
+			Normalized: normalized,
+			Variable:   vr.Variable,
+		})
+	}
+	for _, removed := range hidden {
+		if removed {
+			compacted := bindings[:0]
+			for i, binding := range bindings {
+				if hidden[i] {
+					continue
+				}
+				compacted = append(compacted, binding)
+			}
+			return compacted
+		}
+	}
+	return bindings
 }
 
 func currentScopeVar(env expand.WriteEnviron, name string) (expand.Variable, bool) {
@@ -448,6 +658,7 @@ func deleteCurrentScopeVar(env expand.WriteEnviron, name string) bool {
 			}
 			env.tempUnset[normalized] = true
 		}
+		env.bumpEnvEpoch()
 		return true
 	case *shadowWriteEnviron:
 		if env.shadowSet && name == env.shadowName {
@@ -594,6 +805,37 @@ func (r *Runner) optionFlags() string {
 	return flags.String()
 }
 
+func (r *Runner) materializedSetVars() ([]namedVariable, bool) {
+	cacheEnv, cacheEpoch, cacheable := r.currentWriteEnvCacheToken()
+	if cacheable && r.setVarsCacheReady && r.setVarsCacheEnv == cacheEnv && r.setVarsCacheEpoch == cacheEpoch {
+		return r.setVarsCache, r.setVarsCacheHasBashLineNo
+	}
+
+	var vars []namedVariable
+	hasBashLineNo := false
+	for name, vr := range r.writeEnv.Each() {
+		if name == "BASH_LINENO" {
+			hasBashLineNo = true
+		}
+		if !r.printSetVarVisible(name, vr) {
+			continue
+		}
+		vars = append(vars, namedVariable{Name: name, Variable: vr})
+	}
+	slices.SortFunc(vars, func(a, b namedVariable) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
+	if cacheable {
+		r.setVarsCache = vars
+		r.setVarsCacheEnv = cacheEnv
+		r.setVarsCacheEpoch = cacheEpoch
+		r.setVarsCacheHasBashLineNo = hasBashLineNo
+		r.setVarsCacheReady = true
+	}
+	return vars, hasBashLineNo
+}
+
 func (r *Runner) printSetVar(name string, vr expand.Variable) {
 	if !vr.IsSet() {
 		return
@@ -632,29 +874,32 @@ func (r *Runner) printSetVar(name string, vr expand.Variable) {
 }
 
 func (r *Runner) printSetVars() {
-	var vars []namedVariable
-	hasBashLineNo := false
-	for name, vr := range r.writeEnv.Each() {
-		if name == "BASH_LINENO" {
-			hasBashLineNo = true
+	vars, hasBashLineNo := r.materializedSetVars()
+	if hasBashLineNo {
+		for _, vr := range vars {
+			r.printSetVar(vr.Name, vr.Variable)
 		}
-		if !r.printSetVarVisible(name, vr) {
-			continue
-		}
-		vars = append(vars, namedVariable{Name: name, Variable: vr})
+		return
 	}
-	if !hasBashLineNo {
-		if vr, ok := r.setBuiltinSpecialVar("BASH_LINENO"); ok {
-			if r.printSetVarVisible("BASH_LINENO", vr) {
-				vars = append(vars, namedVariable{Name: "BASH_LINENO", Variable: vr})
-			}
+
+	synthetic, ok := r.setBuiltinSpecialVar("BASH_LINENO")
+	if !ok || !r.printSetVarVisible("BASH_LINENO", synthetic) {
+		for _, vr := range vars {
+			r.printSetVar(vr.Name, vr.Variable)
 		}
+		return
 	}
-	slices.SortFunc(vars, func(a, b namedVariable) int {
-		return strings.Compare(a.Name, b.Name)
-	})
+
+	inserted := false
 	for _, vr := range vars {
+		if !inserted && strings.Compare("BASH_LINENO", vr.Name) < 0 {
+			r.printSetVar("BASH_LINENO", synthetic)
+			inserted = true
+		}
 		r.printSetVar(vr.Name, vr.Variable)
+	}
+	if !inserted {
+		r.printSetVar("BASH_LINENO", synthetic)
 	}
 }
 
