@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"os"
+	"math"
 	"runtime"
 	"runtime/debug"
 	"slices"
@@ -22,6 +22,7 @@ import (
 	"github.com/ewhauser/gbash/commands"
 	"github.com/ewhauser/gbash/contrib/extras"
 	"github.com/ewhauser/gbash/host"
+	"github.com/ewhauser/gbash/internal/shell/interp"
 )
 
 // CommandProfile describes the command surface the tool should advertise.
@@ -44,6 +45,7 @@ const (
 	defaultPATH     = "/usr/bin:/bin"
 	defaultShell    = "/bin/bash"
 	defaultVersion  = "devel"
+	maxTimeoutMS    = uint64(math.MaxInt64 / int64(time.Millisecond))
 )
 
 // Config controls the public bash-tool contract and one-shot execution helper.
@@ -78,6 +80,9 @@ func (r Request) ResolvedCommands() string {
 func (r Request) Timeout() time.Duration {
 	if r.TimeoutMS == nil {
 		return 0
+	}
+	if *r.TimeoutMS >= maxTimeoutMS {
+		return time.Duration(math.MaxInt64)
 	}
 	return time.Duration(*r.TimeoutMS) * time.Millisecond
 }
@@ -674,7 +679,8 @@ func (h *virtualHost) ExecutionMeta(context.Context) (host.ExecutionMeta, error)
 }
 
 func (h *virtualHost) NewPipe() (io.ReadCloser, io.WriteCloser, error) {
-	return os.Pipe()
+	reader, writer := interp.NewVirtualPipe()
+	return reader, writer, nil
 }
 
 func normalizeMachine(goarch string) string {

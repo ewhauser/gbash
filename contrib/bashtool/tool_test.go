@@ -3,8 +3,10 @@ package bashtool
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ewhauser/gbash"
 	"github.com/ewhauser/gbash/commands"
@@ -147,6 +149,20 @@ func TestParseRequestSupportsScriptAliasAndTimeout(t *testing.T) {
 	}
 }
 
+func TestTimeoutClampsInsteadOfOverflowing(t *testing.T) {
+	t.Parallel()
+
+	tooLarge := uint64(math.MaxUint64)
+	req := Request{TimeoutMS: &tooLarge}
+
+	if got := req.Timeout(); got != time.Duration(math.MaxInt64) {
+		t.Fatalf("Timeout() = %v, want clamped max duration", got)
+	}
+	if got := req.Timeout(); got <= 0 {
+		t.Fatalf("Timeout() = %v, want positive duration", got)
+	}
+}
+
 func TestFormatToolResultMatchesEvaluatorShape(t *testing.T) {
 	t.Parallel()
 
@@ -203,5 +219,20 @@ func TestExecutePassesRuntimeOptions(t *testing.T) {
 	}
 	if got := strings.TrimSpace(resp.Stdout); got != "/tmp" {
 		t.Fatalf("Execute() stdout = %q, want /tmp", got)
+	}
+}
+
+func TestExecuteUsesVirtualPipes(t *testing.T) {
+	t.Parallel()
+
+	tool := New(Config{})
+	resp := tool.Execute(context.Background(), Request{
+		Commands: "yes | head -n 1\n",
+	})
+	if resp.ExitCode != 0 {
+		t.Fatalf("Execute() exit = %d, want 0; stderr=%q", resp.ExitCode, resp.Stderr)
+	}
+	if got := resp.Stdout; got != "y\n" {
+		t.Fatalf("Execute() stdout = %q, want y\\n", got)
 	}
 }
