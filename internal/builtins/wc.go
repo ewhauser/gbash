@@ -253,7 +253,7 @@ func (c *WC) runWCFiles0From(ctx context.Context, inv *Invocation, opts wcOption
 	source := opts.files0From
 
 	if source == "-" {
-		return wcRunFiles0FromStream(ctx, inv, opts, source, inv.Stdin)
+		return wcRunFiles0FromStream(ctx, inv, opts, source, inv.Stdin, 1)
 	}
 
 	info, _, err := statPath(ctx, inv, source)
@@ -266,7 +266,11 @@ func (c *WC) runWCFiles0From(ctx context.Context, inv *Invocation, opts wcOption
 	if info.Mode().IsRegular() && info.Size() <= wcMaterializeFiles0Limit {
 		return wcRunFiles0FromMaterialized(ctx, inv, opts, source)
 	}
-	return wcRunFiles0FromPathStream(ctx, inv, opts, source)
+	columnWidth := 1
+	if info.Mode().IsRegular() {
+		columnWidth = wcFiles0StreamWidthForRegularSource(ctx, inv, opts, source)
+	}
+	return wcRunFiles0FromPathStream(ctx, inv, opts, source, columnWidth)
 }
 
 func wcRunFiles0FromMaterialized(ctx context.Context, inv *Invocation, opts wcOptions, source string) error {
@@ -288,17 +292,17 @@ func wcRunFiles0FromMaterialized(ctx context.Context, inv *Invocation, opts wcOp
 	return wcRunEntries(ctx, inv, opts, entries, len(entries), false, false)
 }
 
-func wcRunFiles0FromPathStream(ctx context.Context, inv *Invocation, opts wcOptions, source string) error {
+func wcRunFiles0FromPathStream(ctx context.Context, inv *Invocation, opts wcOptions, source string, columnWidth int) error {
 	file, _, err := openRead(ctx, inv, source)
 	if err != nil {
 		return exitf(inv, 1, "wc: cannot open %s for reading: %s", wcErrorOperand(source), readAllErrorText(err))
 	}
 	defer func() { _ = file.Close() }()
 
-	return wcRunFiles0FromStream(ctx, inv, opts, source, file)
+	return wcRunFiles0FromStream(ctx, inv, opts, source, file, columnWidth)
 }
 
-func wcRunFiles0FromStream(ctx context.Context, inv *Invocation, opts wcOptions, source string, reader io.Reader) error {
+func wcRunFiles0FromStream(ctx context.Context, inv *Invocation, opts wcOptions, source string, reader io.Reader, columnWidth int) error {
 	reader = commandutil.ReaderWithContext(ctx, reader)
 	reader = wcLimitReaderForInvocation(inv, reader)
 	buf := bufio.NewReader(reader)
@@ -324,7 +328,7 @@ func wcRunFiles0FromStream(ctx context.Context, inv *Invocation, opts wcOptions,
 
 		inputCount++
 		entry := wcFiles0Entry(source, record, inputCount)
-		entryExit, err := wcProcessEntry(ctx, inv, opts, entry, 1, &total)
+		entryExit, err := wcProcessEntry(ctx, inv, opts, entry, columnWidth, &total)
 		if err != nil {
 			return err
 		}
@@ -334,7 +338,7 @@ func wcRunFiles0FromStream(ctx context.Context, inv *Invocation, opts wcOptions,
 	}
 
 	if wcTotalVisible(opts.totalWhen, inputCount) {
-		if err := writeWCLine(inv.Stdout, total, opts, wcTotalLabel(opts), 1); err != nil {
+		if err := writeWCLine(inv.Stdout, total, opts, wcTotalLabel(opts), columnWidth); err != nil {
 			return err
 		}
 	}
@@ -342,6 +346,35 @@ func wcRunFiles0FromStream(ctx context.Context, inv *Invocation, opts wcOptions,
 		return &ExitError{Code: exitCode}
 	}
 	return nil
+}
+
+func wcFiles0StreamWidthForRegularSource(ctx context.Context, inv *Invocation, opts wcOptions, source string) int {
+	file, _, err := openRead(ctx, inv, source)
+	if err != nil {
+		return 1
+	}
+	defer func() { _ = file.Close() }()
+
+	acc := wcWidthAccumulator{minWidth: 1}
+	reader := commandutil.ReaderWithContext(ctx, file)
+	reader = wcLimitReaderForInvocation(inv, reader)
+	buf := bufio.NewReader(reader)
+	inputCount := 0
+
+	for {
+		record, done, err := wcReadFiles0Record(buf)
+		if err != nil {
+			break
+		}
+		if done {
+			break
+		}
+
+		inputCount++
+		acc.addEntry(ctx, inv, wcFiles0Entry(source, record, inputCount))
+	}
+
+	return acc.width(opts)
 }
 
 func wcLimitReaderForInvocation(inv *Invocation, reader io.Reader) io.Reader {
@@ -727,35 +760,60 @@ func wcOutputWidth(ctx context.Context, inv *Invocation, opts wcOptions, entries
 		return 1
 	}
 
-	minWidth := 1
-	totalSize := int64(0)
+	acc := wcWidthAccumulator{minWidth: 1}
 	for _, entry := range entries {
-		if entry.invalidMessage != "" {
-			continue
-		}
-		if entry.label == "-" {
-			minWidth = wcMinimumWidth()
-			continue
-		}
+		acc.addEntry(ctx, inv, entry)
+	}
+	return acc.width(opts)
+}
 
-		info, _, err := statPath(ctx, inv, entry.label)
-		if err != nil {
-			continue
-		}
-		if info.Mode().IsRegular() {
-			totalSize += info.Size()
-			continue
-		}
-		minWidth = wcMinimumWidth()
+type wcWidthAccumulator struct {
+	entryCount int
+	minWidth   int
+	totalSize  int64
+}
+
+func (a *wcWidthAccumulator) addEntry(ctx context.Context, inv *Invocation, entry wcInputEntry) {
+	if a == nil {
+		return
+	}
+	a.entryCount++
+	if entry.invalidMessage != "" {
+		return
+	}
+	if entry.label == "-" {
+		a.minWidth = wcMinimumWidth()
+		return
 	}
 
-	if totalSize == 0 {
-		return minWidth
+	info, _, err := statPath(ctx, inv, entry.label)
+	if err != nil {
+		return
+	}
+	if info.Mode().IsRegular() {
+		a.totalSize += info.Size()
+		return
+	}
+	a.minWidth = wcMinimumWidth()
+}
+
+func (a wcWidthAccumulator) width(opts wcOptions) int {
+	if wcEnabledCount(opts) == 1 && a.entryCount == 1 {
+		return 1
+	}
+	if a.totalSize == 0 {
+		if a.minWidth == 0 {
+			return 1
+		}
+		return a.minWidth
 	}
 
-	columnWidth := len(strconv.FormatInt(totalSize, 10))
-	if columnWidth < minWidth {
-		return minWidth
+	columnWidth := len(strconv.FormatInt(a.totalSize, 10))
+	if a.minWidth == 0 {
+		return columnWidth
+	}
+	if columnWidth < a.minWidth {
+		return a.minWidth
 	}
 	return columnWidth
 }
