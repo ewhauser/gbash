@@ -1353,12 +1353,12 @@ func (p *Parser) followStmts(left string, lpos Pos, stops ...reservedWord) ([]*S
 		if p.lang.in(LangZsh | LangMirBSDKorn) {
 			return nil, nil // allow an empty list
 		}
+		if p.recoverError() {
+			return []*Stmt{{Position: recoveredPos}}, nil
+		}
 		if p.lang.in(LangBash|LangBats) && p.atRsrv(rsrvFi, rsrvDone) {
 			p.curErr("syntax error near unexpected token %s", p.currentUnexpectedTokenQuote())
 			return nil, nil
-		}
-		if p.recoverError() {
-			return []*Stmt{{Position: recoveredPos}}, nil
 		}
 		p.followErr(lpos, left, noQuote("a statement list"))
 	}
