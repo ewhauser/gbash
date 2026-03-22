@@ -780,7 +780,7 @@ var todoPos syntax.Pos // for handlerCtx callers where we don't yet have a posit
 func (r *Runner) handlerCtx(ctx context.Context, kind handlerKind, pos syntax.Pos) context.Context {
 	overlay := &overlayEnviron{
 		parent:          r.writeEnv,
-		caseInsensitive: r.platform.EnvCaseInsensitive,
+		caseInsensitive: r.platform.UsesCaseInsensitiveEnv(),
 	}
 	if kind == handlerKindExec {
 		// When SHELLOPTS is exported, update the env overlay with the
@@ -1970,7 +1970,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			}()
 			return fn()
 		}
-		declEvalEnv := newOverlayEnviron(r.writeEnv, true, r.platform.EnvCaseInsensitive)
+		declEvalEnv := newOverlayEnviron(r.writeEnv, true, r.platform.UsesCaseInsensitiveEnv())
 		declLookupVar := func(env expand.WriteEnviron, name string) expand.Variable {
 			if !local || global {
 				return env.Get(name)
@@ -2833,7 +2833,7 @@ const (
 
 func (r *Runner) runCallAssignOverlay(assigns []*syntax.Assign, forceExport, consumeLocals, crossesFuncScope bool) (*overlayEnviron, bool) {
 	overlay := &overlayEnviron{
-		caseInsensitive:           r.platform.EnvCaseInsensitive,
+		caseInsensitive:           r.platform.UsesCaseInsensitiveEnv(),
 		parent:                    r.writeEnv,
 		tempScopeConsumesLocals:   consumeLocals,
 		tempScopeCrossesFuncScope: crossesFuncScope,
@@ -3874,7 +3874,7 @@ func (r *Runner) call(ctx context.Context, pos syntax.Pos, args []string) {
 		origEnv := r.writeEnv
 		r.writeEnv = &overlayEnviron{
 			parent:          r.writeEnv,
-			caseInsensitive: r.platform.EnvCaseInsensitive,
+			caseInsensitive: r.platform.UsesCaseInsensitiveEnv(),
 			funcScope:       true,
 		}
 		prevChunkSource := r.currentChunkSource

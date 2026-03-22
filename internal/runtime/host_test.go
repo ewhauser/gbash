@@ -14,6 +14,11 @@ import (
 	"github.com/ewhauser/gbash/internal/shellstate"
 )
 
+var (
+	testBoolTrue  = true
+	testBoolFalse = false
+)
+
 type fakeHostAdapter struct {
 	defaults  pubhost.Defaults
 	platform  pubhost.Platform
@@ -27,7 +32,18 @@ func (f *fakeHostAdapter) Defaults(context.Context) (pubhost.Defaults, error) {
 
 func (f *fakeHostAdapter) Platform() pubhost.Platform {
 	platform := f.platform
-	platform.PathExtensions = append([]string(nil), platform.PathExtensions...)
+	if platform.PathExtensions != nil {
+		platform.PathExtensions = make([]string, len(platform.PathExtensions))
+		copy(platform.PathExtensions, f.platform.PathExtensions)
+	}
+	if platform.EnvCaseInsensitive != nil {
+		value := *platform.EnvCaseInsensitive
+		platform.EnvCaseInsensitive = &value
+	}
+	if platform.RequireExecutableBit != nil {
+		value := *platform.RequireExecutableBit
+		platform.RequireExecutableBit = &value
+	}
 	return platform
 }
 
@@ -53,7 +69,7 @@ func TestHostAdapterBaseEnvPrecedenceAndReplaceEnv(t *testing.T) {
 				OS:                   "linux",
 				Arch:                 "x86_64",
 				OSType:               "linux-gnu",
-				RequireExecutableBit: true,
+				RequireExecutableBit: &testBoolTrue,
 				Uname: pubhost.Uname{
 					SysName:         "Linux",
 					NodeName:        "fake-linux",
@@ -170,8 +186,8 @@ func TestHostAdapterControlsLookupAndPipeFactories(t *testing.T) {
 			"PATHEXT": ".CMD",
 		},
 	})
-	writeStubCommandFile(t, windowsSession, "/host-bin/plain", "plain", 0o644)
-	writeStubCommandFile(t, windowsSession, "/host-bin/ext.cmd", "ext.cmd", 0o644)
+	writeStubCommandFile(t, windowsSession, "/host-bin/plain", "plain")
+	writeStubCommandFile(t, windowsSession, "/host-bin/ext.cmd", "ext.cmd")
 
 	result, err := windowsSession.Exec(context.Background(), &ExecutionRequest{
 		Script: "" +
@@ -229,7 +245,7 @@ func TestHostAdapterControlsLookupAndPipeFactories(t *testing.T) {
 				OS:                   "linux",
 				Arch:                 "x86_64",
 				OSType:               "linux-gnu",
-				RequireExecutableBit: true,
+				RequireExecutableBit: &testBoolTrue,
 				Uname: pubhost.Uname{
 					SysName:         "Linux",
 					NodeName:        "fake-linux",
@@ -251,7 +267,7 @@ func TestHostAdapterControlsLookupAndPipeFactories(t *testing.T) {
 			"PATH": "/host-bin",
 		},
 	})
-	writeStubCommandFile(t, linuxSession, "/host-bin/plain", "plain", 0o644)
+	writeStubCommandFile(t, linuxSession, "/host-bin/plain", "plain")
 
 	result, err = linuxSession.Exec(context.Background(), &ExecutionRequest{
 		Script: "plain\n",
@@ -275,9 +291,9 @@ func fakeWindowsHost() *fakeHostAdapter {
 			OS:                   "windows",
 			Arch:                 "x86_64",
 			OSType:               "msys",
-			EnvCaseInsensitive:   true,
+			EnvCaseInsensitive:   &testBoolTrue,
 			PathExtensions:       []string{".cmd"},
-			RequireExecutableBit: false,
+			RequireExecutableBit: &testBoolFalse,
 			Uname: pubhost.Uname{
 				SysName:         "Windows_NT",
 				NodeName:        "fake-win-host",
@@ -291,11 +307,160 @@ func fakeWindowsHost() *fakeHostAdapter {
 	}
 }
 
-func writeStubCommandFile(t testing.TB, session *Session, path, name string, mode os.FileMode) {
+func TestHostAdapterCanDisableEnvCaseFolding(t *testing.T) {
+	t.Parallel()
+
+	host := fakeWindowsHost()
+	host.platform.EnvCaseInsensitive = &testBoolFalse
+	session := newSession(t, &Config{Host: host})
+
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		Script: "FOO=upper\nprintf '%s|%s\\n' \"$FOO\" \"${foo-unset}\"\n",
+	})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if got, want := result.Stdout, "upper|unset\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestHostAdapterCanClearProcessGroupMetadata(t *testing.T) {
+	t.Parallel()
+
+	session := newSession(t, &Config{
+		Host: &fakeHostAdapter{
+			defaults: pubhost.Defaults{Env: map[string]string{
+				"HOME": "/home/fake",
+				"PATH": defaultPath,
+			}},
+			platform: pubhost.Platform{
+				OS:                   "linux",
+				Arch:                 "x86_64",
+				OSType:               "linux-gnu",
+				RequireExecutableBit: &testBoolTrue,
+			},
+			meta: pubhost.ExecutionMeta{PID: 1, PPID: 0, ProcessGroup: 0},
+		},
+		Registry: registryWithCommands(t,
+			commands.DefineCommand("pgrp-probe", func(ctx context.Context, inv *commands.Invocation) error {
+				pgrp, ok := shellstate.ProcessGroupFromContext(ctx)
+				if !ok {
+					_, err := io.WriteString(inv.Stdout, "missing\n")
+					return err
+				}
+				_, err := io.WriteString(inv.Stdout, strconv.Itoa(pgrp)+"\n")
+				return err
+			}),
+		),
+	})
+
+	ctx := shellstate.WithProcessGroup(context.Background(), 1234)
+	result, err := session.Exec(ctx, &ExecutionRequest{Script: "pgrp-probe\n"})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if got, want := result.Stdout, "0\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestHostAdapterCanDisablePathExtensions(t *testing.T) {
+	t.Parallel()
+
+	host := fakeWindowsHost()
+	host.platform.PathExtensions = []string{}
+	session := newSession(t, &Config{
+		Host: host,
+		Registry: registryWithCommands(t,
+			commands.DefineCommand("ext.cmd", func(_ context.Context, inv *commands.Invocation) error {
+				_, err := io.WriteString(inv.Stdout, "ext\n")
+				return err
+			}),
+		),
+		BaseEnv: map[string]string{
+			"PATH":    "/host-bin",
+			"PATHEXT": ".CMD",
+		},
+	})
+	writeStubCommandFile(t, session, "/host-bin/ext.cmd", "ext.cmd")
+
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		Script: "command -v ext >/dev/null 2>&1\nprintf '%s\\n' \"$?\"\n",
+	})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if got, want := result.Stdout, "1\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+
+	result, err = session.Exec(context.Background(), &ExecutionRequest{Script: "ext\n"})
+	if err != nil {
+		t.Fatalf("Exec(ext) error = %v", err)
+	}
+	if got := result.Stdout; got != "" {
+		t.Fatalf("ext stdout = %q, want empty", got)
+	}
+	if result.ExitCode == 0 {
+		t.Fatalf("expected ext execution to fail when path extensions are disabled")
+	}
+}
+
+func TestHostAdapterCanDisableExecutableBitRequirement(t *testing.T) {
+	t.Parallel()
+
+	session := newSession(t, &Config{
+		Host: &fakeHostAdapter{
+			defaults: pubhost.Defaults{Env: map[string]string{
+				"HOME": "/home/fake",
+				"PATH": defaultPath,
+			}},
+			platform: pubhost.Platform{
+				OS:                   "linux",
+				Arch:                 "x86_64",
+				OSType:               "linux-gnu",
+				RequireExecutableBit: &testBoolFalse,
+				Uname: pubhost.Uname{
+					SysName:         "Linux",
+					NodeName:        "fake-linux",
+					Release:         "6.0.0",
+					Version:         "fake-version",
+					Machine:         "x86_64",
+					OperatingSystem: "GNU/Linux",
+				},
+			},
+			meta: pubhost.ExecutionMeta{PID: 8, PPID: 3, ProcessGroup: 11},
+		},
+		Registry: registryWithCommands(t,
+			commands.DefineCommand("plain", func(_ context.Context, inv *commands.Invocation) error {
+				_, err := io.WriteString(inv.Stdout, "plain\n")
+				return err
+			}),
+		),
+		BaseEnv: map[string]string{
+			"PATH": "/host-bin",
+		},
+	})
+	writeStubCommandFile(t, session, "/host-bin/plain", "plain")
+
+	result, err := session.Exec(context.Background(), &ExecutionRequest{Script: "plain\n"})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if got, want := result.Stdout, "plain\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+}
+
+func writeStubCommandFile(t testing.TB, session *Session, path, name string) {
 	t.Helper()
 
 	writeSessionFile(t, session, path, []byte("# gbash virtual command stub: "+name+"\n"))
-	if err := session.FileSystem().Chmod(context.Background(), path, mode); err != nil {
+	if err := session.FileSystem().Chmod(context.Background(), path, 0o644); err != nil {
 		t.Fatalf("Chmod(%q) error = %v", path, err)
 	}
 }

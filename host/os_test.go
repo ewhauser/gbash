@@ -70,3 +70,26 @@ func TestOSPlatformDefaultsUnknown(t *testing.T) {
 		t.Fatal("RequireExecutableBit = false, want true")
 	}
 }
+
+func TestPlatformOptionalBooleanOverrides(t *testing.T) {
+	t.Parallel()
+
+	platform := Platform{OS: OSWindows}
+	if !platform.UsesCaseInsensitiveEnv() {
+		t.Fatal("UsesCaseInsensitiveEnv() = false, want true")
+	}
+	if platform.RequiresExecutableBit() {
+		t.Fatal("RequiresExecutableBit() = true, want false")
+	}
+
+	envCaseInsensitive := false
+	requireExecutableBit := true
+	platform.EnvCaseInsensitive = &envCaseInsensitive
+	platform.RequireExecutableBit = &requireExecutableBit
+	if platform.UsesCaseInsensitiveEnv() {
+		t.Fatal("UsesCaseInsensitiveEnv() = true, want false")
+	}
+	if !platform.RequiresExecutableBit() {
+		t.Fatal("RequiresExecutableBit() = false, want true")
+	}
+}

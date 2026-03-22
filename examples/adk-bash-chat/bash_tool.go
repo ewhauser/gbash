@@ -72,7 +72,7 @@ func newPersistentBashTool(ctx context.Context) (*persistentBashTool, error) {
 		return nil, fmt.Errorf("register sqlite3 command: %w", err)
 	}
 
-	gb, err := gbash.New(gbash.WithRegistry(registry))
+	gb, err := gbash.New(gbash.WithRegistry(registry)) //nolint:contextcheck // constructor does not accept context
 	if err != nil {
 		return nil, fmt.Errorf("create runtime: %w", err)
 	}

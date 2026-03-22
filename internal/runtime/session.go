@@ -296,10 +296,7 @@ func executionContext(ctx context.Context, timeout time.Duration) (context.Conte
 }
 
 func withHostExecutionMeta(ctx context.Context, meta host.ExecutionMeta) context.Context {
-	if meta.ProcessGroup > 0 {
-		ctx = shellstate.WithProcessGroup(ctx, meta.ProcessGroup)
-	}
-	return ctx
+	return shellstate.WithProcessGroup(ctx, meta.ProcessGroup)
 }
 
 func validateExecutionRequest(req *ExecutionRequest) error {

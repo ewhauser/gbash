@@ -246,7 +246,7 @@ func (m *core) runnerConfig(exec *Execution, budget *executionBudget) *interp.Ru
 }
 
 func executionEnviron(exec *Execution, env map[string]string) expand.Environ {
-	caseInsensitive := exec != nil && exec.HostPlatform.EnvCaseInsensitive
+	caseInsensitive := exec != nil && exec.HostPlatform.UsesCaseInsensitiveEnv()
 	return expand.ListEnvironWithCase(caseInsensitive, envPairs(env)...)
 }
 
@@ -1316,7 +1316,7 @@ func readVirtualCommandStub(ctx context.Context, r io.Reader) (string, bool, err
 }
 
 func isExecutableCommandFile(exec *Execution, mode stdfs.FileMode) bool {
-	if exec != nil && !exec.HostPlatform.RequireExecutableBit {
+	if exec != nil && !exec.HostPlatform.RequiresExecutableBit() {
 		return true
 	}
 	return mode&0o111 != 0

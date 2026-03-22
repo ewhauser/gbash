@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	hostOSEnvKey     = "GBASH_HOST_OS"
-	hostOSTypeEnvKey = "GBASH_OSTYPE"
+	hostOSEnvKey                  = "GBASH_HOST_OS"
+	hostOSTypeEnvKey              = "GBASH_OSTYPE"
+	hostPathExtensionsDisabledKey = "GBASH_PATH_EXTENSIONS_DISABLED"
 )
 
 func runtimeBaseEnv(ctx context.Context, adapter host.Adapter) (map[string]string, error) {
@@ -49,6 +50,9 @@ func projectPlatformEnv(env map[string]string, raw host.Platform) {
 	setProjectedEnv(env, "GBASH_ARCH", platform.Arch)
 	setProjectedEnv(env, hostOSEnvKey, platform.OS.String())
 	setProjectedEnv(env, hostOSTypeEnvKey, platform.OSType)
+	if platform.PathExtensions != nil && len(platform.PathExtensions) == 0 {
+		setProjectedEnv(env, hostPathExtensionsDisabledKey, "1")
+	}
 	setProjectedEnv(env, "OSTYPE", platform.OSType)
 	setProjectedEnv(env, "GBASH_UNAME_SYSNAME", platform.Uname.SysName)
 	setProjectedEnv(env, "GBASH_UNAME_NODENAME", platform.Uname.NodeName)
@@ -78,14 +82,16 @@ func normalizeHostPlatform(raw host.Platform) host.Platform {
 	if platform.OSType == "" {
 		platform.OSType = defaults.OSType
 	}
-	if defaults.EnvCaseInsensitive {
-		platform.EnvCaseInsensitive = true
+	if platform.EnvCaseInsensitive == nil {
+		value := defaults.EnvCaseInsensitive
+		platform.EnvCaseInsensitive = &value
 	}
-	if len(platform.PathExtensions) == 0 {
+	if platform.PathExtensions == nil {
 		platform.PathExtensions = append([]string(nil), defaults.PathExtensions...)
 	}
-	if defaults.RequireExecutableBit {
-		platform.RequireExecutableBit = true
+	if platform.RequireExecutableBit == nil {
+		value := defaults.RequireExecutableBit
+		platform.RequireExecutableBit = &value
 	}
 	if platform.Uname.SysName == "" {
 		platform.Uname.SysName = defaults.KernelName

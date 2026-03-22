@@ -545,7 +545,7 @@ func newRunnerBase() *Runner {
 
 func (r *Runner) applyConstructorDefaults() error {
 	if r.Env == nil {
-		r.Env = expand.ListEnvironWithCase(r.platform.EnvCaseInsensitive)
+		r.Env = expand.ListEnvironWithCase(r.platform.UsesCaseInsensitiveEnv())
 	}
 	if r.startupHome == "" {
 		if home := r.Env.Get("HOME").String(); path.IsAbs(home) {
@@ -705,14 +705,16 @@ func normalizePlatform(platform host.Platform) host.Platform {
 	if platform.OSType == "" {
 		platform.OSType = defaults.OSType
 	}
-	if defaults.EnvCaseInsensitive {
-		platform.EnvCaseInsensitive = true
+	if platform.EnvCaseInsensitive == nil {
+		value := defaults.EnvCaseInsensitive
+		platform.EnvCaseInsensitive = &value
 	}
-	if len(platform.PathExtensions) == 0 {
+	if platform.PathExtensions == nil {
 		platform.PathExtensions = append([]string(nil), defaults.PathExtensions...)
 	}
-	if defaults.RequireExecutableBit {
-		platform.RequireExecutableBit = true
+	if platform.RequireExecutableBit == nil {
+		value := defaults.RequireExecutableBit
+		platform.RequireExecutableBit = &value
 	}
 	return platform
 }
@@ -1063,7 +1065,7 @@ func (r *Runner) Reset() {
 	// TODO(v4): Use the supplied Env directly if it implements enough methods.
 	r.writeEnv = &overlayEnviron{
 		parent:          r.Env,
-		caseInsensitive: r.platform.EnvCaseInsensitive,
+		caseInsensitive: r.platform.UsesCaseInsensitiveEnv(),
 	}
 	if !r.writeEnv.Get("TMPDIR").IsSet() {
 		r.setVarString("TMPDIR", r.tempDir)
@@ -1317,7 +1319,7 @@ func (r *Runner) subshell(_ bool) *Runner {
 	if shareMapForSubshell(r.commandHash, &r.commandHashShared) {
 		r2.commandHashShared = true
 	}
-	r2.writeEnv = newOverlayEnviron(r.writeEnv, true, r.platform.EnvCaseInsensitive)
+	r2.writeEnv = newOverlayEnviron(r.writeEnv, true, r.platform.UsesCaseInsensitiveEnv())
 	r2.funcs = r.funcs
 	if shareMapForSubshell(r.funcs, &r.funcsShared) {
 		r2.funcsShared = true

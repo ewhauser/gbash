@@ -944,10 +944,12 @@ func (r *Runner) hostOS() string {
 }
 
 func (r *Runner) requireExecutableBit() bool {
-	if r.platform.OS != "" || r.platform.RequireExecutableBit {
-		return r.platform.RequireExecutableBit
+	if r.platform.OS == "" {
+		platform := r.platform
+		platform.OS = host.OS(r.hostOS())
+		return platform.RequiresExecutableBit()
 	}
-	return host.OS(r.hostOS()).PlatformDefaults().RequireExecutableBit
+	return r.platform.RequiresExecutableBit()
 }
 
 func (r *Runner) defaultOSType() string {

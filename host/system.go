@@ -57,13 +57,15 @@ func systemPlatform() Platform {
 	machine := systemArchMachine()
 	osName := CurrentOS()
 	defaults := osName.PlatformDefaults()
+	envCaseInsensitive := defaults.EnvCaseInsensitive
+	requireExecutableBit := defaults.RequireExecutableBit
 	return Platform{
 		OS:                   osName,
 		Arch:                 machine,
 		OSType:               defaults.OSType,
-		EnvCaseInsensitive:   defaults.EnvCaseInsensitive,
+		EnvCaseInsensitive:   &envCaseInsensitive,
 		PathExtensions:       append([]string(nil), defaults.PathExtensions...),
-		RequireExecutableBit: defaults.RequireExecutableBit,
+		RequireExecutableBit: &requireExecutableBit,
 		Uname: Uname{
 			SysName:         defaults.KernelName,
 			NodeName:        systemNodeName(),
@@ -192,6 +194,17 @@ func clonePlatform(platform *Platform) Platform {
 		return Platform{}
 	}
 	out := *platform
-	out.PathExtensions = append([]string(nil), platform.PathExtensions...)
+	if platform.PathExtensions != nil {
+		out.PathExtensions = make([]string, len(platform.PathExtensions))
+		copy(out.PathExtensions, platform.PathExtensions)
+	}
+	if platform.EnvCaseInsensitive != nil {
+		value := *platform.EnvCaseInsensitive
+		out.EnvCaseInsensitive = &value
+	}
+	if platform.RequireExecutableBit != nil {
+		value := *platform.RequireExecutableBit
+		out.RequireExecutableBit = &value
+	}
 	return out
 }

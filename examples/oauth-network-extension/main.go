@@ -64,7 +64,7 @@ func runDemo(ctx context.Context) (*demoReport, error) {
 	rt, err := gbash.New(
 		gbash.WithNetworkClient(client),
 		gbash.WithTracing(gbash.TraceConfig{Mode: gbash.TraceRaw}),
-	)
+	) //nolint:contextcheck // constructor does not accept context
 	if err != nil {
 		return nil, fmt.Errorf("create runtime: %w", err)
 	}

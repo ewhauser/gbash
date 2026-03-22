@@ -62,6 +62,17 @@ type Defaults struct {
 	Env map[string]string
 }
 
+// Bool returns a pointer to value.
+//
+// It is a convenience helper for optional boolean fields in public API
+// structs such as [Platform.EnvCaseInsensitive] and
+// [Platform.RequireExecutableBit].
+//
+//nolint:modernize // This exported helper exists for public API ergonomics.
+func Bool(value bool) *bool {
+	return &value
+}
+
 // ExecutionMeta carries host process metadata used by the shell runtime.
 type ExecutionMeta struct {
 	// PID seeds the shell-visible process identifier reported as $$ and the
@@ -103,22 +114,56 @@ type Platform struct {
 
 	// EnvCaseInsensitive reports whether variable names should be matched
 	// case-insensitively, as on Windows.
-	EnvCaseInsensitive bool
+	//
+	// Nil means “use the platform default”.
+	EnvCaseInsensitive *bool
 
 	// PathExtensions lists executable suffixes that command lookup should try
 	// when a command name has no explicit extension.
 	//
-	// This is typically used for Windows-style PATHEXT behavior. Nil or empty
-	// means “do not apply extension-based lookup”.
+	// This is typically used for Windows-style PATHEXT behavior.
+	//
+	// A nil slice means “use the platform default”. A non-nil empty slice means
+	// “disable extension-based lookup”.
 	PathExtensions []string
 
 	// RequireExecutableBit reports whether regular files must have an execute bit
 	// to be treated as executable command files.
-	RequireExecutableBit bool
+	//
+	// Nil means “use the platform default”.
+	RequireExecutableBit *bool
 
 	// Uname is the uname-style metadata projected into shell-visible commands and
 	// compatibility surfaces.
 	Uname Uname
+}
+
+// UsesCaseInsensitiveEnv reports whether platform should match environment
+// names case-insensitively after applying platform defaults.
+//
+//nolint:gocritic // Platform is copied intentionally for ergonomic value semantics.
+func (platform Platform) UsesCaseInsensitiveEnv() bool {
+	if platform.EnvCaseInsensitive != nil {
+		return *platform.EnvCaseInsensitive
+	}
+	if platform.OS == "" {
+		return false
+	}
+	return platform.OS.PlatformDefaults().EnvCaseInsensitive
+}
+
+// RequiresExecutableBit reports whether regular files must have an execute bit
+// to be treated as executable command files after applying platform defaults.
+//
+//nolint:gocritic // Platform is copied intentionally for ergonomic value semantics.
+func (platform Platform) RequiresExecutableBit() bool {
+	if platform.RequireExecutableBit != nil {
+		return *platform.RequireExecutableBit
+	}
+	if platform.OS == "" {
+		return true
+	}
+	return platform.OS.PlatformDefaults().RequireExecutableBit
 }
 
 // Uname describes the uname-style metadata surfaced by the shell runtime.

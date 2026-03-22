@@ -199,13 +199,19 @@ func winHasExt(file string) bool {
 }
 
 func pathExts(env expand.Environ, platform host.Platform) []string {
+	if env != nil && strings.TrimSpace(env.Get("GBASH_PATH_EXTENSIONS_DISABLED").String()) == "1" {
+		return nil
+	}
 	hostOS := platform.OS
 	if value := strings.TrimSpace(hostOS.String()); value == "" && env != nil {
 		hostOS = host.OS(strings.TrimSpace(env.Get("GBASH_HOST_OS").String()))
 	}
 	defaultExts := append([]string(nil), platform.PathExtensions...)
-	if len(defaultExts) == 0 {
+	if platform.PathExtensions == nil {
 		defaultExts = hostOS.PlatformDefaults().PathExtensions
+	}
+	if len(defaultExts) == 0 {
+		return nil
 	}
 	pathext := env.Get("PATHEXT").String()
 	if pathext == "" {
@@ -313,7 +319,7 @@ func (r *Runner) findPathCandidate(ctx context.Context, cwd, file string, exts [
 		if info.IsDir() {
 			return "", fmt.Errorf("is a directory")
 		}
-		if requireExec && r.platform.RequireExecutableBit {
+		if requireExec && r.requireExecutableBit() {
 			if err := r.access(ctx, candidate, access_X_OK); err != nil {
 				return "", fmt.Errorf("permission denied")
 			}
