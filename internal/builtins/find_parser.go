@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+var findSizeRe = regexp.MustCompile(`^(\d+)([ckMGb])?$`)
+
 type findTokenKind int
 
 const (
@@ -256,7 +258,7 @@ func parseFindSizeExpr(value string) (*findSizeExpr, error) {
 		sizeValue = value[1:]
 	}
 
-	match := regexp.MustCompile(`^(\d+)([ckMGb])?$`).FindStringSubmatch(sizeValue)
+	match := findSizeRe.FindStringSubmatch(sizeValue)
 	if match == nil {
 		return nil, fmt.Errorf("invalid size")
 	}

@@ -13,6 +13,8 @@ import (
 	"strings"
 )
 
+var xanPartitionValueRe = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
+
 func xanRunHeaders(ctx context.Context, inv *Invocation, args []string) error {
 	justNames := false
 	fileArgs := make([]string, 0, len(args))
@@ -2243,7 +2245,7 @@ func xanRunPartition(ctx context.Context, inv *Invocation, args []string) error 
 }
 
 func xanSanitizePartitionValue(value string) string {
-	value = regexp.MustCompile(`[^a-zA-Z0-9_-]`).ReplaceAllString(value, "_")
+	value = xanPartitionValueRe.ReplaceAllString(value, "_")
 	if value == "" {
 		return "empty"
 	}
