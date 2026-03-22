@@ -8,9 +8,6 @@ func WithProcessGroup(ctx context.Context, pgrp int) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if pgrp <= 0 {
-		return ctx
-	}
 	return context.WithValue(ctx, processGroupKey{}, pgrp)
 }
 

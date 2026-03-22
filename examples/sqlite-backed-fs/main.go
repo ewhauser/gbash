@@ -32,6 +32,7 @@ func run(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, args []
 		return 1, err
 	}
 
+	//nolint:contextcheck // constructor does not accept context
 	gb, err := gbash.New(gbash.WithFileSystem(
 		gbash.CustomFileSystem(
 			sqlitefs.Factory{DBPath: opts.dbPath},

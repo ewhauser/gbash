@@ -10,9 +10,9 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"runtime"
 	"strings"
 
+	"github.com/ewhauser/gbash/host"
 	"github.com/ewhauser/gbash/internal/shell/expand"
 	"github.com/ewhauser/gbash/internal/shell/syntax"
 )
@@ -198,13 +198,24 @@ func winHasExt(file string) bool {
 	return strings.LastIndexAny(file, `:\/`) < i
 }
 
-func pathExts(env expand.Environ) []string {
-	if runtime.GOOS != "windows" {
+func pathExts(env expand.Environ, platform host.Platform) []string {
+	if env != nil && strings.TrimSpace(env.Get("GBASH_PATH_EXTENSIONS_DISABLED").String()) == "1" {
+		return nil
+	}
+	hostOS := platform.OS
+	if value := strings.TrimSpace(hostOS.String()); value == "" && env != nil {
+		hostOS = host.OS(strings.TrimSpace(env.Get("GBASH_HOST_OS").String()))
+	}
+	defaultExts := append([]string(nil), platform.PathExtensions...)
+	if platform.PathExtensions == nil {
+		defaultExts = hostOS.PlatformDefaults().PathExtensions
+	}
+	if len(defaultExts) == 0 {
 		return nil
 	}
 	pathext := env.Get("PATHEXT").String()
 	if pathext == "" {
-		return []string{".com", ".exe", ".bat", ".cmd"}
+		return defaultExts
 	}
 	var exts []string
 	for e := range strings.SplitSeq(strings.ToLower(pathext), `;`) {
@@ -219,11 +230,23 @@ func pathExts(env expand.Environ) []string {
 	return exts
 }
 
+func pathVariants(file string, exts []string) []string {
+	if len(exts) == 0 || winHasExt(file) {
+		return []string{file}
+	}
+	variants := make([]string, 0, len(exts)+1)
+	variants = append(variants, file)
+	for _, ext := range exts {
+		variants = append(variants, file+ext)
+	}
+	return variants
+}
+
 func (r *Runner) lookPath(ctx context.Context, cwd string, env expand.Environ, file string, requireExec, useDefaultPath bool) (string, error) {
 	if file == "" {
 		return "", fmt.Errorf("%q: executable file not found in $PATH", file)
 	}
-	exts := pathExts(env)
+	exts := pathExts(env, r.platform)
 	if strings.ContainsRune(file, '/') {
 		return r.findPathCandidate(ctx, cwd, file, exts, requireExec)
 	}
@@ -246,7 +269,7 @@ func (r *Runner) lookPathForHash(ctx context.Context, cwd string, env expand.Env
 	if file == "" {
 		return "", fmt.Errorf("%q: executable file not found in $PATH", file)
 	}
-	exts := pathExts(env)
+	exts := pathExts(env, r.platform)
 	if strings.ContainsRune(file, '/') {
 		if _, err := r.findPathCandidate(ctx, cwd, file, exts, true); err != nil {
 			return "", err
@@ -288,12 +311,7 @@ func (r *Runner) findPathCandidate(ctx context.Context, cwd, file string, exts [
 		base = path.Join(cwd, base)
 	}
 	base = path.Clean(base)
-	tryExts := exts
-	if len(tryExts) == 0 || winHasExt(base) {
-		tryExts = []string{""}
-	}
-	for _, ext := range tryExts {
-		candidate := base + ext
+	for _, candidate := range pathVariants(base, exts) {
 		info, err := r.statHandler(ctx, candidate, true)
 		if err != nil {
 			continue
@@ -301,7 +319,7 @@ func (r *Runner) findPathCandidate(ctx context.Context, cwd, file string, exts [
 		if info.IsDir() {
 			return "", fmt.Errorf("is a directory")
 		}
-		if requireExec && runtime.GOOS != "windows" {
+		if requireExec && r.requireExecutableBit() {
 			if err := r.access(ctx, candidate, access_X_OK); err != nil {
 				return "", fmt.Errorf("permission denied")
 			}
