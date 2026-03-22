@@ -272,13 +272,17 @@ func (r *Runner) setStandardFDs(update standardFDUpdate) {
 	}
 	r.ensureMutableFDTable()
 	if update.setStdin {
-		r.replaceFDNoSync(0, newShellInputFD(update.stdin))
+		if update.stdin == nil {
+			delete(r.fds, 0)
+		} else {
+			r.fds[0] = newShellInputFD(update.stdin)
+		}
 	}
 	if update.setStdout {
-		r.replaceFDNoSync(1, newShellOutputFD(update.stdout))
+		r.fds[1] = newShellOutputFD(update.stdout)
 	}
 	if update.setStderr {
-		r.replaceFDNoSync(2, newShellOutputFD(update.stderr))
+		r.fds[2] = newShellOutputFD(update.stderr)
 	}
 	r.syncStandardFDs()
 }

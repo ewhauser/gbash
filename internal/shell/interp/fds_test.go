@@ -77,6 +77,24 @@ func TestSetFDDoesNotCloseNonOwnedStandardDescriptors(t *testing.T) {
 	}
 }
 
+func TestSetStandardFDsDoesNotCloseOwnedDescriptorWhenRewiringStdout(t *testing.T) {
+	t.Parallel()
+
+	closer := &trackingCloser{}
+	r := &Runner{
+		stdout: &bytes.Buffer{},
+		fds: map[int]*shellFD{
+			1: {writer: &bytes.Buffer{}, closer: closer, owned: true},
+		},
+	}
+
+	r.setStandardFDs(standardFDUpdate{stdout: &bytes.Buffer{}, setStdout: true})
+
+	if got := closer.closes; got != 0 {
+		t.Fatalf("closes = %d, want 0", got)
+	}
+}
+
 func TestNestedStdoutRedirectRestoresOuterDescriptor(t *testing.T) {
 	t.Parallel()
 

@@ -187,6 +187,26 @@ func TestPipelineRegressionLastpipeDoesNotUnwrapUserSubshellTail(t *testing.T) {
 	}
 }
 
+func TestRedirectRegressionForLoopCommandSubstitutionKeepsRedirectedStdout(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, ""+
+		"for i in $(seq 3); do\n"+
+		"  echo \"$i\"\n"+
+		"done > /tmp/redirect-for-loop.txt\n"+
+		"cat /tmp/redirect-for-loop.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "1\n2\n3\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
 func TestSourceRegressionRespectsShoptSourcepath(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
