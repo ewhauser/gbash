@@ -215,16 +215,18 @@ func prepareConfig(cfg *Config) *Config {
 	if cfg.reportedParamErrors == nil {
 		cfg.reportedParamErrors = make(map[*syntax.ParamExp]map[string]struct{})
 	}
-	cfg.prepareParamPatternCaches()
 	cfg.prepareGlobIgnore()
 
 	return cfg
 }
 
-func (cfg *Config) prepareParamPatternCaches() {
+func (cfg *Config) prepareParamPatternExprCache() {
 	if cfg.paramPatternExprCache == nil {
 		cfg.paramPatternExprCache = newBoundedFIFOCache[paramPatternExprCacheKey, string](paramPatternCacheSize)
 	}
+}
+
+func (cfg *Config) prepareCompiledParamPatternCache() {
 	if cfg.compiledParamPatternCache == nil {
 		cfg.compiledParamPatternCache = newBoundedFIFOCache[compiledParamPatternCacheKey, *compiledParamPattern](paramPatternCacheSize)
 	}

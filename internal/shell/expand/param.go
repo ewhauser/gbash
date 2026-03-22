@@ -170,7 +170,7 @@ func shouldQuoteParamPattern(pat string, err error) bool {
 }
 
 func (cfg *Config) paramPatternExpr(pat string, mode pattern.Mode) (string, error) {
-	cfg.prepareParamPatternCaches()
+	cfg.prepareParamPatternExprCache()
 	byteLocale := cfg.bashByteLocale()
 	key := paramPatternExprCacheKey{
 		pattern:    pat,
@@ -201,7 +201,7 @@ func (cfg *Config) paramPatternExpr(pat string, mode pattern.Mode) (string, erro
 }
 
 func (cfg *Config) compileParamPattern(expr string) *compiledParamPattern {
-	cfg.prepareParamPatternCaches()
+	cfg.prepareCompiledParamPatternCache()
 	key := compiledParamPatternCacheKey{
 		expr:       expr,
 		byteLocale: cfg.bashByteLocale(),

@@ -1117,6 +1117,39 @@ func TestFilterGlobIgnoreCharClass(t *testing.T) {
 	}
 }
 
+func TestPrepareConfigDefersParamPatternCacheInit(t *testing.T) {
+	t.Parallel()
+
+	cfg := prepareConfig(&Config{Env: testEnv{}})
+	if cfg.paramPatternExprCache != nil {
+		t.Fatalf("paramPatternExprCache initialized eagerly")
+	}
+	if cfg.compiledParamPatternCache != nil {
+		t.Fatalf("compiledParamPatternCache initialized eagerly")
+	}
+
+	expr, err := cfg.paramPatternExpr("_?_", pattern.ExtendedOperators)
+	if err != nil {
+		t.Fatalf("paramPatternExpr() error = %v", err)
+	}
+	if expr == "" {
+		t.Fatalf("paramPatternExpr() returned empty expression")
+	}
+	if cfg.paramPatternExprCache == nil {
+		t.Fatalf("paramPatternExprCache not initialized lazily")
+	}
+	if cfg.compiledParamPatternCache != nil {
+		t.Fatalf("compiledParamPatternCache initialized before compile")
+	}
+
+	if cfg.compileParamPattern(expr) == nil {
+		t.Fatalf("compileParamPattern() returned nil")
+	}
+	if cfg.compiledParamPatternCache == nil {
+		t.Fatalf("compiledParamPatternCache not initialized lazily")
+	}
+}
+
 func TestLiteralPreservesEscapedGlobChars(t *testing.T) {
 	t.Parallel()
 
