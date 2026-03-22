@@ -1813,16 +1813,8 @@ func (r *Runner) ulimitBuiltin(args []string) (exit exitStatus) {
 		exit.code = 2
 		return exit
 	}
-	for _, spec := range ulimitBuiltinSpecs() {
-		var limit syscall.Rlimit
-		if err := syscall.Getrlimit(spec.resource, &limit); err != nil {
-			continue
-		}
-		value := limit.Cur
-		if mode == ulimitBuiltinHard {
-			value = limit.Max
-		}
-		if _, err := fmt.Fprintf(r.stdout, "%-25s (%s, -%c) %s\n", spec.label, spec.unit, spec.option, formatUlimitValue(value, spec.scale)); err != nil {
+	for _, line := range ulimitBuiltinLines(mode) {
+		if _, err := fmt.Fprintln(r.stdout, line); err != nil {
 			if diag, ok := shellWriteErrorDiagnostic(err); ok {
 				r.errf("%s\n", diag)
 			}
@@ -1832,27 +1824,6 @@ func (r *Runner) ulimitBuiltin(args []string) (exit exitStatus) {
 		}
 	}
 	return exit
-}
-
-func ulimitBuiltinSpecs() []ulimitResourceSpec {
-	return []ulimitResourceSpec{
-		{label: "core file size", option: 'c', unit: "blocks", scale: 512, resource: syscall.RLIMIT_CORE},
-		{label: "data seg size", option: 'd', unit: "kbytes", scale: 1024, resource: syscall.RLIMIT_DATA},
-		{label: "file size", option: 'f', unit: "blocks", scale: 512, resource: syscall.RLIMIT_FSIZE},
-		{label: "open files", option: 'n', unit: "", scale: 1, resource: syscall.RLIMIT_NOFILE},
-		{label: "stack size", option: 's', unit: "kbytes", scale: 1024, resource: syscall.RLIMIT_STACK},
-		{label: "cpu time", option: 't', unit: "seconds", scale: 1, resource: syscall.RLIMIT_CPU},
-	}
-}
-
-func formatUlimitValue(value, scale uint64) string {
-	if value == syscall.RLIM_INFINITY {
-		return "unlimited"
-	}
-	if scale <= 1 {
-		return strconv.FormatUint(value, 10)
-	}
-	return strconv.FormatUint(value/scale, 10)
 }
 
 func sourceBuiltinUsageLine(name string) string {
