@@ -357,10 +357,6 @@
         "oils/glob.test.sh::Glob unicode char": {
           "mode": "xfail",
           "reason": "conformance: C.UTF-8 pathname collation order still differs from bash for this glob case"
-        },
-        "oils/paren-ambiguity.test.sh::((gzip example - zdiff package - #2337": {
-          "mode": "xfail",
-          "reason": "conformance: stderr interleaving of gzip subprocesses differs from bash"
         }
       }
     }
