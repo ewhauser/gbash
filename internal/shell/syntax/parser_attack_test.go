@@ -76,6 +76,24 @@ func TestKnownParserAttackCorpus(t *testing.T) {
 	}
 }
 
+func TestParserNoProgressRegressions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("adversarial-arithm-word", func(t *testing.T) {
+		runParserAttackHelper(t, []byte("$((h0oe c`"), LangPOSIX, false, 0)
+	})
+
+	t.Run("mutation-derived-arithm-word", func(t *testing.T) {
+		raw := []byte("0\xb2$%")
+		cursor := newParserFuzzCursor(raw)
+		attacks := loadKnownParserAttacks(t)
+		attack := attacks[cursor.Intn(len(attacks))]
+		script := []byte(mutateParserAttackScript(attack.Script, cursor))
+
+		runParserAttackHelper(t, script, LangBash, true, 1)
+	})
+}
+
 func TestParserAttackHelperProcess(t *testing.T) {
 	if os.Getenv("GBASH_PARSER_ATTACK_HELPER") == "" {
 		t.Skip("helper process only")

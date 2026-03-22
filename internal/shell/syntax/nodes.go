@@ -1008,12 +1008,19 @@ type BinaryArithm struct {
 }
 
 func (b *BinaryArithm) Pos() Pos {
+	if b == nil {
+		return Pos{}
+	}
 	if b.X != nil {
 		return b.X.Pos()
 	}
 	return b.OpPos
 }
+
 func (b *BinaryArithm) End() Pos {
+	if b == nil {
+		return Pos{}
+	}
 	if b.Y != nil {
 		return b.Y.End()
 	}
