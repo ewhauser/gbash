@@ -1,6 +1,11 @@
 package interp
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"strings"
+	"testing"
+)
 
 func TestSetPosixOptionUpdatesShellOpts(t *testing.T) {
 	t.Parallel()
@@ -251,4 +256,103 @@ echo after
 			t.Fatalf("stderr = %q, want %q", got, want)
 		}
 	})
+}
+
+func TestReadonlyAssignmentAbortsShellExecution(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-posix-standalone-simple-list", func(t *testing.T) {
+		t.Parallel()
+
+		stdout, stderr, err := runInterpScript(t, `
+readonly x=1; x=2; echo hi
+`)
+		requireInterpExitStatus(t, err, 1)
+		if got, want := stdout, ""; got != want {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+		if got, want := stderr, "x: readonly variable\n"; got != want {
+			t.Fatalf("stderr = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("non-posix-skips-rest-of-line-only", func(t *testing.T) {
+		t.Parallel()
+
+		stdout, stderr, err := runInterpScript(t, `
+readonly x=1; x=2; echo hi
+echo next
+`)
+		if err != nil {
+			t.Fatalf("Run error = %v", err)
+		}
+		if got, want := stdout, "next\n"; got != want {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+		if got, want := stderr, "x: readonly variable\n"; got != want {
+			t.Fatalf("stderr = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("posix-multiline", func(t *testing.T) {
+		t.Parallel()
+
+		stdout, stderr, err := runInterpScript(t, `
+set -o posix
+readonly x=1
+x=2
+echo hi
+`)
+		requireInterpExitStatus(t, err, 127)
+		if got, want := stdout, ""; got != want {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+		if got, want := stderr, "x: readonly variable\n"; got != want {
+			t.Fatalf("stderr = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestInteractivePosixReadonlyAssignmentDoesNotExitShell(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	runner, err := NewRunner(&RunnerConfig{
+		Dir:         "/tmp",
+		Interactive: true,
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner error = %v", err)
+	}
+
+	runLine := func(src string) error {
+		t.Helper()
+		return runner.runShellReader(context.Background(), strings.NewReader(src), "interactive-readonly.sh", nil)
+	}
+
+	if err := runLine("set -o posix\n"); err != nil {
+		t.Fatalf("set -o posix error = %v", err)
+	}
+	if err := runLine("readonly x=1\n"); err != nil {
+		t.Fatalf("readonly error = %v", err)
+	}
+	if err := runLine("x=2\n"); err == nil {
+		t.Fatalf("readonly assignment error = nil, want exit status 127")
+	} else {
+		requireInterpExitStatus(t, err, 127)
+	}
+	if runner.Exited() {
+		t.Fatalf("runner should remain interactive after readonly assignment error")
+	}
+	if err := runLine("echo next\n"); err != nil {
+		t.Fatalf("echo next error = %v", err)
+	}
+	if got, want := stdout.String(), "next\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got, want := stderr.String(), "x: readonly variable\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
 }

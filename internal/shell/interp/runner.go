@@ -1219,6 +1219,19 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				if err := r.setVarByRef(prev, as.Ref, vr, as.Append, attrUpdate{}); err != nil {
 					r.errf("%v\n", err)
 					r.exit.code = 1
+					if strings.HasSuffix(err.Error(), ": readonly variable") {
+						if r.posixMode() {
+							r.exit.code = 127
+							if !r.interactive {
+								r.exit.exiting = true
+							}
+							return
+						}
+						if r.currentStmtLine != 0 {
+							r.skipStmtLine = r.currentStmtLine
+						}
+						return
+					}
 					var strictErr strictIndexedSubscriptError
 					if errors.As(err, &strictErr) {
 						r.exit.exiting = true
