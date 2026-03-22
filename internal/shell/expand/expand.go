@@ -43,6 +43,10 @@ type Config struct {
 	// variables.
 	Env Environ
 
+	// Runtime lets internal shell runtimes provide callbacks without
+	// allocating a fresh closure set per Config instance.
+	Runtime RuntimeCallbacks
+
 	// StartupHome carries the shell's trusted startup home for callers that
 	// need startup-sensitive tilde semantics.
 	StartupHome string
@@ -66,6 +70,9 @@ type Config struct {
 	// ReadDir is used for file path globbing.
 	// If nil, globbing is disabled.
 	ReadDir func(string) ([]fs.DirEntry, error)
+	// ReadDirEnabled allows Runtime-backed configs to enable globbing
+	// without populating ReadDir directly.
+	ReadDirEnabled bool
 
 	// GlobStar corresponds to the shell option which allows globbing with "**".
 	GlobStar bool
@@ -129,6 +136,17 @@ type Config struct {
 	paramPatternExprCache     *boundedFIFOCache[paramPatternExprCacheKey, string]
 	compiledParamPatternCache *boundedFIFOCache[compiledParamPatternCacheKey, *compiledParamPattern]
 	reportedParamErrors       map[*syntax.ParamExp]map[string]struct{}
+}
+
+// RuntimeCallbacks lets an internal shell runtime provide expansion helpers
+// without allocating per-Config closures. External callers can keep using the
+// function fields directly.
+type RuntimeCallbacks interface {
+	ExpandCurrentLine() uint
+	ExpandReportError(error)
+	ExpandCmdSubst(io.Writer, *syntax.CmdSubst) error
+	ExpandProcSubst(*syntax.ProcSubst) (string, error)
+	ExpandReadDir(string) ([]fs.DirEntry, error)
 }
 
 const paramPatternCacheSize = 128
@@ -228,6 +246,40 @@ func prepareConfig(cfg *Config) *Config {
 	return cfg
 }
 
+// ResetRuntimeState clears per-run Config state while preserving reusable
+// caches and scratch buffers.
+func (cfg *Config) ResetRuntimeState() {
+	cfg.Env = nil
+	cfg.Runtime = nil
+	cfg.StartupHome = ""
+	cfg.TildeEnv = nil
+	cfg.CmdSubst = nil
+	cfg.ProcSubst = nil
+	cfg.ReportError = nil
+	cfg.ReadDir = nil
+	cfg.ReadDirEnabled = false
+	cfg.GlobStar = false
+	cfg.DotGlob = false
+	cfg.NoCaseGlob = false
+	cfg.NullGlob = false
+	cfg.FailGlob = false
+	cfg.GlobSkipDots = false
+	cfg.NoUnset = false
+	cfg.NoBraceExpand = false
+	cfg.ExtGlob = false
+	cfg.globIgnore = nil
+	cfg.globIgnoreMatchers = nil
+	cfg.globCollatorLocale = ""
+	cfg.globCollatorValue = nil
+	cfg.globCollatorCached = false
+	cfg.bufferAlloc.Reset()
+	cfg.ifs = ""
+	cfg.curParam = nil
+	if cfg.reportedParamErrors != nil {
+		clear(cfg.reportedParamErrors)
+	}
+}
+
 func (cfg *Config) prepareParamPatternExprCache() {
 	if cfg.paramPatternExprCache == nil {
 		cfg.paramPatternExprCache = newBoundedFIFOCache[paramPatternExprCacheKey, string](paramPatternCacheSize)
@@ -240,8 +292,71 @@ func (cfg *Config) prepareCompiledParamPatternCache() {
 	}
 }
 
+func (cfg *Config) currentLine() uint {
+	switch {
+	case cfg.CurrentLine != nil:
+		return cfg.CurrentLine()
+	case cfg.Runtime != nil:
+		return cfg.Runtime.ExpandCurrentLine()
+	default:
+		return 0
+	}
+}
+
+func (cfg *Config) reportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch {
+	case cfg.ReportError != nil:
+		cfg.ReportError(err)
+	case cfg.Runtime != nil:
+		cfg.Runtime.ExpandReportError(err)
+	default:
+		return false
+	}
+	return true
+}
+
+func (cfg *Config) runCmdSubst(w io.Writer, cs *syntax.CmdSubst) error {
+	switch {
+	case cfg.CmdSubst != nil:
+		return cfg.CmdSubst(w, cs)
+	case cfg.Runtime != nil:
+		return cfg.Runtime.ExpandCmdSubst(w, cs)
+	default:
+		return UnexpectedCommandError{Node: cs}
+	}
+}
+
+func (cfg *Config) runProcSubst(ps *syntax.ProcSubst) (string, error) {
+	switch {
+	case cfg.ProcSubst != nil:
+		return cfg.ProcSubst(ps)
+	case cfg.Runtime != nil:
+		return cfg.Runtime.ExpandProcSubst(ps)
+	default:
+		return "", fmt.Errorf("unexpected process substitution at %s", ps.Pos())
+	}
+}
+
+func (cfg *Config) canReadDir() bool {
+	return cfg.ReadDir != nil || (cfg.Runtime != nil && cfg.ReadDirEnabled)
+}
+
+func (cfg *Config) readDir(name string) ([]fs.DirEntry, error) {
+	switch {
+	case cfg.ReadDir != nil:
+		return cfg.ReadDir(name)
+	case cfg.Runtime != nil && cfg.ReadDirEnabled:
+		return cfg.Runtime.ExpandReadDir(name)
+	default:
+		return nil, fs.ErrInvalid
+	}
+}
+
 func (cfg *Config) swallowNonFatal(err error) bool {
-	if err == nil || cfg.ReportError == nil {
+	if err == nil {
 		return false
 	}
 	if !isBadArraySubscript(err) {
@@ -250,15 +365,14 @@ func (cfg *Config) swallowNonFatal(err error) bool {
 			return false
 		}
 	}
-	if cfg.ReportError == nil {
+	if cfg.ReportError == nil && cfg.Runtime == nil {
 		return false
 	}
-	cfg.ReportError(err)
-	return true
+	return cfg.reportError(err)
 }
 
 func (cfg *Config) reportParamErrorOnce(pe *syntax.ParamExp, err error) {
-	if cfg.ReportError == nil || pe == nil || err == nil {
+	if (cfg.ReportError == nil && cfg.Runtime == nil) || pe == nil || err == nil {
 		return
 	}
 	key := err.Error()
@@ -271,7 +385,7 @@ func (cfg *Config) reportParamErrorOnce(pe *syntax.ParamExp, err error) {
 		return
 	}
 	seen[key] = struct{}{}
-	cfg.ReportError(err)
+	cfg.reportError(err)
 }
 
 func (cfg *Config) reportNegativeSubstringLength(pe *syntax.ParamExp, length int) {
@@ -749,7 +863,7 @@ func (cfg *Config) appendPatternPart(sb *strings.Builder, part syntax.PatternPar
 		}
 		sb.WriteString(strconv.Itoa(n))
 	case *syntax.ProcSubst:
-		procPath, err := cfg.ProcSubst(part)
+		procPath, err := cfg.runProcSubst(part)
 		if err != nil {
 			return err
 		}
@@ -816,7 +930,7 @@ func (cfg *Config) appendPatternLiteralPart(sb *strings.Builder, part syntax.Pat
 		}
 		sb.WriteString(strconv.Itoa(n))
 	case *syntax.ProcSubst:
-		procPath, err := cfg.ProcSubst(part)
+		procPath, err := cfg.runProcSubst(part)
 		if err != nil {
 			return err
 		}
@@ -1435,7 +1549,7 @@ func (cfg *Config) expandPathField(dir string, field []fieldPart) ([]string, err
 		}
 	}
 	globPath, doGlob := cfg.escapedGlobField(globField)
-	if !doGlob || cfg.ReadDir == nil {
+	if !doGlob || !cfg.canReadDir() {
 		return []string{literal}, nil
 	}
 	matches, err := cfg.glob(dir, globPath)
@@ -1729,7 +1843,7 @@ func (cfg *Config) wordField(wps []syntax.WordPart, ql quoteLevel) ([]fieldPart,
 			}
 			field = append(field, parts...)
 		case *syntax.ProcSubst:
-			procPath, err := cfg.ProcSubst(wp)
+			procPath, err := cfg.runProcSubst(wp)
 			if err != nil {
 				return nil, err
 			}
@@ -1755,18 +1869,13 @@ func (cfg *Config) wordField(wps []syntax.WordPart, ql quoteLevel) ([]fieldPart,
 }
 
 func (cfg *Config) cmdSubst(cs *syntax.CmdSubst) (string, error) {
-	if cfg.CmdSubst == nil {
-		return "", UnexpectedCommandError{Node: cs}
-	}
 	sb := cfg.strBuilder()
-	if err := cfg.CmdSubst(sb, cs); err != nil {
+	if err := cfg.runCmdSubst(sb, cs); err != nil {
 		return "", err
 	}
 	out := sb.String()
 	if strings.Contains(out, "\x00") {
-		if cfg.ReportError != nil {
-			cfg.ReportError(fmt.Errorf("warning: command substitution: ignored null byte in input"))
-		}
+		cfg.reportError(fmt.Errorf("warning: command substitution: ignored null byte in input"))
 		out = strings.ReplaceAll(out, "\x00", "")
 	}
 	return strings.TrimRight(out, "\n"), nil
@@ -1918,7 +2027,7 @@ func (cfg *Config) wordFieldsOpt(wps []syntax.WordPart, allowAssignLike bool) ([
 				splitter.appendPart(part)
 			}
 		case *syntax.ProcSubst:
-			procPath, err := cfg.ProcSubst(wp)
+			procPath, err := cfg.runProcSubst(wp)
 			if err != nil {
 				return nil, err
 			}
@@ -2906,7 +3015,7 @@ func (state *globState) readDir(name string) ([]fs.DirEntry, error) {
 	if cached, ok := state.readDirCache[name]; ok {
 		return cached.entries, cached.err
 	}
-	entries, err := state.cfg.ReadDir(name)
+	entries, err := state.cfg.readDir(name)
 	state.readDirCache[name] = globReadDirResult{entries: entries, err: err}
 	return entries, err
 }

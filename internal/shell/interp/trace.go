@@ -92,7 +92,7 @@ func (r *Runner) tracePrefix() string {
 	}()
 	r.suppressXTrace = true
 
-	cfg := *r.ecfg
+	cfg := r.ecfg
 	cfg.ReportError = func(err error) {
 		fmt.Fprintln(r.traceErrorWriter(), err.Error())
 	}

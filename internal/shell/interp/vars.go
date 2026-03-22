@@ -1736,14 +1736,14 @@ func (r *Runner) assignLiteral(as *syntax.Assign) string {
 		}
 		return raw
 	}
-	if r.ecfg == nil {
+	if !r.ecfgInit {
 		r.fillExpandConfig(context.Background())
 	}
 	r.inAssignment++
 	defer func() {
 		r.inAssignment--
 	}()
-	str, err := expand.AssignmentLiteral(r.ecfg, as.Value)
+	str, err := expand.AssignmentLiteral(&r.ecfg, as.Value)
 	r.expandErr(err)
 	return str
 }

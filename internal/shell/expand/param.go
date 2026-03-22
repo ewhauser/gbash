@@ -335,7 +335,7 @@ func (cfg *Config) replacementWordPart(wp syntax.WordPart, leading, more bool) (
 		}
 		return cfg.fieldJoin(parts), nil
 	case *syntax.ProcSubst:
-		procPath, err := cfg.ProcSubst(wp)
+		procPath, err := cfg.runProcSubst(wp)
 		if err != nil {
 			return "", err
 		}
@@ -1350,9 +1350,7 @@ func (cfg *Config) paramExpState(pe *syntax.ParamExp) (paramExpState, error) {
 		// This is the only parameter expansion that the environment
 		// interface cannot satisfy.
 		line := uint64(0)
-		if cfg.CurrentLine != nil {
-			line = uint64(cfg.CurrentLine())
-		}
+		line = uint64(cfg.currentLine())
 		if line == 0 && cfg.curParam != nil {
 			line = uint64(cfg.curParam.Pos().Line())
 		}
@@ -1617,7 +1615,7 @@ func (cfg *Config) paramArgField(word *syntax.Word, ql quoteLevel) ([]fieldPart,
 			}
 			field = append(field, parts...)
 		case *syntax.ProcSubst:
-			path, err := cfg.ProcSubst(wp)
+			path, err := cfg.runProcSubst(wp)
 			if err != nil {
 				return nil, err
 			}

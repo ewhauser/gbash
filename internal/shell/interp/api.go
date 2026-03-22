@@ -176,8 +176,9 @@ type Runner struct {
 	// current statement's words, before the statement's own redirects apply.
 	expandBaseFDs map[int]*shellFD
 
-	ecfg *expand.Config
-	ectx context.Context // just so that Runner.Subshell can use it again
+	ecfg     expand.Config
+	ecfgInit bool
+	ectx     context.Context // just so that Runner.Subshell can use it again
 
 	legacyBashCompat bool
 	inSubshell       bool
@@ -264,8 +265,11 @@ type Runner struct {
 	origStderr  io.Writer
 	origFDs     map[int]*shellFD
 	fdSnapshots []map[int]*shellFD
-	origStart   time.Time
-	origRandom  uint32
+	// Most statements need at most one active FD snapshot, so keep a small
+	// inline stack to avoid per-runner heap churn on the common path.
+	fdSnapshotBootstrap [4]map[int]*shellFD
+	origStart           time.Time
+	origRandom          uint32
 
 	startTime time.Time
 	random    uint32

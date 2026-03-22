@@ -51,7 +51,7 @@ func (b *runnerCompletionBackend) ExpandWordlist(wordlist string) ([]string, err
 		fmt.Fprintln(b.runner.stderr, completionutil.WordlistErrorText(wordlist, err))
 		return nil, err
 	}
-	cfg := *b.runner.ecfg
+	cfg := b.runner.ecfg
 	expanded, err := expand.Document(&cfg, word)
 	if err != nil {
 		err = expand.WithArithmSource(err, wordlist, 0, uint(len(wordlist)))

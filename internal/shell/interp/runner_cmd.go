@@ -247,24 +247,26 @@ func (r *Runner) cmdBinary(ctx context.Context, cm *syntax.BinaryCmd) {
 			r.stmt(ctx, cm.Y)
 		}
 	case syntax.Pipe, syntax.PipeAll:
-		suppressPipelineDebug := r.pipelineDebugTrapSuppressed(cm)
-		if !suppressPipelineDebug && r.runPipelineDebugTrap(ctx, cm) {
-			return
-		}
 		restorePipelineDebug := func() {}
-		if !suppressPipelineDebug {
-			restorePipelineDebug = r.pushPipelineDebugState(cm)
+		if r.pipelineDebugActive() {
+			suppressPipelineDebug := r.pipelineDebugTrapSuppressed(cm)
+			if !suppressPipelineDebug && r.runPipelineDebugTrap(ctx, cm) {
+				return
+			}
+			if !suppressPipelineDebug {
+				restorePipelineDebug = r.pushPipelineDebugState(cm)
+			}
 		}
 		defer restorePipelineDebug()
 
 		pr, pw := r.newPipe()
 		r2 := r.subshell(true)
-		r2.setStdoutWriter(pw)
+		update := standardFDUpdate{stdout: pw, setStdout: true}
 		if cm.Op == syntax.PipeAll {
-			r2.setStderrWriter(pw)
-		} else {
-			r2.setStderrWriter(r.stderr)
+			update.stderr = pw
+			update.setStderr = true
 		}
+		r2.setStandardFDs(update)
 		r.setStdinReader(pr)
 		var wg sync.WaitGroup
 		wg.Go(func() {

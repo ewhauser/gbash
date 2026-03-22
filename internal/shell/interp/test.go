@@ -379,10 +379,10 @@ func (r *Runner) evalCond(ctx context.Context, expr syntax.CondExpr, trace *trac
 }
 
 func (r *Runner) condExpandConfig() *expand.Config {
-	if r.ecfg == nil {
+	if !r.ecfgInit {
 		r.fillExpandConfig(context.Background())
 	}
-	cfg := *r.ecfg
+	cfg := r.ecfg
 	cfg.StartupHome = ""
 	return &cfg
 }
