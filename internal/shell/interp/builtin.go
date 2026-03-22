@@ -413,11 +413,15 @@ func (r *Runner) printfBuiltin(args []string) (exit exitStatus) {
 	}
 	format, args := args[0], args[1:]
 	result := printfutil.Format(format, args, printfutil.Options{
+		Dialect:   printfutil.DialectShell,
 		LookupEnv: r.lookupPrintfEnv,
 		StartTime: r.startTime,
 	})
 	for _, diag := range result.Diagnostics {
 		r.errf("printf: %s\n", diag)
+	}
+	for _, warning := range result.Warnings {
+		r.errf("printf: %s\n", warning)
 	}
 	if destRef == nil {
 		if _, err := io.WriteString(r.stdout, result.Output); err != nil {

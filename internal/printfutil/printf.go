@@ -12,12 +12,21 @@ type Options struct {
 	LookupEnv func(name string) (string, bool)
 	Now       func() time.Time
 	StartTime time.Time
+	Dialect   Dialect
 }
+
+type Dialect uint8
+
+const (
+	DialectShell Dialect = iota
+	DialectGNU
+)
 
 type Result struct {
 	Output      string
 	ExitCode    uint8
 	Diagnostics []string
+	Warnings    []string
 }
 
 type formatSpec struct {
@@ -34,6 +43,7 @@ type formatSpec struct {
 	precision        int
 	precisionSet     bool
 	precisionFromArg bool
+	quoteFlag        bool
 }
 
 type formatToken struct {
@@ -56,10 +66,11 @@ type formatter struct {
 	out         strings.Builder
 	exitCode    uint8
 	diagnostics []string
+	warnings    []string
 }
 
 func Format(format string, args []string, opts Options) Result {
-	parsed := parseFormat(format)
+	parsed := parseFormat(format, opts.Dialect)
 	f := formatter{
 		opts: normalizeOptions(opts),
 		args: append([]string(nil), args...),
@@ -74,11 +85,15 @@ func Format(format string, args []string, opts Options) Result {
 			break
 		}
 	}
+	if !parsed.hardStop && parsed.verbs == 0 && f.opts.Dialect == DialectGNU && f.index < len(f.args) {
+		f.addWarning(fmt.Sprintf("warning: ignoring excess arguments, starting with %s", quoteGNUDiagnosticOperand(f.args[f.index])))
+	}
 
 	return Result{
 		Output:      f.out.String(),
 		ExitCode:    f.exitCode,
 		Diagnostics: append([]string(nil), f.diagnostics...),
+		Warnings:    append([]string(nil), f.warnings...),
 	}
 }
 
@@ -89,7 +104,7 @@ func normalizeOptions(opts Options) Options {
 	return opts
 }
 
-func parseFormat(format string) parsedFormat {
+func parseFormat(format string, dialect Dialect) parsedFormat {
 	parsed := parsedFormat{
 		tokens: make([]formatToken, 0, 8),
 	}
@@ -105,10 +120,15 @@ func parseFormat(format string) parsedFormat {
 	for i := 0; i < len(format); {
 		switch format[i] {
 		case '\\':
-			text, next, stop, diag := decodeEscape(format, i, escapeModeOuter)
+			text, next, stop, diag := decodeEscape(format, i, escapeModeOuter, dialect)
 			if diag != "" {
 				parsed.diagLines = append(parsed.diagLines, diag)
 				parsed.hardStop = true
+				if dialect == DialectGNU {
+					literal.WriteString(text)
+					flushLiteral()
+					return parsed
+				}
 			}
 			literal.WriteString(text)
 			i = next
@@ -124,7 +144,7 @@ func parseFormat(format string) parsedFormat {
 				i += 2
 				continue
 			}
-			spec, next, diag, hardStop := parseSpec(format, i)
+			spec, next, diag, hardStop := parseSpec(format, i, dialect)
 			if diag != "" {
 				parsed.diagLines = append(parsed.diagLines, diag)
 				parsed.hardStop = hardStop
@@ -142,7 +162,7 @@ func parseFormat(format string) parsedFormat {
 	return parsed
 }
 
-func parseSpec(format string, start int) (*formatSpec, int, string, bool) {
+func parseSpec(format string, start int, dialect Dialect) (*formatSpec, int, string, bool) {
 	spec := &formatSpec{}
 	i := start + 1
 
@@ -158,6 +178,12 @@ func parseSpec(format string, start int) (*formatSpec, int, string, bool) {
 			spec.alternate = true
 		case '0':
 			spec.zeroPad = true
+		case '\'':
+			if dialect == DialectGNU {
+				spec.quoteFlag = true
+			} else {
+				goto width
+			}
 		default:
 			goto width
 		}
@@ -195,10 +221,20 @@ width:
 		}
 	}
 
+	if dialect == DialectGNU {
+		if i < len(format) && format[i] == '(' {
+			return nil, i + 1, gnuInvalidConversionSpec(format[start : i+1]), true
+		}
+		i = skipGNULengthModifier(format, i)
+	}
+
 	if i >= len(format) {
+		if dialect == DialectGNU {
+			return nil, len(format), gnuFormatEndsInPercent(format[start:]), true
+		}
 		return nil, len(format), fmt.Sprintf("`%s': missing format character", format[start:]), true
 	}
-	if format[i] == '(' {
+	if dialect != DialectGNU && format[i] == '(' {
 		end := strings.IndexByte(format[i+1:], ')')
 		if end < 0 || i+1+end+1 >= len(format) {
 			return nil, len(format), fmt.Sprintf("`%s': missing format character", format[start:]), true
@@ -211,12 +247,18 @@ width:
 		spec.timeLayout = format[i+1 : end]
 		return spec, end + 2, "", false
 	}
-	if isSupportedVerb(format[i]) {
+	if isSupportedVerb(format[i], dialect) {
 		spec.verb = format[i]
+		if dialect == DialectGNU && (spec.verb == 'b' || spec.verb == 'q') && spec.hasGNUUnsupportedFieldParams() {
+			return nil, i + 1, gnuInvalidConversionSpec(format[start : i+1]), true
+		}
 		return spec, i + 1, "", false
 	}
+	if dialect == DialectGNU {
+		return nil, i + 1, gnuInvalidConversionSpec(format[start : i+1]), true
+	}
 	for j := i + 1; j < len(format); j++ {
-		if isSupportedVerb(format[j]) {
+		if isSupportedVerb(format[j], dialect) {
 			return nil, j, fmt.Sprintf("`%c': invalid format character", format[i]), true
 		}
 		if format[j] == '\\' || format[j] == '%' {
@@ -238,8 +280,13 @@ func readDigits(s string, start int) (int, int, bool) {
 	return value, end, true
 }
 
-func isSupportedVerb(ch byte) bool {
-	return strings.ContainsRune("bqcsdiouxXefFgGET", rune(ch))
+func isSupportedVerb(ch byte, dialect Dialect) bool {
+	switch dialect {
+	case DialectGNU:
+		return strings.ContainsRune("bqcsdiouxXefFgGEF", rune(ch))
+	default:
+		return strings.ContainsRune("bqcsdiouxXefFgGET", rune(ch))
+	}
 }
 
 func (f *formatter) run(tokens []formatToken) bool {
@@ -275,6 +322,13 @@ func (f *formatter) addDiagnostic(message string) {
 	if f.exitCode == 0 {
 		f.exitCode = 1
 	}
+}
+
+func (f *formatter) addWarning(message string) {
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	f.warnings = append(f.warnings, message)
 }
 
 func (f *formatter) applySpec(spec formatSpec) bool {
@@ -319,9 +373,9 @@ func (f *formatter) applySpec(spec formatSpec) bool {
 	case 's':
 		f.out.WriteString(applyStringFormat(arg, spec))
 	case 'q':
-		f.out.WriteString(applyStringFormat(quoteShell(arg), spec))
+		f.out.WriteString(applyStringFormat(quoteShell(arg, f.opts.Dialect), spec))
 	case 'b':
-		decoded, stop, diag := decodeEscapeString(arg, escapeModePercentB)
+		decoded, stop, diag := decodeEscapeString(arg, escapeModePercentB, f.opts.Dialect)
 		if diag != "" {
 			f.addDiagnostic(diag)
 		}
@@ -361,6 +415,48 @@ func (f *formatter) applySpec(spec formatSpec) bool {
 		f.out.WriteString(text)
 	}
 	return false
+}
+
+func (s formatSpec) hasGNUUnsupportedFieldParams() bool {
+	return s.leftJustify ||
+		s.forceSign ||
+		s.spaceSign ||
+		s.alternate ||
+		s.zeroPad ||
+		s.widthSet ||
+		s.widthFromArg ||
+		s.precisionSet ||
+		s.precisionFromArg ||
+		s.quoteFlag
+}
+
+func gnuInvalidConversionSpec(spec string) string {
+	return fmt.Sprintf("%s: invalid conversion specification", spec)
+}
+
+func gnuFormatEndsInPercent(spec string) string {
+	return fmt.Sprintf("format %s ends in %%", quoteGNUDiagnosticOperand(spec))
+}
+
+func quoteGNUDiagnosticOperand(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func skipGNULengthModifier(format string, start int) int {
+	if start >= len(format) {
+		return start
+	}
+	switch format[start] {
+	case 'h', 'l':
+		if start+1 < len(format) && format[start+1] == format[start] {
+			return start + 2
+		}
+		return start + 1
+	case 'j', 'z', 't', 'L':
+		return start + 1
+	default:
+		return start
+	}
 }
 
 func applyStringFormat(value string, spec formatSpec) string {

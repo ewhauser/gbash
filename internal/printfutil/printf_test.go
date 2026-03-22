@@ -104,3 +104,140 @@ func TestFormatRejectsInvalidModifierBeforeVerb(t *testing.T) {
 		t.Fatalf("Diagnostics = %v, want invalid-format diagnostic", result.Diagnostics)
 	}
 }
+
+func TestFormatGNUSupportsEscapeE(t *testing.T) {
+	t.Parallel()
+
+	result := Format("\\e", nil, Options{Dialect: DialectGNU})
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; diagnostics=%v", result.ExitCode, result.Diagnostics)
+	}
+	if got, want := result.Output, "\x1b"; got != want {
+		t.Fatalf("Output = %q, want %q", got, want)
+	}
+}
+
+func TestFormatGNURejectsMalformedOuterEscapes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		format string
+		want   string
+	}{
+		{name: "hex", format: "A\\xZ", want: "A"},
+		{name: "short-unicode", format: "A\\uabc", want: "A"},
+		{name: "short-wide-unicode", format: "A\\U1234", want: "A"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := Format(tt.format, nil, Options{Dialect: DialectGNU})
+			if result.ExitCode != 1 {
+				t.Fatalf("ExitCode = %d, want 1; diagnostics=%v", result.ExitCode, result.Diagnostics)
+			}
+			if got := result.Output; got != tt.want {
+				t.Fatalf("Output = %q, want %q", got, tt.want)
+			}
+			if len(result.Diagnostics) != 1 || result.Diagnostics[0] != "missing hexadecimal number in escape" {
+				t.Fatalf("Diagnostics = %v, want missing-hex diagnostic", result.Diagnostics)
+			}
+		})
+	}
+}
+
+func TestFormatGNUPercentBStopsOnMalformedEscape(t *testing.T) {
+	t.Parallel()
+
+	result := Format("%b|%s", []string{"A\\xZ", "B"}, Options{Dialect: DialectGNU})
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; diagnostics=%v", result.ExitCode, result.Diagnostics)
+	}
+	if got, want := result.Output, "A"; got != want {
+		t.Fatalf("Output = %q, want %q", got, want)
+	}
+	if len(result.Diagnostics) != 1 || result.Diagnostics[0] != "missing hexadecimal number in escape" {
+		t.Fatalf("Diagnostics = %v, want missing-hex diagnostic", result.Diagnostics)
+	}
+}
+
+func TestFormatGNUQuoteMatchesCoreutils(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		arg  string
+		want string
+	}{
+		{name: "empty", arg: "", want: "''"},
+		{name: "raw", arg: "abc", want: "abc"},
+		{name: "space", arg: "a b", want: "'a b'"},
+		{name: "single-quote", arg: "'", want: "\"'\""},
+		{name: "double-quote", arg: "\"", want: "'\"'"},
+		{name: "newline", arg: "a\n", want: "'a'$'\\n'"},
+		{name: "tab", arg: "a\tb", want: "'a'$'\\t''b'"},
+		{name: "control", arg: string([]byte{0x01}), want: "''$'\\001'"},
+		{name: "control-quote-control", arg: string([]byte{0x01, '\'', 0x01}), want: "''$'\\001'\\'''$'\\001'"},
+		{name: "leading-tilde", arg: "~foo", want: "'~foo'"},
+		{name: "leading-hash", arg: "#foo", want: "'#foo'"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := Format("%q", []string{tt.arg}, Options{Dialect: DialectGNU})
+			if result.ExitCode != 0 {
+				t.Fatalf("ExitCode = %d, want 0; diagnostics=%v", result.ExitCode, result.Diagnostics)
+			}
+			if got := result.Output; got != tt.want {
+				t.Fatalf("Output = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatGNURejectsShellOnlyConversionsAndFields(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		format string
+		want   string
+	}{
+		{name: "time", format: "%(%F)T", want: "%(: invalid conversion specification"},
+		{name: "width-q", format: "%7q", want: "%7q: invalid conversion specification"},
+		{name: "width-b", format: "%7b", want: "%7b: invalid conversion specification"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := Format(tt.format, []string{"0"}, Options{Dialect: DialectGNU})
+			if result.ExitCode != 1 {
+				t.Fatalf("ExitCode = %d, want 1; diagnostics=%v", result.ExitCode, result.Diagnostics)
+			}
+			if got := result.Output; got != "" {
+				t.Fatalf("Output = %q, want empty", got)
+			}
+			if len(result.Diagnostics) != 1 || result.Diagnostics[0] != tt.want {
+				t.Fatalf("Diagnostics = %v, want [%q]", result.Diagnostics, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatGNUWarnsOnExcessArgsWithoutConversions(t *testing.T) {
+	t.Parallel()
+
+	result := Format("plain", []string{"extra", "more"}, Options{Dialect: DialectGNU})
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; diagnostics=%v", result.ExitCode, result.Diagnostics)
+	}
+	if got, want := result.Output, "plain"; got != want {
+		t.Fatalf("Output = %q, want %q", got, want)
+	}
+	if len(result.Diagnostics) != 0 {
+		t.Fatalf("Diagnostics = %v, want empty", result.Diagnostics)
+	}
+	if len(result.Warnings) != 1 || result.Warnings[0] != "warning: ignoring excess arguments, starting with 'extra'" {
+		t.Fatalf("Warnings = %v, want excess-args warning", result.Warnings)
+	}
+}

@@ -67,7 +67,7 @@ func TestPrintfWriteFailureReturnsExitStatusOne(t *testing.T) {
 	}
 }
 
-func TestPrintfNoArgsMatchesBashUsage(t *testing.T) {
+func TestPrintfNoArgsMatchesGNUOperandDiagnostic(t *testing.T) {
 	t.Parallel()
 
 	cmd := builtins.NewPrintf()
@@ -77,31 +77,155 @@ func TestPrintfNoArgsMatchesBashUsage(t *testing.T) {
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("error = %T %v, want *ExitError", err, err)
 	}
-	if exitErr.Code != 2 {
-		t.Fatalf("ExitError.Code = %d, want 2", exitErr.Code)
+	if exitErr.Code != 1 {
+		t.Fatalf("ExitError.Code = %d, want 1", exitErr.Code)
 	}
-	if got, want := stderr.String(), "printf: usage: printf [-v var] format [arguments]\n"; got != want {
+	if got, want := stderr.String(), "printf: missing operand\nTry 'printf --help' for more information.\n"; got != want {
 		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }
 
-func TestPrintfInvalidVarNameMatchesBashDiagnostic(t *testing.T) {
+func TestPrintfTreatsDashVAsLiteralGNUFormat(t *testing.T) {
 	t.Parallel()
 
 	cmd := builtins.NewPrintf()
+	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	err := cmd.Run(context.Background(), &builtins.Invocation{
-		Args:   []string{"-v", "a[", "%s", "foo"},
+		Args:   []string{"-v", "foo", "%s", "hi"},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got, want := stdout.String(), "-v"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got, want := stderr.String(), "printf: warning: ignoring excess arguments, starting with 'foo'\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
+func TestPrintfRejectsShellOnlyGNUConversion(t *testing.T) {
+	t.Parallel()
+
+	cmd := builtins.NewPrintf()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := cmd.Run(context.Background(), &builtins.Invocation{
+		Args:   []string{"%(%F)T", "-1"},
+		Stdout: &stdout,
 		Stderr: &stderr,
 	})
 	var exitErr *builtins.ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("error = %T %v, want *ExitError", err, err)
 	}
-	if exitErr.Code != 2 {
-		t.Fatalf("ExitError.Code = %d, want 2", exitErr.Code)
+	if exitErr.Code != 1 {
+		t.Fatalf("ExitError.Code = %d, want 1", exitErr.Code)
 	}
-	if got, want := stderr.String(), "printf: `a[': not a valid identifier\n"; got != want {
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+	if got, want := stderr.String(), "printf: %(: invalid conversion specification\n"; got != want {
 		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
+func TestPrintfStopsOnMalformedGNUPercentBEscape(t *testing.T) {
+	t.Parallel()
+
+	cmd := builtins.NewPrintf()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := cmd.Run(context.Background(), &builtins.Invocation{
+		Args:   []string{"%b|%s", "A\\xZ", "B"},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	var exitErr *builtins.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("error = %T %v, want *ExitError", err, err)
+	}
+	if exitErr.Code != 1 {
+		t.Fatalf("ExitError.Code = %d, want 1", exitErr.Code)
+	}
+	if got, want := stdout.String(), "A"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got, want := stderr.String(), "printf: missing hexadecimal number in escape\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
+func TestPrintfBuiltinAndBinPrintfSplitDashVMode(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "foo=old\n" +
+			"printf -v foo %s hi\n" +
+			"printf 'builtin=<%s>\\n' \"$foo\"\n" +
+			"/bin/printf -v foo %s hi\n" +
+			"printf '\\n/bin=<%s>\\n' \"$foo\"\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "builtin=<hi>\n-v\n/bin=<hi>\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, "printf: warning: ignoring excess arguments, starting with 'foo'\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
+func TestPrintfBuiltinAndBinPrintfSplitQQuoting(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'builtin=[%q]\\n' 'a b'\n" +
+			"/bin/printf 'bin=[%q]\\n' 'a b'\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "builtin=[a\\ b]\nbin=['a b']\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
+func TestPrintfBuiltinAndBinPrintfSplitTimeConversion(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "export TZ=UTC\n" +
+			"printf 'builtin=[%(%F)T]\\n' 0\n" +
+			"/bin/printf '%(%F)T' 0\n" +
+			"printf '\\nstatus=%s\\n' \"$?\"\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "builtin=[1970-01-01]\n\nstatus=1\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, "printf: %(: invalid conversion specification\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }
