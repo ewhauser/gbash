@@ -188,7 +188,7 @@ func (c *Date) Run(ctx context.Context, inv *Invocation) error {
 		if err := inv.SetTime(parsed.UTC()); err != nil {
 			return exitf(inv, 1, "date: cannot set date: %v", err)
 		}
-		return nil
+		return writeDateOutput(inv, dateOutputTime(parsed, loc, opts.utc), &opts)
 	}
 
 	switch opts.source {
@@ -407,8 +407,20 @@ func parseDateArgs(inv *Invocation, args []string) (dateOptions, error) {
 		return dateOptions{}, dateUsageError(inv, "the options to specify dates for printing are mutually exclusive")
 	}
 
-	if len(positionals) > 1 {
-		return dateOptions{}, exitf(inv, 1, "date: extra operand %s\nTry 'date --help' for more information.", quoteGNUOperand(positionals[1]))
+	if len(positionals) > 2 {
+		return dateOptions{}, exitf(inv, 1, "date: extra operand %s\nTry 'date --help' for more information.", quoteGNUOperand(positionals[2]))
+	}
+	if len(positionals) == 2 {
+		if opts.source != dateSourceNow || opts.setValue != "" {
+			return dateOptions{}, exitf(inv, 1, "date: extra operand %s\nTry 'date --help' for more information.", quoteGNUOperand(positionals[1]))
+		}
+		if !isDateLegacyTimestamp(positionals[0]) || !strings.HasPrefix(positionals[1], "+") {
+			return dateOptions{}, exitf(inv, 1, "date: extra operand %s\nTry 'date --help' for more information.", quoteGNUOperand(positionals[1]))
+		}
+		opts.setValue = positionals[0]
+		opts.legacySet = true
+		opts.format = dateFormatCustom
+		opts.formatArg = positionals[1][1:]
 	}
 	if len(positionals) == 1 {
 		arg := positionals[0]

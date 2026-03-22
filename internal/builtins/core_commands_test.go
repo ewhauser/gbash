@@ -532,11 +532,11 @@ func TestDateSessionClockPersistsAcrossExecutions(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
 
-	first := mustExecSession(t, session, "TZ=UTC date --set '2024-05-06 07:08:09'\nTZ=UTC printf '%(%F %T)T\\n' -1\n")
+	first := mustExecSession(t, session, "TZ=UTC date --set '2024-05-06 07:08:09' +%F' '%T\nTZ=UTC printf '%(%F %T)T\\n' -1\n")
 	if first.ExitCode != 0 {
 		t.Fatalf("first ExitCode = %d, want 0; stderr=%q", first.ExitCode, first.Stderr)
 	}
-	if got, want := first.Stdout, "2024-05-06 07:08:09\n"; got != want {
+	if got, want := first.Stdout, "2024-05-06 07:08:09\n2024-05-06 07:08:09\n"; got != want {
 		t.Fatalf("first Stdout = %q, want %q", got, want)
 	}
 
@@ -548,11 +548,11 @@ func TestDateSessionClockPersistsAcrossExecutions(t *testing.T) {
 		t.Fatalf("second Stdout = %q, want %q", got, want)
 	}
 
-	legacy := mustExecSession(t, session, "TZ=UTC date 050607082024.11\nTZ=UTC date +%F' '%T\n")
+	legacy := mustExecSession(t, session, "TZ=UTC date 050607082024.11 +%F' '%T\nTZ=UTC date +%F' '%T\n")
 	if legacy.ExitCode != 0 {
 		t.Fatalf("legacy ExitCode = %d, want 0; stderr=%q", legacy.ExitCode, legacy.Stderr)
 	}
-	if got, want := legacy.Stdout, "2024-05-06 07:08:11\n"; got != want {
+	if got, want := legacy.Stdout, "2024-05-06 07:08:11\n2024-05-06 07:08:11\n"; got != want {
 		t.Fatalf("legacy Stdout = %q, want %q", got, want)
 	}
 }
@@ -563,12 +563,12 @@ func TestDateSessionClockIsolationAndUsageErrors(t *testing.T) {
 	left := newSession(t, &Config{})
 	right := newSession(t, &Config{})
 
-	leftResult := mustExecSession(t, left, "TZ=UTC date --set '2024-05-06 07:08:09'\nTZ=UTC date +%F' '%T\n")
-	rightResult := mustExecSession(t, right, "TZ=UTC date --set '2025-06-07 08:09:10'\nTZ=UTC date +%F' '%T\n")
-	if got, want := leftResult.Stdout, "2024-05-06 07:08:09\n"; got != want {
+	leftResult := mustExecSession(t, left, "TZ=UTC date --set '2024-05-06 07:08:09' +%F' '%T\nTZ=UTC date +%F' '%T\n")
+	rightResult := mustExecSession(t, right, "TZ=UTC date --set '2025-06-07 08:09:10' +%F' '%T\nTZ=UTC date +%F' '%T\n")
+	if got, want := leftResult.Stdout, "2024-05-06 07:08:09\n2024-05-06 07:08:09\n"; got != want {
 		t.Fatalf("left Stdout = %q, want %q", got, want)
 	}
-	if got, want := rightResult.Stdout, "2025-06-07 08:09:10\n"; got != want {
+	if got, want := rightResult.Stdout, "2025-06-07 08:09:10\n2025-06-07 08:09:10\n"; got != want {
 		t.Fatalf("right Stdout = %q, want %q", got, want)
 	}
 
