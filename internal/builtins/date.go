@@ -22,6 +22,7 @@ type dateOptions struct {
 	version   bool
 	source    dateSourceKind
 	sourceArg string
+	set       bool
 	setValue  string
 	legacySet bool
 	format    dateFormatKind
@@ -179,7 +180,7 @@ func (c *Date) Run(ctx context.Context, inv *Invocation) error {
 	loc := resolveDateLocationFromEnv(inv.Env, opts.utc)
 	now := inv.Now().In(loc)
 
-	if opts.setValue != "" {
+	if opts.set {
 		parsed, info, err := parseDateSetValue(opts.setValue, now, loc)
 		if err != nil {
 			return exitf(inv, 1, "date: invalid date %q", opts.setValue)
@@ -296,6 +297,7 @@ func parseDateArgs(inv *Invocation, args []string) (dateOptions, error) {
 				if err != nil {
 					return dateOptions{}, err
 				}
+				opts.set = true
 				opts.setValue = value
 				setSeen = true
 			case "resolution":
@@ -364,6 +366,7 @@ func parseDateArgs(inv *Invocation, args []string) (dateOptions, error) {
 						opts.sourceArg = value
 						sourceKinds[dateSourceReference] = struct{}{}
 					case 's':
+						opts.set = true
 						opts.setValue = value
 						setSeen = true
 					}
@@ -411,12 +414,13 @@ func parseDateArgs(inv *Invocation, args []string) (dateOptions, error) {
 		return dateOptions{}, exitf(inv, 1, "date: extra operand %s\nTry 'date --help' for more information.", quoteGNUOperand(positionals[2]))
 	}
 	if len(positionals) == 2 {
-		if opts.source != dateSourceNow || opts.setValue != "" {
+		if opts.source != dateSourceNow || opts.set {
 			return dateOptions{}, exitf(inv, 1, "date: extra operand %s\nTry 'date --help' for more information.", quoteGNUOperand(positionals[1]))
 		}
 		if !isDateLegacyTimestamp(positionals[0]) || !strings.HasPrefix(positionals[1], "+") {
 			return dateOptions{}, exitf(inv, 1, "date: extra operand %s\nTry 'date --help' for more information.", quoteGNUOperand(positionals[1]))
 		}
+		opts.set = true
 		opts.setValue = positionals[0]
 		opts.legacySet = true
 		opts.format = dateFormatCustom
@@ -428,9 +432,10 @@ func parseDateArgs(inv *Invocation, args []string) (dateOptions, error) {
 		case strings.HasPrefix(arg, "+"):
 			opts.format = dateFormatCustom
 			opts.formatArg = arg[1:]
-		case opts.source != dateSourceNow || opts.setValue != "":
+		case opts.source != dateSourceNow || opts.set:
 			return dateOptions{}, exitf(inv, 1, "date: the argument %s lacks a leading '+';\nwhen using an option to specify date(s), any non-option\nargument must be a format string beginning with '+'\nTry 'date --help' for more information.", quoteGNUOperand(arg))
 		case isDateLegacyTimestamp(arg):
+			opts.set = true
 			opts.setValue = arg
 			opts.legacySet = true
 		default:

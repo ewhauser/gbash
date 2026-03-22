@@ -555,6 +555,14 @@ func TestDateSessionClockPersistsAcrossExecutions(t *testing.T) {
 	if got, want := legacy.Stdout, "2024-05-06 07:08:11\n2024-05-06 07:08:11\n"; got != want {
 		t.Fatalf("legacy Stdout = %q, want %q", got, want)
 	}
+
+	emptySet := mustExecSession(t, session, "TZ=UTC date -s '' +%F' '%T\nTZ=UTC date +%F' '%T\nTZ=UTC date --set= +%F' '%T\nTZ=UTC date +%F' '%T\n")
+	if emptySet.ExitCode != 0 {
+		t.Fatalf("emptySet ExitCode = %d, want 0; stderr=%q", emptySet.ExitCode, emptySet.Stderr)
+	}
+	if got, want := emptySet.Stdout, "2024-05-06 00:00:00\n2024-05-06 00:00:00\n2024-05-06 00:00:00\n2024-05-06 00:00:00\n"; got != want {
+		t.Fatalf("emptySet Stdout = %q, want %q", got, want)
+	}
 }
 
 func TestDateSessionClockIsolationAndUsageErrors(t *testing.T) {
