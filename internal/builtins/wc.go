@@ -278,7 +278,7 @@ func wcRunFiles0FromMaterialized(ctx context.Context, inv *Invocation, opts wcOp
 
 	data, readErr, overflow := wcReadAllReaderPartial(ctx, inv, file)
 	if overflow {
-		return readErr
+		return exitf(inv, 1, "wc: %s: read error: %s", wcErrorOperand(source), readAllErrorText(readErr))
 	}
 	if readErr != nil {
 		return exitf(inv, 1, "wc: %s: read error: %s", wcErrorOperand(source), readAllErrorText(readErr))

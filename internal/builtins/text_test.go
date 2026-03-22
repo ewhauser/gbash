@@ -598,6 +598,35 @@ func TestWCFiles0FromStreamingHonorsMaxFileBytes(t *testing.T) {
 	}
 }
 
+func TestWCFiles0FromMaterializedReportsMaxFileBytes(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:  []string{"/"},
+			WriteRoots: []string{"/"},
+			Limits: policy.Limits{
+				MaxFileBytes: 5,
+			},
+		}),
+	})
+
+	result := mustExecSession(t, session, strings.Join([]string{
+		"printf 'a\\n' > /tmp/a.txt",
+		"printf '/tmp/a.txt\\0' > /tmp/names",
+		"wc --files0-from=/tmp/names",
+		"",
+	}, "\n"))
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got := result.Stdout; got != "" {
+		t.Fatalf("Stdout = %q, want empty", got)
+	}
+	if got, want := result.Stderr, "wc: /tmp/names: read error: input exceeds maximum file size of 5 bytes\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
 func TestWCFiles0FromStreamsResultsBeforeEOF(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
