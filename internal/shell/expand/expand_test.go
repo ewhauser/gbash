@@ -1033,6 +1033,27 @@ func TestGlobStarPreservesByteOrder(t *testing.T) {
 	}
 }
 
+func TestGlobStarIgnoresUnreadableSubdirs(t *testing.T) {
+	t.Parallel()
+
+	spy := newTrackedGlobReadDirSpy(map[string]globReadDirNode{
+		"/tree":         dirNode(dirEntry("blocked"), dirEntry("good")),
+		"/tree/blocked": {err: fs.ErrPermission},
+		"/tree/good":    dirNode(fileEntry("keep.txt")),
+	})
+	got, err := (&Config{
+		ReadDir:  spy.ReadDir,
+		GlobStar: true,
+	}).glob("/", "tree/**")
+	if err != nil {
+		t.Fatalf("glob() error = %v", err)
+	}
+	want := []string{"tree/", "tree/blocked", "tree/good", "tree/good/keep.txt"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("glob() = %#v, want %#v", got, want)
+	}
+}
+
 func TestFieldsGlobEscapedBracketPattern(t *testing.T) {
 	t.Parallel()
 

@@ -2599,18 +2599,16 @@ func (state *globState) walk(dir string, partIndex int, matches []string) ([]str
 		if err != nil {
 			return matches, err
 		}
-		childDirs, err := state.globDir(dir, state.globStarMatcher, true, false, nil)
-		if err != nil {
-			return matches, err
-		}
 		var childMatches []string
-		for _, child := range childDirs {
-			if child.name == "." || child.name == ".." {
-				continue
-			}
-			childMatches, err = state.walk(child.path, partIndex, childMatches)
-			if err != nil {
-				return matches, err
+		if childDirs, err := state.globDir(dir, state.globStarMatcher, true, false, nil); err == nil {
+			for _, child := range childDirs {
+				if child.name == "." || child.name == ".." {
+					continue
+				}
+				childMatches, err = state.walk(child.path, partIndex, childMatches)
+				if err != nil {
+					return matches, err
+				}
 			}
 		}
 		return mergeGlobMatches(matches, zeroMatches, childMatches), nil
@@ -2667,23 +2665,22 @@ func (state *globState) walkGlobStarFinal(dir string, includeZeroMatch bool, mat
 	} else {
 		matches = append(matches, dir)
 	}
-	dirMatches, err := state.globDir(dir, state.globStarMatcher, false, true, nil)
-	if err != nil {
-		return matches, err
-	}
-	streams := make([][]string, 0, len(dirMatches))
-	for _, match := range dirMatches {
-		if match.canDescend && match.name != "." && match.name != ".." {
-			stream, err := state.walkGlobStarFinal(match.path, false, nil)
-			if err != nil {
-				return matches, err
+	if dirMatches, err := state.globDir(dir, state.globStarMatcher, false, true, nil); err == nil {
+		streams := make([][]string, 0, len(dirMatches))
+		for _, match := range dirMatches {
+			if match.canDescend && match.name != "." && match.name != ".." {
+				stream, err := state.walkGlobStarFinal(match.path, false, nil)
+				if err != nil {
+					return matches, err
+				}
+				streams = append(streams, stream)
+				continue
 			}
-			streams = append(streams, stream)
-			continue
+			streams = append(streams, []string{match.path})
 		}
-		streams = append(streams, []string{match.path})
+		return mergeManyGlobMatches(matches, streams), nil
 	}
-	return mergeManyGlobMatches(matches, streams), nil
+	return matches, nil
 }
 
 func (state *globState) literalPathMatches(dir, part string, wantDir bool) bool {
