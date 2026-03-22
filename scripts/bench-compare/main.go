@@ -33,6 +33,61 @@ const (
 	hostBashJQMissingReason = "requires jq; host bash environment does not provide it"
 )
 
+const expansionStressCommand = `set -eu
+base='pkg02/section01/file019.txt'
+ref=base
+printf 'indirect=%s\n' "${!ref}"
+
+globbed=(./pkg0[0-3]/section0[0-2]/file0[0-3][0-9].txt)
+printf 'glob=%s\n' "${#globbed[@]}"
+
+trimmed=("${globbed[@]#./}")
+patched=("${trimmed[@]/#pkg/pkg-root}")
+patched=("${patched[@]/%.txt/.data}")
+last=$(( ${#patched[@]} - 1 ))
+printf 'replace=%s|%s\n' "${patched[0]}" "${patched[$last]}"
+
+mixed=('left' 'two words' 'middle:bits')
+set -- pre"${mixed[@]:1:2}"post
+printf 'quoted=%s|%s|%s\n' "$#" "$1" "$2"
+
+old_ifs=$IFS
+IFS=':ç'
+split_src='red:blue::greençomega'
+set -- $split_src
+IFS=$old_ifs
+printf 'ifs=%s|%s|%s|%s\n' "$#" "$1" "$3" "$5"
+
+unset maybe || true
+set -- ${maybe:-alpha beta gamma}
+printf 'default=%s|%s|%s\n' "$#" "$1" "$3"
+
+slice_src=(zero one two three four)
+set -- "${slice_src[@]:1:3}"
+printf 'slice=%s|%s|%s|%s\n' "$#" "$1" "$2" "$3"
+
+path='/root/archive/program.tar.gz'
+printf 'strip=%s|%s\n' "${path#*/}" "${path%%.*}"
+
+literal_path='./literal*dir/[meta]?/report.txt'
+if [ -f "$literal_path" ]; then
+  printf 'literal=%s\n' "$literal_path"
+else
+  printf 'literal=missing\n'
+fi
+`
+
+const expansionStressExpectedStdout = "" +
+	"indirect=pkg02/section01/file019.txt\n" +
+	"glob=480\n" +
+	"replace=pkg-root00/section00/file000.data|pkg-root03/section02/file039.data\n" +
+	"quoted=2|pretwo words|middle:bitspost\n" +
+	"ifs=5|red||omega\n" +
+	"default=3|alpha|gamma\n" +
+	"slice=3|one|two|three\n" +
+	"strip=root/archive/program.tar.gz|/root/archive/program\n" +
+	"literal=./literal*dir/[meta]?/report.txt\n"
+
 type options struct {
 	Runs         int
 	JSONOut      string
@@ -193,6 +248,11 @@ func runMain(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if err != nil {
 		return err
 	}
+	expansionStressRoot := filepath.Join(tmpDir, "expansion-stress-workspace")
+	expansionStressFixture, err := createExpansionStressFixture(expansionStressRoot)
+	if err != nil {
+		return err
+	}
 
 	runtimes := []runtimeConfig{
 		gbashRuntime(helperPath, helperSize),
@@ -201,7 +261,7 @@ func runMain(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		gbashNodeWasmRuntime(repoRoot, wasmAssetDir, wasmSize),
 		justBashRuntime(opts.JustBashSpec, justBashSize),
 	}
-	scenarios := benchmarkScenarios(workspaceFixture, agenticSearchFixture)
+	scenarios := benchmarkScenarios(workspaceFixture, agenticSearchFixture, expansionStressFixture)
 
 	report := benchmarkReport{
 		GeneratedAt:  time.Now().UTC().Format(time.RFC3339),
@@ -481,7 +541,7 @@ func justBashRuntime(spec string, artifactSizeBytes int64) runtimeConfig {
 	}
 }
 
-func benchmarkScenarios(workspaceFixture, agenticSearchFixture fixtureSummary) []scenarioConfig {
+func benchmarkScenarios(workspaceFixture, agenticSearchFixture, expansionStressFixture fixtureSummary) []scenarioConfig {
 	return []scenarioConfig{
 		{
 			Name:           "startup_echo",
@@ -512,6 +572,15 @@ func benchmarkScenarios(workspaceFixture, agenticSearchFixture fixtureSummary) [
 			RequiresJQ:     true,
 			Workspace:      true,
 			Fixture:        &agenticSearchFixture,
+			WarmupScript:   "true\n",
+		},
+		{
+			Name:           "expansion_stress",
+			Description:    "Shell-heavy end-to-end script stressing arrays, slices, quoted expansion, custom IFS, globs, and literal metachar paths.",
+			Command:        expansionStressCommand,
+			ExpectedStdout: expansionStressExpectedStdout,
+			Workspace:      true,
+			Fixture:        &expansionStressFixture,
 			WarmupScript:   "true\n",
 		},
 	}
@@ -651,6 +720,40 @@ func createAgenticSearchFixture(root string) (fixtureSummary, error) {
 		}
 	}
 
+	return summary, nil
+}
+
+func createExpansionStressFixture(root string) (fixtureSummary, error) {
+	const (
+		packages        = 4
+		sections        = 3
+		filesPerSection = 40
+	)
+
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return fixtureSummary{}, fmt.Errorf("create expansion stress root: %w", err)
+	}
+
+	summary := fixtureSummary{Root: root}
+	for pkg := range packages {
+		for section := range sections {
+			for file := range filesPerSection {
+				content := fmt.Sprintf(
+					"package=%02d\nsection=%02d\nfile=%03d\nmode=expansion-stress\n",
+					pkg,
+					section,
+					file,
+				)
+				relPath := fmt.Sprintf("pkg%02d/section%02d/file%03d.txt", pkg, section, file)
+				if err := writeFixtureFile(root, relPath, content, &summary); err != nil {
+					return fixtureSummary{}, err
+				}
+			}
+		}
+	}
+	if err := writeFixtureFile(root, "literal*dir/[meta]?/report.txt", "literal metachar path\n", &summary); err != nil {
+		return fixtureSummary{}, err
+	}
 	return summary, nil
 }
 
