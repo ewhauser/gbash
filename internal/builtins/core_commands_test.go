@@ -475,6 +475,21 @@ func TestDateGNUFormatsAndSources(t *testing.T) {
 			want:   "0.000000001\n",
 		},
 		{
+			name:   "unique abbreviation for universal",
+			script: "TZ=UTC date --uni +%Z\n",
+			want:   "UTC\n",
+		},
+		{
+			name:   "unique abbreviation for resolution",
+			script: "date --resol\n",
+			want:   "0.000000001\n",
+		},
+		{
+			name:   "unique abbreviation for iso 8601",
+			script: "TZ=UTC date --date 2024-05-06T07:08:09 --iso=seconds\n",
+			want:   "2024-05-06T07:08:09+00:00\n",
+		},
+		{
 			name:   "timezone abbreviation parsing",
 			script: "TZ=UTC date -u -d '2024-06-15 10:30 EDT' '+%H:%M %Z'\n",
 			want:   "14:30 UTC\n",
@@ -611,6 +626,22 @@ func TestDateSessionClockIsolationAndUsageErrors(t *testing.T) {
 				t.Fatalf("Stderr = %q, want substring %q", result.Stderr, tc.wantStderr)
 			}
 		})
+	}
+
+	ambiguous := mustExecSession(t, left, "date --r\n")
+	if ambiguous.ExitCode != 1 {
+		t.Fatalf("ambiguous ExitCode = %d, want 1; stderr=%q", ambiguous.ExitCode, ambiguous.Stderr)
+	}
+	for _, want := range []string{
+		"option '--r' is ambiguous",
+		"'--reference'",
+		"'--resolution'",
+		"'--rfc-email'",
+		"'--rfc-3339'",
+	} {
+		if !strings.Contains(ambiguous.Stderr, want) {
+			t.Fatalf("ambiguous Stderr = %q, want substring %q", ambiguous.Stderr, want)
+		}
 	}
 }
 

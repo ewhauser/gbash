@@ -46,6 +46,24 @@ const (
 	dateFormatResolution
 )
 
+var dateLongOptions = []struct {
+	name    string
+	aliases []string
+}{
+	{name: "help", aliases: []string{"help"}},
+	{name: "version", aliases: []string{"version"}},
+	{name: "debug", aliases: []string{"debug"}},
+	{name: "utc", aliases: []string{"utc", "universal"}},
+	{name: "date", aliases: []string{"date"}},
+	{name: "file", aliases: []string{"file"}},
+	{name: "reference", aliases: []string{"reference"}},
+	{name: "set", aliases: []string{"set"}},
+	{name: "resolution", aliases: []string{"resolution"}},
+	{name: "rfc-email", aliases: []string{"rfc-email"}},
+	{name: "rfc-3339", aliases: []string{"rfc-3339"}},
+	{name: "iso-8601", aliases: []string{"iso-8601"}},
+}
+
 const dateVersionText = "date (gbash)\n"
 
 const dateHelpText = `Usage: date [OPTION]... [+FORMAT]
@@ -242,31 +260,34 @@ func parseDateArgs(inv *Invocation, args []string) (dateOptions, error) {
 			continue
 		}
 		if parsing && strings.HasPrefix(arg, "--") && arg != "--" {
-			name, value, hasValue := strings.Cut(arg[2:], "=")
+			rawName, value, hasValue := strings.Cut(arg[2:], "=")
+			name, err := resolveDateLongOption(inv, rawName)
+			if err != nil {
+				return dateOptions{}, err
+			}
 			switch name {
 			case "help":
 				if hasValue {
-					return dateOptions{}, dateUsageError(inv, "option '--help' doesn't allow an argument")
+					return dateOptions{}, dateUsageError(inv, "option '--%s' doesn't allow an argument", rawName)
 				}
 				opts.help = true
 			case "version":
 				if hasValue {
-					return dateOptions{}, dateUsageError(inv, "option '--version' doesn't allow an argument")
+					return dateOptions{}, dateUsageError(inv, "option '--%s' doesn't allow an argument", rawName)
 				}
 				opts.version = true
 			case "debug":
 				if hasValue {
-					return dateOptions{}, dateUsageError(inv, "option '--debug' doesn't allow an argument")
+					return dateOptions{}, dateUsageError(inv, "option '--%s' doesn't allow an argument", rawName)
 				}
 				opts.debug = true
-			case "utc", "universal":
+			case "utc":
 				if hasValue {
-					return dateOptions{}, dateUsageError(inv, "option '--%s' doesn't allow an argument", name)
+					return dateOptions{}, dateUsageError(inv, "option '--%s' doesn't allow an argument", rawName)
 				}
 				opts.utc = true
 			case "date":
-				var err error
-				value, i, err = dateRequireValue(inv, args, i, name, value, hasValue)
+				value, i, err = dateRequireValue(inv, args, i, rawName, value, hasValue)
 				if err != nil {
 					return dateOptions{}, err
 				}
@@ -274,8 +295,7 @@ func parseDateArgs(inv *Invocation, args []string) (dateOptions, error) {
 				opts.sourceArg = value
 				sourceKinds[dateSourceString] = struct{}{}
 			case "file":
-				var err error
-				value, i, err = dateRequireValue(inv, args, i, name, value, hasValue)
+				value, i, err = dateRequireValue(inv, args, i, rawName, value, hasValue)
 				if err != nil {
 					return dateOptions{}, err
 				}
@@ -283,8 +303,7 @@ func parseDateArgs(inv *Invocation, args []string) (dateOptions, error) {
 				opts.sourceArg = value
 				sourceKinds[dateSourceFile] = struct{}{}
 			case "reference":
-				var err error
-				value, i, err = dateRequireValue(inv, args, i, name, value, hasValue)
+				value, i, err = dateRequireValue(inv, args, i, rawName, value, hasValue)
 				if err != nil {
 					return dateOptions{}, err
 				}
@@ -292,8 +311,7 @@ func parseDateArgs(inv *Invocation, args []string) (dateOptions, error) {
 				opts.sourceArg = value
 				sourceKinds[dateSourceReference] = struct{}{}
 			case "set":
-				var err error
-				value, i, err = dateRequireValue(inv, args, i, name, value, hasValue)
+				value, i, err = dateRequireValue(inv, args, i, rawName, value, hasValue)
 				if err != nil {
 					return dateOptions{}, err
 				}
@@ -302,18 +320,17 @@ func parseDateArgs(inv *Invocation, args []string) (dateOptions, error) {
 				setSeen = true
 			case "resolution":
 				if hasValue {
-					return dateOptions{}, dateUsageError(inv, "option '--resolution' doesn't allow an argument")
+					return dateOptions{}, dateUsageError(inv, "option '--%s' doesn't allow an argument", rawName)
 				}
 				opts.source = dateSourceResolution
 				sourceKinds[dateSourceResolution] = struct{}{}
 			case "rfc-email":
 				if hasValue {
-					return dateOptions{}, dateUsageError(inv, "option '--rfc-email' doesn't allow an argument")
+					return dateOptions{}, dateUsageError(inv, "option '--%s' doesn't allow an argument", rawName)
 				}
 				opts.format = dateFormatRFCEmail
 			case "rfc-3339":
-				var err error
-				value, i, err = dateRequireValue(inv, args, i, name, value, hasValue)
+				value, i, err = dateRequireValue(inv, args, i, rawName, value, hasValue)
 				if err != nil {
 					return dateOptions{}, err
 				}
@@ -326,8 +343,6 @@ func parseDateArgs(inv *Invocation, args []string) (dateOptions, error) {
 				} else {
 					opts.formatArg = ""
 				}
-			default:
-				return dateOptions{}, dateUsageError(inv, "unrecognized option '--%s'", name)
 			}
 			continue
 		}
@@ -460,6 +475,44 @@ func dateRequireValue(inv *Invocation, args []string, index int, longName, value
 		return "", index, dateUsageError(inv, "option '--%s' requires an argument", longName)
 	}
 	return args[index+1], index + 1, nil
+}
+
+func resolveDateLongOption(inv *Invocation, name string) (string, error) {
+	for _, option := range dateLongOptions {
+		for _, alias := range option.aliases {
+			if alias == name {
+				return option.name, nil
+			}
+		}
+	}
+
+	matched := make([]string, 0, 2)
+	possibilities := make([]string, 0, 4)
+	for _, option := range dateLongOptions {
+		optionMatched := false
+		for _, alias := range option.aliases {
+			if strings.HasPrefix(alias, name) {
+				possibilities = append(possibilities, alias)
+				optionMatched = true
+			}
+		}
+		if optionMatched {
+			matched = append(matched, option.name)
+		}
+	}
+
+	switch len(matched) {
+	case 0:
+		return "", dateUsageError(inv, "unrecognized option '--%s'", name)
+	case 1:
+		return matched[0], nil
+	default:
+		quoted := make([]string, 0, len(possibilities))
+		for _, possibility := range possibilities {
+			quoted = append(quoted, fmt.Sprintf("'--%s'", possibility))
+		}
+		return "", dateUsageError(inv, "option '--%s' is ambiguous; possibilities: %s", name, strings.Join(quoted, " "))
+	}
 }
 
 func normalizeDateISOPrecision(value string) (string, error) {
