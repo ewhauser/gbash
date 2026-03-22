@@ -138,8 +138,10 @@ var promptFS embed.FS
 var systemPromptTemplate = mustParsePromptTemplate("prompts/system_prompt.tmpl")
 
 // New constructs a reusable bash tool contract.
+//
+//nolint:gocritic // Config is a public value type for ergonomic construction.
 func New(cfg Config) *Tool {
-	normalized := normalizeConfig(cfg)
+	normalized := normalizeConfig(&cfg)
 	registry := normalizedRegistry(cfg.Registry, normalized.profile)
 	defaultNames := defaultRegistryNames()
 	customNames := diffCommandNames(defaultNames, registry.Names())
@@ -275,9 +277,9 @@ func (t *Tool) Help() string {
 		doc.WriteString(strings.Join(t.customCommandNames, "`, `"))
 		doc.WriteString("`\n")
 	}
-	doc.WriteString(fmt.Sprintf("- User: `%s`\n", t.cfg.username))
-	doc.WriteString(fmt.Sprintf("- Host: `%s`\n", t.cfg.hostname))
-	doc.WriteString(fmt.Sprintf("- Home: `%s`\n", t.cfg.homeDir))
+	fmt.Fprintf(&doc, "- User: `%s`\n", t.cfg.username)
+	fmt.Fprintf(&doc, "- Host: `%s`\n", t.cfg.hostname)
+	fmt.Fprintf(&doc, "- Home: `%s`\n", t.cfg.homeDir)
 	if len(t.commandNotes) > 0 {
 		doc.WriteString("\n## Notes\n\n")
 		for _, note := range t.commandNotes {
@@ -328,9 +330,9 @@ func (t *Tool) Execute(ctx context.Context, req Request) Response {
 	opts := append([]gbash.Option{}, t.cfg.runtimeOpts...)
 	opts = append(opts,
 		gbash.WithRegistry(t.registry),
-		gbash.WithHost(newVirtualHost(t.cfg)),
+		gbash.WithHost(newVirtualHost(&t.cfg)),
 	)
-	rt, err := gbash.New(opts...)
+	rt, err := gbash.New(opts...) //nolint:contextcheck // constructor does not accept context
 	if err != nil {
 		return Response{
 			Stderr:   err.Error(),
@@ -418,7 +420,10 @@ func FormatToolResult(resp Response) string {
 	return out
 }
 
-func normalizeConfig(cfg Config) normalizedConfig {
+func normalizeConfig(cfg *Config) normalizedConfig {
+	if cfg == nil {
+		cfg = &Config{}
+	}
 	name := strings.TrimSpace(cfg.Name)
 	if name == "" {
 		name = defaultToolName
@@ -589,7 +594,7 @@ func responseFromError(err error, timeout time.Duration) Response {
 		return Response{
 			Stderr:   err.Error(),
 			ExitCode: 1,
-			Error:    "cancelled",
+			Error:    "canceled",
 		}
 	default:
 		return Response{
@@ -621,10 +626,10 @@ func toolVersion() string {
 }
 
 type virtualHost struct {
-	cfg normalizedConfig
+	cfg *normalizedConfig
 }
 
-func newVirtualHost(cfg normalizedConfig) host.Adapter {
+func newVirtualHost(cfg *normalizedConfig) host.Adapter {
 	return &virtualHost{cfg: cfg}
 }
 
@@ -656,9 +661,9 @@ func (h *virtualHost) Platform() host.Platform {
 		OS:                   osName,
 		Arch:                 machine,
 		OSType:               defaults.OSType,
-		EnvCaseInsensitive:   host.Bool(defaults.EnvCaseInsensitive),
+		EnvCaseInsensitive:   boolPtr(defaults.EnvCaseInsensitive),
 		PathExtensions:       append([]string(nil), defaults.PathExtensions...),
-		RequireExecutableBit: host.Bool(defaults.RequireExecutableBit),
+		RequireExecutableBit: boolPtr(defaults.RequireExecutableBit),
 		Uname: host.Uname{
 			SysName:         defaults.KernelName,
 			NodeName:        h.cfg.hostname,
@@ -692,6 +697,10 @@ func normalizeMachine(goarch string) string {
 	default:
 		return goarch
 	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func mustParsePromptTemplate(name string) *template.Template {
