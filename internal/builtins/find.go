@@ -489,9 +489,6 @@ func writeFindSeparated(inv *Invocation, values []string, sep string, trailing b
 
 func walkDisplayPath(rootArg, rootAbs, currentAbs string) string {
 	if currentAbs == rootAbs {
-		if strings.HasPrefix(rootArg, "/") {
-			return rootAbs
-		}
 		if rootArg == "" {
 			return "."
 		}
@@ -501,7 +498,13 @@ func walkDisplayPath(rootArg, rootAbs, currentAbs string) string {
 	rel := strings.TrimPrefix(currentAbs, rootAbs)
 	rel = strings.TrimPrefix(rel, "/")
 	if strings.HasPrefix(rootArg, "/") {
-		return currentAbs
+		if rootArg == "/" {
+			return "/" + rel
+		}
+		if strings.HasSuffix(rootArg, "/") {
+			return rootArg + rel
+		}
+		return rootArg + "/" + rel
 	}
 	if rootArg == "." {
 		return "./" + rel
@@ -653,11 +656,17 @@ func formatFindPrintf(format string, item *findPrintData) string {
 }
 
 func trimFindStartingPoint(pathValue, startingPoint string) string {
+	normalizedStartingPoint := startingPoint
+	if normalizedStartingPoint != "/" {
+		normalizedStartingPoint = strings.TrimRight(normalizedStartingPoint, "/")
+	}
 	switch {
 	case pathValue == startingPoint:
 		return ""
-	case strings.HasPrefix(pathValue, startingPoint+"/"):
-		return strings.TrimPrefix(pathValue, startingPoint+"/")
+	case normalizedStartingPoint != "" && pathValue == normalizedStartingPoint:
+		return ""
+	case normalizedStartingPoint != "" && strings.HasPrefix(pathValue, normalizedStartingPoint+"/"):
+		return strings.TrimPrefix(pathValue, normalizedStartingPoint+"/")
 	case startingPoint == "." && strings.HasPrefix(pathValue, "./"):
 		return strings.TrimPrefix(pathValue, "./")
 	default:

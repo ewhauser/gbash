@@ -238,6 +238,33 @@ func TestFindFromRootKeepsRelativePathsNormalized(t *testing.T) {
 	}
 }
 
+func TestFindPreservesAbsoluteRootSpellingInOutput(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/rooted/file.txt", []byte("data"))
+
+	result := mustExecSession(t, session,
+		"find /rooted/ -maxdepth 1 -printf '<%P>|<%p>\\n'\n"+
+			"echo ---\n"+
+			"find /rooted/../rooted -maxdepth 1\n",
+	)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	parts := strings.Split(result.Stdout, "---\n")
+	if len(parts) != 2 {
+		t.Fatalf("Stdout blocks = %q, want 2 blocks", result.Stdout)
+	}
+	if got, want := parts[0], "<>|</rooted/>\n<file.txt>|</rooted/file.txt>\n"; got != want {
+		t.Fatalf("printf output = %q, want %q", got, want)
+	}
+	if got, want := parts[1], "/rooted/../rooted\n/rooted/../rooted/file.txt\n"; got != want {
+		t.Fatalf("find output = %q, want %q", got, want)
+	}
+}
+
 func TestFindTypeQueriesAvoidDirEntryInfoForKnownEntries(t *testing.T) {
 	t.Parallel()
 
