@@ -145,6 +145,13 @@ func (fd *shellFD) UnderlyingReader() io.Reader {
 	return fd.reader
 }
 
+func (fd *shellFD) UnderlyingWriter() io.Writer {
+	if fd == nil {
+		return nil
+	}
+	return fd.writer
+}
+
 func (fd *shellFD) SetReadDeadline(t time.Time) error {
 	if fd == nil || fd.deadline == nil {
 		return nil

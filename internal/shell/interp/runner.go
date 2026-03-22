@@ -1071,7 +1071,6 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 		r.syncStandardFDs()
 	}
 	if r.exit.ok() && st.Cmd != nil {
-		r.clearStandardFDErrors()
 		ranCmd = true
 		if st.Negated {
 			oldNoErrExit := r.noErrExit
@@ -1081,7 +1080,6 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 		} else {
 			r.cmd(ctx, st.Cmd)
 		}
-		r.applyStandardFDErrors()
 	}
 	if !r.pipeStatusSet {
 		r.setPipeStatuses(r.exit.code)
