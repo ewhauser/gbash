@@ -31,14 +31,15 @@ func newScopedOverlayEnviron(parent expand.Environ, caseInsensitive bool) *overl
 }
 
 func newOverlayEnviron(parent expand.Environ, snapshot, caseInsensitive bool) *overlayEnviron {
+	epoch := newOverlayEnvEpoch(parent, snapshot)
 	oenv := &overlayEnviron{
 		caseInsensitive: caseInsensitive,
-		envEpoch:        newOverlayEnvEpoch(parent, snapshot),
+		envEpoch:        epoch,
 	}
 	if !snapshot {
 		oenv.parent = parent
 	} else if parentWrite, ok := parent.(expand.WriteEnviron); ok {
-		oenv.parent = forkWriteEnviron(parentWrite)
+		oenv.parent = forkWriteEnvironWithEpoch(parentWrite, epoch)
 	} else {
 		oenv.parent = parent
 	}
@@ -73,23 +74,34 @@ func forkEnviron(parent expand.Environ) expand.Environ {
 }
 
 func forkWriteEnviron(parent expand.WriteEnviron) expand.WriteEnviron {
+	return forkWriteEnvironWithEpoch(parent, newEnvEpoch())
+}
+
+func forkEnvironWithEpoch(parent expand.Environ, epoch *envEpoch) expand.Environ {
+	if parentWrite, ok := parent.(expand.WriteEnviron); ok {
+		return forkWriteEnvironWithEpoch(parentWrite, epoch)
+	}
+	return parent
+}
+
+func forkWriteEnvironWithEpoch(parent expand.WriteEnviron, epoch *envEpoch) expand.WriteEnviron {
 	switch parent := parent.(type) {
 	case *overlayEnviron:
 		clone := *parent
-		clone.parent = forkEnviron(parent.parent)
+		clone.parent = forkEnvironWithEpoch(parent.parent, epoch)
 		clone.valuesShared = shareMapForSubshell(parent.values, &parent.valuesShared)
 		clone.tempUnsetShared = shareMapForSubshell(parent.tempUnset, &parent.tempUnsetShared)
-		clone.envEpoch = newEnvEpoch()
+		clone.envEpoch = epoch
 		clone.visibleCache = nil
 		clone.visibleCacheEpoch = 0
 		clone.visibleCacheReady = false
 		return &clone
 	case *shadowWriteEnviron:
 		clone := *parent
-		clone.parent = forkWriteEnviron(parent.parent)
+		clone.parent = forkWriteEnvironWithEpoch(parent.parent, epoch)
 		return &clone
 	default:
-		oenv := &overlayEnviron{envEpoch: newEnvEpoch()}
+		oenv := &overlayEnviron{envEpoch: epoch}
 		for name, vr := range parent.Each() {
 			if err := oenv.Set(name, vr); err != nil {
 				panic(fmt.Sprintf("copy %s into overlay: %v", name, err))
