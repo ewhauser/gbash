@@ -2467,19 +2467,6 @@ func (p *Parser) finishWord(w *Word) *Word {
 	return w
 }
 
-func (p *Parser) currentUnexpectedTokenQuote() string {
-	switch p.tok {
-	case _Lit, _LitWord:
-		return bashQuoteString(p.val)
-	case sglQuote, dollSglQuote, dblQuote, dollDblQuote, bckQuote, dollar, dollBrace,
-		dollDblParen, dollParen, dollBrack, cmdIn, assgnParen, cmdOut:
-		if _, raw := p.getWordRaw(); raw != "" {
-			return bashQuoteString(raw)
-		}
-	}
-	return p.tok.bashQuote()
-}
-
 func (p *Parser) braceWordPartsAllowed() bool {
 	if !p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
 		return false

@@ -3135,7 +3135,10 @@ func declStringifiedArrayAssign(as *syntax.Assign) *syntax.DeclAssign {
 }
 
 func validFunctionName(name string) bool {
-	return strings.TrimSpace(name) != "" && !strings.Contains(name, "$")
+	return strings.TrimSpace(name) != "" &&
+		!strings.Contains(name, "$") &&
+		!strings.Contains(name, "<(") &&
+		!strings.Contains(name, ">(")
 }
 
 func (r *Runner) patternMatch(pat, name string) bool {
