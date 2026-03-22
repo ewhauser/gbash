@@ -34,6 +34,9 @@ func (r *Runner) trapPrintActions() map[trapID]trapAction {
 	if r == nil {
 		return nil
 	}
+	if len(r.traps.display) == 0 && len(r.traps.actions) == 0 {
+		return nil
+	}
 	actions := make(map[trapID]trapAction, len(r.traps.display)+len(r.traps.actions))
 	for id, action := range r.traps.display {
 		if action.active() {
@@ -81,6 +84,11 @@ func (r *Runner) setTrapAction(id trapID, action trapAction) {
 
 func (r *Runner) cloneTrapStateFrom(parent *Runner) {
 	if parent == nil {
+		r.traps.actions = nil
+		r.traps.display = nil
+		return
+	}
+	if len(parent.traps.actions) == 0 && len(parent.traps.display) == 0 {
 		r.traps.actions = nil
 		r.traps.display = nil
 		return

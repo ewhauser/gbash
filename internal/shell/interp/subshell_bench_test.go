@@ -89,6 +89,73 @@ func BenchmarkPipelineBurst(b *testing.B) {
 	}
 }
 
+func BenchmarkPipelineBurstDebugTrap(b *testing.B) {
+	ctx := context.Background()
+	file := parseSubshellBenchFile(b, "debuglog() { :; }\ntrap 'debuglog $LINENO' DEBUG\n"+strings.Repeat(": | : | :\n", 64))
+	for _, profile := range []subshellBenchProfile{
+		{name: "medium", env: 200, funcs: 64, aliases: 64, commandHash: 128, extraFDs: 16, frames: 8, dirStack: 8},
+		{name: "large", env: 1000, funcs: 256, aliases: 128, commandHash: 256, extraFDs: 32, frames: 16, dirStack: 16},
+	} {
+		base := newSubshellBenchRunner(b, profile)
+		b.Run(profile.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runner := base.subshell(false)
+				if err := runner.Run(ctx, file); err != nil {
+					b.Fatalf("Run() error = %v", err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkStatementFDSnapshot(b *testing.B) {
+	ctx := context.Background()
+	stmt := parseSubshellBenchStmt(b, ": 3>&1\n")
+	for _, profile := range []subshellBenchProfile{
+		{name: "medium", env: 200, funcs: 64, aliases: 64, commandHash: 128, extraFDs: 16, frames: 8, dirStack: 8},
+		{name: "large", env: 1000, funcs: 256, aliases: 128, commandHash: 256, extraFDs: 32, frames: 16, dirStack: 16},
+	} {
+		base := newSubshellBenchRunner(b, profile)
+		b.Run(profile.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				runner := base.subshell(false)
+				runner.stmt(ctx, stmt)
+			}
+		})
+	}
+}
+
+func BenchmarkPipelineFDRewire(b *testing.B) {
+	for _, profile := range []subshellBenchProfile{
+		{name: "medium", env: 200, funcs: 64, aliases: 64, commandHash: 128, extraFDs: 16, frames: 8, dirStack: 8},
+		{name: "large", env: 1000, funcs: 256, aliases: 128, commandHash: 256, extraFDs: 32, frames: 16, dirStack: 16},
+	} {
+		base := newSubshellBenchRunner(b, profile)
+		b.Run(profile.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				parent := base.subshell(false)
+				pr, pw := parent.newPipe()
+				child := parent.subshell(true)
+				child.setStandardFDs(standardFDUpdate{
+					stdout:    pw,
+					stderr:    io.Discard,
+					setStdout: true,
+					setStderr: true,
+				})
+				parent.setStandardFDs(standardFDUpdate{stdin: pr, setStdin: true})
+				_ = pw.Close()
+				_ = pr.Close()
+			}
+		})
+	}
+}
+
 func benchmarkSubshellSnapshotCase(b *testing.B, base *Runner, background bool, body func(*Runner)) {
 	b.Helper()
 	b.ReportAllocs()
@@ -158,4 +225,13 @@ func parseSubshellBenchFile(tb testing.TB, src string) *syntax.File {
 		tb.Fatalf("Parse() error = %v", err)
 	}
 	return file
+}
+
+func parseSubshellBenchStmt(tb testing.TB, src string) *syntax.Stmt {
+	tb.Helper()
+	file := parseSubshellBenchFile(tb, src)
+	if len(file.Stmts) != 1 {
+		tb.Fatalf("Parse() stmt count = %d, want 1", len(file.Stmts))
+	}
+	return file.Stmts[0]
 }

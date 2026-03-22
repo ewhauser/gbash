@@ -202,6 +202,12 @@ func (r *Runner) ensureMutableFDTable() {
 	r.fds = cloneMapOnWrite(r.fds, &r.fdsShared)
 }
 
+func (r *Runner) shareFDTableSnapshot(snapshot map[int]*shellFD) {
+	r.fds = snapshot
+	r.fdsShared = snapshot != nil
+	r.syncStandardFDs()
+}
+
 func (r *Runner) syncStandardFDs() {
 	r.ensureFDTable()
 
@@ -224,40 +230,69 @@ func (r *Runner) syncStandardFDs() {
 	}
 }
 
-func (r *Runner) setStdinReader(in StdinReader) {
-	r.stdin = in
+type standardFDUpdate struct {
+	stdin     StdinReader
+	stdout    io.Writer
+	stderr    io.Writer
+	setStdin  bool
+	setStdout bool
+	setStderr bool
+}
+
+func (r *Runner) replaceFDNoSync(fdNum int, fd *shellFD) {
+	old := r.fds[fdNum]
+	if fd == nil {
+		delete(r.fds, fdNum)
+	} else {
+		r.fds[fdNum] = fd
+	}
+	if old != nil && old != fd && old.owned && !r.fdReferencedElsewhere(fdNum, old) && !r.fdReferencedInSnapshots(old) {
+		_ = old.Close()
+	}
+}
+
+func (r *Runner) setStandardFDs(update standardFDUpdate) {
+	if update.setStdout && update.stdout == nil {
+		update.stdout = io.Discard
+	}
+	if update.setStderr && update.stderr == nil {
+		update.stderr = io.Discard
+	}
+	if update.setStdin {
+		r.stdin = update.stdin
+	}
+	if update.setStdout {
+		r.stdout = update.stdout
+	}
+	if update.setStderr {
+		r.stderr = update.stderr
+	}
 	if r.fds == nil {
 		return
 	}
 	r.ensureMutableFDTable()
-	r.fds[0] = newShellInputFD(in)
+	if update.setStdin {
+		r.replaceFDNoSync(0, newShellInputFD(update.stdin))
+	}
+	if update.setStdout {
+		r.replaceFDNoSync(1, newShellOutputFD(update.stdout))
+	}
+	if update.setStderr {
+		r.replaceFDNoSync(2, newShellOutputFD(update.stderr))
+	}
 	r.syncStandardFDs()
+}
+
+func (r *Runner) setStdinReader(in StdinReader) {
+	r.setStandardFDs(standardFDUpdate{stdin: in, setStdin: true})
 }
 
 func (r *Runner) setStdoutWriter(out io.Writer) {
-	if out == nil {
-		out = io.Discard
-	}
-	r.stdout = out
-	if r.fds == nil {
-		return
-	}
-	r.ensureMutableFDTable()
-	r.fds[1] = newShellOutputFD(out)
-	r.syncStandardFDs()
+	r.setStandardFDs(standardFDUpdate{stdout: out, setStdout: true})
 }
 
 func (r *Runner) setStderrWriter(err io.Writer) {
-	if err == nil {
-		err = io.Discard
-	}
-	r.stderr = err
-	if r.fds == nil {
-		return
-	}
-	r.ensureMutableFDTable()
-	r.fds[2] = newShellOutputFD(err)
-	r.syncStandardFDs()
+	r.setStandardFDs(standardFDUpdate{stderr: err, setStderr: true})
 }
 
 func (r *Runner) allocateFD() int {
@@ -308,15 +343,7 @@ func (fd *shellFD) writeError() error {
 
 func (r *Runner) setFD(fdNum int, fd *shellFD) {
 	r.ensureMutableFDTable()
-	old := r.fds[fdNum]
-	if fd == nil {
-		delete(r.fds, fdNum)
-	} else {
-		r.fds[fdNum] = fd
-	}
-	if old != nil && old != fd && old.owned && !r.fdReferencedElsewhere(fdNum, old) && !r.fdReferencedInSnapshots(old) {
-		_ = old.Close()
-	}
+	r.replaceFDNoSync(fdNum, fd)
 	if fdNum >= 0 && fdNum <= 2 {
 		r.syncStandardFDs()
 	}
@@ -325,6 +352,9 @@ func (r *Runner) setFD(fdNum int, fd *shellFD) {
 func (r *Runner) pushFDSnapshot(snapshot map[int]*shellFD) {
 	if snapshot == nil {
 		return
+	}
+	if r.fdSnapshots == nil {
+		r.fdSnapshots = r.fdSnapshotBootstrap[:0]
 	}
 	r.fdSnapshots = append(r.fdSnapshots, snapshot)
 }

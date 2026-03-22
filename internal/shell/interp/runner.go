@@ -64,63 +64,73 @@ func (r *Runner) currentVisibleLine(line uint) uint {
 	return 0
 }
 
+func (r *Runner) ExpandCurrentLine() uint {
+	return r.currentVisibleLine(0)
+}
+
+func (r *Runner) ExpandReportError(err error) {
+	r.expandErr(err)
+}
+
+func (r *Runner) ExpandCmdSubst(w io.Writer, cs *syntax.CmdSubst) error {
+	ctx := r.ectx
+	switch len(cs.Stmts) {
+	case 0: // nothing to do
+		return nil
+	case 1: // $(<file)
+		word := catShortcutArg(cs.Stmts[0])
+		if word == nil {
+			break
+		}
+		path := r.literal(word)
+		f, err := r.open(ctx, path, os.O_RDONLY, 0, true)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(w, f)
+		f.Close()
+		return err
+	}
+	r2 := r.subshell(false)
+	if r.expandBaseFDs != nil {
+		r2.shareFDTableSnapshot(r.expandBaseFDs)
+	}
+	r2.opts[optVerbose] = false
+	r2.setStandardFDs(standardFDUpdate{stdout: w, setStdout: true})
+	r2.stmts(ctx, cs.Stmts)
+	r2.exit.exiting = false // subshells don't exit the parent shell
+	r.lastExpandExit = r2.exit
+	r.lastExpandExit.errExitIgnored = false
+	if r2.exit.fatalExit {
+		return r2.exit.err // surface fatal errors immediately
+	}
+	return nil
+}
+
+func (r *Runner) ExpandProcSubst(ps *syntax.ProcSubst) (string, error) {
+	ctx := r.ectx
+	if len(ps.Stmts) == 0 { // nothing to do
+		return "/dev/null", nil
+	}
+	if r.procSubstHandler != nil {
+		return r.customProcSubst(ctx, ps)
+	}
+	return "", fmt.Errorf("process substitution unavailable")
+}
+
+func (r *Runner) ExpandReadDir(path string) ([]fs.DirEntry, error) {
+	return r.readDirHandler(r.handlerCtx(r.ectx, handlerKindReadDir, todoPos), path)
+}
+
 func (r *Runner) fillExpandConfig(ctx context.Context) {
 	r.ectx = ctx
-	r.ecfg = &expand.Config{
-		Env:         expandEnv{r},
-		TildeEnv:    tildeExpandEnv{r},
-		StartupHome: r.startupHome,
-		CurrentLine: func() uint {
-			return r.currentVisibleLine(0)
-		},
-		ReportError: func(err error) {
-			r.expandErr(err)
-		},
-		CmdSubst: func(w io.Writer, cs *syntax.CmdSubst) error {
-			switch len(cs.Stmts) {
-			case 0: // nothing to do
-				return nil
-			case 1: // $(<file)
-				word := catShortcutArg(cs.Stmts[0])
-				if word == nil {
-					break
-				}
-				path := r.literal(word)
-				f, err := r.open(ctx, path, os.O_RDONLY, 0, true)
-				if err != nil {
-					return err
-				}
-				_, err = io.Copy(w, f)
-				f.Close()
-				return err
-			}
-			r2 := r.subshell(false)
-			if r.expandBaseFDs != nil {
-				r2.fds = cloneFDTable(r.expandBaseFDs)
-				r2.syncStandardFDs()
-			}
-			r2.opts[optVerbose] = false
-			r2.setStdoutWriter(w)
-			r2.stmts(ctx, cs.Stmts)
-			r2.exit.exiting = false // subshells don't exit the parent shell
-			r.lastExpandExit = r2.exit
-			r.lastExpandExit.errExitIgnored = false
-			if r2.exit.fatalExit {
-				return r2.exit.err // surface fatal errors immediately
-			}
-			return nil
-		},
-		ProcSubst: func(ps *syntax.ProcSubst) (string, error) {
-			if len(ps.Stmts) == 0 { // nothing to do
-				return "/dev/null", nil
-			}
-			if r.procSubstHandler != nil {
-				return r.customProcSubst(ctx, ps)
-			}
-			return "", fmt.Errorf("process substitution unavailable")
-		},
-	}
+	r.ecfg.ResetRuntimeState()
+	r.ecfg.Env = expandEnv{r}
+	r.ecfg.Runtime = r
+	r.ecfg.TildeEnv = tildeExpandEnv{r}
+	r.ecfg.StartupHome = r.startupHome
 	r.updateExpandOpts()
+	r.ecfgInit = true
 }
 
 func (r *Runner) expandingRedirectWord(fn func() string) string {
@@ -158,7 +168,7 @@ func (r *Runner) customProcSubst(ctx context.Context, ps *syntax.ProcSubst) (str
 			if endpoint.Writer == nil {
 				return nil, fmt.Errorf("process substitution writer is nil")
 			}
-			r2.setStdoutWriter(endpoint.Writer)
+			r2.setStandardFDs(standardFDUpdate{stdout: endpoint.Writer, setStdout: true})
 			return func() {
 				if err := endpoint.Writer.Close(); err != nil {
 					r.errf("closing process substitution writer: %v\n", err)
@@ -174,8 +184,12 @@ func (r *Runner) customProcSubst(ctx context.Context, ps *syntax.ProcSubst) (str
 				cleanup()
 				return nil, err
 			}
-			r2.setStdinReader(stdin)
-			r2.setStdoutWriter(stdout)
+			r2.setStandardFDs(standardFDUpdate{
+				stdin:     stdin,
+				stdout:    stdout,
+				setStdin:  true,
+				setStdout: true,
+			})
 			return func() {
 				release()
 				cleanup()
@@ -253,13 +267,7 @@ func catShortcutArg(stmt *syntax.Stmt) *syntax.Word {
 }
 
 func (r *Runner) updateExpandOpts() {
-	if r.opts[optNoGlob] {
-		r.ecfg.ReadDir = nil
-	} else {
-		r.ecfg.ReadDir = func(s string) ([]fs.DirEntry, error) {
-			return r.readDirHandler(r.handlerCtx(r.ectx, handlerKindReadDir, todoPos), s)
-		}
-	}
+	r.ecfg.ReadDirEnabled = !r.opts[optNoGlob]
 	r.ecfg.GlobStar = r.opts[optGlobStar]
 	r.ecfg.DotGlob = r.opts[optDotGlob]
 	r.ecfg.NoCaseGlob = r.opts[optNoCaseGlob]
@@ -412,11 +420,11 @@ func (r *Runner) arithmEval(expr syntax.ArithmExpr, command, let bool, source st
 		err error
 	)
 	if source != "" {
-		n, err = expand.ArithmWithSource(r.ecfg, expr, source, sourceStart, sourceEnd)
+		n, err = expand.ArithmWithSource(&r.ecfg, expr, source, sourceStart, sourceEnd)
 	} else if let {
-		n, err = expand.ArithmLet(r.ecfg, expr)
+		n, err = expand.ArithmLet(&r.ecfg, expr)
 	} else {
-		n, err = expand.Arithm(r.ecfg, expr)
+		n, err = expand.Arithm(&r.ecfg, expr)
 	}
 	var syntaxErr expand.ArithmSyntaxError
 	var diagErr *expand.ArithmDiagnosticError
@@ -459,13 +467,13 @@ func (e arithmCommandError) Unwrap() error {
 }
 
 func (r *Runner) fields(words ...*syntax.Word) []string {
-	strs, err := expand.Fields(r.ecfg, words...)
+	strs, err := expand.Fields(&r.ecfg, words...)
 	r.expandErr(err)
 	return strs
 }
 
 func (r *Runner) literal(word *syntax.Word) string {
-	str, err := expand.Literal(r.ecfg, word)
+	str, err := expand.Literal(&r.ecfg, word)
 	r.expandErr(err)
 	return str
 }
@@ -552,6 +560,13 @@ func (r *Runner) commandDebugTrapSuppressed(cm syntax.Command) bool {
 	return r != nil && cm != nil && r.pipelineSegmentDebugSkips != nil && r.pipelineSegmentDebugSkips[cm] > 0
 }
 
+func (r *Runner) pipelineDebugActive() bool {
+	if r == nil || !r.debugTrapAllowed() {
+		return false
+	}
+	return r.trapAction(trapIDDebug).kind == trapActionCommand
+}
+
 func (r *Runner) runCommandDebugTrap(ctx context.Context, cm syntax.Command) bool {
 	if !commandUsesTopLevelDebugTrap(cm) || r.commandDebugTrapSuppressed(cm) {
 		return false
@@ -560,6 +575,9 @@ func (r *Runner) runCommandDebugTrap(ctx context.Context, cm syntax.Command) boo
 }
 
 func (r *Runner) runPipelineDebugTrap(ctx context.Context, cm *syntax.BinaryCmd) bool {
+	if !r.pipelineDebugActive() {
+		return false
+	}
 	if r.pipelineDebugTrapSuppressed(cm) {
 		return false
 	}
@@ -576,6 +594,9 @@ func (r *Runner) runPipelineDebugTrap(ctx context.Context, cm *syntax.BinaryCmd)
 }
 
 func (r *Runner) pushPipelineDebugState(cm *syntax.BinaryCmd) func() {
+	if !r.pipelineDebugActive() {
+		return func() {}
+	}
 	nodes, segments := r.pipelineDebugInfo(cm)
 	if len(nodes) == 0 && len(segments) == 0 {
 		return func() {}
@@ -629,33 +650,33 @@ func (r *Runner) condLiteral(word *syntax.Word) string {
 }
 
 func (r *Runner) assignmentLiteral(word *syntax.Word) string {
-	if r.ecfg == nil {
+	if !r.ecfgInit {
 		r.fillExpandConfig(context.Background())
 	}
-	cfg := *r.ecfg
+	cfg := r.ecfg
 	str, err := expand.AssignmentLiteral(&cfg, word)
 	r.expandErr(err)
 	return str
 }
 
 func (r *Runner) assignmentWordLiteral(word *syntax.Word) string {
-	if r.ecfg == nil {
+	if !r.ecfgInit {
 		r.fillExpandConfig(context.Background())
 	}
-	cfg := *r.ecfg
+	cfg := r.ecfg
 	str, err := expand.AssignmentWordLiteral(&cfg, word)
 	r.expandErr(err)
 	return str
 }
 
 func (r *Runner) document(word *syntax.Word) string {
-	str, err := expand.Document(r.ecfg, word)
+	str, err := expand.Document(&r.ecfg, word)
 	r.expandErr(err)
 	return str
 }
 
 func (r *Runner) pattern(pat *syntax.Pattern) string {
-	str, err := expand.Pattern(r.ecfg, pat)
+	str, err := expand.Pattern(&r.ecfg, pat)
 	r.expandErr(err)
 	return str
 }
@@ -675,7 +696,7 @@ func (r *Runner) condPattern(pat *syntax.Pattern) string {
 }
 
 func (r *Runner) patternWord(word *syntax.Word) string {
-	str, err := expand.PatternWord(r.ecfg, word)
+	str, err := expand.PatternWord(&r.ecfg, word)
 	r.expandErr(err)
 	return str
 }
@@ -993,7 +1014,9 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 	}
 	r.ensureFDTable()
 	oldIn, oldOut, oldErr := r.stdin, r.stdout, r.stderr
-	oldFDs := cloneFDTable(r.fds)
+	oldFDs := r.fds
+	oldFDsShared := r.fdsShared
+	r.fdsShared = true
 	oldTraceOutput := r.traceOutput
 	oldExpandBaseFDs := r.expandBaseFDs
 	oldNoErrExit := r.noErrExit
@@ -1083,6 +1106,7 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 	if !keepRedirs {
 		r.stdin, r.stdout, r.stderr = oldIn, oldOut, oldErr
 		r.fds = oldFDs
+		r.fdsShared = oldFDsShared
 		for fd := range keepClosedFDs {
 			r.setFD(fd, nil)
 		}
@@ -1600,7 +1624,7 @@ func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (redirResult, e
 	case syntax.RdrIn, syntax.RdrOut, syntax.RdrClob, syntax.AppOut, syntax.AppClob, syntax.RdrInOut,
 		syntax.RdrAll, syntax.RdrAllClob, syntax.AppAll, syntax.AppAllClob:
 		r.inRedirectWord++
-		fields, err := expand.RedirectFields(r.ecfg, rd.Word)
+		fields, err := expand.RedirectFields(&r.ecfg, rd.Word)
 		r.expandErr(err)
 		r.inRedirectWord--
 		if err != nil {
@@ -1617,7 +1641,7 @@ func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (redirResult, e
 		arg = fields[0]
 	case syntax.DplIn:
 		r.inRedirectWord++
-		fields, err := expand.RedirectFields(r.ecfg, rd.Word)
+		fields, err := expand.RedirectFields(&r.ecfg, rd.Word)
 		r.expandErr(err)
 		r.inRedirectWord--
 		if err != nil {
@@ -1634,7 +1658,7 @@ func (r *Runner) redir(ctx context.Context, rd *syntax.Redirect) (redirResult, e
 		arg = fields[0]
 	case syntax.DplOut:
 		r.inRedirectWord++
-		fields, err := expand.DupFields(r.ecfg, rd.Word)
+		fields, err := expand.DupFields(&r.ecfg, rd.Word)
 		r.inRedirectWord--
 		r.expandErr(err)
 		if err != nil {

@@ -168,7 +168,7 @@ func (r *Runner) strictIndexedSubscript(index *syntax.Subscript) (int, error) {
 		}
 		expr = parsed
 	}
-	n, err := expand.Arithm(r.ecfg, expr)
+	n, err := expand.Arithm(&r.ecfg, expr)
 	if err != nil {
 		return 0, strictIndexedSubscriptError{err: err}
 	}

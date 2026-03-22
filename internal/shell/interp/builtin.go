@@ -369,7 +369,7 @@ echoOpts:
 			}
 		}
 		if doExpand {
-			arg, _, _ = expand.Format(r.ecfg, arg, nil)
+			arg, _, _ = expand.Format(&r.ecfg, arg, nil)
 		}
 		if err := r.writeBuiltinString("echo", arg); err != nil {
 			return r.shellBuiltinWriteExit("echo", err)
@@ -745,7 +745,7 @@ func (r *Runner) readBuiltin(ctx context.Context, args []string) (exit exitStatu
 		if opts.exactChars >= 0 {
 			values = []string{record}
 		} else {
-			values = expand.ReadFieldsFromChars(r.ecfg, chars, -1)
+			values = expand.ReadFieldsFromChars(&r.ecfg, chars, -1)
 		}
 		r.setVar(opts.arrayName, expand.Variable{
 			Set:  true,
@@ -760,7 +760,7 @@ func (r *Runner) readBuiltin(ctx context.Context, args []string) (exit exitStatu
 			r.setVarString(name, "")
 		}
 	default:
-		values := expand.ReadFieldsFromChars(r.ecfg, chars, len(names))
+		values := expand.ReadFieldsFromChars(&r.ecfg, chars, len(names))
 		for i, name := range names {
 			val := ""
 			if i < len(values) {
