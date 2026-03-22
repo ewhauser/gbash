@@ -659,10 +659,10 @@ type Parser struct {
 	aliasSource     *AliasExpansion
 	tokAliasChain   []*AliasExpansion
 
-	// Probe parsers used to resolve $((/(( ambiguity skip nested ambiguity
-	// probing to avoid adversarial exponential recursion.
-	parenAmbiguityDisabled bool
-	parenAmbiguityDepth    int
+	// Probe parsers used while resolving $(( ambiguity skip nested $(( probes
+	// so malformed arithmetic words cannot recurse without consuming input.
+	parenAmbiguityDisabled   bool
+	parenAmbiguityProbeDepth int
 
 	pendingHeredocWarningPos    Pos
 	pendingHeredocWarningWanted string
@@ -753,7 +753,7 @@ func (p *Parser) reset() {
 	p.tokAliasChain = nil
 	p.pendingHeredocWarningPos = Pos{}
 	p.pendingHeredocWarningWanted = ""
-	p.parenAmbiguityDepth = 0
+	p.parenAmbiguityProbeDepth = 0
 	if p.aliasActive != nil {
 		clear(p.aliasActive)
 	}
@@ -1146,9 +1146,9 @@ func (p *Parser) doHeredocs() {
 				bodyOpts = append(bodyOpts, ExpandAliases(p.aliasResolver))
 			}
 			bodyParser := NewParser(bodyOpts...)
-			if p.parenAmbiguityDisabled || p.parenAmbiguityDepth > 0 {
+			if p.parenAmbiguityDisabled {
 				bodyParser.parenAmbiguityDisabled = true
-				bodyParser.parenAmbiguityDepth = p.parenAmbiguityDepth
+				bodyParser.parenAmbiguityProbeDepth = p.parenAmbiguityProbeDepth
 			}
 			r.Hdoc, p.err = bodyParser.document(strings.NewReader(raw.Lit()), bodyStart)
 			if p.err == nil && r.Hdoc != nil {
@@ -1950,6 +1950,7 @@ loop:
 		if p.tok == _EOF {
 			break
 		}
+		start := p.cursorSnapshot()
 		p.openNodes++
 		s := p.getStmt(true, false, false)
 		p.openNodes--
@@ -1959,6 +1960,10 @@ loop:
 		}
 		gotEnd = s.Semicolon.IsValid()
 		if !yield(s, p.err) {
+			break
+		}
+		if !start.progressed(p) {
+			p.posRecoverableErr(start.pos, "internal parser error: no progress parsing statement")
 			break
 		}
 	}
@@ -2590,8 +2595,8 @@ func (p *Parser) arithmWordPart(salvageTail bool) *ArithmExp {
 }
 
 func (p *Parser) parenAmbiguityWordPart() WordPart {
-	p.parenAmbiguityDepth++
-	defer func() { p.parenAmbiguityDepth-- }()
+	p.parenAmbiguityProbeDepth++
+	defer func() { p.parenAmbiguityProbeDepth-- }()
 
 	afterToken, err := p.currentSourceTail()
 	start := p.pos
@@ -2696,7 +2701,7 @@ func (p *Parser) wordPart() WordPart {
 	case dollDblParen, dollBrack:
 		p.ensureNoNested(p.pos)
 		if p.tok == dollDblParen {
-			if p.parenAmbiguityDisabled || p.parenAmbiguityDepth > 0 {
+			if p.parenAmbiguityDisabled {
 				return p.arithmWordPart(true)
 			}
 			return p.parenAmbiguityWordPart()
@@ -4982,8 +4987,8 @@ func (p *Parser) arithmExpCmdWithTail(s *Stmt, salvageTail bool) {
 }
 
 func (p *Parser) parenAmbiguityStmt(s *Stmt) {
-	p.parenAmbiguityDepth++
-	defer func() { p.parenAmbiguityDepth-- }()
+	p.parenAmbiguityProbeDepth++
+	defer func() { p.parenAmbiguityProbeDepth-- }()
 
 	afterToken, err := p.currentSourceTail()
 	start := p.pos
@@ -5073,7 +5078,7 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 }
 
 func (p *Parser) arithmExpCmd(s *Stmt) {
-	if p.parenAmbiguityDisabled || p.parenAmbiguityDepth > 0 {
+	if p.parenAmbiguityDisabled && p.parenAmbiguityProbeDepth > 1 {
 		p.arithmExpCmdWithTail(s, true)
 		return
 	}
@@ -6442,17 +6447,30 @@ func (p *Parser) letClause(s *Stmt) {
 	old := p.preNested(arithmExprLet)
 	p.next()
 	for !p.stopToken() && !p.peekRedir() {
+		start := p.cursorSnapshot()
 		if p.spaced && p.tok == hash {
 			for p.tok != _Newl && p.tok != _EOF {
+				commentStart := p.cursorSnapshot()
 				p.next()
+				if !commentStart.progressed(p) {
+					p.posRecoverableErr(commentStart.pos, "internal parser error: no progress parsing let clause")
+					break
+				}
 			}
 			break
 		}
 		x := p.arithmExpr(true)
 		if x == nil {
+			if !start.progressed(p) {
+				p.posRecoverableErr(start.pos, "internal parser error: no progress parsing let clause")
+			}
 			break
 		}
 		lc.Exprs = append(lc.Exprs, x)
+		if !start.progressed(p) {
+			p.posRecoverableErr(start.pos, "internal parser error: no progress parsing let clause")
+			break
+		}
 	}
 	if len(lc.Exprs) == 0 {
 		p.followErrExp(lc.Let, "let")

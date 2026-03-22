@@ -292,9 +292,9 @@ func (p *Parser) arithmWordSuffixEnd(compact bool) Pos {
 
 func (p *Parser) arithmSuffixWord(start, end Pos, src string) *Word {
 	doc := NewParser(Variant(p.lang), KeepComments(p.keepComments))
-	if p.parenAmbiguityDisabled || p.parenAmbiguityDepth > 0 {
+	if p.parenAmbiguityDisabled {
 		doc.parenAmbiguityDisabled = true
-		doc.parenAmbiguityDepth = p.parenAmbiguityDepth
+		doc.parenAmbiguityProbeDepth = p.parenAmbiguityProbeDepth
 	}
 	if len(p.stopAt) > 0 {
 		doc.stopAt = append([]byte(nil), p.stopAt...)
