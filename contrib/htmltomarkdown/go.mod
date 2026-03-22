@@ -1,6 +1,6 @@
 module github.com/ewhauser/gbash/contrib/htmltomarkdown
 
-go 1.26.1
+go 1.26.0
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
