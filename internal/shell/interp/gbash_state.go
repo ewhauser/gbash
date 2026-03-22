@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 
 	"github.com/ewhauser/gbash/internal/shell/expand"
 	"github.com/ewhauser/gbash/internal/shell/syntax"
@@ -138,6 +139,19 @@ func (r *Runner) ShellEnv() map[string]string {
 	if !r.didReset || r.writeEnv == nil {
 		return nil
 	}
+	out := r.materializedShellEnv()
+	if len(out) == 0 {
+		return nil
+	}
+	return maps.Clone(out)
+}
+
+func (r *Runner) materializedShellEnv() map[string]string {
+	cacheEnv, cacheEpoch, cacheable := r.currentWriteEnvCacheToken()
+	if cacheable && r.shellEnvCacheReady && r.shellEnvCacheEnv == cacheEnv && r.shellEnvCacheEpoch == cacheEpoch {
+		return r.shellEnvCache
+	}
+
 	out := make(map[string]string)
 	for name, vr := range r.writeEnv.Each() {
 		if !vr.IsSet() {
@@ -147,7 +161,13 @@ func (r *Runner) ShellEnv() map[string]string {
 		out[name] = vr.String()
 	}
 	if len(out) == 0 {
-		return nil
+		out = nil
+	}
+	if cacheable {
+		r.shellEnvCache = out
+		r.shellEnvCacheEnv = cacheEnv
+		r.shellEnvCacheEpoch = cacheEpoch
+		r.shellEnvCacheReady = true
 	}
 	return out
 }

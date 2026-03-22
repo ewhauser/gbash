@@ -49,6 +49,26 @@ type Runner struct {
 	// writeEnv overlays [Runner.Env] so that we can write environment variables
 	// as an overlay.
 	writeEnv expand.WriteEnviron
+	// shellEnvCache stores the last materialized shell-visible environment for
+	// the current writeEnv/epoch pair.
+	shellEnvCache map[string]string
+	// shellEnvCacheEnv identifies the writeEnv used to build shellEnvCache.
+	shellEnvCacheEnv expand.WriteEnviron
+	// shellEnvCacheEpoch identifies the overlay epoch used to build shellEnvCache.
+	shellEnvCacheEpoch uint64
+	// shellEnvCacheReady reports whether shellEnvCache is valid.
+	shellEnvCacheReady bool
+	// setVarsCache stores sorted set output for the current writeEnv/epoch pair.
+	setVarsCache []namedVariable
+	// setVarsCacheEnv identifies the writeEnv used to build setVarsCache.
+	setVarsCacheEnv expand.WriteEnviron
+	// setVarsCacheEpoch identifies the overlay epoch used to build setVarsCache.
+	setVarsCacheEpoch uint64
+	// setVarsCacheHasBashLineNo tracks whether writeEnv already provided
+	// BASH_LINENO while building setVarsCache.
+	setVarsCacheHasBashLineNo bool
+	// setVarsCacheReady reports whether setVarsCache is valid.
+	setVarsCacheReady bool
 
 	// Dir specifies the working directory of the command, which must be an
 	// absolute path.
@@ -1063,10 +1083,7 @@ func (r *Runner) Reset() {
 	r.dirStack = r.dirBootstrap[:0]
 	r.dirStackShared = false
 	// TODO(v4): Use the supplied Env directly if it implements enough methods.
-	r.writeEnv = &overlayEnviron{
-		parent:          r.Env,
-		caseInsensitive: r.platform.UsesCaseInsensitiveEnv(),
-	}
+	r.writeEnv = newScopedOverlayEnviron(r.Env, r.platform.UsesCaseInsensitiveEnv())
 	if !r.writeEnv.Get("TMPDIR").IsSet() {
 		r.setVarString("TMPDIR", r.tempDir)
 	}
