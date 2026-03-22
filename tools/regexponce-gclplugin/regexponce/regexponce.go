@@ -1,5 +1,7 @@
 // Package regexponce is a fork of github.com/budougumi0617/regexponce v0.1.1
-// with a fix for a nil pointer dereference in the AST visitor.
+// with fixes for:
+//   - nil pointer dereference in the AST visitor (ast.Ident.Obj can be nil)
+//   - allow regexp compilation inside sync.Once callbacks
 package regexponce
 
 import (
@@ -22,7 +24,8 @@ const doc = `Below functions should be called at once for performance.
 - regexp.CompilePOSIX
 - regexp.MustCompilePOSIX
 
-Allow call in init and main functions (unless call is in a for loop) because these functions are only called once.
+Allow call in init, main, and sync.Once callback functions (unless call is
+in a for loop) because these functions are only called once.
 `
 
 // Analyzer checks for correct usage of the regexp package.
@@ -71,6 +74,10 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			continue
 		}
 
+		if isCalledFromSyncOnce(sf) {
+			continue
+		}
+
 		for _, b := range sf.Blocks {
 			var skipped bool
 			if strings.HasPrefix(sf.Name(), "main") {
@@ -105,6 +112,41 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	}
 
 	return nil, nil
+}
+
+// isCalledFromSyncOnce reports whether sf is an anonymous function that is
+// passed to (*sync.Once).Do in its parent function, meaning it executes at
+// most once.
+func isCalledFromSyncOnce(sf *ssa.Function) bool {
+	parent := sf.Parent()
+	if parent == nil {
+		return false
+	}
+	for _, b := range parent.Blocks {
+		for _, instr := range b.Instrs {
+			call, ok := instr.(*ssa.Call)
+			if !ok {
+				continue
+			}
+			callee := call.Call.StaticCallee()
+			if callee == nil {
+				continue
+			}
+			if callee.RelString(nil) != "(*sync.Once).Do" {
+				continue
+			}
+			// Check if sf (or a MakeClosure wrapping sf) is an arg.
+			for _, arg := range call.Call.Args {
+				if arg == sf {
+					return true
+				}
+				if mc, ok := arg.(*ssa.MakeClosure); ok && mc.Fn == sf {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func variablesOrCallInCallExpr(callExpr *ast.CallExpr) bool {

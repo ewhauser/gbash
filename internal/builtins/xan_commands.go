@@ -11,9 +11,20 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
-var xanPartitionValueRe = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
+var (
+	xanPartitionValueOnce sync.Once
+	xanPartitionValueRe   *regexp.Regexp
+)
+
+func getXanPartitionValueRe() *regexp.Regexp {
+	xanPartitionValueOnce.Do(func() {
+		xanPartitionValueRe = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
+	})
+	return xanPartitionValueRe
+}
 
 func xanRunHeaders(ctx context.Context, inv *Invocation, args []string) error {
 	justNames := false
@@ -2245,7 +2256,7 @@ func xanRunPartition(ctx context.Context, inv *Invocation, args []string) error 
 }
 
 func xanSanitizePartitionValue(value string) string {
-	value = xanPartitionValueRe.ReplaceAllString(value, "_")
+	value = getXanPartitionValueRe().ReplaceAllString(value, "_")
 	if value == "" {
 		return "empty"
 	}
