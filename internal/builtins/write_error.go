@@ -2,10 +2,15 @@ package builtins
 
 import (
 	"errors"
+	"io"
 	"os"
 	"runtime"
 	"strings"
 )
+
+type underlyingWriter interface {
+	UnderlyingWriter() io.Writer
+}
 
 func shellWriteErrorDiagnostic(name string, err error) (string, bool) {
 	if runtime.GOOS == "darwin" {
@@ -28,10 +33,32 @@ func shellWriteErrorDiagnostic(name string, err error) (string, bool) {
 func shellWriteErrorText(err error) string {
 	var pathErr *os.PathError
 	if errors.As(err, &pathErr) && pathErr != nil && pathErr.Err != nil {
-		return pathErr.Err.Error()
+		return capitalizeErrorText(pathErr.Err.Error())
 	}
 	if err == nil {
 		return ""
 	}
-	return err.Error()
+	return capitalizeErrorText(err.Error())
+}
+
+func capitalizeErrorText(text string) string {
+	if text == "" {
+		return ""
+	}
+	return strings.ToUpper(text[:1]) + text[1:]
+}
+
+func resolveUnderlyingWriter(w io.Writer) io.Writer {
+	for w != nil {
+		uw, ok := w.(underlyingWriter)
+		if !ok {
+			return w
+		}
+		next := uw.UnderlyingWriter()
+		if next == nil || next == w {
+			return w
+		}
+		w = next
+	}
+	return nil
 }

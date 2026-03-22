@@ -94,11 +94,11 @@ func shellBuiltinWriteErrorDiagnostic(name string, err error) (string, bool) {
 	if runtime.GOOS == "darwin" {
 		var pathErr *os.PathError
 		if errors.As(err, &pathErr) && pathErr != nil && pathErr.Path != "" && pathErr.Err != nil {
-			text := pathErr.Err.Error()
+			text := capitalizeErrorText(pathErr.Err.Error())
 			if text == "" {
 				return "", false
 			}
-			return pathErr.Path + ": " + strings.ToUpper(text[:1]) + text[1:], true
+			return pathErr.Path + ": " + text, true
 		}
 	}
 	var pathErr *os.PathError
@@ -108,7 +108,14 @@ func shellBuiltinWriteErrorDiagnostic(name string, err error) (string, bool) {
 	if err == nil || name == "" {
 		return "", false
 	}
-	return fmt.Sprintf("%s: write error: %v", name, err), true
+	return fmt.Sprintf("%s: write error: %s", name, capitalizeErrorText(err.Error())), true
+}
+
+func capitalizeErrorText(text string) string {
+	if text == "" {
+		return ""
+	}
+	return strings.ToUpper(text[:1]) + text[1:]
 }
 
 func (r *Runner) failShellBuiltinWrite(name string, err error) exitStatus {
