@@ -15,6 +15,11 @@ type testEachEntry struct {
 
 type testEachEnviron []testEachEntry
 
+type mutableTestEnviron struct {
+	values map[string]expand.Variable
+	order  []string
+}
+
 func (e testEachEnviron) Get(name string) expand.Variable {
 	for i := len(e) - 1; i >= 0; i-- {
 		if e[i].name == name {
@@ -36,6 +41,42 @@ func (e testEachEnviron) Each() expand.VarSeq {
 
 func (e testEachEnviron) Set(name string, vr expand.Variable) error {
 	panic("unexpected Set on testEachEnviron")
+}
+
+func newMutableTestEnviron(pairs ...string) *mutableTestEnviron {
+	env := &mutableTestEnviron{values: make(map[string]expand.Variable)}
+	for _, pair := range pairs {
+		name, value, ok := strings.Cut(pair, "=")
+		if !ok {
+			continue
+		}
+		env.Set(name, expand.Variable{Set: true, Exported: true, Kind: expand.String, Str: value})
+	}
+	return env
+}
+
+func (e *mutableTestEnviron) Get(name string) expand.Variable {
+	if vr, ok := e.values[name]; ok {
+		return vr
+	}
+	return expand.Variable{}
+}
+
+func (e *mutableTestEnviron) Each() expand.VarSeq {
+	return func(yield func(string, expand.Variable) bool) {
+		for _, name := range e.order {
+			if !yield(name, e.values[name]) {
+				return
+			}
+		}
+	}
+}
+
+func (e *mutableTestEnviron) Set(name string, vr expand.Variable) {
+	if _, ok := e.values[name]; !ok {
+		e.order = append(e.order, name)
+	}
+	e.values[name] = vr
 }
 
 func TestOverlayEnvironEachIsUniqueAcrossLayers(t *testing.T) {
@@ -226,6 +267,25 @@ func TestPrintSetVarsInvalidatesCacheAndStaysSorted(t *testing.T) {
 		t.Fatalf("second set output still contains ZETA:\n%s", second)
 	}
 	assertSetOutputSorted(t, second)
+}
+
+func TestOverlayEnvironEachDoesNotCacheMutableBaseEnv(t *testing.T) {
+	t.Parallel()
+
+	base := newMutableTestEnviron("FOO=base")
+	overlay := newScopedOverlayEnviron(base, false)
+	child := newScopedOverlayEnviron(overlay, false)
+
+	if _, entries := collectEachEntries(child); entries["FOO"][0].String() != "base" {
+		t.Fatalf("initial child FOO = %q, want base", entries["FOO"][0].String())
+	}
+
+	base.Set("FOO", expand.Variable{Set: true, Exported: true, Kind: expand.String, Str: "updated"})
+
+	_, entries := collectEachEntries(child)
+	if got := entries["FOO"][0].String(); got != "updated" {
+		t.Fatalf("child FOO after mutable base update = %q, want updated", got)
+	}
 }
 
 func mustSetTestVar(tb testing.TB, env expand.WriteEnviron, name string, vr expand.Variable) {

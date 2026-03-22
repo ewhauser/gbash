@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -192,6 +193,8 @@ type envEpoch struct {
 	value uint64
 }
 
+var immutableListEnvironType = reflect.TypeOf(expand.ListEnviron())
+
 func newEnvEpoch() *envEpoch {
 	return &envEpoch{value: 1}
 }
@@ -214,6 +217,27 @@ func sharedEnvEpoch(env expand.Environ) *envEpoch {
 		return sharedEnvEpoch(env.parent)
 	default:
 		return nil
+	}
+}
+
+func isKnownImmutableEnviron(env expand.Environ) bool {
+	if env == nil {
+		return true
+	}
+	typ := reflect.TypeOf(env)
+	return typ == immutableListEnvironType
+}
+
+func cacheableParentEnviron(env expand.Environ) bool {
+	switch env := env.(type) {
+	case nil:
+		return true
+	case *overlayEnviron:
+		return env.canCacheVisibleBindings()
+	case *shadowWriteEnviron:
+		return cacheableParentEnviron(env.parent)
+	default:
+		return isKnownImmutableEnviron(env)
 	}
 }
 
@@ -248,9 +272,19 @@ func (o *overlayEnviron) bumpEnvEpoch() {
 	o.ensureEnvEpoch().value++
 }
 
+func (o *overlayEnviron) canCacheVisibleBindings() bool {
+	if o == nil {
+		return false
+	}
+	return cacheableParentEnviron(o.parent)
+}
+
 func writeEnvEpoch(env expand.WriteEnviron) (uint64, bool) {
 	switch env := env.(type) {
 	case *overlayEnviron:
+		if !env.canCacheVisibleBindings() {
+			return 0, false
+		}
 		return env.envEpochValue(), true
 	default:
 		return 0, false
@@ -343,6 +377,9 @@ func (o *overlayEnviron) Each() expand.VarSeq {
 }
 
 func (o *overlayEnviron) visibleBindings() []visibleBinding {
+	if !o.canCacheVisibleBindings() {
+		return o.buildVisibleBindings()
+	}
 	epoch := o.envEpochValue()
 	if o.visibleCacheReady && o.visibleCacheEpoch == epoch {
 		return o.visibleCache

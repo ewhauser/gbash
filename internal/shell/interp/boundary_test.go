@@ -183,6 +183,30 @@ func TestShellEnvReturnsCallerOwnedCopy(t *testing.T) {
 	}
 }
 
+func TestShellEnvDoesNotCacheMutableBaseEnv(t *testing.T) {
+	t.Parallel()
+
+	base := newMutableTestEnviron("HOME=/sandbox", "FOO=base")
+	runner, err := NewRunner(&RunnerConfig{
+		Env: base,
+		Dir: "/sandbox",
+	})
+	if err != nil {
+		t.Fatalf("NewRunner error = %v", err)
+	}
+	runner.Reset()
+
+	if got := runner.ShellEnv()["FOO"]; got != "base" {
+		t.Fatalf("initial ShellEnv[FOO] = %q, want base", got)
+	}
+
+	base.Set("FOO", expand.Variable{Set: true, Exported: true, Kind: expand.String, Str: "updated"})
+
+	if got := runner.ShellEnv()["FOO"]; got != "updated" {
+		t.Fatalf("ShellEnv[FOO] after mutable base update = %q, want updated", got)
+	}
+}
+
 type nopWriteCloser struct {
 	io.Writer
 }
