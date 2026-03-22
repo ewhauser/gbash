@@ -1,6 +1,6 @@
 module github.com/ewhauser/gbash/tools/regexponce-gclplugin
 
-go 1.26.1
+go 1.26.0
 
 require (
 	github.com/golangci/plugin-module-register v0.1.2
