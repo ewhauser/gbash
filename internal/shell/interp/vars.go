@@ -55,22 +55,6 @@ func newOverlayEnviron(parent expand.Environ, background bool) *overlayEnviron {
 	return oenv
 }
 
-func newCallAssignWriteEnviron(parent expand.WriteEnviron) *callAssignWriteEnviron {
-	cenv := &callAssignWriteEnviron{parent: parent}
-	if optEnv, _, ok := visibleBindingWriteEnv(parent, "OPTIND"); ok {
-		if state := getoptsStateForEnv(optEnv); state != nil {
-			cenv.optState = *state
-		}
-	}
-	if secondsEnv, _, ok := visibleSecondsBinding(parent); ok {
-		if started, ok := secondsStartTimeForEnv(secondsEnv); ok {
-			cenv.secondsStartTime = started
-			cenv.secondsStartSet = true
-		}
-	}
-	return cenv
-}
-
 // overlayEnviron is our main implementation of [expand.WriteEnviron].
 type overlayEnviron struct {
 	// parent is non-nil if [values] is an overlay over a parent environment
@@ -85,22 +69,20 @@ type overlayEnviron struct {
 	// functions can modify global variables. When true, [parent] must not be nil.
 	funcScope bool
 
+	// tempScope marks call-prefix assignments that should behave like bash's
+	// temporary variable scope during function calls and eval/source execution.
+	tempScope bool
+
+	// tempScopeConsumesLocals marks function-call temp scopes whose bindings
+	// should be consumed when a local of the same name is declared.
+	tempScopeConsumesLocals bool
+
 	// optState tracks clustered getopts progress for the OPTIND binding visible
 	// in this scope.
 	optState getopts
 
 	// secondsStartTime tracks the SECONDS baseline for this scope when that
 	// binding is visible from here.
-	secondsStartTime time.Time
-	secondsStartSet  bool
-}
-
-type callAssignWriteEnviron struct {
-	parent expand.WriteEnviron
-	values map[string]namedVariable
-
-	optState getopts
-
 	secondsStartTime time.Time
 	secondsStartSet  bool
 }
@@ -121,10 +103,6 @@ func (o *overlayEnviron) normalize(name string) string {
 	return normalizeEnvName(name)
 }
 
-func (e *callAssignWriteEnviron) normalize(name string) string {
-	return normalizeEnvName(name)
-}
-
 func normalizeEnvName(name string) string {
 	if runtime.GOOS == "windows" {
 		return strings.ToUpper(name)
@@ -141,14 +119,6 @@ func (o *overlayEnviron) Get(name string) expand.Variable {
 		return o.parent.Get(name)
 	}
 	return expand.Variable{}
-}
-
-func (e *callAssignWriteEnviron) Get(name string) expand.Variable {
-	normalized := e.normalize(name)
-	if vr, ok := e.values[normalized]; ok {
-		return vr.Variable
-	}
-	return e.parent.Get(name)
 }
 
 func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
@@ -188,90 +158,11 @@ func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 	return nil
 }
 
-func (e *callAssignWriteEnviron) Set(name string, vr expand.Variable) error {
-	normalized := e.normalize(name)
-	prev, inScope := e.values[normalized]
-	if !inScope {
-		return e.parent.Set(name, vr)
-	}
-	if vr.Kind == expand.KeepValue {
-		vr.Kind = prev.Kind
-		vr.Str = prev.Str
-		vr.List = prev.List
-		vr.Indices = prev.Indices
-		vr.Map = prev.Map
-	} else if prev.ReadOnly {
-		return fmt.Errorf("readonly variable")
-	}
-	if !vr.IsSet() {
-		delete(e.values, normalized)
-		return nil
-	}
-	vr.Local = prev.Local || vr.Local
-	e.values[normalized] = namedVariable{name, vr}
-	return nil
-}
-
-func (e *callAssignWriteEnviron) bind(name string, base, vr expand.Variable) error {
-	if base.ReadOnly {
-		return fmt.Errorf("readonly variable")
-	}
-	if e.values == nil {
-		e.values = make(map[string]namedVariable)
-	}
-	normalized := e.normalize(name)
-	if current, ok := e.values[normalized]; ok {
-		base = current.Variable
-	}
-	if vr.Kind == expand.KeepValue {
-		vr.Kind = base.Kind
-		vr.Str = base.Str
-		vr.List = base.List
-		vr.Indices = base.Indices
-		vr.Map = base.Map
-	}
-	vr.Local = base.Local || vr.Local
-	e.values[normalized] = namedVariable{name, vr}
-	return nil
-}
-
 func (o *overlayEnviron) Each(f func(name string, vr expand.Variable) bool) {
 	if o.parent != nil {
 		o.parent.Each(f)
 	}
 	for _, vr := range o.values {
-		if !f(vr.Name, vr.Variable) {
-			return
-		}
-	}
-}
-
-func (e *callAssignWriteEnviron) Each(f func(name string, vr expand.Variable) bool) {
-	seen := make(map[string]struct{}, len(e.values))
-	stopped := false
-	e.parent.Each(func(name string, vr expand.Variable) bool {
-		normalized := e.normalize(name)
-		if shadow, ok := e.values[normalized]; ok {
-			seen[normalized] = struct{}{}
-			if !f(shadow.Name, shadow.Variable) {
-				stopped = true
-				return false
-			}
-			return true
-		}
-		if !f(name, vr) {
-			stopped = true
-			return false
-		}
-		return true
-	})
-	if stopped {
-		return
-	}
-	for normalized, vr := range e.values {
-		if _, ok := seen[normalized]; ok {
-			continue
-		}
 		if !f(vr.Name, vr.Variable) {
 			return
 		}
@@ -312,40 +203,59 @@ func execEnv(env expand.Environ) []string {
 }
 
 func currentScopeVar(env expand.WriteEnviron, name string) (expand.Variable, bool) {
+	_, vr, ok := currentScopeBinding(env, name)
+	return vr, ok
+}
+
+func currentScopeBinding(env expand.WriteEnviron, name string) (expand.WriteEnviron, expand.Variable, bool) {
 	switch env := env.(type) {
 	case *overlayEnviron:
 		normalized := env.normalize(name)
 		vr, ok := env.values[normalized]
-		if !ok {
-			return expand.Variable{}, false
+		if ok {
+			return env, vr.Variable, true
 		}
-		return vr.Variable, true
-	case *callAssignWriteEnviron:
-		normalized := env.normalize(name)
-		vr, ok := env.values[normalized]
-		if !ok {
-			return expand.Variable{}, false
+		if parent, ok := env.parent.(expand.WriteEnviron); ok && (env.funcScope || env.tempScope) {
+			return currentTempScopeBinding(parent, name)
 		}
-		return vr.Variable, true
+		return nil, expand.Variable{}, false
 	case *shadowWriteEnviron:
 		if env.shadowSet && name == env.shadowName {
-			return env.shadow, true
+			return env, env.shadow, true
 		}
-		return currentScopeVar(env.parent, name)
+		return currentScopeBinding(env.parent, name)
 	default:
-		return expand.Variable{}, false
+		return nil, expand.Variable{}, false
+	}
+}
+
+func currentTempScopeBinding(env expand.WriteEnviron, name string) (expand.WriteEnviron, expand.Variable, bool) {
+	switch env := env.(type) {
+	case *overlayEnviron:
+		normalized := env.normalize(name)
+		if env.tempScope {
+			if vr, ok := env.values[normalized]; ok {
+				return env, vr.Variable, true
+			}
+		}
+		parent, ok := env.parent.(expand.WriteEnviron)
+		if !ok || (!env.funcScope && !env.tempScope) {
+			return nil, expand.Variable{}, false
+		}
+		return currentTempScopeBinding(parent, name)
+	case *shadowWriteEnviron:
+		if env.shadowSet && name == env.shadowName {
+			return env, env.shadow, true
+		}
+		return currentTempScopeBinding(env.parent, name)
+	default:
+		return nil, expand.Variable{}, false
 	}
 }
 
 func currentScopeVars(env expand.WriteEnviron, f func(name string, vr expand.Variable) bool) {
 	switch env := env.(type) {
 	case *overlayEnviron:
-		for _, vr := range env.values {
-			if !f(vr.Name, vr.Variable) {
-				return
-			}
-		}
-	case *callAssignWriteEnviron:
 		for _, vr := range env.values {
 			if !f(vr.Name, vr.Variable) {
 				return
@@ -372,13 +282,6 @@ func visibleBindingWriteEnv(env expand.WriteEnviron, name string) (expand.WriteE
 			return nil, expand.Variable{}, false
 		}
 		return visibleBindingWriteEnv(parent, name)
-	case *callAssignWriteEnviron:
-		normalized := env.normalize(name)
-		vr, ok := env.values[normalized]
-		if ok {
-			return env, vr.Variable, true
-		}
-		return visibleBindingWriteEnv(env.parent, name)
 	case *shadowWriteEnviron:
 		if env.shadowSet && name == env.shadowName {
 			return env, env.shadow, true
@@ -392,8 +295,6 @@ func visibleBindingWriteEnv(env expand.WriteEnviron, name string) (expand.WriteE
 func getoptsStateForEnv(env expand.WriteEnviron) *getopts {
 	switch env := env.(type) {
 	case *overlayEnviron:
-		return &env.optState
-	case *callAssignWriteEnviron:
 		return &env.optState
 	case *shadowWriteEnviron:
 		return &env.optState
@@ -426,15 +327,6 @@ func visibleSecondsBinding(env expand.WriteEnviron) (expand.WriteEnviron, expand
 			return nil, expand.Variable{}, false
 		}
 		return visibleSecondsBinding(parent)
-	case *callAssignWriteEnviron:
-		normalized := env.normalize("SECONDS")
-		if vr, ok := env.values[normalized]; ok {
-			if vr.Variable.Declared() {
-				return env, vr.Variable, true
-			}
-			return nil, expand.Variable{}, false
-		}
-		return visibleSecondsBinding(env.parent)
 	case *shadowWriteEnviron:
 		if env.shadowSet && env.shadowName == "SECONDS" {
 			if env.shadow.Declared() {
@@ -452,8 +344,6 @@ func secondsStartTimeForEnv(env expand.WriteEnviron) (time.Time, bool) {
 	switch env := env.(type) {
 	case *overlayEnviron:
 		return env.secondsStartTime, env.secondsStartSet
-	case *callAssignWriteEnviron:
-		return env.secondsStartTime, env.secondsStartSet
 	case *shadowWriteEnviron:
 		return env.secondsStartTime, env.secondsStartSet
 	default:
@@ -464,10 +354,6 @@ func secondsStartTimeForEnv(env expand.WriteEnviron) (time.Time, bool) {
 func setSecondsStartTimeForEnv(env expand.WriteEnviron, started time.Time) bool {
 	switch env := env.(type) {
 	case *overlayEnviron:
-		env.secondsStartTime = started
-		env.secondsStartSet = true
-		return true
-	case *callAssignWriteEnviron:
 		env.secondsStartTime = started
 		env.secondsStartSet = true
 		return true
@@ -483,16 +369,6 @@ func setSecondsStartTimeForEnv(env expand.WriteEnviron, started time.Time) bool 
 func deleteCurrentScopeVar(env expand.WriteEnviron, name string) bool {
 	switch env := env.(type) {
 	case *overlayEnviron:
-		if env.values == nil {
-			return false
-		}
-		normalized := env.normalize(name)
-		if _, ok := env.values[normalized]; !ok {
-			return false
-		}
-		delete(env.values, normalized)
-		return true
-	case *callAssignWriteEnviron:
 		if env.values == nil {
 			return false
 		}
@@ -525,12 +401,89 @@ func localScopeEnv(env expand.WriteEnviron) expand.WriteEnviron {
 			return env
 		}
 		return localScopeEnv(parent)
-	case *callAssignWriteEnviron:
-		return localScopeEnv(env.parent)
 	case *shadowWriteEnviron:
 		return localScopeEnv(env.parent)
 	default:
 		return env
+	}
+}
+
+func envHasTempScope(env expand.WriteEnviron) bool {
+	switch env := env.(type) {
+	case *overlayEnviron:
+		return env.tempScope
+	case *shadowWriteEnviron:
+		return envHasTempScope(env.parent)
+	default:
+		return false
+	}
+}
+
+func envAllowsDynamicUnset(env expand.WriteEnviron) bool {
+	switch env := env.(type) {
+	case *overlayEnviron:
+		return env.funcScope || env.tempScope
+	case *shadowWriteEnviron:
+		return envAllowsDynamicUnset(env.parent)
+	default:
+		return false
+	}
+}
+
+func tempScopeConsumesLocals(env expand.WriteEnviron) bool {
+	switch env := env.(type) {
+	case *overlayEnviron:
+		return env.tempScope && env.tempScopeConsumesLocals
+	case *shadowWriteEnviron:
+		return tempScopeConsumesLocals(env.parent)
+	default:
+		return false
+	}
+}
+
+func currentFrameTempBinding(env expand.WriteEnviron, name string) (expand.WriteEnviron, expand.Variable, bool) {
+	return currentFrameTempBindingWithState(env, name, false)
+}
+
+func currentFrameTempBindingWithState(env expand.WriteEnviron, name string, seenFrame bool) (expand.WriteEnviron, expand.Variable, bool) {
+	switch env := env.(type) {
+	case *overlayEnviron:
+		normalized := env.normalize(name)
+		if env.tempScope {
+			if vr, ok := env.values[normalized]; ok {
+				return env, vr.Variable, true
+			}
+			parent, ok := env.parent.(expand.WriteEnviron)
+			if !ok {
+				return nil, expand.Variable{}, false
+			}
+			return currentFrameTempBindingWithState(parent, name, true)
+		}
+		if env.funcScope {
+			if seenFrame {
+				return nil, expand.Variable{}, false
+			}
+			parent, ok := env.parent.(expand.WriteEnviron)
+			if !ok {
+				return nil, expand.Variable{}, false
+			}
+			return currentFrameTempBindingWithState(parent, name, true)
+		}
+		parent, ok := env.parent.(expand.WriteEnviron)
+		if !ok {
+			return nil, expand.Variable{}, false
+		}
+		return currentFrameTempBindingWithState(parent, name, seenFrame)
+	case *shadowWriteEnviron:
+		if env.shadowSet && name == env.shadowName {
+			if envHasTempScope(env.parent) {
+				return env, env.shadow, true
+			}
+			return nil, expand.Variable{}, false
+		}
+		return currentFrameTempBindingWithState(env.parent, name, seenFrame)
+	default:
+		return nil, expand.Variable{}, false
 	}
 }
 
@@ -542,8 +495,6 @@ func globalWriteEnv(env expand.WriteEnviron) expand.WriteEnviron {
 			return env
 		}
 		return globalWriteEnv(parent)
-	case *callAssignWriteEnviron:
-		return globalWriteEnv(env.parent)
 	case *shadowWriteEnviron:
 		return globalWriteEnv(env.parent)
 	default:

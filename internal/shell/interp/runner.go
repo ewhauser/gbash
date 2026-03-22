@@ -1258,16 +1258,37 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			break
 		}
 
-		specialCallAssigns := r.posixSpecialBuiltinActive(fields[0])
-		var restores []restoreVar
-		if specialCallAssigns {
-			restores = r.runSpecialCallAssigns(cm.Assigns)
+		assignOverlayMode := callAssignOverlayDiscard
+		assignOverlayConsumesLocals := false
+		if r.posixSpecialBuiltinActive(fields[0]) {
+			assignOverlayMode = callAssignOverlayCommit
+		} else if fields[0] != "eval" && fields[0] != "source" && fields[0] != "." {
+			if info, ok := r.funcInfo(fields[0]); ok && info.body != nil {
+				assignOverlayConsumesLocals = true
+			} else {
+				assignOverlayMode = callAssignOverlayNone
+			}
+		}
+
+		var (
+			assignOverlay *overlayEnviron
+			restoreEnv    expand.WriteEnviron
+			restores      []restoreVar
+		)
+		if len(cm.Assigns) > 0 && assignOverlayMode != callAssignOverlayNone {
+			var ok bool
+			assignOverlay, ok = r.runCallAssignOverlay(cm.Assigns, true, assignOverlayConsumesLocals)
+			if !ok || r.exit.fatalExit || r.exit.exiting {
+				break
+			}
+			restoreEnv = r.writeEnv
+			r.writeEnv = assignOverlay
 		} else {
 			restores = r.runCallAssigns(cm.Assigns)
-		}
-		if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
-			r.restoreCallAssigns(restores)
-			break
+			if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
+				r.restoreCallAssigns(restores)
+				break
+			}
 		}
 
 		r.setSpecialUnderscoreFromFields(fields)
@@ -1277,7 +1298,12 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 
 		r.call(ctx, cm.Args[0].Pos(), fields)
 		r.exit.errExitIgnored = false
-		if !specialCallAssigns {
+		if assignOverlay != nil {
+			if assignOverlayMode == callAssignOverlayCommit && !r.exit.fatalExit {
+				r.commitCallAssignOverlay(assignOverlay)
+			}
+			r.writeEnv = restoreEnv
+		} else {
 			r.restoreCallAssigns(restores)
 		}
 	case *syntax.BinaryCmd:
@@ -1881,8 +1907,8 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			if !local || global {
 				return env.Get(name)
 			}
-			if vr, ok := currentScopeVar(localScopeEnv(env), name); ok {
-				if !vr.Local {
+			if owner, vr, ok := currentScopeBinding(localScopeEnv(env), name); ok {
+				if !vr.Local && !envHasTempScope(owner) {
 					return expand.Variable{}
 				}
 				return vr
@@ -2005,6 +2031,9 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				return true
 			}
 			targetEnv := r.writeEnv
+			if local {
+				targetEnv = localScopeEnv(r.writeEnv)
+			}
 			if global && r.inFunc {
 				targetEnv = globalWriteEnv(r.writeEnv)
 			} else if !local {
@@ -2013,6 +2042,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				}
 			}
 			return runWithWriteEnv(targetEnv, func() bool {
+				frameTempOwner, _, hasFrameTemp := currentFrameTempBinding(r.writeEnv, name)
 				vr := declLookupVar(targetEnv, name)
 				declaredBefore := vr.Declared()
 				if msg := arrayConversionError(name, vr); msg != "" {
@@ -2223,6 +2253,9 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 				}
 				if !isAssign {
 					r.setVar(name, vr)
+					if local && hasFrameTemp && frameTempOwner != targetEnv && tempScopeConsumesLocals(frameTempOwner) {
+						deleteCurrentScopeVar(frameTempOwner, name)
+					}
 					if declName == "readonly" && !declaredBefore && !vr.IsSet() &&
 						(vr.Kind == expand.Indexed || vr.Kind == expand.Associative) {
 						r.setHiddenReadonlyArrayDecl(name, vr.Kind)
@@ -2255,6 +2288,9 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					}
 					r.exit.code = 1
 					return false
+				}
+				if local && hasFrameTemp && frameTempOwner != targetEnv && tempScopeConsumesLocals(frameTempOwner) {
+					deleteCurrentScopeVar(frameTempOwner, name)
 				}
 				r.clearHiddenReadonlyArrayDecl(name)
 				if tracingEnabled {
@@ -2682,17 +2718,11 @@ type restoreVar struct {
 	secondsEnv       expand.WriteEnviron
 	secondsStartTime time.Time
 	restoreSeconds   bool
-	popWriteEnv      expand.WriteEnviron
 }
 
 func (r *Runner) restoreCallAssigns(restores []restoreVar) {
-	var popWriteEnv expand.WriteEnviron
 	for i := len(restores) - 1; i >= 0; i-- {
 		restore := restores[i]
-		if restore.popWriteEnv != nil {
-			popWriteEnv = restore.popWriteEnv
-			continue
-		}
 		if restore.restoreSeconds {
 			if err := r.writeEnv.Set(restore.name, restore.vr); err != nil {
 				r.errf("%s: %v\n", restore.name, err)
@@ -2706,14 +2736,6 @@ func (r *Runner) restoreCallAssigns(restores []restoreVar) {
 			continue
 		}
 		r.setVar(restore.name, restore.vr)
-	}
-	if popWriteEnv != nil {
-		if cenv, ok := r.writeEnv.(*callAssignWriteEnviron); ok {
-			if _, hasPath := cenv.values[cenv.normalize("PATH")]; hasPath {
-				r.commandHashClear()
-			}
-		}
-		r.writeEnv = popWriteEnv
 	}
 }
 
@@ -2734,12 +2756,63 @@ func (r *Runner) expandAssignsForSideEffects(assigns []*syntax.Assign) bool {
 	return true
 }
 
+type callAssignOverlayMode uint8
+
+const (
+	callAssignOverlayNone callAssignOverlayMode = iota
+	callAssignOverlayDiscard
+	callAssignOverlayCommit
+)
+
+func (r *Runner) runCallAssignOverlay(assigns []*syntax.Assign, forceExport, consumeLocals bool) (*overlayEnviron, bool) {
+	overlay := &overlayEnviron{
+		parent:                  r.writeEnv,
+		tempScope:               true,
+		tempScopeConsumesLocals: consumeLocals,
+	}
+	origEnv := r.writeEnv
+	r.writeEnv = overlay
+	defer func() {
+		r.writeEnv = origEnv
+	}()
+	_ = r.runCallAssignsWithExport(assigns, forceExport)
+	if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
+		return nil, false
+	}
+	return overlay, true
+}
+
+func (r *Runner) commitCallAssignOverlay(overlay *overlayEnviron) {
+	if overlay == nil {
+		return
+	}
+	parent, ok := overlay.parent.(expand.WriteEnviron)
+	if !ok {
+		return
+	}
+	names := make([]string, 0, len(overlay.values))
+	for _, vr := range overlay.values {
+		names = append(names, vr.Name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		vr, ok := overlay.values[overlay.normalize(name)]
+		if !ok {
+			continue
+		}
+		origEnv := r.writeEnv
+		r.writeEnv = parent
+		r.setVar(vr.Name, vr.Variable)
+		r.writeEnv = origEnv
+	}
+}
+
 func (r *Runner) runCallAssigns(assigns []*syntax.Assign) []restoreVar {
-	return r.runCallAssignsWithExport(assigns, true, true)
+	return r.runCallAssignsWithExport(assigns, true)
 }
 
 func (r *Runner) runSpecialCallAssigns(assigns []*syntax.Assign) []restoreVar {
-	return r.runCallAssignsWithExport(assigns, true, false)
+	return r.runCallAssignsWithExport(assigns, true)
 }
 
 func (r *Runner) callAssignRestoreVar(name string, vr expand.Variable) restoreVar {
@@ -2761,13 +2834,8 @@ func (r *Runner) callAssignRestoreVar(name string, vr expand.Variable) restoreVa
 	return restore
 }
 
-func (r *Runner) runCallAssignsWithExport(assigns []*syntax.Assign, forceExport, temporary bool) []restoreVar {
+func (r *Runner) runCallAssignsWithExport(assigns []*syntax.Assign, forceExport bool) []restoreVar {
 	var restores []restoreVar
-	if temporary && len(assigns) > 0 {
-		parentEnv := r.writeEnv
-		r.writeEnv = newCallAssignWriteEnviron(parentEnv)
-		restores = append(restores, restoreVar{popWriteEnv: parentEnv})
-	}
 	for _, as := range assigns {
 		name := as.Ref.Name.Value
 		prev := r.lookupVar(name)
@@ -2792,41 +2860,16 @@ func (r *Runner) runCallAssignsWithExport(assigns []*syntax.Assign, forceExport,
 			} else {
 				vr.Exported = resolvedPrev.Exported
 			}
-			if temporary {
-				cenv := r.writeEnv.(*callAssignWriteEnviron)
-				if resolvedRef.Index != nil {
-					base := resolvedPrev
-					base.Exported = vr.Exported
-					if err := cenv.bind(resolvedRef.Name.Value, resolvedPrev, base); err != nil {
-						r.errf("%s: %v\n", resolvedRef.Name.Value, err)
-						r.exit.code = 1
-						return restores
-					}
-					if err := r.setVarByRef(prev, as.Ref, vr, as.Append, attrUpdate{}); err != nil {
-						r.errf("%v\n", err)
-						r.exit.code = 1
-						return restores
-					}
-				} else {
-					if err := cenv.bind(resolvedRef.Name.Value, resolvedPrev, vr); err != nil {
-						r.errf("%s: %v\n", resolvedRef.Name.Value, err)
-						r.exit.code = 1
-						return restores
-					}
-				}
-				r.afterSetVar(resolvedRef.Name.Value, vr)
-			} else {
-				restore := r.callAssignRestoreVar(resolvedRef.Name.Value, resolvedPrev)
-				if err := r.setVarByRef(prev, as.Ref, vr, as.Append, attrUpdate{}); err != nil {
-					r.errf("%v\n", err)
-					r.exit.code = 1
-					return restores
-				}
-				restores = append(restores, restore)
+			restore := r.callAssignRestoreVar(resolvedRef.Name.Value, resolvedPrev)
+			if err := r.setVarByRef(prev, as.Ref, vr, as.Append, attrUpdate{}); err != nil {
+				r.errf("%v\n", err)
+				r.exit.code = 1
+				return restores
 			}
 			if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
 				return restores
 			}
+			restores = append(restores, restore)
 			continue
 		}
 
@@ -2846,38 +2889,13 @@ func (r *Runner) runCallAssignsWithExport(assigns []*syntax.Assign, forceExport,
 		} else {
 			vr.Exported = resolvedPrev.Exported
 		}
-		if temporary {
-			cenv := r.writeEnv.(*callAssignWriteEnviron)
-			if resolvedRef.Index != nil {
-				base := resolvedPrev
-				base.Exported = vr.Exported
-				if err := cenv.bind(resolvedRef.Name.Value, resolvedPrev, base); err != nil {
-					r.errf("%s: %v\n", resolvedRef.Name.Value, err)
-					r.exit.code = 1
-					return restores
-				}
-				if err := r.setVarByRef(prev, as.Ref, vr, as.Append, attrUpdate{}); err != nil {
-					r.errf("%v\n", err)
-					r.exit.code = 1
-					return restores
-				}
-			} else {
-				if err := cenv.bind(resolvedRef.Name.Value, resolvedPrev, vr); err != nil {
-					r.errf("%s: %v\n", resolvedRef.Name.Value, err)
-					r.exit.code = 1
-					return restores
-				}
-			}
-			r.afterSetVar(resolvedRef.Name.Value, vr)
-		} else {
-			restore := r.callAssignRestoreVar(resolvedRef.Name.Value, resolvedPrev)
-			if err := r.setVarByRef(prev, as.Ref, vr, as.Append, attrUpdate{}); err != nil {
-				r.errf("%v\n", err)
-				r.exit.code = 1
-				return restores
-			}
-			restores = append(restores, restore)
+		restore := r.callAssignRestoreVar(resolvedRef.Name.Value, resolvedPrev)
+		if err := r.setVarByRef(prev, as.Ref, vr, as.Append, attrUpdate{}); err != nil {
+			r.errf("%v\n", err)
+			r.exit.code = 1
+			return restores
 		}
+		restores = append(restores, restore)
 		if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
 			return restores
 		}
