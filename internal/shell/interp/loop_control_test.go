@@ -24,6 +24,26 @@ echo done
 	}
 }
 
+func TestBreakInConditionClampedToLoopDepth(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+while break 2; do :; done
+while :; do echo second; break; done
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+
+	const wantStdout = "second\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestTopLevelReturnReportsStatusTwo(t *testing.T) {
 	t.Parallel()
 
