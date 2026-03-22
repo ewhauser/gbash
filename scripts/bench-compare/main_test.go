@@ -131,6 +131,57 @@ func TestCreateAgenticSearchFixture(t *testing.T) {
 	}
 }
 
+func TestCreateExpansionStressFixture(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "workspace")
+	summary, err := createExpansionStressFixture(root)
+	if err != nil {
+		t.Fatalf("createExpansionStressFixture() error = %v", err)
+	}
+	if summary.FileCount != 481 {
+		t.Fatalf("FileCount = %d, want 481", summary.FileCount)
+	}
+	assertFixtureSummaryMatchesWalk(t, root, summary)
+
+	matches, err := filepath.Glob(filepath.Join(root, "pkg0[0-3]", "section0[0-2]", "file0[0-3][0-9].txt"))
+	if err != nil {
+		t.Fatalf("Glob() error = %v", err)
+	}
+	if got, want := len(matches), 480; got != want {
+		t.Fatalf("glob match count = %d, want %d", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, "literal*dir", "[meta]?", "report.txt")); err != nil {
+		t.Fatalf("Stat(literal metachar path) error = %v", err)
+	}
+}
+
+func TestExpansionStressScenarioMatchesExpectedStdoutUnderBash(t *testing.T) {
+	t.Parallel()
+
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+
+	root := filepath.Join(t.TempDir(), "workspace")
+	summary, err := createExpansionStressFixture(root)
+	if err != nil {
+		t.Fatalf("createExpansionStressFixture() error = %v", err)
+	}
+
+	cmd := exec.CommandContext(context.Background(), bashPath, "--noprofile", "--norc", "-c", expansionStressCommand)
+	cmd.Dir = summary.Root
+	cmd.Env = append(os.Environ(), "BASH_ENV=")
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bash expansion stress command failed: %v\noutput=%s", err, output)
+	}
+	if got, want := string(output), expansionStressExpectedStdout; got != want {
+		t.Fatalf("bash expansion stress stdout = %q, want %q", got, want)
+	}
+}
+
 func TestSummarizeDurations(t *testing.T) {
 	t.Parallel()
 	stats, ok := summarizeDurations([]time.Duration{
@@ -166,9 +217,14 @@ func TestBenchmarkScenarios(t *testing.T) {
 		FileCount:  300,
 		TotalBytes: 24120,
 	}
+	expansionFixture := fixtureSummary{
+		Root:       filepath.Join(string(filepath.Separator), "tmp", "expansion"),
+		FileCount:  481,
+		TotalBytes: 30293,
+	}
 
-	scenarios := benchmarkScenarios(workspaceFixture, agenticFixture)
-	if got, want := len(scenarios), 3; got != want {
+	scenarios := benchmarkScenarios(workspaceFixture, agenticFixture, expansionFixture)
+	if got, want := len(scenarios), 4; got != want {
 		t.Fatalf("len(benchmarkScenarios()) = %d, want %d", got, want)
 	}
 
@@ -180,12 +236,13 @@ func TestBenchmarkScenarios(t *testing.T) {
 		"startup_echo",
 		"workspace_inventory",
 		"agentic_search",
+		"expansion_stress",
 	}
 	if !slices.Equal(gotNames, wantNames) {
 		t.Fatalf("scenario names = %q, want %q", gotNames, wantNames)
 	}
 
-	for _, index := range []int{0, 1, 2} {
+	for _, index := range []int{0, 1, 2, 3} {
 		if got, want := scenarios[index].WarmupScript, "true\n"; got != want {
 			t.Fatalf("scenarios[%d].WarmupScript = %q, want %q", index, got, want)
 		}
@@ -219,6 +276,36 @@ func TestBenchmarkScenarios(t *testing.T) {
 	}
 	if !strings.Contains(scenarios[2].Command, "jq -s") {
 		t.Fatalf("agentic_search command = %q, want jq usage", scenarios[2].Command)
+	}
+	if !scenarios[3].Workspace {
+		t.Fatalf("expansion_stress should mount the generated fixture")
+	}
+	if scenarios[3].RequiresJQ {
+		t.Fatalf("expansion_stress should not require jq")
+	}
+	if got, want := scenarios[3].ExpectedStdout, expansionStressExpectedStdout; got != want {
+		t.Fatalf("expansion_stress ExpectedStdout = %q, want %q", got, want)
+	}
+	if scenarios[3].Fixture == nil {
+		t.Fatalf("expansion_stress Fixture = nil, want fixture summary")
+	}
+	if got, want := scenarios[3].Fixture.Root, expansionFixture.Root; got != want {
+		t.Fatalf("expansion_stress Fixture.Root = %q, want %q", got, want)
+	}
+	if !strings.Contains(scenarios[3].Command, `IFS=':ç'`) {
+		t.Fatalf("expansion_stress command = %q, want multibyte IFS coverage", scenarios[3].Command)
+	}
+	if !strings.Contains(scenarios[3].Command, `set -- ./pkg0[0-3]/section0[0-2]/file0[0-3][0-9].txt`) {
+		t.Fatalf("expansion_stress command = %q, want glob coverage", scenarios[3].Command)
+	}
+	if !strings.Contains(scenarios[3].Command, `redir_payload=$( (`) {
+		t.Fatalf("expansion_stress command = %q, want subshell capture coverage", scenarios[3].Command)
+	}
+	if !strings.Contains(scenarios[3].Command, `<<EOFREDIR`) {
+		t.Fatalf("expansion_stress command = %q, want heredoc stdin redirection coverage", scenarios[3].Command)
+	}
+	if !strings.Contains(scenarios[3].Command, `) 2>&1 )`) {
+		t.Fatalf("expansion_stress command = %q, want stderr redirection coverage", scenarios[3].Command)
 	}
 }
 
