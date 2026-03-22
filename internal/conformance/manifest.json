@@ -349,14 +349,6 @@
         "oils/serialize.test.sh::${var@Q}": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/smoke.test.sh::failed command": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash"
-        },
-        "oils/glob.test.sh::Glob unicode char": {
-          "mode": "xfail",
-          "reason": "conformance: C.UTF-8 pathname collation order still differs from bash for this glob case"
         }
       }
     }
