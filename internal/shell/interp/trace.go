@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/ewhauser/gbash/internal/shell/expand"
@@ -356,9 +357,11 @@ func traceANSIQuote(arg string, cLocale bool) string {
 	b.WriteString("$'")
 	for i := 0; i < len(arg); {
 		if !cLocale {
-			_, size := utf8.DecodeRuneInString(arg[i:])
-			if size > 1 {
-				// Valid multi-byte UTF-8 (including U+FFFD): preserve as-is.
+			r, size := utf8.DecodeRuneInString(arg[i:])
+			if size > 1 && unicode.IsPrint(r) {
+				// Printable multi-byte UTF-8: preserve as-is.
+				// Non-printable runes (e.g. U+0085 NEXT LINE) fall
+				// through to per-byte octal escaping like bash.
 				b.WriteString(arg[i : i+size])
 				i += size
 				continue

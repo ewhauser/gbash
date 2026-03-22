@@ -158,6 +158,28 @@ echo "$s"
 	}
 }
 
+func TestXTraceNonPrintableUTF8UsesOctalEscapes(t *testing.T) {
+	t.Parallel()
+
+	// U+0085 (NEXT LINE) is a valid 2-byte UTF-8 sequence (C2 85) but
+	// non-printable; bash escapes it as octal even in UTF-8 locales.
+	stdout, stderr, err := runInterpScript(t, `
+s=$'\xc2\x85\x03'
+set -x
+echo "$s"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if got, want := stdout, "\xc2\x85\x03\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	const wantStderr = "+ echo $'\\302\\205\\003'\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
+	}
+}
+
 func TestXTracePS4CommandSubstDoesNotTraceRecursively(t *testing.T) {
 	t.Parallel()
 
