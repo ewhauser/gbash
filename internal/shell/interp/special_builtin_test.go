@@ -189,7 +189,7 @@ echo after
 func TestReadonlyAssignmentAbortsShellExecution(t *testing.T) {
 	t.Parallel()
 
-	t.Run("non-posix-simple-list", func(t *testing.T) {
+	t.Run("non-posix-standalone-simple-list", func(t *testing.T) {
 		t.Parallel()
 
 		stdout, stderr, err := runInterpScript(t, `
@@ -197,6 +197,24 @@ readonly x=1; x=2; echo hi
 `)
 		requireInterpExitStatus(t, err, 1)
 		if got, want := stdout, ""; got != want {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+		if got, want := stderr, "x: readonly variable\n"; got != want {
+			t.Fatalf("stderr = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("non-posix-skips-rest-of-line-only", func(t *testing.T) {
+		t.Parallel()
+
+		stdout, stderr, err := runInterpScript(t, `
+readonly x=1; x=2; echo hi
+echo next
+`)
+		if err != nil {
+			t.Fatalf("Run error = %v", err)
+		}
+		if got, want := stdout, "next\n"; got != want {
 			t.Fatalf("stdout = %q, want %q", got, want)
 		}
 		if got, want := stderr, "x: readonly variable\n"; got != want {

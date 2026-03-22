@@ -1222,8 +1222,12 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 					if strings.HasSuffix(err.Error(), ": readonly variable") {
 						if r.posixMode() {
 							r.exit.code = 127
+							r.exit.exiting = true
+							return
 						}
-						r.exit.exiting = true
+						if r.currentStmtLine != 0 {
+							r.skipStmtLine = r.currentStmtLine
+						}
 						return
 					}
 					var strictErr strictIndexedSubscriptError
