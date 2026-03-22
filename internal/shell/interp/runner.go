@@ -1358,7 +1358,12 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 			oldNoErrExit := r.noErrExit
 			r.noErrExit = true
 			r.loopDepth++
-			r.stmts(ctx, cm.Cond)
+			for _, condStmt := range cm.Cond {
+				r.stmt(ctx, condStmt)
+				if r.breakEnclosing > 0 || r.contnEnclosing > 0 {
+					break
+				}
+			}
 			r.loopDepth--
 			r.noErrExit = oldNoErrExit
 			if r.stmtAborted() {
