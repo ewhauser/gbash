@@ -98,7 +98,11 @@ func TestExpandTabListsAndShortcuts(t *testing.T) {
 			"printf '%s\\n' ---\n" +
 			"printf '\\ta\\tb\\tc' | expand --tabs=8,+4\n" +
 			"printf '%s\\n' ---\n" +
-			"printf '\\ta\\tb\\tc' | expand -2,5 -7\n",
+			"printf '\\ta\\tb\\tc' | expand -2,5 -7\n" +
+			"printf '%s\\n' ---\n" +
+			"printf '\\ta\\tb\\tc' | expand -8,/4\n" +
+			"printf '%s\\n' ---\n" +
+			"printf '\\ta\\tb\\tc' | expand -1,+5\n",
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -113,7 +117,9 @@ func TestExpandTabListsAndShortcuts(t *testing.T) {
 		" a    b    c---\n" +
 		"        a   b   c---\n" +
 		"        a   b   c---\n" +
-		"  a  b c"
+		"  a  b c---\n" +
+		"        a   b   c---\n" +
+		" a    b    c"
 	if got := result.Stdout; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
@@ -163,6 +169,17 @@ func TestExpandErrorsMatchCoreutilsStyle(t *testing.T) {
 	}
 	if got, want := invalidTabs.Stderr, "expand: '+' specifier only allowed with the last value\n"; got != want {
 		t.Fatalf("invalidTabs stderr = %q, want %q", got, want)
+	}
+
+	invalidLegacyTabs, err := rt.Run(context.Background(), &ExecutionRequest{Script: "expand -+5\n"})
+	if err != nil {
+		t.Fatalf("Run(invalidLegacyTabs) error = %v", err)
+	}
+	if invalidLegacyTabs.ExitCode != 1 {
+		t.Fatalf("invalidLegacyTabs ExitCode = %d, want 1", invalidLegacyTabs.ExitCode)
+	}
+	if got, want := invalidLegacyTabs.Stderr, "expand: invalid option -- '+'\nTry 'expand --help' for more information.\n"; got != want {
+		t.Fatalf("invalidLegacyTabs stderr = %q, want %q", got, want)
 	}
 
 	session := newSession(t, &Config{})
