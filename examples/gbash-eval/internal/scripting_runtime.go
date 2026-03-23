@@ -427,8 +427,7 @@ func argValue(args []string, flag string) (string, bool, error) {
 			}
 			return args[i+1], true, nil
 		}
-		if strings.HasPrefix(arg, flag+"=") {
-			value := strings.TrimPrefix(arg, flag+"=")
+		if value, ok := strings.CutPrefix(arg, flag+"="); ok {
 			if value == "" {
 				return "", false, fmt.Errorf("missing value for %s", flag)
 			}
