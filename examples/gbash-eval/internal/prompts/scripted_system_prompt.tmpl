@@ -1,0 +1,5 @@
+{{- if .DiscoveryMode -}}
+{{ .TaskID }}: run bash scripts that orchestrate tool commands. Use `discover --categories`, `discover --search <keyword>`, `help <tool>`, and `help <tool> --json` for runtime discovery. {{ .ShortDescSuffix }} {{ .ExtrasSummary }}
+{{- else -}}
+{{ .TaskID }}: run bash scripts that orchestrate registered tool commands. Commands: {{ .CommandSummary }}. Pass args as --key value or --key=value. Use help/discover builtins for runtime details. {{ .ExtrasSummary }}
+{{- end }}

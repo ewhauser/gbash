@@ -515,9 +515,25 @@ Those command paths are virtual stubs used for shell resolution. Command impleme
 |---|---|
 | [`adk-bash-chat`](./examples/adk-bash-chat/) | Local CLI chatbot using [`adk-go`](https://github.com/google/adk-go) with a persistent `gbash` bash tool session and a seeded ops analytics lab |
 | [`custom-zstd`](./examples/custom-zstd/) | Demonstrates custom command registration by adding a `zstd` compression/decompression command |
+| [`gbash-eval`](./examples/gbash-eval/) | Standalone LLM evaluator example that ports [`bashkit`](https://github.com/everruns/bashkit)'s `crates/bashkit-eval` design and vendored JSONL datasets onto `gbash` |
 | [`openai-tool-call`](./examples/openai-tool-call/) | Uses the OpenAI Go SDK Responses API with `gbash` as a `bash` function tool |
 | [`sqlite-backed-fs`](./examples/sqlite-backed-fs/) | Custom `gbfs.FileSystem` backed by a SQLite database for persistent sandbox filesystem state |
 | [`transactional-workspaces`](./examples/transactional-workspaces/) | Narrated snapshot/rollback/branch demo showing how `gbash` sessions become reversible, inspectable shell workspaces |
+
+The `gbash-eval` example is intentionally attribution-heavy because it is a direct Go port of upstream evaluator ideas and copied dataset fixtures from [`everruns/bashkit`](https://github.com/everruns/bashkit/tree/main/crates/bashkit-eval), adapted under Apache-2.0 for `gbash`.
+
+Smoke test from the repo root:
+
+```bash
+export OPENAI_API_KEY=your-api-key
+go run ./examples/gbash-eval run \
+  --dataset ./examples/gbash-eval/data/smoke-test.jsonl \
+  --provider openresponses \
+  --model gpt-5-codex \
+  --save
+```
+
+To run only selected eval task IDs, add `--task` with repeated or comma-separated values.
 
 ## Development
 
@@ -535,4 +551,4 @@ This project is licensed under the [Apache License 2.0](./LICENSE). Copyright
 - [`just-bash`](https://github.com/vercel-labs/just-bash) sparked the idea for `gbash` and provided the starting point for the initial port.
 - [`mvdan/sh`](https://github.com/mvdan/sh) provides the shell parser and interpreter foundation that `gbash` forks and builds on in-tree.
 - [`uutils/coreutils`](https://github.com/uutils/coreutils) provides the baseline behavior and implementations behind many of the command ports.
-- [`bashkit`](https://github.com/everruns/bashkit) contributed strong ideas for structuring shell conformance testing well.
+- [`bashkit`](https://github.com/everruns/bashkit) is the upstream source for the `examples/gbash-eval` evaluator design and the vendored JSONL datasets copied from `crates/bashkit-eval`, adapted here under Apache-2.0 without carrying over upstream `results/` artifacts.
