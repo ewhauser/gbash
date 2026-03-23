@@ -926,7 +926,11 @@ func randomizeSortLines(ctx context.Context, inv *Invocation, lines []string, op
 	}
 	groups := sortEquivalentGroups(lines, opts)
 	gosort.SliceStable(groups, func(i, j int) bool {
-		return bytes.Compare(sortGroupRandomHash(groups[i], salt), sortGroupRandomHash(groups[j], salt)) < 0
+		cmp := bytes.Compare(sortGroupRandomHash(groups[i], salt, opts), sortGroupRandomHash(groups[j], salt, opts))
+		if opts.reverse {
+			return cmp > 0
+		}
+		return cmp < 0
 	})
 	out := make([]string, 0, len(lines))
 	for _, group := range groups {
@@ -961,6 +965,7 @@ func sortEquivalentGroups(lines []string, opts *sortOptions) [][]string {
 	normalized := append([]string(nil), lines...)
 	groupOpts := *opts
 	groupOpts.randomSort = false
+	groupOpts.reverse = false
 	groupOpts.stable = true
 	gosort.SliceStable(normalized, func(i, j int) bool {
 		return compareSortLines(normalized[i], normalized[j], &groupOpts) < 0
@@ -976,10 +981,127 @@ func sortEquivalentGroups(lines []string, opts *sortOptions) [][]string {
 	return groups
 }
 
-func sortGroupRandomHash(group []string, salt []byte) []byte {
-	payload := group[0]
+func sortGroupRandomHash(group []string, salt []byte, opts *sortOptions) []byte {
+	payload := sortRandomHashPayload(group, opts)
 	sum := sha256.Sum256(append(append([]byte{}, salt...), payload...))
 	return sum[:]
+}
+
+func sortRandomHashPayload(group []string, opts *sortOptions) []byte {
+	if len(group) == 0 {
+		return nil
+	}
+	line := group[0]
+	if opts.ignoreLeadingBlanks {
+		line = strings.TrimLeftFunc(line, unicode.IsSpace)
+	}
+	if len(opts.keys) == 0 {
+		return sortCanonicalValueBytes(line, opts)
+	}
+
+	var payload bytes.Buffer
+	for _, key := range opts.keys {
+		value := extractSortKeyValue(line, key, opts.fieldDelimiter)
+		if key.ignoreLeading {
+			value = strings.TrimLeftFunc(value, unicode.IsSpace)
+		}
+		keyOpts := sortKeyComparisonOptions(opts, key)
+		chunk := sortCanonicalValueBytes(value, &keyOpts)
+		payload.WriteString(strconv.Itoa(len(chunk)))
+		payload.WriteByte(':')
+		payload.Write(chunk)
+		payload.WriteByte(0)
+	}
+	return payload.Bytes()
+}
+
+func sortCanonicalValueBytes(value string, opts *sortOptions) []byte {
+	normalized := value
+	if opts.ignoreNonprinting {
+		normalized = toPrintableOnly(normalized)
+	}
+	if opts.dictionaryOrder {
+		normalized = toDictionaryOrder(normalized)
+	}
+	if opts.ignoreCase {
+		normalized = strings.ToLower(normalized)
+	}
+
+	switch {
+	case opts.monthSort:
+		return []byte("month:" + sortCanonicalMonthText(parseMonth(normalized)))
+	case opts.humanNumeric:
+		return []byte("human:" + sortCanonicalFloatText(parseHumanSize(normalized)))
+	case opts.versionSort:
+		return []byte("version:" + sortCanonicalVersionText(normalized))
+	case opts.generalNumeric:
+		return []byte("general:" + sortCanonicalGeneralNumberText(normalized))
+	case opts.numeric:
+		return []byte("numeric:" + sortCanonicalNumericText(normalized))
+	default:
+		return []byte("text:" + normalized)
+	}
+}
+
+func sortCanonicalMonthText(value int) string {
+	if value < 10 {
+		return "0" + strconv.Itoa(value)
+	}
+	return strconv.Itoa(value)
+}
+
+func sortCanonicalFloatText(value float64) string {
+	switch {
+	case math.IsNaN(value):
+		return "nan"
+	case math.IsInf(value, 1):
+		return "+inf"
+	case math.IsInf(value, -1):
+		return "-inf"
+	case value == 0:
+		return "0"
+	default:
+		return strconv.FormatFloat(value, 'g', -1, 64)
+	}
+}
+
+func sortCanonicalGeneralNumberText(value string) string {
+	number := parseGeneralNumericValue(value)
+	switch number.kind {
+	case sortNumberInvalid:
+		return "invalid"
+	case sortNumberNaN:
+		return "nan"
+	default:
+		return sortCanonicalFloatText(number.value)
+	}
+}
+
+func sortCanonicalNumericText(value string) string {
+	number, ok := parseNumericPrefix(value)
+	if !ok {
+		return "invalid"
+	}
+	return sortCanonicalFloatText(number)
+}
+
+func sortCanonicalVersionText(value string) string {
+	parts := versionChunkRe.FindAllString(value, -1)
+	if len(parts) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, part := range parts {
+		if numeric, err := strconv.Atoi(part); err == nil {
+			b.WriteByte('n')
+			b.WriteString(strconv.Itoa(numeric))
+		} else {
+			b.WriteByte('s')
+			b.WriteString(part)
+		}
+		b.WriteByte(0)
+	}
+	return b.String()
 }
 
 func compareSortLines(a, b string, opts *sortOptions) int {
@@ -1016,15 +1138,7 @@ func compareSortLines(a, b string, opts *sortOptions) int {
 			valB = strings.TrimLeftFunc(valB, unicode.IsSpace)
 		}
 
-		keyOpts := *opts
-		keyOpts.numeric = key.numeric || opts.numeric
-		keyOpts.generalNumeric = key.generalNumeric || opts.generalNumeric
-		keyOpts.ignoreCase = key.ignoreCase || opts.ignoreCase
-		keyOpts.ignoreNonprinting = key.ignoreNonprinting || opts.ignoreNonprinting
-		keyOpts.humanNumeric = key.humanNumeric || opts.humanNumeric
-		keyOpts.versionSort = key.versionSort || opts.versionSort
-		keyOpts.dictionaryOrder = key.dictionaryOrder || opts.dictionaryOrder
-		keyOpts.monthSort = key.monthSort || opts.monthSort
+		keyOpts := sortKeyComparisonOptions(opts, key)
 
 		cmp := compareSortValues(valA, valB, &keyOpts)
 		useReverse := key.reverse || opts.reverse
@@ -1160,20 +1274,27 @@ func sortLinesEquivalent(a, b string, opts *sortOptions) bool {
 			valA = strings.TrimLeftFunc(valA, unicode.IsSpace)
 			valB = strings.TrimLeftFunc(valB, unicode.IsSpace)
 		}
-		keyOpts := *opts
-		keyOpts.numeric = key.numeric || opts.numeric
-		keyOpts.generalNumeric = key.generalNumeric || opts.generalNumeric
-		keyOpts.ignoreCase = key.ignoreCase || opts.ignoreCase
-		keyOpts.ignoreNonprinting = key.ignoreNonprinting || opts.ignoreNonprinting
-		keyOpts.humanNumeric = key.humanNumeric || opts.humanNumeric
-		keyOpts.versionSort = key.versionSort || opts.versionSort
-		keyOpts.dictionaryOrder = key.dictionaryOrder || opts.dictionaryOrder
-		keyOpts.monthSort = key.monthSort || opts.monthSort
+		keyOpts := sortKeyComparisonOptions(opts, key)
 		if compareSortValues(valA, valB, &keyOpts) != 0 {
 			return false
 		}
 	}
 	return true
+}
+
+func sortKeyComparisonOptions(opts *sortOptions, key sortKey) sortOptions {
+	keyOpts := *opts
+	keyOpts.randomSort = false
+	keyOpts.reverse = false
+	keyOpts.numeric = key.numeric || opts.numeric
+	keyOpts.generalNumeric = key.generalNumeric || opts.generalNumeric
+	keyOpts.ignoreCase = key.ignoreCase || opts.ignoreCase
+	keyOpts.ignoreNonprinting = key.ignoreNonprinting || opts.ignoreNonprinting
+	keyOpts.humanNumeric = key.humanNumeric || opts.humanNumeric
+	keyOpts.versionSort = key.versionSort || opts.versionSort
+	keyOpts.dictionaryOrder = key.dictionaryOrder || opts.dictionaryOrder
+	keyOpts.monthSort = key.monthSort || opts.monthSort
+	return keyOpts
 }
 
 func compareSortValues(a, b string, opts *sortOptions) int {

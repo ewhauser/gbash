@@ -270,6 +270,82 @@ func TestSortRandomSortUsesSeedAndGroupsEqualKeys(t *testing.T) {
 	}
 }
 
+func TestSortRandomSortUsesCanonicalKeyHash(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf '0123456789abcdef' > /tmp/random\n" +
+			"printf 'Alpha\\nalpha\\nbeta\\n' > /tmp/in1\n" +
+			"printf 'alpha\\nAlpha\\nbeta\\n' > /tmp/in2\n" +
+			"sort -Rf --random-source=/tmp/random /tmp/in1 > /tmp/out1\n" +
+			"sort -Rf --random-source=/tmp/random /tmp/in2 > /tmp/out2\n" +
+			"cat /tmp/out1\n" +
+			"printf -- '---\\n'\n" +
+			"cat /tmp/out2\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	parts := strings.Split(result.Stdout, "---\n")
+	if len(parts) != 2 {
+		t.Fatalf("Stdout = %q, want two outputs", result.Stdout)
+	}
+
+	normalize := func(text string) string {
+		lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+		for i, line := range lines {
+			lines[i] = strings.ToLower(line)
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	if got1, got2 := normalize(parts[0]), normalize(parts[1]); got1 != got2 {
+		t.Fatalf("normalized outputs differ: %q vs %q", got1, got2)
+	}
+}
+
+func TestSortRandomSortReverseReversesHashOrder(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf '0123456789abcdef' > /tmp/random\n" +
+			"printf 'one\\ntwo\\nthree\\n' > /tmp/in.txt\n" +
+			"sort -R --random-source=/tmp/random /tmp/in.txt > /tmp/out1\n" +
+			"sort -Rr --random-source=/tmp/random /tmp/in.txt > /tmp/out2\n" +
+			"cat /tmp/out1\n" +
+			"printf -- '---\\n'\n" +
+			"cat /tmp/out2\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	parts := strings.Split(result.Stdout, "---\n")
+	if len(parts) != 2 {
+		t.Fatalf("Stdout = %q, want two outputs", result.Stdout)
+	}
+
+	forward := strings.Split(strings.TrimSuffix(parts[0], "\n"), "\n")
+	reverse := strings.Split(strings.TrimSuffix(parts[1], "\n"), "\n")
+	if len(forward) != len(reverse) {
+		t.Fatalf("line counts differ: %q vs %q", parts[0], parts[1])
+	}
+	for i := range forward {
+		if reverse[i] != forward[len(forward)-1-i] {
+			t.Fatalf("reverse output %q is not the reverse of %q", parts[1], parts[0])
+		}
+	}
+}
+
 func TestSortRandomSourceRequiresEnoughBytes(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
