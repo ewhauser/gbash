@@ -164,7 +164,7 @@ func (c *Expand) RunParsed(ctx context.Context, inv *Invocation, matches *Parsed
 			continue
 		}
 
-		if _, err := inv.Stdout.Write(expandBytes(data, opts)); err != nil {
+		if _, err := inv.Stdout.Write(expandBytes(data, &opts)); err != nil {
 			return &ExitError{Code: 1, Err: err}
 		}
 	}
@@ -278,7 +278,7 @@ func parseExpandTabNumber(raw string) (int, error) {
 	}
 
 	var rangeErr *strconv.NumError
-	if strings.Contains(err.Error(), "value out of range") || (errors.As(err, &rangeErr) && rangeErr.Err == strconv.ErrRange) {
+	if strings.Contains(err.Error(), "value out of range") || (errors.As(err, &rangeErr) && errors.Is(err, strconv.ErrRange)) {
 		return 0, fmt.Errorf("tab stop is too large %s", quoteGNUOperand(raw))
 	}
 	return 0, fmt.Errorf("tab size contains invalid character(s): %s", quoteGNUOperand(digitsTrimmed))
@@ -322,7 +322,7 @@ func expandMaxSpaceRun(tabstops []int, mode expandRemainingMode) int {
 	return maxGap
 }
 
-func expandBytes(data []byte, opts expandOptions) []byte {
+func expandBytes(data []byte, opts *expandOptions) []byte {
 	if len(data) == 0 {
 		return nil
 	}

@@ -85,7 +85,7 @@ func TestExpandBytes(t *testing.T) {
 		remainingMode: expandRemainingNone,
 		spaceCache:    bytes.Repeat([]byte(" "), 4),
 	}
-	if got, want := string(expandBytes([]byte("\ta\tb"), opts)), "    a\tb"; got != want {
+	if got, want := string(expandBytes([]byte("\ta\tb"), &opts)), "    a\tb"; got != want {
 		t.Fatalf("expandBytes(initial) = %q, want %q", got, want)
 	}
 
@@ -94,7 +94,7 @@ func TestExpandBytes(t *testing.T) {
 		remainingMode: expandRemainingNone,
 		spaceCache:    bytes.Repeat([]byte(" "), 8),
 	}
-	if got, want := string(expandBytes([]byte("界\tX"), byteCountOpts)), "界     X"; got != want {
+	if got, want := string(expandBytes([]byte("界\tX"), &byteCountOpts)), "界     X"; got != want {
 		t.Fatalf("expandBytes(multibyte) = %q, want %q", got, want)
 	}
 }
