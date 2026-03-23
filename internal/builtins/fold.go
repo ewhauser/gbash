@@ -135,14 +135,6 @@ func (c *Fold) Spec() CommandSpec {
 }
 
 func (c *Fold) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
-	spec := c.Spec()
-	if matches.Has("help") {
-		return RenderCommandHelp(inv.Stdout, &spec)
-	}
-	if matches.Has("version") {
-		return RenderCommandVersion(inv.Stdout, &spec)
-	}
-
 	width := foldDefaultWidth
 	if matches.Has("width") {
 		v := matches.Value("width")
@@ -154,6 +146,14 @@ func (c *Fold) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCo
 			return exitf(inv, 1, "fold: invalid number of columns: %s", quoteValue(v))
 		}
 		width = w
+	}
+
+	spec := c.Spec()
+	if matches.Has("help") {
+		return RenderCommandHelp(inv.Stdout, &spec)
+	}
+	if matches.Has("version") {
+		return RenderCommandVersion(inv.Stdout, &spec)
 	}
 
 	mode := foldModeColumns
@@ -251,15 +251,15 @@ func foldBytewise(data []byte, spaces bool, width int) []byte {
 
 func lastByteSpacePos(chunk []byte) int {
 	for j := len(chunk) - 1; j >= 0; j-- {
-		if isASCIIWhitespace(chunk[j]) && chunk[j] != '\r' {
+		if isFoldBlank(chunk[j]) {
 			return j
 		}
 	}
 	return -1
 }
 
-func isASCIIWhitespace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\v' || b == '\f' || b == '\r'
+func isFoldBlank(b byte) bool {
+	return b == ' ' || b == '\t'
 }
 
 // foldText implements column mode (default) and character mode (-c).
@@ -354,7 +354,7 @@ func foldText(data []byte, spaces bool, width int, mode foldWidthMode) []byte {
 			emit()
 		}
 
-		if spaces && r < 128 && isASCIIWhitespace(byte(r)) {
+		if spaces && r < 128 && isFoldBlank(byte(r)) {
 			lastSpace = len(lineBuf)
 		}
 
