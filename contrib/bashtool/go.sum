@@ -23,8 +23,12 @@ github.com/dimchansky/utfbom v1.1.1 h1:vV6w1AhK4VMnhBno/TPVCoK9U/LP0PkLCS9tbxHdi
 github.com/dimchansky/utfbom v1.1.1/go.mod h1:SxdoEBH5qIqFocHMyGOXVAybYJdr71b1Q/j0mACtrfE=
 github.com/elliotchance/orderedmap v1.8.0 h1:TrOREecvh3JbS+NCgwposXG5ZTFHtEsQiCGOhPElnMw=
 github.com/elliotchance/orderedmap v1.8.0/go.mod h1:wsDwEaX5jEoyhbs7x93zk2H/qv0zwuhg4inXhDkYqys=
+github.com/ewhauser/gbash v0.0.25 h1:aTraQCZOHqWxIpO/4jjjmGynj/f2tMvfb4u1g0RfuNM=
+github.com/ewhauser/gbash v0.0.25/go.mod h1:+pZrcLZBj15CUuKDio2GvW/O4p/87FenQLmctnCr1PE=
 github.com/ewhauser/gbash/contrib/awk v0.0.25 h1:Dy7ednJqeln+Cd1E7lIb8pNh+52rEX+T8C7IT9TYnSc=
 github.com/ewhauser/gbash/contrib/awk v0.0.25/go.mod h1:y1a4umuRfZu1Jz0C/86v0pkoG5sbbX9HVHflK854miM=
+github.com/ewhauser/gbash/contrib/extras v0.0.25 h1:K+Xd4x+4KQ3ci2rG240pv/egXCcvm0n2x07QP6yDedY=
+github.com/ewhauser/gbash/contrib/extras v0.0.25/go.mod h1:2xnNce9oTocsjRi4r42fRNyFuITtStmC2d8rnFPab8Q=
 github.com/ewhauser/gbash/contrib/htmltomarkdown v0.0.25 h1:VU8RASnrIAekSuJA8e0odDz6c25aeEUd0ImYvbAJv3k=
 github.com/ewhauser/gbash/contrib/htmltomarkdown v0.0.25/go.mod h1:FoMXdbzmJotjEWAAZJpQnuDrMp+jtpXmfB0Y8Bfb5aE=
 github.com/ewhauser/gbash/contrib/jq v0.0.25 h1:JAE2UFlNClsHRw/dlfmnt0EJuv2VM3xnBL+/91kfE3c=

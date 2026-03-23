@@ -32,7 +32,6 @@ require (
 	github.com/agext/levenshtein v1.2.1 // indirect
 	github.com/alecthomas/participle/v2 v2.1.4 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
-	github.com/benhoyt/goawk v1.31.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dimchansky/utfbom v1.1.1 // indirect
 	github.com/elliotchance/orderedmap v1.8.0 // indirect
@@ -91,11 +90,3 @@ require (
 	rsc.io/omap v1.2.0 // indirect
 	rsc.io/ordered v1.1.1 // indirect
 )
-
-replace github.com/ewhauser/gbash => ../
-
-replace github.com/ewhauser/gbash/contrib/bashtool => ../contrib/bashtool
-
-replace github.com/ewhauser/gbash/contrib/extras => ../contrib/extras
-
-replace github.com/ewhauser/gbash/contrib/sqlite3 => ../contrib/sqlite3

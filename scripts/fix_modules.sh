@@ -32,34 +32,40 @@ edit_module() {
 		cd "${ROOT_DIR}/${dir}"
 		while (($#)); do
 			local module="$1"
-			local replace_target="$2"
 			if [[ -n "${VERSION}" ]]; then
 				go mod edit -require="${module}@${VERSION}"
 			fi
-			go mod edit -replace="${module}=${replace_target}"
-			shift 2
+			shift
 		done
 		go mod tidy
 	)
 }
 
-edit_module contrib/awk github.com/ewhauser/gbash ../..
-edit_module contrib/htmltomarkdown github.com/ewhauser/gbash ../..
-edit_module contrib/jq github.com/ewhauser/gbash ../..
-edit_module contrib/sqlite3 github.com/ewhauser/gbash ../..
-edit_module contrib/yq github.com/ewhauser/gbash ../..
+edit_module contrib/awk github.com/ewhauser/gbash
+edit_module contrib/codingtools github.com/ewhauser/gbash
+edit_module contrib/htmltomarkdown github.com/ewhauser/gbash
+edit_module contrib/jq github.com/ewhauser/gbash
+edit_module contrib/nodejs github.com/ewhauser/gbash
+edit_module contrib/sqlite3 github.com/ewhauser/gbash
+edit_module contrib/yq github.com/ewhauser/gbash
 edit_module \
 	contrib/extras \
-	github.com/ewhauser/gbash ../.. \
-	github.com/ewhauser/gbash/contrib/awk ../awk \
-	github.com/ewhauser/gbash/contrib/htmltomarkdown ../htmltomarkdown \
-	github.com/ewhauser/gbash/contrib/jq ../jq \
-	github.com/ewhauser/gbash/contrib/sqlite3 ../sqlite3 \
-	github.com/ewhauser/gbash/contrib/yq ../yq
+	github.com/ewhauser/gbash \
+	github.com/ewhauser/gbash/contrib/awk \
+	github.com/ewhauser/gbash/contrib/htmltomarkdown \
+	github.com/ewhauser/gbash/contrib/jq \
+	github.com/ewhauser/gbash/contrib/sqlite3 \
+	github.com/ewhauser/gbash/contrib/yq
+edit_module \
+	contrib/bashtool \
+	github.com/ewhauser/gbash \
+	github.com/ewhauser/gbash/contrib/extras
 edit_module \
 	examples \
-	github.com/ewhauser/gbash ../ \
-	github.com/ewhauser/gbash/contrib/sqlite3 ../contrib/sqlite3
+	github.com/ewhauser/gbash \
+	github.com/ewhauser/gbash/contrib/bashtool \
+	github.com/ewhauser/gbash/contrib/extras \
+	github.com/ewhauser/gbash/contrib/sqlite3
 
 sync_package_json_version packages/gbash-wasm/package.json
 

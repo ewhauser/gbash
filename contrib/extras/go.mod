@@ -51,15 +51,3 @@ require (
 	golang.org/x/tools v0.41.0 // indirect
 	gopkg.in/op/go-logging.v1 v1.0.0-20160211212156-b2cb9fa56473 // indirect
 )
-
-replace github.com/ewhauser/gbash => ../..
-
-replace github.com/ewhauser/gbash/contrib/awk => ../awk
-
-replace github.com/ewhauser/gbash/contrib/htmltomarkdown => ../htmltomarkdown
-
-replace github.com/ewhauser/gbash/contrib/jq => ../jq
-
-replace github.com/ewhauser/gbash/contrib/sqlite3 => ../sqlite3
-
-replace github.com/ewhauser/gbash/contrib/yq => ../yq

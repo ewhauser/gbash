@@ -79,6 +79,16 @@ github.com/envoyproxy/go-control-plane/ratelimit v0.1.0 h1:/G9QYbddjL25KvtKTv3an
 github.com/envoyproxy/go-control-plane/ratelimit v0.1.0/go.mod h1:Wk+tMFAFbCXaJPzVVHnPgRKdUdwW/KdbRt94AzgRee4=
 github.com/envoyproxy/protoc-gen-validate v1.2.1 h1:DEo3O99U8j4hBFwbJfrz9VtgcDfUKS7KJ7spH3d86P8=
 github.com/envoyproxy/protoc-gen-validate v1.2.1/go.mod h1:d/C80l/jxXLdfEIhX1W2TmLfsJ31lvEjwamM4DxlWXU=
+github.com/ewhauser/gbash v0.0.25/go.mod h1:+pZrcLZBj15CUuKDio2GvW/O4p/87FenQLmctnCr1PE=
+github.com/ewhauser/gbash v0.0.26/go.mod h1:+pZrcLZBj15CUuKDio2GvW/O4p/87FenQLmctnCr1PE=
+github.com/ewhauser/gbash/contrib/awk v0.0.26/go.mod h1:3yk58hglYK0Q6+lhcrXXdmelaTKXBmjHbfoOeMSBgqY=
+github.com/ewhauser/gbash/contrib/bashtool v0.0.26/go.mod h1:tU6NU3LqzK+UqyvybSfHJHydBqIFOhxkohAguluXY3k=
+github.com/ewhauser/gbash/contrib/extras v0.0.25/go.mod h1:2xnNce9oTocsjRi4r42fRNyFuITtStmC2d8rnFPab8Q=
+github.com/ewhauser/gbash/contrib/extras v0.0.26/go.mod h1:pi9poTcYKan4gWqekBha47m7MwjAji/OfjSwx9ban0k=
+github.com/ewhauser/gbash/contrib/htmltomarkdown v0.0.26/go.mod h1:Zj5rAf8eFMcldRbpVDf7zbUgyGFxK0lNK40hXuWkpbo=
+github.com/ewhauser/gbash/contrib/jq v0.0.26/go.mod h1:zfxU66gqRBgKFnwhDhgGiLH+pQaevyTkVG9O32PUiyU=
+github.com/ewhauser/gbash/contrib/sqlite3 v0.0.26/go.mod h1:rA5e2B9UO/71OQhdrsTghRqmtb/xknC8Pv3ernCrHMo=
+github.com/ewhauser/gbash/contrib/yq v0.0.26/go.mod h1:LRSM+QNlY6wMTBnDdpoFKXrHlb4GOsb3AQHdtutUb50=
 github.com/glebarez/go-sqlite v1.21.1 h1:7MZyUPh2XTrHS7xNEHQbrhfMZuPSzhkm2A1qgg0y5NY=
 github.com/glebarez/go-sqlite v1.21.1/go.mod h1:ISs8MF6yk5cL4n/43rSOmVMGJJjHYr7L2MbZZ5Q4E2E=
 github.com/glebarez/sqlite v1.8.0 h1:02X12E2I/4C1n+v90yTqrjRa8yuo7c3KeHI3FRznCvc=
