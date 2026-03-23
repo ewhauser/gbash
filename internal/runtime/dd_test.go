@@ -104,6 +104,21 @@ func TestDdConversions(t *testing.T) {
 		}
 	})
 
+	t.Run("block carries across reads", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+		writeSessionFile(t, session, "/tmp/in.txt", []byte("abc\n"))
+
+		result := execSessionScriptWithInput(t, session, "dd if=/tmp/in.txt of=/tmp/out.bin conv=block cbs=4 ibs=2 status=none\n", nil)
+		if got, want := result.ExitCode, 0; got != want {
+			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if got, want := readSessionFile(t, session, "/tmp/out.bin"), []byte("abc "); !bytes.Equal(got, want) {
+			t.Fatalf("output = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("unblock", func(t *testing.T) {
 		t.Parallel()
 
@@ -111,6 +126,21 @@ func TestDdConversions(t *testing.T) {
 		writeSessionFile(t, session, "/tmp/in.bin", []byte("abc defg"))
 
 		result := execSessionScriptWithInput(t, session, "dd if=/tmp/in.bin of=/tmp/out.txt conv=unblock cbs=4 status=none\n", nil)
+		if got, want := result.ExitCode, 0; got != want {
+			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if got, want := string(readSessionFile(t, session, "/tmp/out.txt")), "abc\ndefg\n"; got != want {
+			t.Fatalf("output = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("unblock carries across reads", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+		writeSessionFile(t, session, "/tmp/in.bin", []byte("abc defg"))
+
+		result := execSessionScriptWithInput(t, session, "dd if=/tmp/in.bin of=/tmp/out.txt conv=unblock cbs=4 ibs=3 status=none\n", nil)
 		if got, want := result.ExitCode, 0; got != want {
 			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
 		}

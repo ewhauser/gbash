@@ -198,6 +198,11 @@ type ddInput struct {
 	label  string
 }
 
+type ddTransformState struct {
+	blockCarry    []byte
+	blockOverflow bool
+}
+
 type ddOutputWriter interface {
 	WriteData([]byte) (ddWriteStats, error)
 	Flush() (ddWriteStats, error)
@@ -615,13 +620,14 @@ func runDdWithIO(ctx context.Context, inv *Invocation, settings *ddSettings, inp
 		swabCarry    byte
 		hasSwabCarry bool
 	)
+	transformState := ddTransformState{}
 	var (
 		readStats  ddReadStats
 		writeStats ddWriteStats
 	)
 
 	writeChunk := func(chunk []byte) error {
-		transformed, trunc := ddTransformBlock(chunk, settings.conv, settings.cbs)
+		transformed, trunc := ddTransformBlock(chunk, settings.conv, settings.cbs, false, &transformState)
 		readStats.recordsTrunc += trunc
 
 		writeUpdate, writeErr := output.WriteData(transformed)
@@ -694,6 +700,17 @@ func runDdWithIO(ctx context.Context, inv *Invocation, settings *ddSettings, inp
 			if err := writeChunk(chunk); err != nil {
 				return err
 			}
+		}
+	}
+	if settings.conv.blockMode != ddBlockModeNone {
+		transformed, trunc := ddTransformBlock(nil, settings.conv, settings.cbs, true, &transformState)
+		readStats.recordsTrunc += trunc
+		if len(transformed) > 0 {
+			writeUpdate, writeErr := output.WriteData(transformed)
+			if writeErr != nil {
+				return &ExitError{Code: 1, Err: writeErr}
+			}
+			writeStats.add(writeUpdate)
 		}
 	}
 
@@ -982,20 +999,20 @@ func ddDiscard(reader io.Reader, bytesToSkip uint64) (uint64, error) {
 	return discarded, nil
 }
 
-func ddTransformBlock(input []byte, conv ddConvOptions, cbs int) ([]byte, uint32) {
+func ddTransformBlock(input []byte, conv ddConvOptions, cbs int, eof bool, state *ddTransformState) ([]byte, uint32) {
 	data := append([]byte(nil), input...)
 	if conv.kind == ddConversionASCII {
 		ddTranslate(data, ddEBCDICToASCII[:])
 		ddApplyCase(data, conv.caseMode)
 		if conv.blockMode != ddBlockModeNone {
-			return ddApplyBlockMode(data, conv.blockMode, cbs)
+			return ddApplyBlockMode(data, conv.blockMode, cbs, eof, state)
 		}
 		return data, 0
 	}
 
 	var trunc uint32
 	if conv.blockMode != ddBlockModeNone {
-		data, trunc = ddApplyBlockMode(data, conv.blockMode, cbs)
+		data, trunc = ddApplyBlockMode(data, conv.blockMode, cbs, eof, state)
 	}
 	ddApplyCase(data, conv.caseMode)
 	switch conv.kind {
@@ -1028,56 +1045,76 @@ func ddApplyCase(buf []byte, mode ddCaseMode) {
 	}
 }
 
-func ddApplyBlockMode(buf []byte, mode ddBlockMode, cbs int) ([]byte, uint32) {
+func ddApplyBlockMode(buf []byte, mode ddBlockMode, cbs int, eof bool, state *ddTransformState) ([]byte, uint32) {
 	if cbs <= 0 {
 		return buf, 0
 	}
+	if state == nil {
+		state = &ddTransformState{}
+	}
 	switch mode {
 	case ddBlockModeBlock:
-		return ddBlock(buf, cbs)
+		return state.block(buf, cbs, eof)
 	case ddBlockModeUnblock:
-		return ddUnblock(buf, cbs), 0
+		return state.unblock(buf, cbs, eof), 0
 	default:
 		return buf, 0
 	}
 }
 
-func ddBlock(buf []byte, cbs int) ([]byte, uint32) {
-	parts := bytes.Split(buf, []byte{'\n'})
-	hadTrailingNewline := len(buf) > 0 && buf[len(buf)-1] == '\n'
-	if hadTrailingNewline && len(parts) > 0 {
-		parts = parts[:len(parts)-1]
-	}
-	blocks := make([][]byte, 0, len(parts))
+func (s *ddTransformState) block(buf []byte, cbs int, eof bool) ([]byte, uint32) {
+	out := make([]byte, 0, len(buf))
 	var truncated uint32
-	for _, part := range parts {
-		if len(part) > cbs {
-			truncated++
+	flush := func(force bool) {
+		if !force && len(s.blockCarry) == 0 && !s.blockOverflow {
+			return
 		}
 		block := make([]byte, cbs)
-		copy(block, part)
-		for i := len(part); i < cbs; i++ {
+		copy(block, s.blockCarry)
+		for i := len(s.blockCarry); i < cbs; i++ {
 			block[i] = ' '
 		}
-		blocks = append(blocks, block)
-	}
-	out := make([]byte, 0, len(blocks)*cbs)
-	for _, block := range blocks {
+		if s.blockOverflow {
+			truncated++
+		}
 		out = append(out, block...)
+		s.blockCarry = s.blockCarry[:0]
+		s.blockOverflow = false
+	}
+	for _, b := range buf {
+		if b == '\n' {
+			flush(true)
+			continue
+		}
+		if len(s.blockCarry) < cbs {
+			s.blockCarry = append(s.blockCarry, b)
+		} else {
+			s.blockOverflow = true
+		}
+	}
+	if eof {
+		flush(len(s.blockCarry) > 0 || s.blockOverflow)
 	}
 	return out, truncated
 }
 
-func ddUnblock(buf []byte, cbs int) []byte {
+func (s *ddTransformState) unblock(buf []byte, cbs int, eof bool) []byte {
 	if cbs <= 0 {
 		return append([]byte(nil), buf...)
 	}
-	out := make([]byte, 0, len(buf)+len(buf)/cbs+1)
-	for start := 0; start < len(buf); start += cbs {
-		end := minInt(start+cbs, len(buf))
-		chunk := bytes.TrimRight(buf[start:end], " ")
+	s.blockCarry = append(s.blockCarry, buf...)
+	out := make([]byte, 0, len(s.blockCarry)+len(s.blockCarry)/cbs+1)
+	for len(s.blockCarry) >= cbs {
+		chunk := bytes.TrimRight(s.blockCarry[:cbs], " ")
 		out = append(out, chunk...)
 		out = append(out, '\n')
+		s.blockCarry = s.blockCarry[cbs:]
+	}
+	if eof && len(s.blockCarry) > 0 {
+		chunk := bytes.TrimRight(s.blockCarry, " ")
+		out = append(out, chunk...)
+		out = append(out, '\n')
+		s.blockCarry = s.blockCarry[:0]
 	}
 	return out
 }
