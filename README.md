@@ -533,6 +533,8 @@ go run ./examples/gbash-eval run \
   --save
 ```
 
+To run only selected eval task IDs, add `--task` with repeated or comma-separated values.
+
 ## Development
 
 `make build`, `make test`, and `make lint` cover the Go modules. `make test` now resolves the pinned GNU `diff` oracle through Nix via `./scripts/ensure-diffutils.sh`; set `GBASH_CONFORMANCE_DIFF` if you want to override that path explicitly. See [CONTRIBUTING.md](./CONTRIBUTING.md) for repository structure, module versioning, release process, benchmarks, and GNU coreutils compatibility testing.

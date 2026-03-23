@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 )
 
 func Run(ctx context.Context, cfg RunConfig, stdout, stderr io.Writer) error {
@@ -19,6 +21,10 @@ func Run(ctx context.Context, cfg RunConfig, stdout, stderr io.Writer) error {
 
 func runBashEval(ctx context.Context, cfg RunConfig, provider Provider, stdout io.Writer) error {
 	tasks, err := loadDataset(cfg.DatasetPath)
+	if err != nil {
+		return err
+	}
+	tasks, err = filterTasksByID(tasks, cfg.TaskIDs, func(task EvalTask) string { return task.ID })
 	if err != nil {
 		return err
 	}
@@ -63,4 +69,43 @@ func runBashEval(ctx context.Context, cfg RunConfig, provider Provider, stdout i
 		}
 	}
 	return nil
+}
+
+func filterTasksByID[T any](tasks []T, taskIDs []string, idOf func(T) string) ([]T, error) {
+	if len(taskIDs) == 0 {
+		return tasks, nil
+	}
+
+	wanted := make(map[string]struct{}, len(taskIDs))
+	for _, taskID := range taskIDs {
+		wanted[taskID] = struct{}{}
+	}
+
+	filtered := make([]T, 0, len(taskIDs))
+	found := make(map[string]struct{}, len(taskIDs))
+	for _, task := range tasks {
+		taskID := idOf(task)
+		if _, ok := wanted[taskID]; !ok {
+			continue
+		}
+		filtered = append(filtered, task)
+		found[taskID] = struct{}{}
+	}
+
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("no tasks matched requested IDs: %s", strings.Join(taskIDs, ", "))
+	}
+
+	missing := make([]string, 0)
+	for _, taskID := range taskIDs {
+		if _, ok := found[taskID]; !ok {
+			missing = append(missing, taskID)
+		}
+	}
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		return nil, fmt.Errorf("task IDs not found in dataset: %s", strings.Join(missing, ", "))
+	}
+
+	return filtered, nil
 }

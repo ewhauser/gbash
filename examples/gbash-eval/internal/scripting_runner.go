@@ -12,6 +12,10 @@ func runScriptingEval(ctx context.Context, cfg RunConfig, provider Provider, std
 	if err != nil {
 		return err
 	}
+	tasks, err = filterTasksByID(tasks, cfg.TaskIDs, func(task ScriptingEvalTask) string { return task.ID })
+	if err != nil {
+		return err
+	}
 	mode := "scripted"
 	if cfg.Baseline {
 		mode = "baseline"

@@ -74,6 +74,8 @@ func TestRunCLIRoutesRunCommandWithParsedConfig(t *testing.T) {
 		"--save",
 		"--output", "/tmp/results",
 		"--moniker", "demo",
+		"--task", "alpha",
+		"--task", "beta,gamma",
 	}, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("RunCLI() error = %v", err)
@@ -89,5 +91,8 @@ func TestRunCLIRoutesRunCommandWithParsedConfig(t *testing.T) {
 		captured.OutputDir != "/tmp/results" ||
 		captured.Moniker != "demo" {
 		t.Fatalf("captured cfg = %#v", captured)
+	}
+	if got, want := strings.Join(captured.TaskIDs, ","), "alpha,beta,gamma"; got != want {
+		t.Fatalf("captured.TaskIDs = %q, want %q", got, want)
 	}
 }

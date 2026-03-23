@@ -21,6 +21,7 @@ type RunConfig struct {
 	Save         bool
 	OutputDir    string
 	Moniker      string
+	TaskIDs      []string
 }
 
 func RunCLI(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -60,6 +61,7 @@ func parseRunFlags(args []string, stderr io.Writer) (RunConfig, error) {
 	}
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	taskIDs := taskIDFlag{}
 	fs.StringVar(&cfg.DatasetPath, "dataset", "", "path to JSONL dataset file")
 	fs.StringVar(&cfg.ProviderName, "provider", "", "provider: anthropic, openai, or openresponses")
 	fs.StringVar(&cfg.Model, "model", "", "model name")
@@ -69,6 +71,7 @@ func parseRunFlags(args []string, stderr io.Writer) (RunConfig, error) {
 	fs.BoolVar(&cfg.Save, "save", false, "save JSON and Markdown reports to disk")
 	fs.StringVar(&cfg.OutputDir, "output", cfg.OutputDir, "output directory for saved reports")
 	fs.StringVar(&cfg.Moniker, "moniker", "", "custom run identifier")
+	fs.Var(&taskIDs, "task", "run only specific task ID(s); repeat the flag or pass a comma-separated list")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: gbash-eval run --dataset PATH --provider NAME --model NAME [options]\n\n")
 		fs.PrintDefaults()
@@ -97,6 +100,7 @@ func parseRunFlags(args []string, stderr io.Writer) (RunConfig, error) {
 	if cfg.Baseline && cfg.EvalType != "scripting-tool" {
 		return RunConfig{}, errors.New("--baseline is only valid with --eval-type scripting-tool")
 	}
+	cfg.TaskIDs = taskIDs.Values()
 	if cfg.Moniker == "" {
 		cfg.Moniker = sanitizeMoniker(cfg.ProviderName + "-" + cfg.Model)
 	}
@@ -117,4 +121,36 @@ func printCLIUsage(w io.Writer) {
 func sanitizeMoniker(value string) string {
 	replacer := strings.NewReplacer("/", "-", ":", "-", " ", "-", "\t", "-")
 	return replacer.Replace(value)
+}
+
+type taskIDFlag struct {
+	values []string
+	seen   map[string]struct{}
+}
+
+func (f *taskIDFlag) String() string {
+	return strings.Join(f.values, ",")
+}
+
+func (f *taskIDFlag) Set(value string) error {
+	parts := strings.Split(value, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if f.seen == nil {
+			f.seen = make(map[string]struct{})
+		}
+		if _, ok := f.seen[part]; ok {
+			continue
+		}
+		f.seen[part] = struct{}{}
+		f.values = append(f.values, part)
+	}
+	return nil
+}
+
+func (f *taskIDFlag) Values() []string {
+	return append([]string(nil), f.values...)
 }

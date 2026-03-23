@@ -31,6 +31,17 @@ go run ./gbash-eval run \
 
 Anthropic runs use `ANTHROPIC_API_KEY` and `--provider anthropic`. OpenAI Chat Completions and Responses runs both use `OPENAI_API_KEY` with `--provider openai` or `--provider openresponses`.
 
+To run only specific task IDs from a dataset, use `--task` one or more times, or pass a comma-separated list:
+
+```bash
+go run ./examples/gbash-eval run \
+  --dataset ./examples/gbash-eval/data/eval-tasks.jsonl \
+  --provider openai \
+  --model gpt-5.4 \
+  --task data_csv_join \
+  --task db_csv_join_aggregate,pipe_process_sub
+```
+
 For the common benchmark pass that persists both Anthropic Opus 4.6 and OpenAI 5.4 results, use the bundled script from the repo root:
 
 ```bash
