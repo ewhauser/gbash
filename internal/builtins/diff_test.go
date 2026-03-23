@@ -226,3 +226,97 @@ func TestDiffRejectsNegativeContextLengths(t *testing.T) {
 		}
 	}
 }
+
+func TestDiffRecursiveNewFileDescendsIntoOneSidedDirectory(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkdir -p /tmp/left/dir/sub\nmkdir -p /tmp/right\nprintf 'x\\n' > /tmp/left/dir/sub/file\ndiff -r -N /tmp/left /tmp/right\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if strings.Contains(result.Stderr, "Is a directory") {
+		t.Fatalf("Stderr = %q, should recurse instead of reporting trouble", result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "diff -r -N /tmp/left/dir/sub/file /tmp/right/dir/sub/file") {
+		t.Fatalf("Stdout = %q, want recursive file comparison", result.Stdout)
+	}
+}
+
+func TestDiffNewFileMissingDirectoryWithoutRecursiveReportsCommonSubdirectory(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkdir -p /tmp/left/dir/sub\nmkdir -p /tmp/right\nprintf 'x\\n' > /tmp/left/dir/sub/file\ndiff -N /tmp/left /tmp/right\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if got, want := result.Stdout, "Common subdirectories: /tmp/left/dir and /tmp/right/dir\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestDiffSideBySideUsesPipeForReplacementRows(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'old\\n' > /tmp/a.txt\nprintf 'new\\n' > /tmp/b.txt\ndiff -y /tmp/a.txt /tmp/b.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	lines := strings.Split(strings.TrimSuffix(result.Stdout, "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Stdout = %q, want a single replacement row", result.Stdout)
+	}
+	if !strings.Contains(lines[0], "|") || !strings.Contains(lines[0], "old") || !strings.Contains(lines[0], "new") {
+		t.Fatalf("Stdout = %q, want side-by-side replacement row", result.Stdout)
+	}
+	if strings.Contains(lines[0], "<") || strings.Contains(lines[0], ">") {
+		t.Fatalf("Stdout = %q, replacement should not use delete/insert markers", result.Stdout)
+	}
+}
+
+func TestDiffRejectsNegativeNumericOptionValues(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	tests := []struct {
+		script string
+		want   string
+	}{
+		{script: "diff --width=-1 /dev/null /dev/null\n", want: "invalid width '-1'"},
+		{script: "diff -W0 /dev/null /dev/null\n", want: "invalid width '0'"},
+		{script: "diff --tabsize=-1 /dev/null /dev/null\n", want: "invalid tabsize '-1'"},
+		{script: "diff --horizon-lines=-1 /dev/null /dev/null\n", want: "invalid horizon length '-1'"},
+	}
+	for _, tc := range tests {
+		result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
+		if err != nil {
+			t.Fatalf("Run(%q) error = %v", tc.script, err)
+		}
+		if result.ExitCode != 2 {
+			t.Fatalf("Run(%q) ExitCode = %d, want 2; stdout=%q stderr=%q", tc.script, result.ExitCode, result.Stdout, result.Stderr)
+		}
+		if result.Stdout != "" {
+			t.Fatalf("Run(%q) Stdout = %q, want empty", tc.script, result.Stdout)
+		}
+		if !strings.Contains(result.Stderr, tc.want) {
+			t.Fatalf("Run(%q) Stderr = %q, want %q", tc.script, result.Stderr, tc.want)
+		}
+	}
+}

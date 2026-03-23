@@ -269,7 +269,7 @@ func parseDiffArgs(inv *Invocation) (diffOptions, []diffJob, error) {
 				opts.mode = diffModeSideBySide
 				opts.sideBySide = true
 			case "width":
-				n, err := diffRequiredIntArg(inv, "--width", value, hasValue, args, &i)
+				n, err := diffRequiredValidatedIntArg(inv, "--width", value, hasValue, args, &i, diffParsePositiveWidth)
 				if err != nil {
 					return diffOptions{}, nil, err
 				}
@@ -297,7 +297,7 @@ func parseDiffArgs(inv *Invocation) (diffOptions, []diffJob, error) {
 			case "initial-tab":
 				opts.initialTab = true
 			case "tabsize":
-				n, err := diffRequiredIntArg(inv, "--tabsize", value, hasValue, args, &i)
+				n, err := diffRequiredValidatedIntArg(inv, "--tabsize", value, hasValue, args, &i, diffParsePositiveTabSize)
 				if err != nil {
 					return diffOptions{}, nil, err
 				}
@@ -405,7 +405,7 @@ func parseDiffArgs(inv *Invocation) (diffOptions, []diffJob, error) {
 			case "minimal":
 				opts.minimal = true
 			case "horizon-lines":
-				n, err := diffRequiredIntArg(inv, "--horizon-lines", value, hasValue, args, &i)
+				n, err := diffRequiredValidatedIntArg(inv, "--horizon-lines", value, hasValue, args, &i, diffParseHorizonLength)
 				if err != nil {
 					return diffOptions{}, nil, err
 				}
@@ -492,9 +492,9 @@ func parseDiffArgs(inv *Invocation) (diffOptions, []diffJob, error) {
 					return diffOptions{}, nil, err
 				}
 				shorts = ""
-				n, err := strconv.Atoi(v)
+				n, err := diffParsePositiveWidth(inv, v)
 				if err != nil {
-					return diffOptions{}, nil, diffInvalidNumber(inv, v)
+					return diffOptions{}, nil, err
 				}
 				opts.width = n
 			case 'p':
@@ -627,30 +627,58 @@ func diffMissingOperand(inv *Invocation, after string) error {
 	return exitf(inv, 2, "diff: missing operand after %s\nTry 'diff --help' for more information.", after)
 }
 
-func diffInvalidNumber(inv *Invocation, value string) error {
-	return exitf(inv, 2, "diff: invalid number %s\nTry 'diff --help' for more information.", quoteGNUOperand(value))
-}
-
 func diffInvalidContextLength(inv *Invocation, value string) error {
 	return exitf(inv, 2, "diff: invalid context length %s\nTry 'diff --help' for more information.", quoteGNUOperand(value))
 }
 
-func diffRequiredIntArg(inv *Invocation, opt, value string, hasValue bool, args []string, idx *int) (int, error) {
+func diffInvalidWidth(inv *Invocation, value string) error {
+	return exitf(inv, 2, "diff: invalid width %s\nTry 'diff --help' for more information.", quoteGNUOperand(value))
+}
+
+func diffInvalidTabSize(inv *Invocation, value string) error {
+	return exitf(inv, 2, "diff: invalid tabsize %s\nTry 'diff --help' for more information.", quoteGNUOperand(value))
+}
+
+func diffInvalidHorizonLength(inv *Invocation, value string) error {
+	return exitf(inv, 2, "diff: invalid horizon length %s\nTry 'diff --help' for more information.", quoteGNUOperand(value))
+}
+
+func diffRequiredValidatedIntArg(inv *Invocation, opt, value string, hasValue bool, args []string, idx *int, parse func(*Invocation, string) (int, error)) (int, error) {
 	v, err := diffRequiredStringArg(inv, opt, value, hasValue, args, idx)
 	if err != nil {
 		return 0, err
 	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return 0, diffInvalidNumber(inv, v)
-	}
-	return n, nil
+	return parse(inv, v)
 }
 
 func diffParseContextLength(inv *Invocation, value string) (int, error) {
 	n, err := strconv.Atoi(value)
 	if err != nil || n < 0 {
 		return 0, diffInvalidContextLength(inv, value)
+	}
+	return n, nil
+}
+
+func diffParsePositiveWidth(inv *Invocation, value string) (int, error) {
+	n, err := strconv.Atoi(value)
+	if err != nil || n <= 0 {
+		return 0, diffInvalidWidth(inv, value)
+	}
+	return n, nil
+}
+
+func diffParsePositiveTabSize(inv *Invocation, value string) (int, error) {
+	n, err := strconv.Atoi(value)
+	if err != nil || n <= 0 {
+		return 0, diffInvalidTabSize(inv, value)
+	}
+	return n, nil
+}
+
+func diffParseHorizonLength(inv *Invocation, value string) (int, error) {
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return 0, diffInvalidHorizonLength(inv, value)
 	}
 	return n, nil
 }
@@ -858,7 +886,23 @@ func (c *Diff) compareDirectories(ctx context.Context, inv *Invocation, opts *di
 		case leftOK:
 			leftChild := path.Join(leftName, leftEntry.Name())
 			if opts.newFile {
-				subStatus, err := c.comparePathPair(ctx, inv, opts, loader, leftChild, path.Join(rightName, leftEntry.Name()), true)
+				rightChild := path.Join(rightName, leftEntry.Name())
+				leftChildAbs := path.Join(leftAbs, leftEntry.Name())
+				leftInfo, lerr := diffDirEntryInfo(ctx, inv, leftChildAbs, leftEntry, opts.noDereference)
+				if lerr != nil {
+					_, _ = fmt.Fprintf(inv.Stderr, "diff: %s: %s\n", leftChild, readAllErrorText(lerr))
+					status = max(status, 2)
+					continue
+				}
+				subStatus, err := c.compareMissingDirectory(ctx, inv, opts, loader, leftChild, leftChildAbs, rightChild, path.Join(rightAbs, leftEntry.Name()), leftInfo, true)
+				if err != nil {
+					return 0, err
+				}
+				if subStatus >= 0 {
+					status = max(status, subStatus)
+					continue
+				}
+				subStatus, err = c.comparePathPair(ctx, inv, opts, loader, leftChild, rightChild, true)
 				if err != nil {
 					return 0, err
 				}
@@ -872,7 +916,23 @@ func (c *Diff) compareDirectories(ctx context.Context, inv *Invocation, opts *di
 		case rightOK:
 			rightChild := path.Join(rightName, rightEntry.Name())
 			if opts.newFile || opts.unidirectionalNew {
-				subStatus, err := c.comparePathPair(ctx, inv, opts, loader, path.Join(leftName, rightEntry.Name()), rightChild, true)
+				leftChild := path.Join(leftName, rightEntry.Name())
+				rightChildAbs := path.Join(rightAbs, rightEntry.Name())
+				rightInfo, rerr := diffDirEntryInfo(ctx, inv, rightChildAbs, rightEntry, opts.noDereference)
+				if rerr != nil {
+					_, _ = fmt.Fprintf(inv.Stderr, "diff: %s: %s\n", rightChild, readAllErrorText(rerr))
+					status = max(status, 2)
+					continue
+				}
+				subStatus, err := c.compareMissingDirectory(ctx, inv, opts, loader, leftChild, path.Join(leftAbs, rightEntry.Name()), rightChild, rightChildAbs, rightInfo, false)
+				if err != nil {
+					return 0, err
+				}
+				if subStatus >= 0 {
+					status = max(status, subStatus)
+					continue
+				}
+				subStatus, err = c.comparePathPair(ctx, inv, opts, loader, leftChild, rightChild, true)
 				if err != nil {
 					return 0, err
 				}
@@ -884,6 +944,72 @@ func (c *Diff) compareDirectories(ctx context.Context, inv *Invocation, opts *di
 			}
 			status = max(status, 1)
 		}
+	}
+	return status, nil
+}
+
+func (c *Diff) compareMissingDirectory(ctx context.Context, inv *Invocation, opts *diffOptions, loader *diffLoader, leftName, leftAbs, rightName, rightAbs string, existingInfo stdfs.FileInfo, existingOnLeft bool) (int, error) {
+	if existingInfo == nil || !existingInfo.IsDir() {
+		return -1, nil
+	}
+	if !opts.recursive {
+		if _, err := fmt.Fprintf(inv.Stdout, "Common subdirectories: %s and %s\n", leftName, rightName); err != nil {
+			return 0, diffWriteError(err)
+		}
+		return 0, nil
+	}
+
+	existingName := leftName
+	existingAbs := leftAbs
+	if !existingOnLeft {
+		existingName = rightName
+		existingAbs = rightAbs
+	}
+	entries, err := readDir(ctx, inv, existingAbs)
+	if err != nil {
+		return 2, exitf(inv, 2, "diff: %s: %s", existingName, readAllErrorText(err))
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return diffFileNameKey(entries[i].Name(), opts.ignoreFileNameCase) < diffFileNameKey(entries[j].Name(), opts.ignoreFileNameCase)
+	})
+
+	status := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if diffExcluded(name, opts.excludes) {
+			continue
+		}
+		childLeftName := path.Join(leftName, name)
+		childRightName := path.Join(rightName, name)
+		childLeftAbs := path.Join(leftAbs, name)
+		childRightAbs := path.Join(rightAbs, name)
+		childExistingAbs := childLeftAbs
+		if !existingOnLeft {
+			childExistingAbs = childRightAbs
+		}
+		info, err := diffDirEntryInfo(ctx, inv, childExistingAbs, entry, opts.noDereference)
+		if err != nil {
+			childName := childLeftName
+			if !existingOnLeft {
+				childName = childRightName
+			}
+			_, _ = fmt.Fprintf(inv.Stderr, "diff: %s: %s\n", childName, readAllErrorText(err))
+			status = max(status, 2)
+			continue
+		}
+		subStatus, err := c.compareMissingDirectory(ctx, inv, opts, loader, childLeftName, childLeftAbs, childRightName, childRightAbs, info, existingOnLeft)
+		if err != nil {
+			return 0, err
+		}
+		if subStatus >= 0 {
+			status = max(status, subStatus)
+			continue
+		}
+		subStatus, err = c.comparePathPair(ctx, inv, opts, loader, childLeftName, childRightName, true)
+		if err != nil {
+			return 0, err
+		}
+		status = max(status, subStatus)
 	}
 	return status, nil
 }
@@ -1716,10 +1842,12 @@ func diffWriteRCS(out *strings.Builder, changes []diffChange) {
 
 func diffWriteSideBySide(out *strings.Builder, units []diffUnit, opts *diffOptions) {
 	leftWidth := max((opts.width-7)/2, 1)
-	for _, unit := range units {
+	for i := 0; i < len(units); {
+		unit := units[i]
 		switch unit.kind {
 		case diffOpEqual:
 			if opts.suppressCommonLines {
+				i++
 				continue
 			}
 			leftText := diffClipOutput(unit.left.text, leftWidth, opts)
@@ -1729,12 +1857,40 @@ func diffWriteSideBySide(out *strings.Builder, units []diffUnit, opts *diffOptio
 				rightText = ""
 			}
 			fmt.Fprintf(out, "%-*s %s %s\n", leftWidth, leftText, sep, rightText)
-		case diffOpDelete:
-			leftText := diffClipOutput(unit.left.text, leftWidth, opts)
-			fmt.Fprintf(out, "%-*s <\n", leftWidth, leftText)
-		case diffOpInsert:
-			rightText := diffClipOutput(unit.right.text, leftWidth, opts)
-			fmt.Fprintf(out, "%-*s > %s\n", leftWidth, "", rightText)
+			i++
+		default:
+			start := i
+			for i < len(units) && units[i].kind != diffOpEqual {
+				i++
+			}
+			deletes := make([]diffLine, 0, i-start)
+			inserts := make([]diffLine, 0, i-start)
+			for _, changeUnit := range units[start:i] {
+				switch changeUnit.kind {
+				case diffOpDelete:
+					if changeUnit.left != nil {
+						deletes = append(deletes, *changeUnit.left)
+					}
+				case diffOpInsert:
+					if changeUnit.right != nil {
+						inserts = append(inserts, *changeUnit.right)
+					}
+				}
+			}
+			pairs := min(len(deletes), len(inserts))
+			for idx := range pairs {
+				leftText := diffClipOutput(deletes[idx].text, leftWidth, opts)
+				rightText := diffClipOutput(inserts[idx].text, leftWidth, opts)
+				fmt.Fprintf(out, "%-*s | %s\n", leftWidth, leftText, rightText)
+			}
+			for _, line := range deletes[pairs:] {
+				leftText := diffClipOutput(line.text, leftWidth, opts)
+				fmt.Fprintf(out, "%-*s <\n", leftWidth, leftText)
+			}
+			for _, line := range inserts[pairs:] {
+				rightText := diffClipOutput(line.text, leftWidth, opts)
+				fmt.Fprintf(out, "%-*s > %s\n", leftWidth, "", rightText)
+			}
 		}
 	}
 }
