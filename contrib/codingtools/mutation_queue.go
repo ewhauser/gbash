@@ -3,6 +3,7 @@ package codingtools
 import (
 	"context"
 	"fmt"
+	"path"
 	"reflect"
 	"sync"
 
@@ -71,13 +72,36 @@ func releaseMutationQueue(q *mutationQueue, key string, next chan struct{}) {
 }
 
 func mutationQueueKey(ctx context.Context, fsys gbfs.FileSystem, resolvedPath string) string {
-	keyPath := resolvedPath
-	if fsys != nil {
-		if realPath, err := fsys.Realpath(ctx, resolvedPath); err == nil {
-			keyPath = gbfs.Clean(realPath)
-		}
+	return filesystemIdentity(fsys) + ":" + canonicalMutationPath(ctx, fsys, resolvedPath)
+}
+
+func canonicalMutationPath(ctx context.Context, fsys gbfs.FileSystem, resolvedPath string) string {
+	keyPath := gbfs.Clean(resolvedPath)
+	if fsys == nil {
+		return keyPath
 	}
-	return filesystemIdentity(fsys) + ":" + keyPath
+
+	current := keyPath
+	var suffix string
+	for {
+		if realPath, err := fsys.Realpath(ctx, current); err == nil {
+			if suffix == "" {
+				return gbfs.Clean(realPath)
+			}
+			return gbfs.Resolve(realPath, suffix)
+		}
+		if current == "/" {
+			return keyPath
+		}
+
+		base := path.Base(current)
+		if suffix == "" {
+			suffix = base
+		} else {
+			suffix = path.Join(base, suffix)
+		}
+		current = path.Dir(current)
+	}
 }
 
 func filesystemIdentity(fsys gbfs.FileSystem) string {

@@ -481,6 +481,26 @@ func TestEditOverlappingDuplicateMatchError(t *testing.T) {
 	}
 }
 
+func TestEditExactMatchIgnoresFuzzyEquivalentVariants(t *testing.T) {
+	t.Parallel()
+
+	fsys := gbfs.NewMemory()
+	mustWriteVirtualFile(t, fsys, "/workspace/note.txt", "quote: \"hello\"\nquote: \u201chello\u201d\n")
+	tools := New(Config{FS: fsys, WorkingDir: "/workspace"})
+
+	_, err := tools.Edit(context.Background(), EditRequest{
+		Path:    "note.txt",
+		OldText: "quote: \"hello\"",
+		NewText: "quote: \"goodbye\"",
+	})
+	if err != nil {
+		t.Fatalf("Edit() error = %v", err)
+	}
+	if got := string(mustReadVirtualFile(t, fsys, "/workspace/note.txt")); got != "quote: \"goodbye\"\nquote: \u201chello\u201d\n" {
+		t.Fatalf("file content = %q, want exact occurrence replaced only", got)
+	}
+}
+
 func TestEditMissingMatchError(t *testing.T) {
 	t.Parallel()
 
@@ -578,6 +598,60 @@ func TestEditAndWriteSerializeSamePath(t *testing.T) {
 	}
 	if got := fsys.MaxActiveWrites(); got != 1 {
 		t.Fatalf("MaxActiveWrites() = %d, want 1", got)
+	}
+}
+
+func TestWriteSerializesSymlinkAliasPaths(t *testing.T) {
+	t.Parallel()
+
+	base := gbfs.NewMemory()
+	if err := base.MkdirAll(context.Background(), "/workspace/real", 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := base.Symlink(context.Background(), "/workspace/real", "/workspace/link"); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	fsys := &serialCheckFS{FileSystem: base, started: make(chan struct{}, 4)}
+	tools := New(Config{FS: fsys, WorkingDir: "/workspace"})
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 2)
+
+	wg.Go(func() {
+		_, err := tools.Write(context.Background(), WriteRequest{
+			Path:    "real/new.txt",
+			Content: "first\n",
+		})
+		errCh <- err
+	})
+
+	select {
+	case <-fsys.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first write to start")
+	}
+
+	wg.Go(func() {
+		_, err := tools.Write(context.Background(), WriteRequest{
+			Path:    "link/new.txt",
+			Content: "second\n",
+		})
+		errCh <- err
+	})
+
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+	}
+	if got := fsys.MaxActiveWrites(); got != 1 {
+		t.Fatalf("MaxActiveWrites() = %d, want 1 for symlink aliases", got)
+	}
+	if got := string(mustReadVirtualFile(t, base, "/workspace/real/new.txt")); got != "second\n" {
+		t.Fatalf("final content = %q, want second write to win after serialization", got)
 	}
 }
 

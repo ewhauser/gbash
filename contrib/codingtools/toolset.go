@@ -208,9 +208,12 @@ func (t *Toolset) Edit(ctx context.Context, req EditRequest) (EditResponse, erro
 			)
 		}
 
-		fuzzyContent := normalizeForFuzzyMatch(normalizedContent)
-		fuzzyOldText := normalizeForFuzzyMatch(normalizedOldText)
-		occurrences := countOverlappingOccurrences(fuzzyContent, fuzzyOldText)
+		occurrences := countOverlappingOccurrences(normalizedContent, normalizedOldText)
+		if matchResult.usedFuzzyMatch {
+			fuzzyContent := normalizeForFuzzyMatch(normalizedContent)
+			fuzzyOldText := normalizeForFuzzyMatch(normalizedOldText)
+			occurrences = countOverlappingOccurrences(fuzzyContent, fuzzyOldText)
+		}
 		if occurrences > 1 {
 			return EditResponse{}, fmt.Errorf(
 				"found %d occurrences of the text in %s. The text must be unique. Please provide more context to make it unique",
