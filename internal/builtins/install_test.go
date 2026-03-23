@@ -39,6 +39,55 @@ func TestInstallRejectsDirectoryWithTargetDirectory(t *testing.T) {
 	}
 }
 
+func TestInstallRejectsEmptyTargetDirectoryOperand(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/tmp/src.txt", []byte("one\n"))
+
+	result := mustExecSession(t, session, "install -t '' /tmp/src.txt /tmp/dst.txt\n")
+	if result.ExitCode == 0 {
+		t.Fatalf("ExitCode = %d, want non-zero", result.ExitCode)
+	}
+	if !strings.Contains(result.Stderr, "failed to access ''") {
+		t.Fatalf("Stderr = %q, want empty target-directory error", result.Stderr)
+	}
+	if _, err := session.FileSystem().Stat(context.Background(), "/tmp/dst.txt"); err == nil {
+		t.Fatalf("Stat(dst) succeeded, want no file created")
+	}
+}
+
+func TestInstallRejectsEmptyOwnershipValues(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		command    string
+		wantStderr string
+	}{
+		{name: "empty owner", command: "install -o '' /tmp/src.txt /tmp/dst.txt\n", wantStderr: "invalid user ''"},
+		{name: "whitespace group", command: "install -g '   ' /tmp/src.txt /tmp/dst.txt\n", wantStderr: "invalid group '   '"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			session := newSession(t, &Config{})
+			writeSessionFile(t, session, "/tmp/src.txt", []byte("one\n"))
+
+			result := mustExecSession(t, session, tt.command)
+			if result.ExitCode == 0 {
+				t.Fatalf("ExitCode = %d, want non-zero", result.ExitCode)
+			}
+			if !strings.Contains(result.Stderr, tt.wantStderr) {
+				t.Fatalf("Stderr = %q, want substring %q", result.Stderr, tt.wantStderr)
+			}
+			if _, err := session.FileSystem().Stat(context.Background(), "/tmp/dst.txt"); err == nil {
+				t.Fatalf("Stat(dst) succeeded, want no file created")
+			}
+		})
+	}
+}
+
 func TestInstallSupportsCreateLeadingAndTargetDirectory(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})

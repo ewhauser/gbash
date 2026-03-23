@@ -60,6 +60,7 @@ type installOptions struct {
 	strip              bool
 	stripProgram       string
 	targetDirectory    string
+	targetDirectorySet bool
 	noTargetDirectory  bool
 	verbose            bool
 	unprivileged       bool
@@ -162,6 +163,7 @@ func parseInstallMatches(inv *Invocation, matches *ParsedCommand) (installOption
 		strip:              matches.Has("strip"),
 		stripProgram:       installDefaultStripProgram,
 		targetDirectory:    matches.Value("target-directory"),
+		targetDirectorySet: matches.Has("target-directory"),
 		noTargetDirectory:  matches.Has("no-target-directory"),
 		verbose:            matches.Has("verbose"),
 		unprivileged:       matches.Has("unprivileged"),
@@ -170,11 +172,20 @@ func parseInstallMatches(inv *Invocation, matches *ParsedCommand) (installOption
 	if matches.Has("strip-program") {
 		opts.stripProgram = matches.Value("strip-program")
 	}
-	if opts.targetDirectory != "" && opts.noTargetDirectory {
+	if matches.Has("owner") && opts.ownerValue == "" {
+		return installOptions{}, exitf(inv, 1, "install: invalid user %s", quoteGNUOperand(matches.Value("owner")))
+	}
+	if matches.Has("group") && opts.groupValue == "" {
+		return installOptions{}, exitf(inv, 1, "install: invalid group %s", quoteGNUOperand(matches.Value("group")))
+	}
+	if opts.targetDirectorySet && opts.noTargetDirectory {
 		return installOptions{}, exitf(inv, 1, "install: options --target-directory and --no-target-directory are mutually exclusive")
 	}
-	if opts.directoryOnly && opts.targetDirectory != "" {
+	if opts.directoryOnly && opts.targetDirectorySet {
 		return installOptions{}, exitf(inv, 1, "install: options --directory and --target-directory are mutually exclusive")
+	}
+	if opts.targetDirectorySet && opts.targetDirectory == "" {
+		return installOptions{}, exitf(inv, 1, "install: failed to access %s: No such file or directory", quoteGNUOperand(opts.targetDirectory))
 	}
 	if opts.compare && opts.preserveTimestamps {
 		return installOptions{}, exitf(inv, 1, "install: options --compare and --preserve-timestamps are mutually exclusive")
@@ -322,14 +333,14 @@ func runInstallFiles(ctx context.Context, inv *Invocation, db *permissionIdentit
 	if err != nil {
 		return err
 	}
-	targetPathForOps, err := installResolveTargetOperand(ctx, inv, targetArg, opts.targetDirectory != "" || len(sources) > 1)
+	targetPathForOps, err := installResolveTargetOperand(ctx, inv, targetArg, opts.targetDirectorySet || len(sources) > 1)
 	if err != nil {
 		return err
 	}
 
 	if opts.createLeading {
 		switch {
-		case opts.targetDirectory != "":
+		case opts.targetDirectorySet:
 			if err := installEnsureRealDirectoryPath(ctx, inv, allowPath(inv, opts.targetDirectory), opts.verbose); err != nil {
 				return err
 			}
@@ -357,7 +368,7 @@ func runInstallFiles(ctx context.Context, inv *Invocation, db *permissionIdentit
 	}
 	targetIsSymlink := targetLExists && targetLstat != nil && targetLstat.Mode()&stdfs.ModeSymlink != 0
 
-	if opts.targetDirectory != "" || len(sources) > 1 {
+	if opts.targetDirectorySet || len(sources) > 1 {
 		if !targetIsDir {
 			return exitf(inv, 1, "install: target %s is not a directory", quoteGNUOperand(targetArg))
 		}
@@ -391,7 +402,7 @@ func installOperands(inv *Invocation, opts *installOptions) ([]string, string, e
 	if len(args) == 0 {
 		return nil, "", exitf(inv, 1, "install: missing file operand")
 	}
-	if opts.targetDirectory != "" {
+	if opts.targetDirectorySet {
 		return args, opts.targetDirectory, nil
 	}
 	if opts.noTargetDirectory && len(args) > 2 {
