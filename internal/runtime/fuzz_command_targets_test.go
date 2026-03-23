@@ -36,7 +36,7 @@ func FuzzFilePathCommands(f *testing.F) {
 		writeSessionFile(t, session, inputPath, data)
 
 		script := fmt.Appendf(nil,
-			"touch %s\ncp -pv %s %s\nmv -v %s %s\ncp %s %s\nunlink %s\nln -s -f %s %s\nreadlink %s >/tmp/readlink.out\nstat %s >/tmp/stat.out\nbasename --suffix=.moved %s >/tmp/base.out\ndirname %s >/tmp/dir.out\nchmod 600 %s\nchown 123:456 %s\nchown -h 321:654 %s || true\nchgrp 456 %s\nchgrp -h 654 %s || true\nmkdir -p /tmp/fuzz-empty/sub\nrmdir /tmp/fuzz-empty/sub\nmktemp /tmp/fuzz.XXXX >/tmp/mktemp-file.out\nmktemp -d /tmp/fuzzdir.XXXX >/tmp/mktemp-dir.out\nmktemp -u --suffix=.txt /tmp/fuzzdry.XXXX >/tmp/mktemp-dry.out\nmktemp --tmpdir=. fuzz.XXXX >/tmp/mktemp-rel.out\nfile --brief %s >/tmp/file.out\nrm %s %s %s\n",
+			"touch %s\ncp -pv %s %s\nmv -v %s %s\ncp %s %s\nunlink %s\nln -s -f %s %s\nreadlink %s >/tmp/readlink.out\nstat %s >/tmp/stat.out\nbasename --suffix=.moved %s >/tmp/base.out\ndirname %s >/tmp/dir.out\nchmod 600 %s\nchown 123:456 %s\nchown -h 321:654 %s || true\nchgrp 456 %s\nchgrp -h 654 %s || true\ninstall -D -m 700 %s /tmp/install/deep/output.txt\ninstall -S .bak %s /tmp/install-copy.txt\ninstall -C %s /tmp/install-copy.txt >/tmp/install-compare.out\ninstall -U -o 111 -g 222 %s /tmp/install-owned.txt\ninstall -d -m 755 /tmp/install/dir/sub\nmkdir -p /tmp/fuzz-empty/sub\nrmdir /tmp/fuzz-empty/sub\nmktemp /tmp/fuzz.XXXX >/tmp/mktemp-file.out\nmktemp -d /tmp/fuzzdir.XXXX >/tmp/mktemp-dir.out\nmktemp -u --suffix=.txt /tmp/fuzzdry.XXXX >/tmp/mktemp-dry.out\nmktemp --tmpdir=. fuzz.XXXX >/tmp/mktemp-rel.out\nfile --brief %s >/tmp/file.out\nrm %s %s %s\n",
 			shellQuote(inputPath),
 			shellQuote(inputPath),
 			shellQuote(copyPath),
@@ -57,6 +57,10 @@ func FuzzFilePathCommands(f *testing.F) {
 			shellQuote(movedPath),
 			shellQuote(movedPath),
 			shellQuote(linkPath),
+			shellQuote(inputPath),
+			shellQuote(inputPath),
+			shellQuote(inputPath),
+			shellQuote(inputPath),
 			shellQuote(inputPath),
 			shellQuote(linkPath),
 			shellQuote(movedPath),
