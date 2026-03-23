@@ -196,6 +196,7 @@ func (s *ddWriteStats) add(other ddWriteStats) {
 type ddInput struct {
 	reader io.Reader
 	label  string
+	closer io.Closer
 }
 
 type ddTransformState struct {
@@ -208,6 +209,10 @@ type ddOutputWriter interface {
 	Flush() (ddWriteStats, error)
 	Sync() error
 	Finalize(context.Context, *Invocation) error
+}
+
+type ddOutputMaterializer interface {
+	Materialize(context.Context, *Invocation) error
 }
 
 type ddStdoutWriter struct {
@@ -603,9 +608,25 @@ func runDd(ctx context.Context, inv *Invocation, settings *ddSettings) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		_ = input.Close()
+	}()
+
 	output, err := openDdOutput(ctx, inv, settings)
 	if err != nil {
 		return err
+	}
+	if ddUsesSamePath(inv, settings) {
+		if materializer, ok := output.(ddOutputMaterializer); ok {
+			if err := materializer.Materialize(ctx, inv); err != nil {
+				return err
+			}
+			_ = input.Close()
+			input, err = openDdInput(ctx, inv, settings)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return runDdWithIO(ctx, inv, settings, input, output)
@@ -659,6 +680,7 @@ func runDdWithIO(ctx context.Context, inv *Invocation, settings *ddSettings, inp
 		}
 
 		chunk, update, eof, readErr := readDdBlock(input.reader, requestSize, settings.iflags.fullblock)
+		syntheticSync := false
 		if readErr != nil {
 			if !settings.conv.noerror {
 				return exitf(inv, 1, "dd: error reading %s: %v", quoteGNUOperand(input.label), readErr)
@@ -666,10 +688,18 @@ func runDdWithIO(ctx context.Context, inv *Invocation, settings *ddSettings, inp
 			ddWarn(inv, "error reading %s: %v", quoteGNUOperand(input.label), readErr)
 			hadReadError = true
 			if len(chunk) == 0 {
-				break
+				if !settings.conv.sync {
+					break
+				}
+				update = ddReadStats{
+					recordsPartial: 1,
+					bytesTotal:     uint64(requestSize),
+				}
+				eof = true
+				syntheticSync = true
 			}
 		}
-		if len(chunk) == 0 {
+		if len(chunk) == 0 && !syntheticSync {
 			break
 		}
 
@@ -768,6 +798,23 @@ func ddPrepareSwabChunk(chunk []byte, carry byte, hasCarry, finalize bool) ([]by
 	return buf, carry, hasCarry
 }
 
+func (in *ddInput) Close() error {
+	if in == nil || in.closer == nil {
+		return nil
+	}
+	return in.closer.Close()
+}
+
+func ddUsesSamePath(inv *Invocation, settings *ddSettings) bool {
+	if settings == nil || !settings.infileSet || !settings.outfileSet {
+		return false
+	}
+	if settings.infile == "" || settings.outfile == "" {
+		return false
+	}
+	return allowPath(inv, settings.infile) == allowPath(inv, settings.outfile)
+}
+
 func ddScaledOffset(inv *Invocation, operand string, value ddNumber, blockSize int) (uint64, error) {
 	if value.bytes || value.value == 0 {
 		return value.value, nil
@@ -785,6 +832,7 @@ func openDdInput(ctx context.Context, inv *Invocation, settings *ddSettings) (*d
 	var (
 		reader io.Reader
 		label  string
+		closer io.Closer
 	)
 	if !settings.infileSet {
 		reader = inv.Stdin
@@ -813,22 +861,29 @@ func openDdInput(ctx context.Context, inv *Invocation, settings *ddSettings) (*d
 		}
 		reader = file
 		label = settings.infile
+		closer = file
 	}
 
 	skipBytes, err := ddScaledOffset(inv, "skip", settings.skip, settings.ibs)
 	if err != nil {
+		if closer != nil {
+			_ = closer.Close()
+		}
 		return nil, err
 	}
 	if skipBytes > 0 {
 		discarded, err := ddDiscard(reader, skipBytes)
 		if err != nil {
+			if closer != nil {
+				_ = closer.Close()
+			}
 			return nil, exitf(inv, 1, "dd: error reading %s: %v", quoteGNUOperand(label), err)
 		}
 		if discarded < skipBytes {
 			ddWarn(inv, "%s: cannot skip to specified offset", quoteGNUOperand(label))
 		}
 	}
-	return &ddInput{reader: reader, label: label}, nil
+	return &ddInput{reader: reader, label: label, closer: closer}, nil
 }
 
 func openDdOutput(ctx context.Context, inv *Invocation, settings *ddSettings) (ddOutputWriter, error) {
@@ -886,13 +941,17 @@ func openDdOutput(ctx context.Context, inv *Invocation, settings *ddSettings) (d
 
 	perm := stdfs.FileMode(0o644)
 	existing := []byte{}
+	needExisting := exists && info != nil && (seekBytes > 0 || settings.conv.notrunc)
 	if exists && info != nil {
 		perm = info.Mode().Perm()
 		if perm == 0 {
 			perm = 0o644
 		}
-		data, _, readErr := readAllFile(ctx, inv, settings.outfile)
-		if readErr == nil {
+		if needExisting {
+			data, _, readErr := readAllFile(ctx, inv, settings.outfile)
+			if readErr != nil {
+				return nil, exitf(inv, 1, "dd: error reading %s: %s", quoteGNUOperand(settings.outfile), readAllErrorText(readErr))
+			}
 			existing = data
 		}
 	}
@@ -1201,6 +1260,10 @@ func (w *ddFileWriter) Sync() error {
 }
 
 func (w *ddFileWriter) Finalize(ctx context.Context, inv *Invocation) error {
+	return writeFileContents(ctx, inv, w.abs, w.data, w.perm)
+}
+
+func (w *ddFileWriter) Materialize(ctx context.Context, inv *Invocation) error {
 	return writeFileContents(ctx, inv, w.abs, w.data, w.perm)
 }
 

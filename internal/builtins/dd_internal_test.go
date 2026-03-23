@@ -6,8 +6,12 @@ import (
 	"errors"
 	"io"
 	"math"
+	"os"
 	"strings"
 	"testing"
+
+	gbfs "github.com/ewhauser/gbash/fs"
+	"github.com/ewhauser/gbash/policy"
 )
 
 type ddReadStep struct {
@@ -75,6 +79,36 @@ func (r *ddEOFReader) Read(p []byte) (int, error) {
 	return 0, io.EOF
 }
 
+type ddOpenFailFS struct {
+	gbfs.FileSystem
+	failPath string
+	err      error
+}
+
+func (fs ddOpenFailFS) Open(ctx context.Context, name string) (gbfs.File, error) {
+	if name == fs.failPath {
+		return nil, fs.err
+	}
+	return fs.FileSystem.Open(ctx, name)
+}
+
+func writeDdTestFile(tb testing.TB, fsys gbfs.FileSystem, name string, data []byte) {
+	tb.Helper()
+
+	if err := fsys.MkdirAll(context.Background(), "/tmp", 0o755); err != nil {
+		tb.Fatalf("MkdirAll(/tmp) error = %v", err)
+	}
+	file, err := fsys.OpenFile(context.Background(), name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		tb.Fatalf("OpenFile(%q) error = %v", name, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	if _, err := file.Write(data); err != nil {
+		tb.Fatalf("Write(%q) error = %v", name, err)
+	}
+}
+
 func TestRunDdWithIONoerrorPreservesPartialReadAndFails(t *testing.T) {
 	t.Parallel()
 
@@ -140,6 +174,38 @@ func TestRunDdWithIONoerrorStopsOnZeroByteReadError(t *testing.T) {
 	}
 }
 
+func TestRunDdWithIONoerrorSyncPadsZeroByteReadError(t *testing.T) {
+	t.Parallel()
+
+	reader := &ddLoopGuardReader{err: errors.New("boom"), maxCalls: 1}
+	writer := &ddCaptureWriter{}
+	var stderr bytes.Buffer
+
+	err := runDdWithIO(context.Background(), &Invocation{Stderr: &stderr}, &ddSettings{
+		ibs:    4,
+		obs:    4,
+		status: ddStatusNone,
+		count:  &ddNumber{value: 1},
+		conv: ddConvOptions{
+			noerror: true,
+			sync:    true,
+		},
+	}, &ddInput{reader: reader, label: "input"}, writer)
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 1 {
+		t.Fatalf("runDdWithIO() error = %v, want exit status 1", err)
+	}
+	if got, want := writer.data, []byte{0, 0, 0, 0}; !bytes.Equal(got, want) {
+		t.Fatalf("captured output = %v, want %v", got, want)
+	}
+	if reader.calls != 1 {
+		t.Fatalf("Read() calls = %d, want 1", reader.calls)
+	}
+	if got := stderr.String(); !strings.Contains(got, "dd: error reading 'input': boom\n") {
+		t.Fatalf("stderr = %q, want read warning", got)
+	}
+}
+
 func TestDdDiscardClampsHugeSkipBeforeIntConversion(t *testing.T) {
 	t.Parallel()
 
@@ -189,5 +255,39 @@ func TestDdScaledOffsetRejectsBlockOverflow(t *testing.T) {
 	}
 	if got := err.Error(); !strings.Contains(got, "skip offset is too large") {
 		t.Fatalf("error = %q, want overflow diagnostic", got)
+	}
+}
+
+func TestOpenDdOutputFailsWhenExistingBytesCannotBeRead(t *testing.T) {
+	t.Parallel()
+
+	mem := gbfs.NewMemory()
+	writeDdTestFile(t, mem, "/tmp/out.txt", []byte("abcdef"))
+
+	inv := NewInvocation(&InvocationOptions{
+		Cwd: "/",
+		FileSystem: ddOpenFailFS{
+			FileSystem: mem,
+			failPath:   "/tmp/out.txt",
+			err:        errors.New("boom"),
+		},
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:  []string{"/"},
+			WriteRoots: []string{"/"},
+		}),
+	})
+
+	_, err := openDdOutput(context.Background(), inv, &ddSettings{
+		outfile:    "/tmp/out.txt",
+		outfileSet: true,
+		obs:        1,
+		seek:       ddNumber{value: 1},
+	})
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 1 {
+		t.Fatalf("openDdOutput() error = %v, want exit status 1", err)
+	}
+	if got := err.Error(); !strings.Contains(got, "dd: error reading '/tmp/out.txt': boom") {
+		t.Fatalf("error = %q, want read failure diagnostic", got)
 	}
 }

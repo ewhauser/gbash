@@ -88,6 +88,49 @@ func TestDdSeekAndAppendSemantics(t *testing.T) {
 	}
 }
 
+func TestDdSameFileSemantics(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		script string
+		want   string
+	}{
+		{
+			name:   "truncates before reading",
+			script: "dd if=/tmp/file.txt of=/tmp/file.txt bs=1 count=1 status=none\n",
+			want:   "",
+		},
+		{
+			name:   "seek reads from materialized truncated prefix",
+			script: "dd if=/tmp/file.txt of=/tmp/file.txt seek=2 bs=1 count=1 status=none\n",
+			want:   "aba",
+		},
+		{
+			name:   "notrunc keeps tail after same-file seek",
+			script: "dd if=/tmp/file.txt of=/tmp/file.txt seek=2 bs=1 count=1 conv=notrunc status=none\n",
+			want:   "abadef",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			session := newSession(t, &Config{})
+			writeSessionFile(t, session, "/tmp/file.txt", []byte("abcdef"))
+
+			result := execSessionScriptWithInput(t, session, tc.script, nil)
+			if got, want := result.ExitCode, 0; got != want {
+				t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+			}
+			if got := string(readSessionFile(t, session, "/tmp/file.txt")); got != tc.want {
+				t.Fatalf("output = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestDdConversions(t *testing.T) {
 	t.Parallel()
 
