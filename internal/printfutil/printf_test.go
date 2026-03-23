@@ -204,8 +204,15 @@ func TestFormatGNURejectsShellOnlyConversionsAndFields(t *testing.T) {
 		want   string
 	}{
 		{name: "time", format: "%(%F)T", want: "%(: invalid conversion specification"},
+		{name: "quote-flag-s", format: "%'s", want: "%'s: invalid conversion specification"},
+		{name: "quote-flag-c", format: "%'c", want: "%'c: invalid conversion specification"},
+		{name: "quote-flag-x", format: "%'x", want: "%'x: invalid conversion specification"},
+		{name: "quote-flag-o", format: "%'o", want: "%'o: invalid conversion specification"},
 		{name: "width-q", format: "%7q", want: "%7q: invalid conversion specification"},
 		{name: "width-b", format: "%7b", want: "%7b: invalid conversion specification"},
+		{name: "length-q", format: "%lq", want: "%lq: invalid conversion specification"},
+		{name: "length-llq", format: "%llq", want: "%llq: invalid conversion specification"},
+		{name: "length-b", format: "%lb", want: "%lb: invalid conversion specification"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -219,6 +226,39 @@ func TestFormatGNURejectsShellOnlyConversionsAndFields(t *testing.T) {
 			}
 			if len(result.Diagnostics) != 1 || result.Diagnostics[0] != tt.want {
 				t.Fatalf("Diagnostics = %v, want [%q]", result.Diagnostics, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatGNUAllowsQuoteFlagAndLengthModifiersWhereCoreutilsDoes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		format string
+		arg    string
+		want   string
+	}{
+		{name: "quote-flag-d", format: "%'d", arg: "1000", want: "1000"},
+		{name: "quote-flag-u", format: "%'u", arg: "1000", want: "1000"},
+		{name: "quote-flag-f", format: "%'f", arg: "1000", want: "1000.000000"},
+		{name: "length-s", format: "%ls", arg: "x", want: "x"},
+		{name: "length-d", format: "%ld", arg: "10", want: "10"},
+		{name: "length-f", format: "%Lf", arg: "10", want: "10.000000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := Format(tt.format, []string{tt.arg}, Options{Dialect: DialectGNU})
+			if result.ExitCode != 0 {
+				t.Fatalf("ExitCode = %d, want 0; diagnostics=%v", result.ExitCode, result.Diagnostics)
+			}
+			if got := result.Output; got != tt.want {
+				t.Fatalf("Output = %q, want %q", got, tt.want)
+			}
+			if len(result.Diagnostics) != 0 {
+				t.Fatalf("Diagnostics = %v, want empty", result.Diagnostics)
 			}
 		})
 	}

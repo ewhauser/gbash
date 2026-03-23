@@ -44,6 +44,7 @@ type formatSpec struct {
 	precisionSet     bool
 	precisionFromArg bool
 	quoteFlag        bool
+	lengthModifier   bool
 }
 
 type formatToken struct {
@@ -225,7 +226,9 @@ width:
 		if i < len(format) && format[i] == '(' {
 			return nil, i + 1, gnuInvalidConversionSpec(format[start : i+1]), true
 		}
-		i = skipGNULengthModifier(format, i)
+		next := skipGNULengthModifier(format, i)
+		spec.lengthModifier = next != i
+		i = next
 	}
 
 	if i >= len(format) {
@@ -249,8 +252,13 @@ width:
 	}
 	if isSupportedVerb(format[i], dialect) {
 		spec.verb = format[i]
-		if dialect == DialectGNU && (spec.verb == 'b' || spec.verb == 'q') && spec.hasGNUUnsupportedFieldParams() {
-			return nil, i + 1, gnuInvalidConversionSpec(format[start : i+1]), true
+		if dialect == DialectGNU {
+			if spec.quoteFlag && !gnuAllowsQuoteFlag(spec.verb) {
+				return nil, i + 1, gnuInvalidConversionSpec(format[start : i+1]), true
+			}
+			if (spec.verb == 'b' || spec.verb == 'q') && spec.hasGNUUnsupportedFieldParams() {
+				return nil, i + 1, gnuInvalidConversionSpec(format[start : i+1]), true
+			}
 		}
 		return spec, i + 1, "", false
 	}
@@ -427,7 +435,12 @@ func (s formatSpec) hasGNUUnsupportedFieldParams() bool {
 		s.widthFromArg ||
 		s.precisionSet ||
 		s.precisionFromArg ||
-		s.quoteFlag
+		s.quoteFlag ||
+		s.lengthModifier
+}
+
+func gnuAllowsQuoteFlag(verb byte) bool {
+	return strings.ContainsRune("diufFeEgG", rune(verb))
 }
 
 func gnuInvalidConversionSpec(spec string) string {
