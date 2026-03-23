@@ -14,14 +14,14 @@ const (
 )
 
 func DecodeEscapes(s string) (decoded string, stop bool, err error) {
-	decoded, stop, diag := decodeEscapeString(s, escapeModeOuter)
+	decoded, stop, diag := decodeEscapeString(s, escapeModeOuter, DialectShell)
 	if diag == "" {
 		return decoded, stop, nil
 	}
 	return decoded, stop, fmt.Errorf("%s", diag)
 }
 
-func decodeEscapeString(s string, mode escapeMode) (string, bool, string) {
+func decodeEscapeString(s string, mode escapeMode, dialect Dialect) (string, bool, string) {
 	var b strings.Builder
 	var diags []string
 	for i := 0; i < len(s); {
@@ -30,9 +30,13 @@ func decodeEscapeString(s string, mode escapeMode) (string, bool, string) {
 			i++
 			continue
 		}
-		text, next, stop, diag := decodeEscape(s, i, mode)
+		text, next, stop, diag := decodeEscape(s, i, mode, dialect)
 		if diag != "" {
 			diags = append(diags, diag)
+			if dialect == DialectGNU {
+				b.WriteString(text)
+				return b.String(), true, joinDiagnostics(diags)
+			}
 		}
 		b.WriteString(text)
 		i = next
@@ -43,7 +47,7 @@ func decodeEscapeString(s string, mode escapeMode) (string, bool, string) {
 	return b.String(), false, joinDiagnostics(diags)
 }
 
-func decodeEscape(s string, start int, mode escapeMode) (text string, next int, stop bool, diag string) {
+func decodeEscape(s string, start int, mode escapeMode, dialect Dialect) (text string, next int, stop bool, diag string) {
 	if start+1 >= len(s) {
 		return "\\", start + 1, false, ""
 	}
@@ -54,6 +58,11 @@ func decodeEscape(s string, start int, mode escapeMode) (text string, next int, 
 		return "\b", start + 2, false, ""
 	case 'c':
 		return "", start + 2, true, ""
+	case 'e':
+		if dialect == DialectGNU {
+			return "\x1b", start + 2, false, ""
+		}
+		return "\\e", start + 2, false, ""
 	case 'f':
 		return "\f", start + 2, false, ""
 	case 'n':
@@ -73,11 +82,11 @@ func decodeEscape(s string, start int, mode escapeMode) (text string, next int, 
 	case '?':
 		return "?", start + 2, false, ""
 	case 'x':
-		return decodeHexEscape(s, start, 2)
+		return decodeHexEscape(s, start, 2, dialect)
 	case 'u':
-		return decodeUnicodeEscape(s, start, 4)
+		return decodeUnicodeEscape(s, start, 4, dialect)
 	case 'U':
-		return decodeUnicodeEscape(s, start, 8)
+		return decodeUnicodeEscape(s, start, 8, dialect)
 	case '0', '1', '2', '3', '4', '5', '6', '7':
 		return decodeOctalEscape(s, start, mode)
 	default:
@@ -85,19 +94,38 @@ func decodeEscape(s string, start int, mode escapeMode) (text string, next int, 
 	}
 }
 
-func decodeHexEscape(s string, start, maxDigits int) (string, int, bool, string) {
+func decodeHexEscape(s string, start, maxDigits int, dialect Dialect) (string, int, bool, string) {
 	end := start + 2
 	for end < len(s) && end-(start+2) < maxDigits && IsHexDigit(s[end]) {
 		end++
 	}
 	if end == start+2 {
+		if dialect == DialectGNU {
+			return "", len(s), false, "missing hexadecimal number in escape"
+		}
 		return "\\x", start + 2, false, "missing hex digit for \\x"
 	}
 	value, _ := strconv.ParseUint(s[start+2:end], 16, 8)
 	return string([]byte{byte(value)}), end, false, ""
 }
 
-func decodeUnicodeEscape(s string, start, maxDigits int) (string, int, bool, string) {
+func decodeUnicodeEscape(s string, start, maxDigits int, dialect Dialect) (string, int, bool, string) {
+	if dialect == DialectGNU {
+		end := start + 2 + maxDigits
+		if end > len(s) {
+			return "", len(s), false, "missing hexadecimal number in escape"
+		}
+		for i := start + 2; i < end; i++ {
+			if !IsHexDigit(s[i]) {
+				return "", len(s), false, "missing hexadecimal number in escape"
+			}
+		}
+		value, _ := strconv.ParseUint(s[start+2:end], 16, 32)
+		if value > 0x10ffff || value >= 0xd800 && value <= 0xdfff {
+			return "", len(s), false, fmt.Sprintf("invalid universal character name %s", s[start:end])
+		}
+		return encodeCodePoint(uint32(value)), end, false, ""
+	}
 	end := start + 2
 	for end < len(s) && end-(start+2) < maxDigits && IsHexDigit(s[end]) {
 		end++

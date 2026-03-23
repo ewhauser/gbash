@@ -9,7 +9,14 @@ import (
 	"github.com/ewhauser/gbash/internal/shell/syntax"
 )
 
-func quoteShell(s string) string {
+func quoteShell(s string, dialect Dialect) string {
+	if dialect == DialectGNU {
+		return quoteShellGNU(s)
+	}
+	return quoteShellBash(s)
+}
+
+func quoteShellBash(s string) string {
 	if s == "" {
 		return "''"
 	}
@@ -27,6 +34,85 @@ func quoteShell(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+func quoteShellGNU(s string) string {
+	if s == "" {
+		return "''"
+	}
+	reference := s
+
+	quotes := byte('\'')
+	mustQuote := false
+	if gnuShellHasInitialQuotePressure(reference) {
+		mustQuote = true
+	} else if strings.ContainsRune(reference, '\'') {
+		quotes = '"'
+		mustQuote = true
+	}
+
+	var b strings.Builder
+	inDollar := false
+	enterDollar := func() {
+		if inDollar {
+			return
+		}
+		b.WriteString("'$'")
+		inDollar = true
+	}
+	exitDollar := func() {
+		if !inDollar {
+			return
+		}
+		b.WriteString("''")
+		inDollar = false
+	}
+
+	for s != "" {
+		r, size := utf8.DecodeRuneInString(s)
+		switch {
+		case r == utf8.RuneError && size == 1:
+			enterDollar()
+			mustQuote = true
+			fmt.Fprintf(&b, "\\%03o", s[0])
+		default:
+			switch state, ch := classifyGNUShellChar(r, quotes); state {
+			case gnuEscapeChar:
+				exitDollar()
+				b.WriteRune(ch)
+			case gnuEscapeForceQuote:
+				exitDollar()
+				mustQuote = true
+				b.WriteRune(ch)
+			case gnuEscapeQuotedSingle:
+				mustQuote = true
+				inDollar = false
+				b.WriteString("'\\''")
+			case gnuEscapeDollar:
+				enterDollar()
+				mustQuote = true
+				b.WriteByte('\\')
+				b.WriteRune(ch)
+			case gnuEscapeOctal:
+				enterDollar()
+				mustQuote = true
+				for _, raw := range []byte(s[:size]) {
+					fmt.Fprintf(&b, "\\%03o", raw)
+				}
+			}
+		}
+		s = s[size:]
+	}
+
+	if !mustQuote && !gnuSpecialShellStart(reference) {
+		return b.String()
+	}
+	var quoted strings.Builder
+	quoted.Grow(b.Len() + 2)
+	quoted.WriteByte(quotes)
+	quoted.WriteString(b.String())
+	quoted.WriteByte(quotes)
+	return quoted.String()
 }
 
 func needsANSIQuote(s string) bool {
@@ -102,4 +188,61 @@ func quoteANSI(s string) string {
 	}
 	b.WriteByte('\'')
 	return b.String()
+}
+
+type gnuEscapeState uint8
+
+const (
+	gnuEscapeChar gnuEscapeState = iota
+	gnuEscapeForceQuote
+	gnuEscapeQuotedSingle
+	gnuEscapeDollar
+	gnuEscapeOctal
+)
+
+func gnuShellHasInitialQuotePressure(s string) bool {
+	for _, b := range []byte(s) {
+		if b == '"' || b == '`' || b == '$' || b == '\\' || b == '^' || b == '\n' || b == '\t' || b == '\r' || b == '=' || b < 0x20 || b == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
+func gnuSpecialShellStart(s string) bool {
+	if s == "" {
+		return false
+	}
+	return s[0] == '~' || s[0] == '#'
+}
+
+func classifyGNUShellChar(r rune, quotes byte) (gnuEscapeState, rune) {
+	switch r {
+	case '\a':
+		return gnuEscapeDollar, 'a'
+	case '\b':
+		return gnuEscapeDollar, 'b'
+	case '\t':
+		return gnuEscapeDollar, 't'
+	case '\n':
+		return gnuEscapeDollar, 'n'
+	case '\v':
+		return gnuEscapeDollar, 'v'
+	case '\f':
+		return gnuEscapeDollar, 'f'
+	case '\r':
+		return gnuEscapeDollar, 'r'
+	case '\'':
+		if quotes == '\'' {
+			return gnuEscapeQuotedSingle, r
+		}
+		return gnuEscapeChar, r
+	}
+	if r < 0x20 || r == 0x7f {
+		return gnuEscapeOctal, r
+	}
+	if strings.ContainsRune("`$&*()|[;\\'\"<>?! ", r) {
+		return gnuEscapeForceQuote, r
+	}
+	return gnuEscapeChar, r
 }
