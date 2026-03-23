@@ -219,8 +219,8 @@ func (t *Toolset) Edit(ctx context.Context, req EditRequest) (EditResponse, erro
 			)
 		}
 
-		baseContent := matchResult.contentForReplacement
-		newContent := baseContent[:matchResult.index] + normalizedNewText + baseContent[matchResult.index+matchResult.matchLength:]
+		baseContent := normalizedContent
+		newContent := baseContent[:matchResult.replaceStart] + normalizedNewText + baseContent[matchResult.replaceEnd:]
 		if baseContent == newContent {
 			return EditResponse{}, fmt.Errorf(
 				"no changes made to %s. The replacement produced identical content",

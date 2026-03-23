@@ -8,11 +8,10 @@ import (
 )
 
 type fuzzyMatchResult struct {
-	found                 bool
-	index                 int
-	matchLength           int
-	usedFuzzyMatch        bool
-	contentForReplacement string
+	found          bool
+	replaceStart   int
+	replaceEnd     int
+	usedFuzzyMatch bool
 }
 
 func detectLineEnding(content string) string {
@@ -42,72 +41,45 @@ func restoreLineEndings(text, ending string) string {
 }
 
 func normalizeForFuzzyMatch(text string) string {
-	lines := strings.Split(norm.NFKC.String(text), "\n")
-	for i := range lines {
-		lines[i] = strings.TrimRight(lines[i], " \t")
-	}
-	text = strings.Join(lines, "\n")
-	replacer := strings.NewReplacer(
-		"\u2018", "'",
-		"\u2019", "'",
-		"\u201A", "'",
-		"\u201B", "'",
-		"\u201C", "\"",
-		"\u201D", "\"",
-		"\u201E", "\"",
-		"\u201F", "\"",
-		"\u2010", "-",
-		"\u2011", "-",
-		"\u2012", "-",
-		"\u2013", "-",
-		"\u2014", "-",
-		"\u2015", "-",
-		"\u2212", "-",
-		"\u00A0", " ",
-		"\u2002", " ",
-		"\u2003", " ",
-		"\u2004", " ",
-		"\u2005", " ",
-		"\u2006", " ",
-		"\u2007", " ",
-		"\u2008", " ",
-		"\u2009", " ",
-		"\u200A", " ",
-		"\u202F", " ",
-		"\u205F", " ",
-		"\u3000", " ",
-	)
-	return replacer.Replace(text)
+	normalized, _ := normalizeForFuzzyMatchWithSegments(text)
+	return normalized
 }
 
 func fuzzyFindText(content, oldText string) fuzzyMatchResult {
 	exactIndex := strings.Index(content, oldText)
 	if exactIndex != -1 {
 		return fuzzyMatchResult{
-			found:                 true,
-			index:                 exactIndex,
-			matchLength:           len(oldText),
-			contentForReplacement: content,
+			found:        true,
+			replaceStart: exactIndex,
+			replaceEnd:   exactIndex + len(oldText),
 		}
 	}
 
-	fuzzyContent := normalizeForFuzzyMatch(content)
+	fuzzyContent, segments := normalizeForFuzzyMatchWithSegments(content)
 	fuzzyOldText := normalizeForFuzzyMatch(oldText)
 	fuzzyIndex := strings.Index(fuzzyContent, fuzzyOldText)
 	if fuzzyIndex == -1 {
 		return fuzzyMatchResult{
-			found:                 false,
-			index:                 -1,
-			contentForReplacement: content,
+			found:        false,
+			replaceStart: -1,
+			replaceEnd:   -1,
+		}
+	}
+
+	replaceStart, replaceEnd, ok := mapFuzzyRangeToOriginal(segments, fuzzyIndex, fuzzyIndex+len(fuzzyOldText))
+	if !ok {
+		return fuzzyMatchResult{
+			found:        false,
+			replaceStart: -1,
+			replaceEnd:   -1,
 		}
 	}
 
 	return fuzzyMatchResult{
-		found:                 true,
-		index:                 fuzzyIndex,
-		matchLength:           len(fuzzyOldText),
-		usedFuzzyMatch:        true,
-		contentForReplacement: fuzzyContent,
+		found:          true,
+		replaceStart:   replaceStart,
+		replaceEnd:     replaceEnd,
+		usedFuzzyMatch: true,
 	}
 }
 
@@ -187,4 +159,139 @@ func countOverlappingOccurrences(text, target string) int {
 		start += index + 1
 	}
 	return count
+}
+
+type fuzzySegment struct {
+	output    string
+	origStart int
+	origEnd   int
+	outStart  int
+	outEnd    int
+}
+
+var fuzzyMatchReplacer = strings.NewReplacer(
+	"\u2018", "'",
+	"\u2019", "'",
+	"\u201A", "'",
+	"\u201B", "'",
+	"\u201C", "\"",
+	"\u201D", "\"",
+	"\u201E", "\"",
+	"\u201F", "\"",
+	"\u2010", "-",
+	"\u2011", "-",
+	"\u2012", "-",
+	"\u2013", "-",
+	"\u2014", "-",
+	"\u2015", "-",
+	"\u2212", "-",
+	"\u00A0", " ",
+	"\u2002", " ",
+	"\u2003", " ",
+	"\u2004", " ",
+	"\u2005", " ",
+	"\u2006", " ",
+	"\u2007", " ",
+	"\u2008", " ",
+	"\u2009", " ",
+	"\u200A", " ",
+	"\u202F", " ",
+	"\u205F", " ",
+	"\u3000", " ",
+)
+
+func normalizeForFuzzyMatchWithSegments(text string) (string, []fuzzySegment) {
+	lines := strings.Split(text, "\n")
+	segments := make([]fuzzySegment, 0, len(lines))
+	var builder strings.Builder
+
+	originalOffset := 0
+	for lineIndex, line := range lines {
+		lineSegments := normalizeLineForFuzzyMatchSegments(line, originalOffset)
+		for _, segment := range lineSegments {
+			segment.outStart = builder.Len()
+			builder.WriteString(segment.output)
+			segment.outEnd = builder.Len()
+			segments = append(segments, segment)
+		}
+
+		originalOffset += len(line)
+		if lineIndex < len(lines)-1 {
+			newline := fuzzySegment{
+				output:    "\n",
+				origStart: originalOffset,
+				origEnd:   originalOffset + 1,
+				outStart:  builder.Len(),
+			}
+			builder.WriteString("\n")
+			newline.outEnd = builder.Len()
+			segments = append(segments, newline)
+			originalOffset++
+		}
+	}
+
+	return builder.String(), segments
+}
+
+func normalizeLineForFuzzyMatchSegments(line string, baseOffset int) []fuzzySegment {
+	segments := make([]fuzzySegment, 0, len(line))
+	for start := 0; start < len(line); {
+		size := norm.NFKC.NextBoundaryInString(line[start:], true)
+		if size <= 0 {
+			size = len(line) - start
+		}
+
+		chunk := line[start : start+size]
+		normalized := fuzzyMatchReplacer.Replace(norm.NFKC.String(chunk))
+		if normalized != "" {
+			segments = append(segments, fuzzySegment{
+				output:    normalized,
+				origStart: baseOffset + start,
+				origEnd:   baseOffset + start + size,
+			})
+		}
+		start += size
+	}
+
+	return trimTrailingFuzzySegments(segments)
+}
+
+func trimTrailingFuzzySegments(segments []fuzzySegment) []fuzzySegment {
+	for len(segments) > 0 {
+		last := len(segments) - 1
+		trimmed := strings.TrimRight(segments[last].output, " \t")
+		if trimmed == segments[last].output {
+			break
+		}
+		if trimmed == "" {
+			segments = segments[:last]
+			continue
+		}
+		segments[last].output = trimmed
+		break
+	}
+	return segments
+}
+
+func mapFuzzyRangeToOriginal(segments []fuzzySegment, start, end int) (int, int, bool) {
+	if start < 0 || end <= start {
+		return 0, 0, false
+	}
+
+	var startSegment *fuzzySegment
+	var endSegment *fuzzySegment
+	for i := range segments {
+		segment := &segments[i]
+		if startSegment == nil && start >= segment.outStart && start < segment.outEnd {
+			startSegment = segment
+		}
+		if end > segment.outStart && end <= segment.outEnd {
+			endSegment = segment
+			break
+		}
+	}
+	if startSegment == nil || endSegment == nil {
+		return 0, 0, false
+	}
+	return startSegment.origStart, endSegment.origEnd, true
 }

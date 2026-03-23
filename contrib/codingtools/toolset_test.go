@@ -205,6 +205,29 @@ func TestReadRejectsOversizedFirstLine(t *testing.T) {
 	}
 }
 
+func TestReadRejectsOversizedFirstLineAcrossReaderBuffer(t *testing.T) {
+	t.Parallel()
+
+	fsys := gbfs.NewMemory()
+	mustWriteVirtualFile(t, fsys, "/workspace/notes.txt", strings.Repeat("a", 70*1024)+"\nnext\n")
+	tools := New(Config{
+		FS:         fsys,
+		WorkingDir: "/workspace",
+		Truncation: TruncationOptions{MaxLines: 100, MaxBytes: 4},
+	})
+
+	resp, err := tools.Read(context.Background(), ReadRequest{Path: "notes.txt"})
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if !strings.Contains(resp.Content[0].Text, "exceeds the 4B read limit") {
+		t.Fatalf("Read() text = %q, want oversized first-line message", resp.Content[0].Text)
+	}
+	if resp.Details == nil || resp.Details.Truncation == nil || !resp.Details.Truncation.FirstLineExceedsLimit {
+		t.Fatalf("Read() details = %#v, want first-line limit flag", resp.Details)
+	}
+}
+
 func TestReadMissingFile(t *testing.T) {
 	t.Parallel()
 
@@ -401,6 +424,26 @@ func TestEditFuzzyReplacement(t *testing.T) {
 	}
 	if got := string(mustReadVirtualFile(t, fsys, "/workspace/note.txt")); got != "smart quote: \"goodbye\"\n" {
 		t.Fatalf("file content = %q, want normalized fuzzy replacement", got)
+	}
+}
+
+func TestEditFuzzyReplacementPreservesUnrelatedBytes(t *testing.T) {
+	t.Parallel()
+
+	fsys := gbfs.NewMemory()
+	mustWriteVirtualFile(t, fsys, "/workspace/note.txt", "keep em dash — and fullwidth colon：\nsmart quote: \u201chello\u201d\n")
+	tools := New(Config{FS: fsys, WorkingDir: "/workspace"})
+
+	_, err := tools.Edit(context.Background(), EditRequest{
+		Path:    "note.txt",
+		OldText: "smart quote: \"hello\"",
+		NewText: "smart quote: \"goodbye\"",
+	})
+	if err != nil {
+		t.Fatalf("Edit() error = %v", err)
+	}
+	if got := string(mustReadVirtualFile(t, fsys, "/workspace/note.txt")); got != "keep em dash — and fullwidth colon：\nsmart quote: \"goodbye\"\n" {
+		t.Fatalf("file content = %q, want unrelated bytes preserved", got)
 	}
 }
 

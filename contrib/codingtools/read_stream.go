@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	gbfs "github.com/ewhauser/gbash/fs"
 )
@@ -42,7 +41,7 @@ func readResponse(ctx context.Context, fsys gbfs.FileSystem, absolutePath string
 	}
 
 	accumulator := newTextReadAccumulator(req, opts)
-	if err := forEachSplitLine(reader, accumulator.consumeLine); err != nil {
+	if err := streamTextLines(reader, accumulator); err != nil {
 		return ReadResponse{}, err
 	}
 	return accumulator.response()
@@ -79,16 +78,38 @@ func newTextReadAccumulator(req ReadRequest, opts TruncationOptions) *textReadAc
 	}
 }
 
-func (a *textReadAccumulator) consumeLine(line string) error {
+func (a *textReadAccumulator) shouldBufferCurrentLine() bool {
+	lineIndex := a.totalFileLines
+	if lineIndex < a.startLine {
+		return false
+	}
+	if a.limit != nil && a.selectedLines >= *a.limit {
+		return false
+	}
+	if a.truncated || len(a.outputLines) >= a.truncation.MaxLines {
+		return false
+	}
+	return a.currentLineBufferLimit() > 0
+}
+
+func (a *textReadAccumulator) currentLineBufferLimit() int {
+	newlineBytes := 0
+	if len(a.outputLines) > 0 {
+		newlineBytes = 1
+	}
+	return maxInt(0, a.truncation.MaxBytes-a.outputBytes-newlineBytes)
+}
+
+func (a *textReadAccumulator) consumeLine(line string, lineBytes int) {
 	lineIndex := a.totalFileLines
 	a.totalFileLines++
 
 	if lineIndex < a.startLine {
-		return nil
+		return
 	}
 	if a.limit != nil && a.selectedLines >= *a.limit {
 		a.hasMoreAfterSelection = true
-		return nil
+		return
 	}
 
 	a.selectedLines++
@@ -96,27 +117,26 @@ func (a *textReadAccumulator) consumeLine(line string) error {
 		a.selectedBytes++
 	}
 
-	lineBytes := len(line)
 	a.selectedBytes += lineBytes
 	if a.selectedLines == 1 {
 		a.firstSelectedBytes = lineBytes
 	}
 
 	if a.truncated {
-		return nil
+		return
 	}
 
 	if a.selectedLines == 1 && lineBytes > a.truncation.MaxBytes {
 		a.truncated = true
 		a.truncatedBy = "bytes"
 		a.firstLineTooLong = true
-		return nil
+		return
 	}
 
 	if len(a.outputLines) >= a.truncation.MaxLines {
 		a.truncated = true
 		a.truncatedBy = "lines"
-		return nil
+		return
 	}
 
 	outputLineBytes := lineBytes
@@ -126,12 +146,11 @@ func (a *textReadAccumulator) consumeLine(line string) error {
 	if a.outputBytes+outputLineBytes > a.truncation.MaxBytes {
 		a.truncated = true
 		a.truncatedBy = "bytes"
-		return nil
+		return
 	}
 
 	a.outputLines = append(a.outputLines, line)
 	a.outputBytes += outputLineBytes
-	return nil
 }
 
 func (a *textReadAccumulator) response() (ReadResponse, error) {
@@ -216,36 +235,88 @@ func (a *textReadAccumulator) response() (ReadResponse, error) {
 	}, nil
 }
 
-func forEachSplitLine(reader io.Reader, fn func(line string) error) error {
-	buffered := bufio.NewReader(reader)
+func streamTextLines(reader io.Reader, accumulator *textReadAccumulator) error {
+	buffered := bufio.NewReaderSize(reader, 32*1024)
 	emitted := false
 	lastEndedWithNewline := false
+	lineState := newStreamedLine(accumulator)
 
 	for {
-		line, err := buffered.ReadString('\n')
+		fragment, err := buffered.ReadSlice('\n')
+		lineEnded := err == nil && len(fragment) > 0 && fragment[len(fragment)-1] == '\n'
+		if lineEnded {
+			fragment = fragment[:len(fragment)-1]
+		}
+		if len(fragment) > 0 {
+			lineState.append(fragment)
+		}
+
 		switch {
-		case err == nil:
+		case lineEnded:
 			emitted = true
 			lastEndedWithNewline = true
-			if callErr := fn(strings.TrimSuffix(line, "\n")); callErr != nil {
-				return callErr
-			}
+			lineState.finish(accumulator)
+			lineState = newStreamedLine(accumulator)
+		case errors.Is(err, bufio.ErrBufferFull):
+			lastEndedWithNewline = false
 		case errors.Is(err, io.EOF):
-			if line != "" {
+			if lineState.hasData {
 				emitted = true
 				lastEndedWithNewline = false
-				if callErr := fn(line); callErr != nil {
-					return callErr
-				}
+				lineState.finish(accumulator)
 			}
 			if !emitted || lastEndedWithNewline {
-				return fn("")
+				accumulator.consumeLine("", 0)
 			}
 			return nil
-		default:
+		case err != nil:
 			return err
 		}
 	}
+}
+
+type streamedLine struct {
+	buffer       bytes.Buffer
+	bufferLimit  int
+	byteCount    int
+	hasData      bool
+	shouldBuffer bool
+}
+
+func newStreamedLine(accumulator *textReadAccumulator) *streamedLine {
+	bufferLimit := 0
+	if accumulator.shouldBufferCurrentLine() {
+		bufferLimit = accumulator.currentLineBufferLimit()
+	}
+	return &streamedLine{
+		bufferLimit:  bufferLimit,
+		shouldBuffer: bufferLimit > 0,
+	}
+}
+
+func (l *streamedLine) append(fragment []byte) {
+	l.hasData = true
+	l.byteCount += len(fragment)
+	if !l.shouldBuffer || l.buffer.Len() >= l.bufferLimit {
+		return
+	}
+
+	remaining := l.bufferLimit - l.buffer.Len()
+	if remaining <= 0 {
+		return
+	}
+	if len(fragment) > remaining {
+		fragment = fragment[:remaining]
+	}
+	_, _ = l.buffer.Write(fragment)
+}
+
+func (l *streamedLine) finish(accumulator *textReadAccumulator) {
+	line := ""
+	if l.shouldBuffer && l.buffer.Len() == l.byteCount {
+		line = l.buffer.String()
+	}
+	accumulator.consumeLine(line, l.byteCount)
 }
 
 func readAtMost(reader io.Reader, limit int) ([]byte, error) {
