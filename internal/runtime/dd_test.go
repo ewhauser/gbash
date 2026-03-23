@@ -131,6 +131,41 @@ func TestDdSameFileSemantics(t *testing.T) {
 	}
 }
 
+func TestDdSparseSemantics(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sparse notrunc preserves existing bytes", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+		writeSessionFile(t, session, "/tmp/in.bin", []byte{0, 0, 0, 0})
+		writeSessionFile(t, session, "/tmp/out.txt", []byte("abcdef"))
+
+		result := execSessionScriptWithInput(t, session, "dd if=/tmp/in.bin of=/tmp/out.txt bs=2 count=2 seek=1 conv=sparse,notrunc status=none\n", nil)
+		if got, want := result.ExitCode, 0; got != want {
+			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if got, want := string(readSessionFile(t, session, "/tmp/out.txt")), "abcdef"; got != want {
+			t.Fatalf("output = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("sparse still extends truncated output size", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+		writeSessionFile(t, session, "/tmp/in.bin", []byte{0, 0, 0, 0})
+
+		result := execSessionScriptWithInput(t, session, "dd if=/tmp/in.bin of=/tmp/out.bin bs=2 count=2 seek=1 conv=sparse status=none\n", nil)
+		if got, want := result.ExitCode, 0; got != want {
+			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if got, want := readSessionFile(t, session, "/tmp/out.bin"), []byte{0, 0, 0, 0, 0, 0}; !bytes.Equal(got, want) {
+			t.Fatalf("output = %v, want %v", got, want)
+		}
+	})
+}
+
 func TestDdConversions(t *testing.T) {
 	t.Parallel()
 

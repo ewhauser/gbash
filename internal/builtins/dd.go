@@ -215,6 +215,10 @@ type ddOutputMaterializer interface {
 	Materialize(context.Context, *Invocation) error
 }
 
+type ddSparseWriter interface {
+	SkipZeros(int) (ddWriteStats, error)
+}
+
 type ddStdoutWriter struct {
 	writer   io.Writer
 	obs      int
@@ -651,7 +655,7 @@ func runDdWithIO(ctx context.Context, inv *Invocation, settings *ddSettings, inp
 		transformed, trunc := ddTransformBlock(chunk, settings.conv, settings.cbs, false, &transformState)
 		readStats.recordsTrunc += trunc
 
-		writeUpdate, writeErr := output.WriteData(transformed)
+		writeUpdate, writeErr := ddWriteOutputBlock(output, transformed, settings)
 		if writeErr != nil {
 			return &ExitError{Code: 1, Err: writeErr}
 		}
@@ -695,7 +699,6 @@ func runDdWithIO(ctx context.Context, inv *Invocation, settings *ddSettings, inp
 					recordsPartial: 1,
 					bytesTotal:     uint64(requestSize),
 				}
-				eof = true
 				syntheticSync = true
 			}
 		}
@@ -736,7 +739,7 @@ func runDdWithIO(ctx context.Context, inv *Invocation, settings *ddSettings, inp
 		transformed, trunc := ddTransformBlock(nil, settings.conv, settings.cbs, true, &transformState)
 		readStats.recordsTrunc += trunc
 		if len(transformed) > 0 {
-			writeUpdate, writeErr := output.WriteData(transformed)
+			writeUpdate, writeErr := ddWriteOutputBlock(output, transformed, settings)
 			if writeErr != nil {
 				return &ExitError{Code: 1, Err: writeErr}
 			}
@@ -796,6 +799,27 @@ func ddPrepareSwabChunk(chunk []byte, carry byte, hasCarry, finalize bool) ([]by
 	}
 	ddSwab(buf)
 	return buf, carry, hasCarry
+}
+
+func ddWriteOutputBlock(output ddOutputWriter, data []byte, settings *ddSettings) (ddWriteStats, error) {
+	if len(data) == 0 {
+		return ddWriteStats{}, nil
+	}
+	if settings != nil && settings.conv.sparse {
+		if sparseWriter, ok := output.(ddSparseWriter); ok && ddIsAllZero(data) {
+			return sparseWriter.SkipZeros(len(data))
+		}
+	}
+	return output.WriteData(data)
+}
+
+func ddIsAllZero(data []byte) bool {
+	for _, b := range data {
+		if b != 0 {
+			return false
+		}
+	}
+	return len(data) > 0
 }
 
 func (in *ddInput) Close() error {
@@ -1267,28 +1291,36 @@ func (w *ddFileWriter) Sync() error {
 }
 
 func (w *ddFileWriter) Finalize(ctx context.Context, inv *Invocation) error {
+	w.ensureSize()
 	return writeFileContents(ctx, inv, w.abs, w.data, w.perm)
 }
 
 func (w *ddFileWriter) Materialize(ctx context.Context, inv *Invocation) error {
+	w.ensureSize()
 	return writeFileContents(ctx, inv, w.abs, w.data, w.perm)
 }
 
+func (w *ddFileWriter) SkipZeros(size int) (ddWriteStats, error) {
+	w.cursor += size
+	w.ensureSize()
+	return ddCountWriteStats(size, w.obs), nil
+}
+
 func (w *ddFileWriter) writeChunks(data []byte) (ddWriteStats, error) {
-	stats := ddWriteStats{}
+	stats := ddCountWriteStats(len(data), w.obs)
 	for len(data) > 0 {
 		chunkLen := minInt(len(data), w.obs)
 		chunk := data[:chunkLen]
 		w.write(chunk)
-		if len(chunk) == w.obs {
-			stats.recordsComplete++
-		} else {
-			stats.recordsPartial++
-		}
-		stats.bytesTotal += uint64(len(chunk))
 		data = data[chunkLen:]
 	}
 	return stats, nil
+}
+
+func (w *ddFileWriter) ensureSize() {
+	if w.cursor > len(w.data) {
+		w.data = append(w.data, make([]byte, w.cursor-len(w.data))...)
+	}
 }
 
 func (w *ddFileWriter) write(chunk []byte) {
@@ -1301,22 +1333,31 @@ func (w *ddFileWriter) write(chunk []byte) {
 }
 
 func ddWriteChunks(writer io.Writer, data []byte, obs int) (ddWriteStats, error) {
-	stats := ddWriteStats{}
+	stats := ddCountWriteStats(len(data), obs)
 	for len(data) > 0 {
 		chunkLen := minInt(len(data), obs)
 		chunk := data[:chunkLen]
 		if _, err := writer.Write(chunk); err != nil {
 			return stats, err
 		}
-		if len(chunk) == obs {
+		data = data[chunkLen:]
+	}
+	return stats, nil
+}
+
+func ddCountWriteStats(size, obs int) ddWriteStats {
+	stats := ddWriteStats{}
+	for size > 0 {
+		chunkLen := minInt(size, obs)
+		if chunkLen == obs {
 			stats.recordsComplete++
 		} else {
 			stats.recordsPartial++
 		}
-		stats.bytesTotal += uint64(len(chunk))
-		data = data[chunkLen:]
+		stats.bytesTotal += uint64(chunkLen)
+		size -= chunkLen
 	}
-	return stats, nil
+	return stats
 }
 
 func ddWriteFinalStats(w io.Writer, status ddStatusLevel, progressPrinted bool, reads ddReadStats, writes ddWriteStats, duration time.Duration) error {

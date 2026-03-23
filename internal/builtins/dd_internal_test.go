@@ -206,6 +206,38 @@ func TestRunDdWithIONoerrorSyncPadsZeroByteReadError(t *testing.T) {
 	}
 }
 
+func TestRunDdWithIONoerrorSyncContinuesUntilCountSatisfied(t *testing.T) {
+	t.Parallel()
+
+	reader := &ddLoopGuardReader{err: errors.New("boom"), maxCalls: 3}
+	writer := &ddCaptureWriter{}
+	var stderr bytes.Buffer
+
+	err := runDdWithIO(context.Background(), &Invocation{Stderr: &stderr}, &ddSettings{
+		ibs:    4,
+		obs:    4,
+		status: ddStatusNone,
+		count:  &ddNumber{value: 3},
+		conv: ddConvOptions{
+			noerror: true,
+			sync:    true,
+		},
+	}, &ddInput{reader: reader, label: "input"}, writer)
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 1 {
+		t.Fatalf("runDdWithIO() error = %v, want exit status 1", err)
+	}
+	if got, want := writer.data, make([]byte, 12); !bytes.Equal(got, want) {
+		t.Fatalf("captured output = %v, want %v", got, want)
+	}
+	if reader.calls != 3 {
+		t.Fatalf("Read() calls = %d, want 3", reader.calls)
+	}
+	if got, want := strings.Count(stderr.String(), "dd: error reading 'input': boom\n"), 3; got != want {
+		t.Fatalf("warning count = %d, want %d; stderr=%q", got, want, stderr.String())
+	}
+}
+
 func TestReadDdBlockPreservesNonEOFErrorOnNonFullblockRead(t *testing.T) {
 	t.Parallel()
 
@@ -344,5 +376,32 @@ func TestOpenDdOutputFailsWhenExistingBytesCannotBeRead(t *testing.T) {
 	}
 	if got := err.Error(); !strings.Contains(got, "dd: error reading '/tmp/out.txt': boom") {
 		t.Fatalf("error = %q, want read failure diagnostic", got)
+	}
+}
+
+func TestDdFileWriterSkipZerosPreservesExistingData(t *testing.T) {
+	t.Parallel()
+
+	writer := &ddFileWriter{
+		obs:    2,
+		data:   []byte("abcdef"),
+		cursor: 2,
+	}
+
+	stats, err := writer.SkipZeros(4)
+	if err != nil {
+		t.Fatalf("SkipZeros() error = %v", err)
+	}
+	if got, want := stats.recordsComplete, uint64(2); got != want {
+		t.Fatalf("recordsComplete = %d, want %d", got, want)
+	}
+	if got, want := stats.bytesTotal, uint64(4); got != want {
+		t.Fatalf("bytesTotal = %d, want %d", got, want)
+	}
+	if got, want := string(writer.data), "abcdef"; got != want {
+		t.Fatalf("data = %q, want %q", got, want)
+	}
+	if got, want := writer.cursor, 6; got != want {
+		t.Fatalf("cursor = %d, want %d", got, want)
 	}
 }
