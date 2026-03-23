@@ -33,13 +33,6 @@ func normalizeToLF(text string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
 }
 
-func restoreLineEndings(text, ending string) string {
-	if ending == "\r\n" {
-		return strings.ReplaceAll(text, "\n", "\r\n")
-	}
-	return text
-}
-
 func normalizeForFuzzyMatch(text string) string {
 	normalized, _ := normalizeForFuzzyMatchWithSegments(text)
 	return normalized
@@ -88,6 +81,83 @@ func stripBOM(content string) (string, string) {
 		return "\uFEFF", stripped
 	}
 	return "", content
+}
+
+func normalizedOffsetMap(text string) []int {
+	offsets := make([]int, 1, len(text)+1)
+	offsets[0] = 0
+	for i := 0; i < len(text); {
+		switch text[i] {
+		case '\r':
+			if i+1 < len(text) && text[i+1] == '\n' {
+				i += 2
+			} else {
+				i++
+			}
+		default:
+			i++
+		}
+		offsets = append(offsets, i)
+	}
+	return offsets
+}
+
+func mapNormalizedRangeToOriginal(offsets []int, start, end int) (int, int, bool) {
+	if start < 0 || end < start || end >= len(offsets) {
+		return 0, 0, false
+	}
+	return offsets[start], offsets[end], true
+}
+
+func extractLineEndings(text string) []string {
+	endings := make([]string, 0, strings.Count(text, "\n")+strings.Count(text, "\r"))
+	for i := 0; i < len(text); {
+		switch text[i] {
+		case '\r':
+			if i+1 < len(text) && text[i+1] == '\n' {
+				endings = append(endings, "\r\n")
+				i += 2
+				continue
+			}
+			endings = append(endings, "\r")
+		case '\n':
+			endings = append(endings, "\n")
+		}
+		i++
+	}
+	return endings
+}
+
+func restoreReplacementLineEndings(normalizedText, originalSegment, fallback string) string {
+	if !strings.Contains(normalizedText, "\n") {
+		return normalizedText
+	}
+
+	lineEndings := extractLineEndings(originalSegment)
+	if fallback == "" {
+		fallback = "\n"
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(normalizedText) + len(lineEndings))
+	lineEndingIndex := 0
+	for i := 0; i < len(normalizedText); i++ {
+		if normalizedText[i] != '\n' {
+			builder.WriteByte(normalizedText[i])
+			continue
+		}
+
+		switch {
+		case lineEndingIndex < len(lineEndings):
+			builder.WriteString(lineEndings[lineEndingIndex])
+		case len(lineEndings) > 0:
+			builder.WriteString(lineEndings[len(lineEndings)-1])
+		default:
+			builder.WriteString(fallback)
+		}
+		lineEndingIndex++
+	}
+	return builder.String()
 }
 
 func generateDiffString(oldContent, newContent string, contextLines int) (string, int) {

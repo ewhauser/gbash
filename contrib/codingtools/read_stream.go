@@ -100,6 +100,14 @@ func (a *textReadAccumulator) currentLineBufferLimit() int {
 	return maxInt(0, a.truncation.MaxBytes-a.outputBytes-newlineBytes)
 }
 
+func (a *textReadAccumulator) limitReached() bool {
+	return a.limit != nil && a.selectedLines >= *a.limit
+}
+
+func (a *textReadAccumulator) noteMoreAfterSelection() {
+	a.hasMoreAfterSelection = true
+}
+
 func (a *textReadAccumulator) consumeLine(line string, lineBytes int) {
 	lineIndex := a.totalFileLines
 	a.totalFileLines++
@@ -107,8 +115,8 @@ func (a *textReadAccumulator) consumeLine(line string, lineBytes int) {
 	if lineIndex < a.startLine {
 		return
 	}
-	if a.limit != nil && a.selectedLines >= *a.limit {
-		a.hasMoreAfterSelection = true
+	if a.limitReached() {
+		a.noteMoreAfterSelection()
 		return
 	}
 
@@ -225,9 +233,8 @@ func (a *textReadAccumulator) response() (ReadResponse, error) {
 
 	outputText := outputContent
 	if a.limit != nil && a.hasMoreAfterSelection {
-		remaining := a.totalFileLines - (a.startLine + a.selectedLines)
 		nextOffset := a.startLine + a.selectedLines + 1
-		outputText += fmt.Sprintf("\n\n[%d more lines in file. Use offset=%d to continue.]", remaining, nextOffset)
+		outputText += fmt.Sprintf("\n\n[More lines remain in file. Use offset=%d to continue.]", nextOffset)
 	}
 
 	return ReadResponse{
@@ -246,6 +253,11 @@ func streamTextLines(reader io.Reader, accumulator *textReadAccumulator) error {
 		lineEnded := err == nil && len(fragment) > 0 && fragment[len(fragment)-1] == '\n'
 		if lineEnded {
 			fragment = fragment[:len(fragment)-1]
+		}
+
+		if accumulator.limitReached() && (len(fragment) > 0 || lineEnded) {
+			accumulator.noteMoreAfterSelection()
+			return nil
 		}
 		if len(fragment) > 0 {
 			lineState.append(fragment)

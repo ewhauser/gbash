@@ -195,10 +195,11 @@ func (t *Toolset) Edit(ctx context.Context, req EditRequest) (EditResponse, erro
 
 		rawContent := string(buffer)
 		bom, content := stripBOM(rawContent)
-		originalEnding := detectLineEnding(content)
+		fallbackEnding := detectLineEnding(content)
 		normalizedContent := normalizeToLF(content)
 		normalizedOldText := normalizeToLF(req.OldText)
 		normalizedNewText := normalizeToLF(req.NewText)
+		normalizedOffsets := normalizedOffsetMap(content)
 
 		matchResult := fuzzyFindText(normalizedContent, normalizedOldText)
 		if !matchResult.found {
@@ -231,7 +232,12 @@ func (t *Toolset) Edit(ctx context.Context, req EditRequest) (EditResponse, erro
 			)
 		}
 
-		finalContent := bom + restoreLineEndings(newContent, originalEnding)
+		replaceStart, replaceEnd, ok := mapNormalizedRangeToOriginal(normalizedOffsets, matchResult.replaceStart, matchResult.replaceEnd)
+		if !ok {
+			return EditResponse{}, fmt.Errorf("could not map edit range back to original file content for %s", req.Path)
+		}
+		restoredNewText := restoreReplacementLineEndings(normalizedNewText, content[replaceStart:replaceEnd], fallbackEnding)
+		finalContent := bom + content[:replaceStart] + restoredNewText + content[replaceEnd:]
 		if err := writeFile(ctx, t.cfg.fsys, absolutePath, finalContent); err != nil {
 			return EditResponse{}, err
 		}

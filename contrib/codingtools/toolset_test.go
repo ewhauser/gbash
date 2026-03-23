@@ -131,8 +131,38 @@ func TestReadOffsetAndLimitPagination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read() error = %v", err)
 	}
-	if got := resp.Content[0].Text; got != "two\nthree\n\n[2 more lines in file. Use offset=4 to continue.]" {
+	if got := resp.Content[0].Text; got != "two\nthree\n\n[More lines remain in file. Use offset=4 to continue.]" {
 		t.Fatalf("Read() text = %q", got)
+	}
+}
+
+func TestReadStopsAfterLimitSatisfied(t *testing.T) {
+	t.Parallel()
+
+	base := gbfs.NewMemory()
+	mustWriteVirtualFile(t, base, "/workspace/notes.txt", "placeholder\n")
+	fsys := &guardedReadFS{
+		FileSystem:  base,
+		guardedPath: "/workspace/notes.txt",
+		chunks: [][]byte{
+			[]byte(strings.Repeat("a", contentTypeSniffBytes)),
+			[]byte("tail-of-first-line\n"),
+			[]byte("b"),
+		},
+		failErr: errors.New("read past requested limit"),
+	}
+	tools := New(Config{FS: fsys, WorkingDir: "/workspace"})
+	limit := 1
+
+	resp, err := tools.Read(context.Background(), ReadRequest{
+		Path:  "notes.txt",
+		Limit: &limit,
+	})
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if !strings.Contains(resp.Content[0].Text, "[More lines remain in file. Use offset=2 to continue.]") {
+		t.Fatalf("Read() text = %q, want generic continuation note", resp.Content[0].Text)
 	}
 }
 
@@ -555,6 +585,26 @@ func TestEditPreservesBOMAndCRLF(t *testing.T) {
 	}
 }
 
+func TestEditPreservesMixedLineEndingsOutsideReplacement(t *testing.T) {
+	t.Parallel()
+
+	fsys := gbfs.NewMemory()
+	mustWriteVirtualFile(t, fsys, "/workspace/note.txt", "hello\r\nworld\nagain\r\n")
+	tools := New(Config{FS: fsys, WorkingDir: "/workspace"})
+
+	_, err := tools.Edit(context.Background(), EditRequest{
+		Path:    "note.txt",
+		OldText: "world",
+		NewText: "gbash",
+	})
+	if err != nil {
+		t.Fatalf("Edit() error = %v", err)
+	}
+	if got := string(mustReadVirtualFile(t, fsys, "/workspace/note.txt")); got != "hello\r\ngbash\nagain\r\n" {
+		t.Fatalf("file content = %q, want mixed line endings preserved", got)
+	}
+}
+
 func TestEditAndWriteSerializeSamePath(t *testing.T) {
 	t.Parallel()
 
@@ -906,4 +956,74 @@ func (f *trackedFile) Close() error {
 		}
 	})
 	return err
+}
+
+type guardedReadFS struct {
+	gbfs.FileSystem
+	guardedPath string
+	chunks      [][]byte
+	failErr     error
+}
+
+func (fsys *guardedReadFS) Open(ctx context.Context, name string) (gbfs.File, error) {
+	if name != fsys.guardedPath {
+		return fsys.FileSystem.Open(ctx, name)
+	}
+
+	info, err := fsys.Stat(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+
+	chunks := make([][]byte, len(fsys.chunks))
+	copy(chunks, fsys.chunks)
+	return &guardedReadFile{
+		info:    info,
+		chunks:  chunks,
+		failErr: fsys.failErr,
+	}, nil
+}
+
+type guardedReadFile struct {
+	info     stdfs.FileInfo
+	chunks   [][]byte
+	failErr  error
+	chunkIdx int
+	chunkPos int
+}
+
+func (f *guardedReadFile) Read(p []byte) (int, error) {
+	for f.chunkIdx < len(f.chunks) {
+		chunk := f.chunks[f.chunkIdx]
+		if f.chunkPos >= len(chunk) {
+			f.chunkIdx++
+			f.chunkPos = 0
+			continue
+		}
+
+		n := copy(p, chunk[f.chunkPos:])
+		f.chunkPos += n
+		if f.chunkPos >= len(chunk) {
+			f.chunkIdx++
+			f.chunkPos = 0
+		}
+		return n, nil
+	}
+
+	if f.failErr != nil {
+		return 0, f.failErr
+	}
+	return 0, io.EOF
+}
+
+func (f *guardedReadFile) Write([]byte) (int, error) {
+	return 0, stdfs.ErrPermission
+}
+
+func (f *guardedReadFile) Close() error {
+	return nil
+}
+
+func (f *guardedReadFile) Stat() (stdfs.FileInfo, error) {
+	return f.info, nil
 }
