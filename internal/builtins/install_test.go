@@ -234,6 +234,42 @@ func TestInstallReplacesDestinationSymlinkInsteadOfFollowingIt(t *testing.T) {
 	}
 }
 
+func TestInstallNoTargetDirectoryReplacesSymlinkToDirectory(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/tmp/src.txt", []byte("new\n"))
+	if err := session.FileSystem().MkdirAll(context.Background(), "/tmp/real-dir", 0o755); err != nil {
+		t.Fatalf("MkdirAll(real-dir) error = %v", err)
+	}
+	if err := session.FileSystem().Symlink(context.Background(), "real-dir", "/tmp/dst"); err != nil {
+		t.Fatalf("Symlink(dst) error = %v", err)
+	}
+
+	result := mustExecSession(t, session, "install -T /tmp/src.txt /tmp/dst\ncat /tmp/dst\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "new\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+
+	info, err := session.FileSystem().Lstat(context.Background(), "/tmp/dst")
+	if err != nil {
+		t.Fatalf("Lstat(dst) error = %v", err)
+	}
+	if info.Mode()&stdfs.ModeSymlink != 0 {
+		t.Fatalf("Lstat(dst).Mode() = %v, want regular file", info.Mode())
+	}
+
+	realDirInfo, err := session.FileSystem().Stat(context.Background(), "/tmp/real-dir")
+	if err != nil {
+		t.Fatalf("Stat(real-dir) error = %v", err)
+	}
+	if !realDirInfo.IsDir() {
+		t.Fatalf("Stat(real-dir).Mode() = %v, want directory", realDirInfo.Mode())
+	}
+}
+
 func TestInstallReplacesSymlinkToSourceWithoutSameFileError(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})

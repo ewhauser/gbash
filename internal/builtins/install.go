@@ -351,6 +351,11 @@ func runInstallFiles(ctx context.Context, inv *Invocation, db *permissionIdentit
 		return &ExitError{Code: 1, Err: err}
 	}
 	targetIsDir := targetExists && targetInfo != nil && targetInfo.IsDir()
+	targetLstat, _, targetLExists, err := lstatMaybe(ctx, inv, targetPathForOps)
+	if err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
+	targetIsSymlink := targetLExists && targetLstat != nil && targetLstat.Mode()&stdfs.ModeSymlink != 0
 
 	if opts.targetDirectory != "" || len(sources) > 1 {
 		if !targetIsDir {
@@ -366,7 +371,7 @@ func runInstallFiles(ctx context.Context, inv *Invocation, db *permissionIdentit
 	}
 
 	if opts.noTargetDirectory {
-		if targetIsDir || installRawPathLooksDirectory(targetArg) {
+		if installRawPathLooksDirectory(targetArg) || (targetIsDir && !targetIsSymlink) {
 			return exitf(inv, 1, "install: cannot overwrite directory %s with non-directory", quoteGNUOperand(targetArg))
 		}
 		return installOne(ctx, inv, db, opts, sources[0], targetAbs)
