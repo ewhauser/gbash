@@ -16,9 +16,10 @@ Copied upstream artifacts in this example:
 - `data/scripting-tool/many-tools.jsonl`
 - `data/scripting-tool/paginated.jsonl`
 
-Documented gbash-specific dataset adaptation:
+Documented gbash-specific dataset adaptations:
 
 - `data/eval-tasks.jsonl` keeps the upstream schema but updates `sysinfo_env_report` to expect the gbash evaluator identity (`user: agent`, `host: gbash`) instead of the upstream bashkit identity.
+- `data/eval-tasks.jsonl` also clarifies `sysinfo_env_report` so the model is asked to emit the four-line report from a single bash tool invocation rather than assembling it later in assistant text.
 
 Deliberately not copied from upstream:
 

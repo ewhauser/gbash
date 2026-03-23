@@ -2,6 +2,7 @@ package gbasheval
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -107,6 +108,12 @@ func TestVendoredEvalDatasetUsesGbashSystemInfoIdentity(t *testing.T) {
 		}
 		if !sliceContainsString(checks, "stdout_contains:host: gbash") {
 			t.Fatalf("sysinfo_env_report checks = %#v, want host: gbash expectation", checks)
+		}
+		if !strings.Contains(task.Prompt, "single bash command or short bash script") {
+			t.Fatalf("sysinfo_env_report prompt = %q, want single-command guidance", task.Prompt)
+		}
+		if !strings.Contains(task.Prompt, "bash tool output") {
+			t.Fatalf("sysinfo_env_report prompt = %q, want bash-tool-output guidance", task.Prompt)
 		}
 		return
 	}
