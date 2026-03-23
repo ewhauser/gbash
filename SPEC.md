@@ -288,12 +288,12 @@ Package responsibilities:
 - `packages/`: publishable JavaScript and TypeScript packages. `packages/gbash-wasm` owns the `js/wasm` assets plus explicit host entrypoints such as `@ewhauser/gbash-wasm/browser` and `@ewhauser/gbash-wasm/node`.
 - `policy/`: allowlists, root restrictions, size limits, network stance, and decision helpers
 - `trace/`: event schema, recorder interfaces, and in-memory buffering
-- `examples/`: runnable demos that can depend on external SDKs without affecting the root module build list
+- `examples/`: runnable demos that can depend on external SDKs without affecting the root module build list. The repository may also ship official maintained examples such as `examples/gbash-eval`; any evaluator-only commands or affordances used there, including scripted-tool discovery/help shims, remain local to the example and do not expand the core runtime contract.
 - `tests/`: black-box runtime tests and corpus-driven shell fixtures
 
 We intentionally do not create a `compat/` package because external harness support should ride on the normal CLI and runtime surfaces, not a second execution API.
 
-The repository itself should be maintained as a committed Go workspace plus a pnpm workspace. The root module stays focused on the runtime, CLI, and core commands, while direct children under `contrib/` are separate modules for optional heavyweight commands and public helper packages, `packages/` contains publishable JavaScript packages, and `examples/` is a separate module used for demos that may need external SDK dependencies or looser version pinning.
+The repository itself should be maintained as a committed Go workspace plus a pnpm workspace. The root module stays focused on the runtime, CLI, and core commands, while direct children under `contrib/` are separate modules for optional heavyweight commands and public helper packages, `packages/` contains publishable JavaScript packages, and `examples/` is a separate module used for demos that may need external SDK dependencies or looser version pinning. Official examples can include repo-maintained evaluation harnesses or SDK integrations, but any example-specific helpers stay scoped to that example module rather than silently becoming supported runtime surface.
 
 Top-level repository directories such as `cmd/`, `contrib/`, `packages/`,
 `scripts/`, and `third_party/` may also carry doc-only package comments so
