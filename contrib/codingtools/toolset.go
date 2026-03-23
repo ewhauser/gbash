@@ -2,7 +2,6 @@ package codingtools
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -144,90 +143,7 @@ func (t *Toolset) Read(ctx context.Context, req ReadRequest) (ReadResponse, erro
 	}
 
 	absolutePath := resolveReadPath(ctx, t.cfg.fsys, req.Path, t.cfg.workingDir, t.cfg.homeDir)
-	buffer, err := readFile(ctx, t.cfg.fsys, absolutePath)
-	if err != nil {
-		return ReadResponse{}, err
-	}
-
-	if mimeType := detectSupportedImageMimeType(buffer); mimeType != "" {
-		return ReadResponse{
-			Content: []ContentBlock{
-				{Type: "text", Text: fmt.Sprintf("Read image file [%s]", mimeType)},
-				{Type: "image", Data: base64.StdEncoding.EncodeToString(buffer), MIMEType: mimeType},
-			},
-		}, nil
-	}
-
-	textContent := string(buffer)
-	allLines := strings.Split(textContent, "\n")
-	totalFileLines := len(allLines)
-
-	startLine := 0
-	if req.Offset != nil {
-		startLine = maxInt(0, *req.Offset-1)
-	}
-	startLineDisplay := startLine + 1
-	if startLine >= len(allLines) {
-		return ReadResponse{}, fmt.Errorf("offset %d is beyond end of file (%d lines total)", valueOrDefault(req.Offset, 0), len(allLines))
-	}
-
-	selectedContent := strings.Join(allLines[startLine:], "\n")
-	userLimitedLines := -1
-	if req.Limit != nil {
-		endLine := minInt(startLine+*req.Limit, len(allLines))
-		selectedContent = strings.Join(allLines[startLine:endLine], "\n")
-		userLimitedLines = endLine - startLine
-	}
-
-	truncation := TruncateHead(selectedContent, t.cfg.truncation)
-	var outputText string
-	var details *ReadDetails
-
-	switch {
-	case truncation.FirstLineExceedsLimit:
-		firstLineSize := FormatSize(len(allLines[startLine]))
-		outputText = fmt.Sprintf(
-			"[Line %d is %s and exceeds the %s read limit. This tool does not return partial lines.]",
-			startLineDisplay,
-			firstLineSize,
-			FormatSize(truncation.MaxBytes),
-		)
-		details = &ReadDetails{Truncation: &truncation}
-	case truncation.Truncated:
-		endLineDisplay := startLineDisplay + truncation.OutputLines - 1
-		nextOffset := endLineDisplay + 1
-		outputText = truncation.Content
-		if truncation.TruncatedBy == "lines" {
-			outputText += fmt.Sprintf(
-				"\n\n[Showing lines %d-%d of %d. Use offset=%d to continue.]",
-				startLineDisplay,
-				endLineDisplay,
-				totalFileLines,
-				nextOffset,
-			)
-		} else {
-			outputText += fmt.Sprintf(
-				"\n\n[Showing lines %d-%d of %d (%s limit). Use offset=%d to continue.]",
-				startLineDisplay,
-				endLineDisplay,
-				totalFileLines,
-				FormatSize(truncation.MaxBytes),
-				nextOffset,
-			)
-		}
-		details = &ReadDetails{Truncation: &truncation}
-	case userLimitedLines >= 0 && startLine+userLimitedLines < len(allLines):
-		remaining := len(allLines) - (startLine + userLimitedLines)
-		nextOffset := startLine + userLimitedLines + 1
-		outputText = truncation.Content + fmt.Sprintf("\n\n[%d more lines in file. Use offset=%d to continue.]", remaining, nextOffset)
-	default:
-		outputText = truncation.Content
-	}
-
-	return ReadResponse{
-		Content: []ContentBlock{{Type: "text", Text: outputText}},
-		Details: details,
-	}, nil
+	return readResponse(ctx, t.cfg.fsys, absolutePath, req, t.cfg.truncation)
 }
 
 // Write runs the write tool.
@@ -294,7 +210,7 @@ func (t *Toolset) Edit(ctx context.Context, req EditRequest) (EditResponse, erro
 
 		fuzzyContent := normalizeForFuzzyMatch(normalizedContent)
 		fuzzyOldText := normalizeForFuzzyMatch(normalizedOldText)
-		occurrences := strings.Count(fuzzyContent, fuzzyOldText)
+		occurrences := countOverlappingOccurrences(fuzzyContent, fuzzyOldText)
 		if occurrences > 1 {
 			return EditResponse{}, fmt.Errorf(
 				"found %d occurrences of the text in %s. The text must be unique. Please provide more context to make it unique",
@@ -541,13 +457,6 @@ func detectSupportedImageMimeType(data []byte) string {
 	default:
 		return ""
 	}
-}
-
-func valueOrDefault(value *int, fallback int) int {
-	if value == nil {
-		return fallback
-	}
-	return *value
 }
 
 func minInt(a, b int) int {

@@ -171,3 +171,20 @@ func generateDiffString(oldContent, newContent string, contextLines int) (string
 
 	return strings.Join(output, "\n"), firstChangedLine
 }
+
+func countOverlappingOccurrences(text, target string) int {
+	if target == "" {
+		return 0
+	}
+
+	count := 0
+	for start := 0; start <= len(text)-len(target); {
+		index := strings.Index(text[start:], target)
+		if index == -1 {
+			return count
+		}
+		count++
+		start += index + 1
+	}
+	return count
+}

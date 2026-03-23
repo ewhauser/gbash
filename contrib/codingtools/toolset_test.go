@@ -421,6 +421,23 @@ func TestEditDuplicateMatchError(t *testing.T) {
 	}
 }
 
+func TestEditOverlappingDuplicateMatchError(t *testing.T) {
+	t.Parallel()
+
+	fsys := gbfs.NewMemory()
+	mustWriteVirtualFile(t, fsys, "/workspace/note.txt", "ababa\n")
+	tools := New(Config{FS: fsys, WorkingDir: "/workspace"})
+
+	_, err := tools.Edit(context.Background(), EditRequest{
+		Path:    "note.txt",
+		OldText: "aba",
+		NewText: "xyz",
+	})
+	if err == nil || !strings.Contains(err.Error(), "must be unique") {
+		t.Fatalf("Edit() error = %v, want overlapping duplicate-match error", err)
+	}
+}
+
 func TestEditMissingMatchError(t *testing.T) {
 	t.Parallel()
 
