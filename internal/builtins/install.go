@@ -173,6 +173,9 @@ func parseInstallMatches(inv *Invocation, matches *ParsedCommand) (installOption
 	if opts.targetDirectory != "" && opts.noTargetDirectory {
 		return installOptions{}, exitf(inv, 1, "install: options --target-directory and --no-target-directory are mutually exclusive")
 	}
+	if opts.directoryOnly && opts.targetDirectory != "" {
+		return installOptions{}, exitf(inv, 1, "install: options --directory and --target-directory are mutually exclusive")
+	}
 	if opts.compare && opts.preserveTimestamps {
 		return installOptions{}, exitf(inv, 1, "install: options --compare and --preserve-timestamps are mutually exclusive")
 	}
@@ -414,7 +417,7 @@ func installOne(ctx context.Context, inv *Invocation, db *permissionIdentityDB, 
 	if destInfo != nil && statDestExists && destInfo.IsDir() { //nolint:nilaway // destInfo is non-nil when statDestExists is true
 		return exitf(inv, 1, "install: cannot overwrite directory %s with non-directory", quoteGNUOperand(destAbs))
 	}
-	if cpSameFile(ctx, inv, sourceAbs, sourceInfo, destAbs, destInfo, destExists) {
+	if (destLstat == nil || destLstat.Mode()&stdfs.ModeSymlink == 0) && cpSameFile(ctx, inv, sourceAbs, sourceInfo, destAbs, destInfo, destExists) {
 		return exitf(inv, 1, "install: %s and %s are the same file", quoteGNUOperand(sourceArg), quoteGNUOperand(destAbs))
 	}
 	if opts.compare {
@@ -524,8 +527,7 @@ func installBackupPath(ctx context.Context, inv *Invocation, mode installBackupM
 	case installBackupNumbered:
 		return installNumberedBackupPath(ctx, inv, destAbs)
 	case installBackupExisting:
-		first := installSimpleBackupPath(destAbs, ".~1~")
-		if _, _, exists, err := lstatMaybe(ctx, inv, first); err != nil {
+		if _, exists, err := installHighestBackupIndex(ctx, inv, destAbs); err != nil {
 			return "", err
 		} else if exists {
 			return installNumberedBackupPath(ctx, inv, destAbs)
@@ -546,14 +548,15 @@ func installSimpleBackupPath(destAbs, suffix string) string {
 }
 
 func installNumberedBackupPath(ctx context.Context, inv *Invocation, destAbs string) (string, error) {
-	for i := 1; ; i++ {
-		candidate := installSimpleBackupPath(destAbs, fmt.Sprintf(".~%d~", i))
-		if _, _, exists, err := lstatMaybe(ctx, inv, candidate); err != nil {
-			return "", err
-		} else if !exists {
-			return candidate, nil
-		}
+	maxIndex, exists, err := installHighestBackupIndex(ctx, inv, destAbs)
+	if err != nil {
+		return "", err
 	}
+	next := uint64(1)
+	if exists {
+		next = maxIndex + 1
+	}
+	return installSimpleBackupPath(destAbs, fmt.Sprintf(".~%d~", next)), nil
 }
 
 func installCopyFile(ctx context.Context, inv *Invocation, sourceAbs, destAbs string) error {
@@ -745,6 +748,41 @@ func installModeFromOctal(value uint32) stdfs.FileMode {
 		mode |= stdfs.ModeSticky
 	}
 	return mode
+}
+
+func installHighestBackupIndex(ctx context.Context, inv *Invocation, destAbs string) (uint64, bool, error) {
+	dir := path.Dir(destAbs)
+	base := path.Base(destAbs)
+	entries, err := readDir(ctx, inv, dir)
+	if err != nil {
+		if errorsIsNotExist(err) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+
+	prefix := base + ".~"
+	var maxIndex uint64
+	found := false
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, "~") {
+			continue
+		}
+		indexText := strings.TrimSuffix(strings.TrimPrefix(name, prefix), "~")
+		if indexText == "" {
+			continue
+		}
+		index, err := strconv.ParseUint(indexText, 10, 64)
+		if err != nil || index == 0 {
+			continue
+		}
+		if !found || index > maxIndex {
+			maxIndex = index
+			found = true
+		}
+	}
+	return maxIndex, found, nil
 }
 
 func installStatTarget(ctx context.Context, inv *Invocation, name string) (stdfs.FileInfo, string, bool, error) {

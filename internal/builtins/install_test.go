@@ -23,6 +23,22 @@ func TestInstallDirectoryModeOnlyAppliesToTarget(t *testing.T) {
 	}
 }
 
+func TestInstallRejectsDirectoryWithTargetDirectory(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "install -d -t /tmp/root foo\n")
+	if result.ExitCode == 0 {
+		t.Fatalf("ExitCode = %d, want non-zero", result.ExitCode)
+	}
+	if !strings.Contains(result.Stderr, "options --directory and --target-directory are mutually exclusive") {
+		t.Fatalf("Stderr = %q, want mutually exclusive error", result.Stderr)
+	}
+	if _, err := session.FileSystem().Stat(context.Background(), "/home/agent/foo"); err == nil {
+		t.Fatalf("Stat(foo) succeeded, want no file created")
+	}
+}
+
 func TestInstallSupportsCreateLeadingAndTargetDirectory(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
@@ -187,5 +203,68 @@ func TestInstallReplacesDestinationSymlinkInsteadOfFollowingIt(t *testing.T) {
 	}
 	if info.Mode()&stdfs.ModeSymlink != 0 {
 		t.Fatalf("Lstat(dst).Mode() = %v, want regular file", info.Mode())
+	}
+}
+
+func TestInstallReplacesSymlinkToSourceWithoutSameFileError(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/tmp/src.txt", []byte("new\n"))
+	if err := session.FileSystem().Symlink(context.Background(), "src.txt", "/tmp/dst.txt"); err != nil {
+		t.Fatalf("Symlink(dst) error = %v", err)
+	}
+
+	result := mustExecSession(t, session, "install /tmp/src.txt /tmp/dst.txt\ncat /tmp/dst.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "new\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+
+	info, err := session.FileSystem().Lstat(context.Background(), "/tmp/dst.txt")
+	if err != nil {
+		t.Fatalf("Lstat(dst) error = %v", err)
+	}
+	if info.Mode()&stdfs.ModeSymlink != 0 {
+		t.Fatalf("Lstat(dst).Mode() = %v, want regular file", info.Mode())
+	}
+}
+
+func TestInstallNumberedBackupsAdvanceFromHighestExistingIndex(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/tmp/src.txt", []byte("fresh\n"))
+	writeSessionFile(t, session, "/tmp/dst.txt", []byte("stale\n"))
+	writeSessionFile(t, session, "/tmp/dst.txt.~2~", []byte("older\n"))
+
+	result := mustExecSession(t, session, "install --backup=numbered /tmp/src.txt /tmp/dst.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := string(readSessionFile(t, session, "/tmp/dst.txt.~3~")), "stale\n"; got != want {
+		t.Fatalf("numbered backup contents = %q, want %q", got, want)
+	}
+	if _, err := session.FileSystem().Stat(context.Background(), "/tmp/dst.txt.~1~"); err == nil {
+		t.Fatalf("Stat(.~1~) succeeded, want sparse history to stay sparse")
+	}
+}
+
+func TestInstallExistingBackupsDetectHigherNumberedSeries(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/tmp/src.txt", []byte("fresh\n"))
+	writeSessionFile(t, session, "/tmp/dst.txt", []byte("stale\n"))
+	writeSessionFile(t, session, "/tmp/dst.txt.~2~", []byte("older\n"))
+
+	result := mustExecSession(t, session, "install -b /tmp/src.txt /tmp/dst.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := string(readSessionFile(t, session, "/tmp/dst.txt.~3~")), "stale\n"; got != want {
+		t.Fatalf("existing backup contents = %q, want %q", got, want)
+	}
+	if _, err := session.FileSystem().Stat(context.Background(), "/tmp/dst.txt~"); err == nil {
+		t.Fatalf("Stat(simple backup) succeeded, want numbered backup")
 	}
 }
