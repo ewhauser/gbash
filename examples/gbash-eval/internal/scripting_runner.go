@@ -34,6 +34,11 @@ func runScriptingEval(ctx context.Context, cfg RunConfig, provider Provider, std
 		}
 		if err != nil {
 			fmt.Fprintf(stdout, "  ERROR: %v\n\n", err)
+			results = append(results, ScriptingEvalResult{
+				Task:  task,
+				Trace: trace,
+				Score: failureScore(task.ID, task.Expectations, err),
+			})
 			continue
 		}
 
@@ -75,7 +80,7 @@ func compatTraceFromScripting(trace ScriptingTrace) agentTrace {
 		toolCalls = append(toolCalls, toolCallResult{
 			Commands: strings.TrimSpace(toJSONString(call.Input)),
 			Stdout:   call.Output,
-			Stderr:   "",
+			Stderr:   call.Stderr,
 			ExitCode: call.ExitCode,
 		})
 	}

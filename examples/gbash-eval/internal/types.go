@@ -1,6 +1,9 @@
 package gbasheval
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 type role string
 
@@ -44,6 +47,31 @@ type toolCallResult struct {
 	Stdout   string `json:"stdout"`
 	Stderr   string `json:"stderr"`
 	ExitCode int    `json:"exit_code"`
+}
+
+func failureScore(taskID string, expectations []Expectation, err error) TaskScore {
+	results := make([]ScoreResult, 0, len(expectations))
+	detail := fmt.Sprintf("task execution failed: %v", err)
+	for _, exp := range expectations {
+		results = append(results, ScoreResult{
+			Check:  exp.Check,
+			Passed: false,
+			Detail: detail,
+			Weight: exp.Weight,
+		})
+	}
+
+	var maxScore float64
+	for _, result := range results {
+		maxScore += result.Weight
+	}
+
+	return TaskScore{
+		TaskID:   taskID,
+		Results:  results,
+		Score:    0,
+		MaxScore: maxScore,
+	}
 }
 
 type agentTrace struct {

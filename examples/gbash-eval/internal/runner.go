@@ -38,6 +38,11 @@ func runBashEval(ctx context.Context, cfg RunConfig, provider Provider, stdout i
 		trace, fsys, err := runAgentLoop(ctx, provider, task, cfg.MaxTurns)
 		if err != nil {
 			fmt.Fprintf(stdout, "  ERROR: %v\n\n", err)
+			results = append(results, EvalResult{
+				Task:  task,
+				Trace: trace,
+				Score: failureScore(task.ID, task.Expectations, err),
+			})
 			continue
 		}
 		score := scoreTask(task.ID, trace, fsys, task.Expectations)

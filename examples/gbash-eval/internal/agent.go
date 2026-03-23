@@ -38,6 +38,19 @@ func runAgentLoop(ctx context.Context, provider Provider, task EvalTask, maxTurn
 	var inputTokens uint32
 	var outputTokens uint32
 	start := time.Now()
+	currentTrace := func() agentTrace {
+		return agentTrace{
+			Messages:          messages,
+			ToolCalls:         toolCalls,
+			ToolCallCount:     len(toolCalls),
+			Turns:             countAssistantTurns(messages),
+			LastToolResponse:  lastToolResponse,
+			NaturalStop:       naturalStop,
+			TotalInputTokens:  inputTokens,
+			TotalOutputTokens: outputTokens,
+			DurationMS:        uint64(time.Since(start).Milliseconds()),
+		}
+	}
 
 	tool := evalBashTool()
 	toolDef := bashToolDefinition()
@@ -49,7 +62,7 @@ func runAgentLoop(ctx context.Context, provider Provider, task EvalTask, maxTurn
 	for turn := 0; turn < maxTurns; turn++ {
 		resp, err := provider.Chat(ctx, messages, []toolDefinition{toolDef}, system)
 		if err != nil {
-			return agentTrace{}, nil, fmt.Errorf("provider chat: %w", err)
+			return currentTrace(), session.FileSystem(), fmt.Errorf("provider chat: %w", err)
 		}
 		inputTokens += resp.InputTokens
 		outputTokens += resp.OutputTokens
@@ -116,17 +129,7 @@ func runAgentLoop(ctx context.Context, provider Provider, task EvalTask, maxTurn
 		messages = append(messages, message{Role: roleToolResult, Content: resultBlocks})
 	}
 
-	return agentTrace{
-		Messages:          messages,
-		ToolCalls:         toolCalls,
-		ToolCallCount:     len(toolCalls),
-		Turns:             countAssistantTurns(messages),
-		LastToolResponse:  lastToolResponse,
-		NaturalStop:       naturalStop,
-		TotalInputTokens:  inputTokens,
-		TotalOutputTokens: outputTokens,
-		DurationMS:        uint64(time.Since(start).Milliseconds()),
-	}, session.FileSystem(), nil
+	return currentTrace(), session.FileSystem(), nil
 }
 
 func extractToolUses(msg message) []contentBlock {

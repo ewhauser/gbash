@@ -13,6 +13,7 @@ type ScriptingToolCall struct {
 	ToolName    string                      `json:"tool_name"`
 	Input       map[string]any              `json:"input"`
 	Output      string                      `json:"output"`
+	Stderr      string                      `json:"stderr"`
 	ExitCode    int                         `json:"exit_code"`
 	Invocations []ScriptedCommandInvocation `json:"invocations"`
 }
@@ -73,11 +74,26 @@ func runScriptedAgent(ctx context.Context, provider Provider, task ScriptingEval
 	var rawBytes int
 	var sentBytes int
 	start := time.Now()
+	currentTrace := func() ScriptingTrace {
+		return ScriptingTrace{
+			Messages:            messages,
+			ToolCalls:           toolCalls,
+			ToolCallCount:       len(toolCalls),
+			Turns:               countAssistantTurns(messages),
+			NaturalStop:         naturalStop,
+			TotalInputTokens:    inputTokens,
+			TotalOutputTokens:   outputTokens,
+			DurationMS:          uint64(time.Since(start).Milliseconds()),
+			Baseline:            false,
+			RawToolOutputBytes:  rawBytes,
+			ToolOutputSentBytes: sentBytes,
+		}
+	}
 
 	for turn := 0; turn < maxTurns; turn++ {
 		resp, err := provider.Chat(ctx, messages, []toolDefinition{toolDef}, scriptedSystemPrompt(task))
 		if err != nil {
-			return ScriptingTrace{}, fmt.Errorf("provider chat: %w", err)
+			return currentTrace(), fmt.Errorf("provider chat: %w", err)
 		}
 		inputTokens += resp.InputTokens
 		outputTokens += resp.OutputTokens
@@ -120,6 +136,7 @@ func runScriptedAgent(ctx context.Context, provider Provider, task ScriptingEval
 				ToolName:    toolDef.Name,
 				Input:       cloneMap(use.Input),
 				Output:      stdout,
+				Stderr:      stderr,
 				ExitCode:    exitCode,
 				Invocations: invocations,
 			})
@@ -133,19 +150,7 @@ func runScriptedAgent(ctx context.Context, provider Provider, task ScriptingEval
 		messages = append(messages, message{Role: roleToolResult, Content: resultBlocks})
 	}
 
-	return ScriptingTrace{
-		Messages:            messages,
-		ToolCalls:           toolCalls,
-		ToolCallCount:       len(toolCalls),
-		Turns:               countAssistantTurns(messages),
-		NaturalStop:         naturalStop,
-		TotalInputTokens:    inputTokens,
-		TotalOutputTokens:   outputTokens,
-		DurationMS:          uint64(time.Since(start).Milliseconds()),
-		Baseline:            false,
-		RawToolOutputBytes:  rawBytes,
-		ToolOutputSentBytes: sentBytes,
-	}, nil
+	return currentTrace(), nil
 }
 
 func runBaselineAgent(ctx context.Context, provider Provider, task ScriptingEvalTask, maxTurns int) (ScriptingTrace, error) {
@@ -180,11 +185,26 @@ func runBaselineAgent(ctx context.Context, provider Provider, task ScriptingEval
 	var rawBytes int
 	var sentBytes int
 	start := time.Now()
+	currentTrace := func() ScriptingTrace {
+		return ScriptingTrace{
+			Messages:            messages,
+			ToolCalls:           toolCalls,
+			ToolCallCount:       len(toolCalls),
+			Turns:               countAssistantTurns(messages),
+			NaturalStop:         naturalStop,
+			TotalInputTokens:    inputTokens,
+			TotalOutputTokens:   outputTokens,
+			DurationMS:          uint64(time.Since(start).Milliseconds()),
+			Baseline:            true,
+			RawToolOutputBytes:  rawBytes,
+			ToolOutputSentBytes: sentBytes,
+		}
+	}
 
 	for turn := 0; turn < maxTurns; turn++ {
 		resp, err := provider.Chat(ctx, messages, toolDefs, system)
 		if err != nil {
-			return ScriptingTrace{}, fmt.Errorf("provider chat: %w", err)
+			return currentTrace(), fmt.Errorf("provider chat: %w", err)
 		}
 		inputTokens += resp.InputTokens
 		outputTokens += resp.OutputTokens
@@ -229,6 +249,7 @@ func runBaselineAgent(ctx context.Context, provider Provider, task ScriptingEval
 				ToolName: use.Name,
 				Input:    cloneMap(use.Input),
 				Output:   stdout,
+				Stderr:   stderr,
 				ExitCode: exitCode,
 				Invocations: []ScriptedCommandInvocation{{
 					Name:     use.Name,
@@ -247,17 +268,5 @@ func runBaselineAgent(ctx context.Context, provider Provider, task ScriptingEval
 		messages = append(messages, message{Role: roleToolResult, Content: resultBlocks})
 	}
 
-	return ScriptingTrace{
-		Messages:            messages,
-		ToolCalls:           toolCalls,
-		ToolCallCount:       len(toolCalls),
-		Turns:               countAssistantTurns(messages),
-		NaturalStop:         naturalStop,
-		TotalInputTokens:    inputTokens,
-		TotalOutputTokens:   outputTokens,
-		DurationMS:          uint64(time.Since(start).Milliseconds()),
-		Baseline:            true,
-		RawToolOutputBytes:  rawBytes,
-		ToolOutputSentBytes: sentBytes,
-	}, nil
+	return currentTrace(), nil
 }
