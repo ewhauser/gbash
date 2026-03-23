@@ -3,10 +3,13 @@ package awk
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"io"
+	"regexp"
 	"strings"
 
-	"github.com/benhoyt/goawk/interp"
-	"github.com/benhoyt/goawk/parser"
+	"github.com/ewhauser/gbash/contrib/awk/goawk/interp"
+	"github.com/ewhauser/gbash/contrib/awk/goawk/parser"
 
 	"github.com/ewhauser/gbash/commands"
 )
@@ -49,21 +52,23 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 		return exitf(inv, "awk: parse error: %v", err)
 	}
 
-	stdinData, err := loadAWKInputs(ctx, inv, inputs)
+	loadedInputs, err := loadAWKInputs(ctx, inv, inputs)
 	if err != nil {
 		return err
 	}
 
 	config := &interp.Config{
-		Stdin:        bytes.NewReader(stdinData),
+		Stdin:        bytes.NewReader(loadedInputs.Stdin),
 		Output:       inv.Stdout,
 		Error:        inv.Stderr,
 		Argv0:        "awk",
+		Args:         inputs,
 		Vars:         buildAWKVars(opts),
 		Environ:      awkEnviron(inv.Env),
 		NoExec:       true,
 		NoFileWrites: true,
 		NoFileReads:  true,
+		FileOpener:   newAWKFileOpener(inv, loadedInputs),
 	}
 	status, err := interp.ExecProgram(compiled, config)
 	if err != nil {
@@ -153,22 +158,38 @@ func loadAWKProgram(ctx context.Context, inv *commands.Invocation, opts awkOptio
 	return strings.Join(parts, "\n"), nil
 }
 
-func loadAWKInputs(ctx context.Context, inv *commands.Invocation, names []string) ([]byte, error) {
-	inputs, err := readNamedInputs(ctx, inv, names, true)
+type awkInputs struct {
+	Stdin []byte
+	Files map[string][]byte
+}
+
+var awkArgVarPattern = regexp.MustCompile(`^([_a-zA-Z][_a-zA-Z0-9]*)=(.*)`)
+
+func loadAWKInputs(ctx context.Context, inv *commands.Invocation, names []string) (*awkInputs, error) {
+	stdinData, err := commands.ReadAllStdin(ctx, inv)
 	if err != nil {
 		return nil, err
 	}
-	if len(inputs) == 0 {
-		return nil, nil
-	}
-	var out bytes.Buffer
-	for i, input := range inputs {
-		if i > 0 && out.Len() > 0 && !bytes.HasSuffix(out.Bytes(), []byte{'\n'}) {
-			out.WriteByte('\n')
+
+	files := make(map[string][]byte)
+	for _, name := range names {
+		if name == "" || name == "-" || awkArgVarPattern.MatchString(name) {
+			continue
 		}
-		out.Write(input.Data)
+		resolved := inv.FS.Resolve(name)
+		if _, ok := files[resolved]; ok {
+			continue
+		}
+		data, err := readAllFile(ctx, inv, name)
+		if err != nil {
+			return nil, err
+		}
+		files[resolved] = data
 	}
-	return out.Bytes(), nil
+	return &awkInputs{
+		Stdin: stdinData,
+		Files: files,
+	}, nil
 }
 
 func buildAWKVars(opts awkOptions) []string {
@@ -191,48 +212,17 @@ func awkEnviron(env map[string]string) []string {
 	return pairs
 }
 
-type namedInput struct {
-	Data []byte
-}
-
-func readNamedInputs(ctx context.Context, inv *commands.Invocation, names []string, defaultStdin bool) ([]namedInput, error) {
-	if len(names) == 0 {
-		if !defaultStdin {
-			return nil, nil
-		}
-		data, err := commands.ReadAllStdin(ctx, inv)
-		if err != nil {
-			return nil, err
-		}
-		return []namedInput{{Data: data}}, nil
-	}
-
-	var (
-		inputs    []namedInput
-		stdinData []byte
-		stdinRead bool
-	)
-	for _, name := range names {
+func newAWKFileOpener(inv *commands.Invocation, inputs *awkInputs) func(string) (io.ReadCloser, error) {
+	return func(name string) (io.ReadCloser, error) {
 		if name == "-" {
-			if !stdinRead {
-				data, err := commands.ReadAllStdin(ctx, inv)
-				if err != nil {
-					return nil, err
-				}
-				stdinData = data
-				stdinRead = true
-			}
-			inputs = append(inputs, namedInput{Data: append([]byte(nil), stdinData...)})
-			continue
+			return io.NopCloser(bytes.NewReader(inputs.Stdin)), nil
 		}
-
-		data, err := readAllFile(ctx, inv, name)
-		if err != nil {
-			return nil, err
+		data, ok := inputs.Files[inv.FS.Resolve(name)]
+		if !ok {
+			return nil, fmt.Errorf("can't read from file due to NoFileReads")
 		}
-		inputs = append(inputs, namedInput{Data: data})
+		return io.NopCloser(bytes.NewReader(data)), nil
 	}
-	return inputs, nil
 }
 
 func readAllFile(ctx context.Context, inv *commands.Invocation, name string) ([]byte, error) {
