@@ -17,6 +17,7 @@ import (
 	"github.com/ewhauser/gbash/internal/builtins"
 	"github.com/ewhauser/gbash/internal/shell"
 	"github.com/ewhauser/gbash/internal/shellstate"
+	"github.com/ewhauser/gbash/policy"
 	"github.com/ewhauser/gbash/trace"
 )
 
@@ -129,8 +130,12 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 			StdoutTruncated: stdout.Truncated(),
 			StderrTruncated: stderr.Truncated(),
 		}
+		handled := classifyExecutionControlError(ctx, req.Timeout, err, stderr, result)
 		logExecutionOutputs(ctx, s.cfg.Logger, &baseLogEvent, result)
 		logExecutionCompletion(ctx, s.cfg.Logger, &baseLogEvent, result, err, false)
+		if handled {
+			return result, nil
+		}
 		return result, err
 	}
 	execReq := &shell.Execution{
@@ -351,6 +356,13 @@ func (s *Session) interactCallback(ctx context.Context, req *commands.Interactiv
 
 func (s *Session) FileSystem() gbfs.FileSystem {
 	return s.fs
+}
+
+func (s *Session) Limits() policy.Limits {
+	if s == nil || s.cfg.Policy == nil {
+		return policy.Limits{}
+	}
+	return s.cfg.Policy.Limits()
 }
 
 func resolveWorkDir(defaultDir, workDir string) string {

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ewhauser/gbash"
+	"github.com/ewhauser/gbash/policy"
 )
 
 func TestRunFileScriptSetsScriptPathIntrospection(t *testing.T) {
@@ -227,6 +228,40 @@ func TestRunFileScriptCopyScriptMissingHostFile(t *testing.T) {
 	}
 }
 
+func TestRunFileScriptCopyScriptHonorsMaxFileBytes(t *testing.T) {
+	t.Parallel()
+
+	scriptPath := writeCLIScript(t, "echo hi\n")
+
+	exitCode, stdout, stderr, err := runCLIWithConfig(t, Config{
+		Name: "gbash",
+		BaseOptions: []gbash.Option{
+			gbash.WithPolicy(policy.NewStatic(&policy.Config{
+				ReadRoots:  []string{"/"},
+				WriteRoots: []string{"/"},
+				Limits: policy.Limits{
+					MaxFileBytes: 3,
+				},
+			})),
+		},
+	}, []string{"--copy-script", scriptPath}, "")
+	if err == nil {
+		t.Fatal("run() error = nil, want max file size failure")
+	}
+	if exitCode != 1 {
+		t.Fatalf("exitCode = %d, want 1", exitCode)
+	}
+	if got, want := stdout, ""; got != want {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+	if got, want := stderr, ""; got != want {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	if got, want := err.Error(), scriptPath+": input exceeds maximum file size of 3 bytes"; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
 func TestRunCommandStringLeavesBashSourceUnset(t *testing.T) {
 	t.Parallel()
 
@@ -270,9 +305,15 @@ func TestRunStdinScriptLeavesBashSourceUnset(t *testing.T) {
 func runCLI(t *testing.T, args []string, stdin string) (exitCode int, stdoutText, stderrText string, err error) {
 	t.Helper()
 
+	return runCLIWithConfig(t, Config{Name: "gbash"}, args, stdin)
+}
+
+func runCLIWithConfig(t *testing.T, cfg Config, args []string, stdin string) (exitCode int, stdoutText, stderrText string, err error) {
+	t.Helper()
+
 	var stdout strings.Builder
 	var stderr strings.Builder
-	exitCode, err = run(context.Background(), Config{Name: "gbash"}, args, strings.NewReader(stdin), &stdout, &stderr, false)
+	exitCode, err = run(context.Background(), cfg, args, strings.NewReader(stdin), &stdout, &stderr, false)
 	return exitCode, stdout.String(), stderr.String(), err
 }
 

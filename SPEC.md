@@ -185,6 +185,7 @@ That frontend is also exposed as a public `cli` package so shipped binaries can 
 - filesystem state persists across executions within the same session
 - the virtual wall clock persists across executions within the same session and is observable by time-based builtins such as `date`, `touch`, `uptime`, `who`, `ls`, and shell `printf %(... )T`
 - `date --set` and the legacy `date MMDDhhmm[[CC]YY][.ss]` form mutate only that session-local virtual wall clock; they never modify the host clock
+- integrations may inspect the session's effective policy limits when they need to align frontend staging or preflight behavior with runtime-enforced caps such as `MaxFileBytes`
 
 This matches the agent workflow we care about: a sequence of shell calls operating on a shared sandboxed workspace, without requiring shell-local state to leak between calls unless we explicitly add that feature later.
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"path"
@@ -13,6 +14,7 @@ import (
 	"github.com/ewhauser/gbash"
 	"github.com/ewhauser/gbash/commands"
 	"github.com/ewhauser/gbash/internal/builtins"
+	"github.com/ewhauser/gbash/internal/commandutil"
 	"github.com/ewhauser/gbash/internal/shell/syntax"
 	gbserver "github.com/ewhauser/gbash/server"
 	"golang.org/x/term"
@@ -330,6 +332,10 @@ func stageHostScriptFile(ctx context.Context, session *gbash.Session, sourcePath
 	if info, statErr := source.Stat(); statErr == nil {
 		mode = info.Mode().Perm()
 	}
+	data, err := readHostScriptData(ctx, source, sourcePath, session.Limits().MaxFileBytes)
+	if err != nil {
+		return err
+	}
 
 	if err := fsys.MkdirAll(ctx, path.Dir(sandboxPath), 0o755); err != nil {
 		return fmt.Errorf("create staged script directory: %w", err)
@@ -340,10 +346,30 @@ func stageHostScriptFile(ctx context.Context, session *gbash.Session, sourcePath
 	}
 	defer func() { _ = target.Close() }()
 
-	if _, err := io.Copy(target, source); err != nil {
+	if _, err := target.Write(data); err != nil {
 		return fmt.Errorf("copy host script to sandbox: %w", err)
 	}
 	return nil
+}
+
+func readHostScriptData(ctx context.Context, source *os.File, sourcePath string, maxFileBytes int64) ([]byte, error) {
+	reader := commandutil.ReaderWithContext(ctx, source)
+	if maxFileBytes <= 0 || maxFileBytes == math.MaxInt64 {
+		data, err := io.ReadAll(reader)
+		if err != nil {
+			return nil, fmt.Errorf("read host script %s: %w", sourcePath, err)
+		}
+		return data, nil
+	}
+
+	data, err := io.ReadAll(io.LimitReader(reader, maxFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read host script %s: %w", sourcePath, err)
+	}
+	if int64(len(data)) > maxFileBytes {
+		return nil, fmt.Errorf("%s: %w", sourcePath, commands.Diagnosticf("input exceeds maximum file size of %d bytes", maxFileBytes))
+	}
+	return data, nil
 }
 
 func scriptStageExitCode(err error) int {
