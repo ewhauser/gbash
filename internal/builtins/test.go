@@ -228,14 +228,35 @@ func (p *testRPNParser) parsePrimary(args []string, pos int) ([]testSymbol, int,
 		return nil, pos, testParseExpectedValue()
 	}
 	if args[pos] == "(" {
-		stack, next, err := p.parseOr(args, pos+1)
+		depth := 1
+		groupStarts := []int{pos}
+		end := pos + 1
+		for end < len(args) && depth > 0 {
+			switch args[end] {
+			case "(":
+				currentGroupStart := groupStarts[len(groupStarts)-1]
+				if p.parenStartsNestedGroup(args, currentGroupStart, end) {
+					depth++
+					groupStarts = append(groupStarts, end)
+				}
+			case ")":
+				depth--
+				groupStarts = groupStarts[:len(groupStarts)-1]
+			}
+			end++
+		}
+		if depth != 0 {
+			return nil, pos, testParseExpected(")")
+		}
+		inner := args[pos+1 : end-1]
+		if len(inner) == 0 {
+			return nil, pos, testParseExpected(")")
+		}
+		stack, err := p.parseArgs(inner)
 		if err != nil {
 			return nil, pos, err
 		}
-		if next >= len(args) || args[next] != ")" {
-			return nil, pos, testParseExpected(")")
-		}
-		return stack, next + 1, nil
+		return stack, end, nil
 	}
 	if pos+2 < len(args) && isTestExprBinaryOp(args[pos+1]) {
 		op, _ := testBinarySymbol(args[pos+1], false)
@@ -252,6 +273,39 @@ func (p *testRPNParser) parsePrimary(args []string, pos int) ([]testSymbol, int,
 		}, pos + 2, nil
 	}
 	return []testSymbol{testLiteralSymbol(args[pos])}, pos + 1, nil
+}
+
+func (p *testRPNParser) parenStartsNestedGroup(args []string, groupPos, idx int) bool {
+	if idx > groupPos+1 {
+		prev := args[idx-1]
+		if prev == "-a" || prev == "-o" {
+			return p.groupPrefixParsesAsExpr(args[groupPos+1 : idx-1])
+		}
+		return !isTestExprBinaryOp(prev) && !isTestUnaryOp(prev)
+	}
+	nextClose := -1
+	for i := idx + 1; i < len(args); i++ {
+		if args[i] == ")" {
+			nextClose = i
+			break
+		}
+	}
+	if nextClose < 0 {
+		return true
+	}
+	if nextClose == idx+2 {
+		return false
+	}
+	next := args[idx+1]
+	return !isTestExprBinaryOp(next) && next != "-a" && next != "-o"
+}
+
+func (p *testRPNParser) groupPrefixParsesAsExpr(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	_, next, err := p.parseOr(args, 0)
+	return err == nil && next == len(args)
 }
 
 func testLiteralSymbol(token string) testSymbol {

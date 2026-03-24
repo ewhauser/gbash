@@ -167,14 +167,35 @@ func (p *testParser) parsePrimary(args []string, pos int) (syntax.TestExpr, int,
 		return nil, pos, fmt.Errorf("argument expected")
 	}
 	if args[pos] == "(" {
-		expr, next, err := p.parseOr(args, pos+1)
+		depth := 1
+		groupStarts := []int{pos}
+		end := pos + 1
+		for end < len(args) && depth > 0 {
+			switch args[end] {
+			case "(":
+				currentGroupStart := groupStarts[len(groupStarts)-1]
+				if p.parenStartsNestedGroup(args, currentGroupStart, end) {
+					depth++
+					groupStarts = append(groupStarts, end)
+				}
+			case ")":
+				depth--
+				groupStarts = groupStarts[:len(groupStarts)-1]
+			}
+			end++
+		}
+		if depth != 0 {
+			return nil, pos, fmt.Errorf("reached %q without matching '(' with ')'", args[len(args)-1])
+		}
+		inner := args[pos+1 : end-1]
+		if len(inner) == 0 {
+			return nil, pos, fmt.Errorf("`)' expected")
+		}
+		expr, err := p.parseArgs(inner)
 		if err != nil {
 			return nil, pos, err
 		}
-		if next >= len(args) || args[next] != ")" {
-			return nil, pos, fmt.Errorf("reached %q without matching '(' with ')'", args[len(args)-1])
-		}
-		return &syntax.ParenTest{X: expr}, next + 1, nil
+		return &syntax.ParenTest{X: expr}, end, nil
 	}
 	if pos+2 < len(args) {
 		if op := testExprBinaryOp(args[pos+1]); op != illegalTok {
@@ -192,6 +213,39 @@ func (p *testParser) parsePrimary(args []string, pos int) (syntax.TestExpr, int,
 		}, pos + 2, nil
 	}
 	return testWord(args[pos]), pos + 1, nil
+}
+
+func (p *testParser) parenStartsNestedGroup(args []string, groupPos, idx int) bool {
+	if idx > groupPos+1 {
+		prev := args[idx-1]
+		if prev == "-a" || prev == "-o" {
+			return p.groupPrefixParsesAsExpr(args[groupPos+1 : idx-1])
+		}
+		return testExprBinaryOp(prev) == illegalTok && !isClassicUnaryOp(prev)
+	}
+	nextClose := -1
+	for i := idx + 1; i < len(args); i++ {
+		if args[i] == ")" {
+			nextClose = i
+			break
+		}
+	}
+	if nextClose < 0 {
+		return true
+	}
+	if nextClose == idx+2 {
+		return false
+	}
+	next := args[idx+1]
+	return testExprBinaryOp(next) == illegalTok && next != "-a" && next != "-o"
+}
+
+func (p *testParser) groupPrefixParsesAsExpr(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	_, next, err := p.parseOr(args, 0)
+	return err == nil && next == len(args)
 }
 
 func isClassicUnaryOp(val string) bool {
