@@ -173,3 +173,46 @@ func TestInstrumentSourceForPrintKeepsEscapedTripleQuoteDocstringsBeforeFutureIm
 		t.Fatalf("instrumentSourceForPrint() = %q, want injected print binding", instrumented)
 	}
 }
+
+func TestInstrumentSourceForPrintKeepsParenthesizedFutureImportsTogether(t *testing.T) {
+	t.Parallel()
+
+	source := "" +
+		"from __future__ import (\n" +
+		"    annotations,\n" +
+		")\n" +
+		"print('x')\n"
+
+	instrumented := instrumentSourceForPrint(source)
+	prefix := "from __future__ import (\n    annotations,\n)\n"
+	if !strings.HasPrefix(instrumented, prefix) {
+		t.Fatalf("instrumentSourceForPrint() = %q, want prefix %q", instrumented, prefix)
+	}
+	if !strings.Contains(instrumented, pythonPrintPrelude) {
+		t.Fatalf("instrumentSourceForPrint() = %q, want injected prelude", instrumented)
+	}
+	if !strings.Contains(instrumented, pythonPrintBinding) {
+		t.Fatalf("instrumentSourceForPrint() = %q, want injected print binding", instrumented)
+	}
+}
+
+func TestInstrumentSourceForPrintKeepsBackslashContinuedFutureImportsTogether(t *testing.T) {
+	t.Parallel()
+
+	source := "" +
+		"from __future__ import annotations, \\\n" +
+		"    generator_stop\n" +
+		"print('x')\n"
+
+	instrumented := instrumentSourceForPrint(source)
+	prefix := "from __future__ import annotations, \\\n    generator_stop\n"
+	if !strings.HasPrefix(instrumented, prefix) {
+		t.Fatalf("instrumentSourceForPrint() = %q, want prefix %q", instrumented, prefix)
+	}
+	if !strings.Contains(instrumented, pythonPrintPrelude) {
+		t.Fatalf("instrumentSourceForPrint() = %q, want injected prelude", instrumented)
+	}
+	if !strings.Contains(instrumented, pythonPrintBinding) {
+		t.Fatalf("instrumentSourceForPrint() = %q, want injected print binding", instrumented)
+	}
+}

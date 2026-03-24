@@ -540,13 +540,11 @@ func instrumentSourceForPrint(source string) string {
 		index = consumePythonTriviaLines(source, docstringEnd)
 	}
 	for index < len(source) {
-		lineEnd := nextPythonLineEnd(source, index)
-		trimmed := strings.TrimSpace(source[index:lineEnd])
-		if strings.HasPrefix(trimmed, "from __future__ import ") || trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			index = lineEnd
-			continue
+		index = consumePythonTriviaLines(source, index)
+		if !hasFutureImportPrefix(source, index) {
+			break
 		}
-		break
+		index = consumePythonStatement(source, index)
 	}
 
 	return source[:index] + pythonPrintPrelude + pythonPrintBinding + source[index:]
@@ -793,6 +791,43 @@ func consumePythonTriviaLines(source string, index int) int {
 	return index
 }
 
+func consumePythonStatement(source string, index int) int {
+	parenDepth := 0
+	lineContinued := false
+
+	for index < len(source) {
+		switch source[index] {
+		case '#':
+			for index < len(source) && source[index] != '\n' {
+				index++
+			}
+		case '"', '\'':
+			index = consumePythonString(source, index)
+		case '(', '[', '{':
+			parenDepth++
+			index++
+		case ')', ']', '}':
+			if parenDepth > 0 {
+				parenDepth--
+			}
+			index++
+		case '\\':
+			lineContinued = pythonLineContinuationAt(source, index)
+			index++
+		case '\n':
+			index++
+			if parenDepth == 0 && !lineContinued {
+				return index
+			}
+			lineContinued = false
+		default:
+			index++
+		}
+	}
+
+	return len(source)
+}
+
 func consumeModuleDocstring(source string, index int) (int, bool) {
 	if index >= len(source) {
 		return 0, false
@@ -829,6 +864,14 @@ func nextPythonLineEnd(source string, index int) int {
 	return len(source)
 }
 
+func hasFutureImportPrefix(source string, index int) bool {
+	if index >= len(source) {
+		return false
+	}
+	lineEnd := nextPythonLineEnd(source, index)
+	return strings.HasPrefix(strings.TrimSpace(source[index:lineEnd]), "from __future__ import ")
+}
+
 func leadingPythonWhitespace(line string) int {
 	index := 0
 	for index < len(line) {
@@ -852,6 +895,16 @@ func isEscapedPythonDelimiter(source string, index int) bool {
 		backslashes++
 	}
 	return backslashes%2 == 1
+}
+
+func pythonLineContinuationAt(source string, index int) bool {
+	if index+1 >= len(source) {
+		return false
+	}
+	if source[index+1] == '\n' {
+		return true
+	}
+	return index+2 < len(source) && source[index+1] == '\r' && source[index+2] == '\n'
 }
 
 func moduleDocstringLiteral(line string) (int, string, bool, bool) {
