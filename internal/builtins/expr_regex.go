@@ -231,10 +231,14 @@ func (p *exprRegexParser) parseAtom(atExprStart, inGroup bool) (*exprRegexNode, 
 			}
 			return nil, exprUnmatchedClosingParenError()
 		case next.isDigit():
+			group := int(next.ch - '0')
+			if group == 0 || group > p.nextGroup {
+				return nil, exprInvalidBackReferenceError()
+			}
 			p.pos += 2
 			return &exprRegexNode{
 				kind:  exprRegexBackref,
-				group: int(next.ch - '0'),
+				group: group,
 			}, nil
 		default:
 			p.pos += 2

@@ -27,7 +27,7 @@ func firstNonEmpty(values ...string) string {
 
 func usesByteLocale(locale string) bool {
 	switch strings.ToUpper(strings.TrimSpace(locale)) {
-	case "", "C", "POSIX", "C.UTF-8", "C.UTF_8":
+	case "", "C", "POSIX":
 		return true
 	default:
 		return false

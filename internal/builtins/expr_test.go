@@ -27,6 +27,27 @@ func TestExprSupportsGNUKeywordOperatorsAndRegexCaptures(t *testing.T) {
 	}
 }
 
+func TestExprTreatsCUTF8AsMultibyteLocale(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "export LC_ALL=C.UTF-8\n" +
+			"expr length αbcdef\n" +
+			"expr index αbcδef δ\n" +
+			"expr substr αbcδef 4 2\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "6\n4\nδe\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestExprShortCircuitsBooleanOperatorsAndGNUTruthiness(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
@@ -51,6 +72,24 @@ func TestExprShortCircuitsBooleanOperatorsAndGNUTruthiness(t *testing.T) {
 	}
 	if got := result.Stderr; got != "" {
 		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
+func TestExprRejectsInvalidBackReference(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "expr 0 : '\\1'\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 2 {
+		t.Fatalf("ExitCode = %d, want 2", result.ExitCode)
+	}
+	if got, want := result.Stderr, "expr: Invalid back reference\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }
 

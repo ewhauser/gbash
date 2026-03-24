@@ -639,6 +639,10 @@ func exprTrailingBackslashError() error {
 	return exprStaticError("Trailing backslash")
 }
 
+func exprInvalidBackReferenceError() error {
+	return exprStaticError("Invalid back reference")
+}
+
 func exprRegexTooBigError() error {
 	return exprStaticError("Regular expression too big")
 }
