@@ -189,7 +189,7 @@ func FuzzDirectoryTraversalCommands(f *testing.F) {
 		writeSessionFile(t, session, inputPath, data)
 
 		script := fmt.Appendf(nil,
-			"mkdir -p %s\ncp %s %s\nln -s -f %s %s\ndu -a %s >/tmp/du.out\ntree -a -L 2 %s >/tmp/tree.out\nrm -r -f %s\n",
+			"mkdir -p %s\ncp %s %s\nln -s -f %s %s\ndu -a %s >/tmp/du.out\ntree -a -L 2 %s >/tmp/tree.out\nrm --interactive=never --one-file-system -r -f %s\n",
 			shellQuote(path.Dir(treeFile)),
 			shellQuote(inputPath),
 			shellQuote(treeFile),
