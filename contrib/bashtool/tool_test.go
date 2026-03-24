@@ -128,10 +128,10 @@ func TestHelpIncludesExtrasNotes(t *testing.T) {
 	if !strings.Contains(help, "## Result") {
 		t.Fatalf("Help() missing result section: %q", help)
 	}
-	if !strings.Contains(help, "Stable contrib commands available: awk, html-to-markdown, jq, sqlite3, yq.") {
+	if !strings.Contains(help, "Stable contrib commands available: awk, html-to-markdown, jq, python, python3, sqlite3, yq.") {
 		t.Fatalf("Help() missing extras note: %q", help)
 	}
-	if !strings.Contains(help, "`awk`, `html-to-markdown`, `jq`, `sqlite3`, `yq`") {
+	if !strings.Contains(help, "`awk`, `html-to-markdown`, `jq`, `python`, `python3`, `sqlite3`, `yq`") {
 		t.Fatalf("Help() missing custom commands list: %q", help)
 	}
 }

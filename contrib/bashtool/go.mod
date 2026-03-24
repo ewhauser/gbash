@@ -19,6 +19,7 @@ require (
 	github.com/ewhauser/gbash/contrib/awk v0.0.28 // indirect
 	github.com/ewhauser/gbash/contrib/htmltomarkdown v0.0.28 // indirect
 	github.com/ewhauser/gbash/contrib/jq v0.0.28 // indirect
+	github.com/ewhauser/gbash/contrib/python v0.0.28 // indirect
 	github.com/ewhauser/gbash/contrib/sqlite3 v0.0.28 // indirect
 	github.com/ewhauser/gbash/contrib/yq v0.0.28 // indirect
 	github.com/fatih/color v1.18.0 // indirect
@@ -62,6 +63,8 @@ replace github.com/ewhauser/gbash/contrib/awk => ../awk
 replace github.com/ewhauser/gbash/contrib/htmltomarkdown => ../htmltomarkdown
 
 replace github.com/ewhauser/gbash/contrib/jq => ../jq
+
+replace github.com/ewhauser/gbash/contrib/python => ../python
 
 replace github.com/ewhauser/gbash/contrib/sqlite3 => ../sqlite3
 
