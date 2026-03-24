@@ -334,6 +334,10 @@ func rmRemoveDirectoryRecursive(ctx context.Context, inv *Invocation, display, a
 	}
 
 	if err := inv.FS.Remove(ctx, abs, false); err != nil {
+		if rmShouldIgnoreRemoveError(err, opts) {
+			result.removed = true
+			return result, nil
+		}
 		if !result.hadErr {
 			if err := rmWriteCannotRemove(inv, display, rmRemovalErrorText(err, true)); err != nil {
 				return rmResult{}, err
@@ -367,6 +371,9 @@ func rmRemoveEmptyDirectory(ctx context.Context, inv *Invocation, display, abs s
 	}
 
 	if err := inv.FS.Remove(ctx, abs, false); err != nil {
+		if rmShouldIgnoreRemoveError(err, opts) {
+			return rmResult{removed: true}, nil
+		}
 		if err := rmWriteCannotRemove(inv, display, rmRemovalErrorText(err, true)); err != nil {
 			return rmResult{}, err
 		}
@@ -405,6 +412,9 @@ func rmRemoveFile(ctx context.Context, inv *Invocation, display, abs string, inf
 	}
 
 	if err := inv.FS.Remove(ctx, abs, false); err != nil {
+		if rmShouldIgnoreRemoveError(err, opts) {
+			return rmResult{removed: true}, nil
+		}
 		if err := rmWriteCannotRemove(inv, display, rmRemovalErrorText(err, false)); err != nil {
 			return rmResult{}, err
 		}
@@ -448,6 +458,10 @@ func rmPromptFile(ctx context.Context, inv *Invocation, display string, info std
 		return rmPromptYes(ctx, inv, fmt.Sprintf("remove write-protected regular empty file %s", quoteGNUOperand(display)), opts)
 	}
 	return rmPromptYes(ctx, inv, fmt.Sprintf("remove write-protected regular file %s", quoteGNUOperand(display)), opts)
+}
+
+func rmShouldIgnoreRemoveError(err error, opts rmOptions) bool {
+	return opts.force && errorsIsNotExist(err)
 }
 
 func rmPromptDirectory(ctx context.Context, inv *Invocation, display string, info stdfs.FileInfo, opts rmOptions) (bool, error) {

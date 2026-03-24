@@ -2,9 +2,30 @@ package builtins
 
 import (
 	"bytes"
+	"context"
+	"os"
 	"strings"
 	"testing"
+
+	stdfs "io/fs"
+
+	gbfs "github.com/ewhauser/gbash/fs"
 )
+
+type removeNotExistAfterDeleteFS struct {
+	gbfs.FileSystem
+	target string
+}
+
+func (fs removeNotExistAfterDeleteFS) Remove(ctx context.Context, name string, recursive bool) error {
+	if name == fs.target {
+		if err := fs.FileSystem.Remove(ctx, name, recursive); err != nil {
+			return err
+		}
+		return stdfs.ErrNotExist
+	}
+	return fs.FileSystem.Remove(ctx, name, recursive)
+}
 
 func parseRMSpec(t *testing.T, args ...string) (*Invocation, *ParsedCommand, string, error) {
 	t.Helper()
@@ -191,5 +212,47 @@ func TestParseRMSpecAcceptsTripleHyphenPresumeInputTTY(t *testing.T) {
 	}
 	if !matches.Has("presume-input-tty") {
 		t.Fatalf("presume-input-tty option not parsed")
+	}
+}
+
+func TestRMForceIgnoresRemoveNotExistAfterSuccessfulLstat(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mem := gbfs.NewMemory()
+	file, err := mem.OpenFile(ctx, "/tmp/race", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile() error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	var stderr bytes.Buffer
+	inv := NewInvocation(&InvocationOptions{
+		Cwd:        "/",
+		FileSystem: removeNotExistAfterDeleteFS{FileSystem: mem, target: "/tmp/race"},
+		Stderr:     &stderr,
+	})
+	info, err := inv.FS.Lstat(ctx, "/tmp/race")
+	if err != nil {
+		t.Fatalf("Lstat() error = %v", err)
+	}
+
+	result, err := rmRemoveFile(ctx, inv, "/tmp/race", "/tmp/race", info, rmOptions{force: true})
+	if err != nil {
+		t.Fatalf("rmRemoveFile() error = %v", err)
+	}
+	if result.hadErr {
+		t.Fatalf("hadErr = true, want false")
+	}
+	if !result.removed {
+		t.Fatalf("removed = false, want true when target disappears during forced removal")
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	if _, err := inv.FS.Lstat(ctx, "/tmp/race"); !errorsIsNotExist(err) {
+		t.Fatalf("post-remove Lstat() error = %v, want not exist", err)
 	}
 }
