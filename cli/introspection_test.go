@@ -180,6 +180,31 @@ func TestRunFileScriptMapsAbsoluteHostPathWithinReadWriteRoot(t *testing.T) {
 	}
 }
 
+func TestRunFileScriptPreservesWhitespaceRelativeSandboxPath(t *testing.T) {
+	t.Parallel()
+
+	rootDir := writeCLIRootScript(t, " script spaced.sh ", strings.Join([]string{
+		"set -u",
+		`printf 'ZERO:%s\n' "$0"`,
+		`printf 'SRC:%s\n' "${BASH_SOURCE[0]}"`,
+		"",
+	}, "\n"))
+
+	exitCode, stdout, stderr, err := runCLI(t, []string{"--root", rootDir, " script spaced.sh "}, "")
+	if err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr)
+	}
+	if got, want := stdout, "ZERO: script spaced.sh \nSRC: script spaced.sh \n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got, want := stderr, ""; got != want {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
 func TestRunFileScriptCopyScriptStagesHostPath(t *testing.T) {
 	t.Parallel()
 
@@ -198,6 +223,31 @@ func TestRunFileScriptCopyScriptStagesHostPath(t *testing.T) {
 		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr)
 	}
 	if got, want := stdout, "ZERO:/tmp/.gbash-host-script/main.sh\nSRC:/tmp/.gbash-host-script/main.sh\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got, want := stderr, ""; got != want {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRunFileScriptCopyScriptPreservesWhitespaceHostPath(t *testing.T) {
+	t.Parallel()
+
+	scriptPath := writeCLIFile(t, " script spaced.sh ", strings.Join([]string{
+		"set -u",
+		`printf 'ZERO:%s\n' "$0"`,
+		`printf 'SRC:%s\n' "${BASH_SOURCE[0]}"`,
+		"",
+	}, "\n"))
+
+	exitCode, stdout, stderr, err := runCLI(t, []string{"--copy-script", scriptPath}, "")
+	if err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr)
+	}
+	if got, want := stdout, "ZERO:/tmp/.gbash-host-script/ script spaced.sh \nSRC:/tmp/.gbash-host-script/ script spaced.sh \n"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 	if got, want := stderr, ""; got != want {
@@ -320,7 +370,13 @@ func runCLIWithConfig(t *testing.T, cfg Config, args []string, stdin string) (ex
 func writeCLIScript(t *testing.T, contents string) string {
 	t.Helper()
 
-	scriptPath := filepath.Join(t.TempDir(), "main.sh")
+	return writeCLIFile(t, "main.sh", contents)
+}
+
+func writeCLIFile(t *testing.T, name, contents string) string {
+	t.Helper()
+
+	scriptPath := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(scriptPath, []byte(contents), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q) error = %v", scriptPath, err)
 	}

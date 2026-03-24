@@ -319,6 +319,19 @@ func stageHostScriptFile(ctx context.Context, session *gbash.Session, sourcePath
 	if fsys == nil {
 		return errors.New("session filesystem unavailable")
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%s: No such file or directory", sourcePath)
+		}
+		return fmt.Errorf("stat host script %s: %w", sourcePath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s: copy-script source must be a regular file", sourcePath)
+	}
 	source, err := os.Open(sourcePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -328,10 +341,7 @@ func stageHostScriptFile(ctx context.Context, session *gbash.Session, sourcePath
 	}
 	defer func() { _ = source.Close() }()
 
-	mode := os.FileMode(0o644)
-	if info, statErr := source.Stat(); statErr == nil {
-		mode = info.Mode().Perm()
-	}
+	mode := info.Mode().Perm()
 	data, err := readHostScriptData(ctx, source, sourcePath, session.Limits().MaxFileBytes)
 	if err != nil {
 		return err
@@ -375,6 +385,12 @@ func readHostScriptData(ctx context.Context, source *os.File, sourcePath string,
 func scriptStageExitCode(err error) int {
 	if err == nil {
 		return 0
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return 124
+	}
+	if errors.Is(err, context.Canceled) {
+		return 130
 	}
 	if strings.Contains(strings.ToLower(err.Error()), "no such file or directory") {
 		return 127

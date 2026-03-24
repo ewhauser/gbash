@@ -252,19 +252,18 @@ type scriptPathPlan struct {
 }
 
 func (opts *runtimeOptions) planScriptPath(scriptPath string) (scriptPathPlan, error) {
-	trimmed := strings.TrimSpace(scriptPath)
-	if trimmed == "" {
+	if scriptPath == "" {
 		return scriptPathPlan{}, nil
 	}
-	if sandboxPath, ok, err := opts.mapMountedHostScriptPath(trimmed); err != nil {
+	if sandboxPath, ok, err := opts.mapMountedHostScriptPath(scriptPath); err != nil {
 		return scriptPathPlan{}, err
 	} else if ok {
 		return scriptPathPlan{sandboxPath: sandboxPath}, nil
 	}
 	if opts == nil || !opts.copyScript {
-		return scriptPathPlan{sandboxPath: trimmed}, nil
+		return scriptPathPlan{sandboxPath: scriptPath}, nil
 	}
-	source, err := filepath.Abs(trimmed)
+	source, err := filepath.Abs(scriptPath)
 	if err != nil {
 		return scriptPathPlan{}, fmt.Errorf("resolve --copy-script source: %w", err)
 	}
@@ -289,11 +288,11 @@ func (opts *runtimeOptions) mapMountedHostScriptPath(scriptPath string) (string,
 }
 
 func sandboxPathForMountedHostPath(scriptPath, hostRoot, mountPoint string) (string, bool, error) {
-	resolvedRoot, err := filepath.Abs(strings.TrimSpace(hostRoot))
+	resolvedRoot, err := filepath.Abs(hostRoot)
 	if err != nil {
 		return "", false, fmt.Errorf("resolve mounted root: %w", err)
 	}
-	resolvedScript, err := filepath.Abs(strings.TrimSpace(scriptPath))
+	resolvedScript, err := filepath.Abs(scriptPath)
 	if err != nil {
 		return "", false, fmt.Errorf("resolve script path: %w", err)
 	}
@@ -313,7 +312,6 @@ func sandboxPathForMountedHostPath(scriptPath, hostRoot, mountPoint string) (str
 }
 
 func stagedSandboxScriptPath(base string) string {
-	base = strings.TrimSpace(base)
 	switch base {
 	case "", ".", string(os.PathSeparator):
 		base = "script.sh"
