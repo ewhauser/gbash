@@ -169,8 +169,8 @@ func TestVirtualNullDeviceRejectsRemoval(t *testing.T) {
 	if result.ExitCode != 1 {
 		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if result.Stderr != "" {
-		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	if got, want := result.Stderr, "rm: cannot remove '/dev/null': Permission denied\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 	if _, err := session.FileSystem().Stat(context.Background(), "/dev/null"); err != nil {
 		t.Fatalf("Stat(/dev/null) after rm error = %v", err)
