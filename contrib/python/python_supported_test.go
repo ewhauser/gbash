@@ -78,6 +78,26 @@ func TestPythonNativePrintCallbackHandlesAliases(t *testing.T) {
 	}
 }
 
+func TestPythonPrintSupportsStdoutAndStderrTargets(t *testing.T) {
+	t.Parallel()
+
+	result, err := newPythonRuntime(t).Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: "python -c 'import sys\nprint(\"out\", file=sys.stdout)\nprint(\"err\", file=sys.stderr)'\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "out\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, "err\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
 func TestPythonHelpAndVersionIdentifyAlias(t *testing.T) {
 	t.Parallel()
 

@@ -26,10 +26,19 @@ const (
 	pythonStdinEntry         = ".gbash-python-stdin.py"
 	pythonHostPrintName      = "__gbash_internal_print"
 	pythonRewrittenPrintName = "__gbash_print"
-	pythonPrintPrelude       = "def __gbash_print(*args, sep=\" \", end=\"\\n\", file=None, flush=False):\n" +
-		"    if file is not None:\n" +
-		"        raise NotImplementedError(\"print(file=...) is not supported\")\n" +
-		"    __gbash_internal_print(sep.join(str(arg) for arg in args) + end)\n\n"
+	pythonPrintPrelude       = "import sys\n\n" +
+		"def __gbash_print(*args, sep=\" \", end=\"\\n\", file=None, flush=False):\n" +
+		"    text = sep.join(str(arg) for arg in args) + end\n" +
+		"    target = sys.stdout if file is None else file\n" +
+		"    if target is sys.stdout:\n" +
+		"        __gbash_internal_print(\"stdout\", text)\n" +
+		"        return\n" +
+		"    if target is sys.stderr:\n" +
+		"        __gbash_internal_print(\"stderr\", text)\n" +
+		"        return\n" +
+		"    target.write(text)\n" +
+		"    if flush and hasattr(target, \"flush\"):\n" +
+		"        target.flush()\n\n"
 	pythonPrintBinding = "print = __gbash_print\n\n"
 )
 
@@ -136,8 +145,18 @@ func (c *Python) RunParsed(ctx context.Context, inv *commands.Invocation, matche
 	_, err = runner.Run(ctx, monty.RunOptions{
 		Functions: map[string]monty.ExternalFunction{
 			pythonHostPrintName: func(_ context.Context, call monty.Call) (monty.Result, error) {
-				if len(call.Args) > 0 && call.Args[0].Kind() == "string" {
-					_, _ = io.WriteString(inv.Stdout, call.Args[0].Raw().(string))
+				if len(call.Args) < 2 {
+					return monty.Return(monty.None()), nil
+				}
+				if call.Args[0].Kind() != "string" || call.Args[1].Kind() != "string" {
+					return monty.Return(monty.None()), nil
+				}
+				text := call.Args[1].Raw().(string)
+				switch call.Args[0].Raw().(string) {
+				case "stderr":
+					_, _ = io.WriteString(inv.Stderr, text)
+				default:
+					_, _ = io.WriteString(inv.Stdout, text)
 				}
 				return monty.Return(monty.None()), nil
 			},
@@ -869,7 +888,8 @@ func hasFutureImportPrefix(source string, index int) bool {
 		return false
 	}
 	lineEnd := nextPythonLineEnd(source, index)
-	return strings.HasPrefix(strings.TrimSpace(source[index:lineEnd]), "from __future__ import ")
+	fields := strings.Fields(strings.TrimSpace(source[index:lineEnd]))
+	return len(fields) >= 3 && fields[0] == "from" && fields[1] == "__future__" && fields[2] == "import"
 }
 
 func leadingPythonWhitespace(line string) int {
