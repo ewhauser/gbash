@@ -252,14 +252,13 @@ func rmRemovePath(ctx context.Context, inv *Invocation, raw string, opts rmOptio
 }
 
 func rmRemoveDirectory(ctx context.Context, inv *Invocation, display, abs string, info stdfs.FileInfo, opts rmOptions) (rmResult, error) {
-	if rmRefersToCurrentOrParent(display) {
-		if err := rmWriteRefusal(inv, display); err != nil {
-			return rmResult{}, err
-		}
-		return rmResult{hadErr: true}, nil
-	}
-
 	if opts.recursive {
+		if rmRefersToCurrentOrParent(display) {
+			if err := rmWriteRefusal(inv, display); err != nil {
+				return rmResult{}, err
+			}
+			return rmResult{hadErr: true}, nil
+		}
 		if rmIsPreserveRootViolation(ctx, inv, abs, opts.preserveRoot) {
 			if err := rmWritePreserveRootError(inv, display); err != nil {
 				return rmResult{}, err

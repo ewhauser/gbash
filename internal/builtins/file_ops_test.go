@@ -149,6 +149,37 @@ func TestRMRefusesCurrentAndParentDirectoryOperands(t *testing.T) {
 	}
 }
 
+func TestRMCurrentOrParentDirectoryNonRecursiveUsesNormalDirectoryErrors(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session,
+		"mkdir d\n"+
+			"printf 'keep' > d/file\n"+
+			"rm d/.\n"+
+			"printf 'plain=%s\\n' \"$?\"\n"+
+			"rm -d d/.\n"+
+			"printf 'dir=%s\\n' \"$?\"\n"+
+			"[ -e d/file ] && echo kept || echo removed\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "plain=1\ndir=1\nkept\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	for _, want := range []string{
+		"rm: cannot remove 'd/.': Is a directory",
+		"rm: cannot remove 'd/.': Directory not empty",
+	} {
+		if !strings.Contains(result.Stderr, want) {
+			t.Fatalf("Stderr = %q, want %q", result.Stderr, want)
+		}
+	}
+	if strings.Contains(result.Stderr, "refusing to remove '.' or '..'") {
+		t.Fatalf("Stderr = %q, want non-recursive directory errors instead of refusal", result.Stderr)
+	}
+}
+
 func TestRMPromptOrderAndPresumeInputTTY(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
