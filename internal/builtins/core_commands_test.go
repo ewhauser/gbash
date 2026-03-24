@@ -583,6 +583,38 @@ echo "bar=${BAR-unset}"
 	}
 }
 
+func TestEnableBuiltinDisabledDeclarationBuiltinPreservesCompoundAssignmentArgument(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: `
+enable -n export
+function export {
+  printf 'argc=%s\n' "$#"
+  i=1
+  for arg in "$@"; do
+    printf 'arg%s=<%s>\n' "$i" "$arg"
+    i=$((i+1))
+  done
+}
+export arr=([a]=b [c]=d)
+`,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "argc=1\narg1=<arr=([a]=b [c]=d)>\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
 func TestEnableBuiltinListingModesAndErrors(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})

@@ -681,28 +681,47 @@ func parseCallWords(src string) ([]*syntax.Word, error) {
 	return words, err
 }
 
+func (r *Runner) declOperandCommandFields(operand syntax.DeclOperand) ([]string, bool) {
+	if operand == nil {
+		return nil, true
+	}
+	if dynamic, ok := operand.(*syntax.DeclDynamicWord); ok {
+		return r.fields(dynamic.Word), true
+	}
+
+	src := declOperandString(operand)
+	if src == "" {
+		return nil, true
+	}
+	words, err := parseCallWords(src)
+	if err != nil {
+		// Declaration-only operand forms such as compound assignments do not
+		// reliably round-trip through generic call-word parsing. Preserve the
+		// original operand text so disabled builtins still fall through to
+		// command/function resolution instead of failing with a syntax error.
+		return []string{src}, true
+	}
+	if len(words) == 0 {
+		return nil, true
+	}
+	fields := make([]string, 0, len(words))
+	for _, word := range words {
+		fields = append(fields, r.fields(word)...)
+		if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting || r.exit.err != nil {
+			return nil, false
+		}
+	}
+	return fields, true
+}
+
 func (r *Runner) declClauseCommandFields(cm *syntax.DeclClause) ([]string, bool) {
 	fields := []string{cm.Variant.Value}
 	for _, operand := range r.mergeDeclOperands(cm.Variant.Value, cm.Operands) {
-		src := declOperandString(operand)
-		if src == "" {
-			continue
-		}
-		words, err := parseCallWords(src)
-		if err != nil {
-			r.errf("%v\n", err)
-			r.exit.code = 2
+		operandFields, ok := r.declOperandCommandFields(operand)
+		if !ok {
 			return nil, false
 		}
-		if len(words) == 0 {
-			continue
-		}
-		for _, word := range words {
-			fields = append(fields, r.fields(word)...)
-			if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting || r.exit.err != nil {
-				return nil, false
-			}
-		}
+		fields = append(fields, operandFields...)
 	}
 	return fields, true
 }
