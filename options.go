@@ -29,6 +29,9 @@ func WithConfig(cfg *Config) Option {
 			target.Policy = cfg.Policy
 		}
 		if cfg.LimitOverrides != (policy.Limits{}) {
+			if updated, ok := overrideMaxFileReadBytes(target.FileSystem, cfg.LimitOverrides.MaxFileBytes); ok {
+				target.FileSystem = updated
+			}
 			target.LimitOverrides = mergeLimitOverrides(target.LimitOverrides, cfg.LimitOverrides)
 		}
 		if cfg.BaseEnv != nil {
@@ -114,6 +117,9 @@ func WithPolicy(p policy.Policy) Option {
 // unchanged.
 func WithLimitOverrides(overrides policy.Limits) Option {
 	return func(target *Config) error {
+		if updated, ok := overrideMaxFileReadBytes(target.FileSystem, overrides.MaxFileBytes); ok {
+			target.FileSystem = updated
+		}
 		target.LimitOverrides = mergeLimitOverrides(target.LimitOverrides, overrides)
 		return nil
 	}

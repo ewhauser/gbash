@@ -549,6 +549,39 @@ func TestRunCLIMaxFileBytesFlagMergesExistingLimitOverrides(t *testing.T) {
 	}
 }
 
+func TestRunCLIMaxFileBytesFlagOverridesBaseOptionsHostFileCap(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "input.txt"), []byte("abcd"), 0o644); err != nil {
+		t.Fatalf("WriteFile(input.txt) error = %v", err)
+	}
+
+	cfg := newCLIConfig()
+	cfg.BaseOptions = []gbash.Option{
+		gbash.WithFileSystem(gbash.HostDirectoryFileSystem(root, gbash.HostDirectoryOptions{
+			MaxFileReadBytes: 3,
+		})),
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLIWithConfig(context.Background(), cfg, []string{"--max-file-bytes", "4", "-c", "cat input.txt"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLIWithConfig() error = %v", err)
+	}
+	if got, want := exitCode, 0; got != want {
+		t.Fatalf("exitCode = %d, want %d; stdout=%q stderr=%q", got, want, stdout.String(), stderr.String())
+	}
+	if got, want := stdout.String(), "abcd"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
 func mustParseCLIJSONResult(t *testing.T, raw string) cliJSONResult {
 	t.Helper()
 

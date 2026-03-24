@@ -289,6 +289,22 @@ func (cfg FileSystemConfig) runtimeConfig() internalruntime.FileSystemConfig {
 	}
 }
 
+type maxFileReadBytesOverrider interface {
+	WithMaxFileReadBytes(maxBytes int64) gbfs.Factory
+}
+
+func overrideMaxFileReadBytes(cfg FileSystemConfig, maxBytes int64) (FileSystemConfig, bool) {
+	if maxBytes <= 0 || cfg.Factory == nil {
+		return cfg, false
+	}
+	overrider, ok := cfg.Factory.(maxFileReadBytesOverrider)
+	if !ok {
+		return cfg, false
+	}
+	cfg.Factory = overrider.WithMaxFileReadBytes(maxBytes)
+	return cfg, true
+}
+
 func copyStringMap(src map[string]string) map[string]string {
 	if len(src) == 0 {
 		return nil
@@ -353,6 +369,25 @@ func MountableFileSystem(opts MountableFileSystemOptions) FileSystemConfig {
 	}
 }
 
+type hostDirectoryFactory struct {
+	root             string
+	mountPoint       string
+	maxFileReadBytes int64
+}
+
+func (f hostDirectoryFactory) New(ctx context.Context) (gbfs.FileSystem, error) {
+	return gbfs.Overlay(gbfs.Host(gbfs.HostOptions{
+		Root:             f.root,
+		VirtualRoot:      f.mountPoint,
+		MaxFileReadBytes: f.maxFileReadBytes,
+	})).New(ctx)
+}
+
+func (f hostDirectoryFactory) WithMaxFileReadBytes(maxBytes int64) gbfs.Factory {
+	f.maxFileReadBytes = maxBytes
+	return f
+}
+
 // HostDirectoryFileSystem mounts a real host directory into the sandbox under a
 // writable in-memory overlay.
 //
@@ -365,13 +400,30 @@ func HostDirectoryFileSystem(root string, opts HostDirectoryOptions) FileSystemC
 		mountPoint = DefaultWorkspaceMountPoint
 	}
 	return FileSystemConfig{
-		Factory: gbfs.Overlay(gbfs.Host(gbfs.HostOptions{
-			Root:             root,
-			VirtualRoot:      mountPoint,
-			MaxFileReadBytes: opts.MaxFileReadBytes,
-		})),
+		Factory: hostDirectoryFactory{
+			root:             root,
+			mountPoint:       mountPoint,
+			maxFileReadBytes: opts.MaxFileReadBytes,
+		},
 		WorkingDir: mountPoint,
 	}
+}
+
+type readWriteDirectoryFactory struct {
+	root             string
+	maxFileReadBytes int64
+}
+
+func (f readWriteDirectoryFactory) New(ctx context.Context) (gbfs.FileSystem, error) {
+	return gbfs.ReadWrite(gbfs.ReadWriteOptions{
+		Root:             f.root,
+		MaxFileReadBytes: f.maxFileReadBytes,
+	}).New(ctx)
+}
+
+func (f readWriteDirectoryFactory) WithMaxFileReadBytes(maxBytes int64) gbfs.Factory {
+	f.maxFileReadBytes = maxBytes
+	return f
 }
 
 // ReadWriteDirectoryFileSystem mounts a real host directory as the mutable
@@ -382,10 +434,10 @@ func HostDirectoryFileSystem(root string, opts HostDirectoryOptions) FileSystemC
 // to the host directory.
 func ReadWriteDirectoryFileSystem(root string, opts ReadWriteDirectoryOptions) FileSystemConfig {
 	return FileSystemConfig{
-		Factory: gbfs.ReadWrite(gbfs.ReadWriteOptions{
-			Root:             root,
-			MaxFileReadBytes: opts.MaxFileReadBytes,
-		}),
+		Factory: readWriteDirectoryFactory{
+			root:             root,
+			maxFileReadBytes: opts.MaxFileReadBytes,
+		},
 		WorkingDir: "/",
 	}
 }
