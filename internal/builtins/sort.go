@@ -300,12 +300,6 @@ func parseSortMatches(inv *Invocation, matches *ParsedCommand) (sortOptions, []s
 	opts.stable = matches.Has("stable")
 	opts.merge = matches.Has("merge")
 	opts.zeroTerminated = matches.Has("zero-terminated")
-	opts.checkOnly = matches.Has("check") || matches.Has("check-silent")
-	opts.checkQuiet = matches.Has("check-silent")
-
-	if matches.Has("check") && matches.Has("check-silent") {
-		return sortOptions{}, nil, sortOptionf(inv, "sort: options '-cC' are incompatible")
-	}
 	if outputs := matches.Values("output"); len(outputs) > 1 {
 		first := outputs[0]
 		for _, value := range outputs[1:] {
@@ -338,7 +332,7 @@ func parseSortMatches(inv *Invocation, matches *ParsedCommand) (sortOptions, []s
 		opts.randomSource = matches.Value("random-source")
 	}
 	if matches.Has("parallel") {
-		value, err := parseSortPositiveInt(inv, "parallel", matches.Value("parallel"), 0)
+		value, err := parseSortPositiveInt(inv, "parallel", matches.Value("parallel"), 1)
 		if err != nil {
 			return sortOptions{}, nil, err
 		}
@@ -371,13 +365,24 @@ func parseSortMatches(inv *Invocation, matches *ParsedCommand) (sortOptions, []s
 			return sortOptions{}, nil, err
 		}
 	}
+	checkDiagnose := matches.Count("check") > len(matches.Values("check"))
+	checkQuiet := matches.Has("check-silent")
 	for _, mode := range matches.Values("check") {
 		quiet, err := parseSortCheckMode(inv, mode)
 		if err != nil {
 			return sortOptions{}, nil, err
 		}
-		opts.checkQuiet = quiet
+		if quiet {
+			checkQuiet = true
+			continue
+		}
+		checkDiagnose = true
 	}
+	if checkDiagnose && checkQuiet {
+		return sortOptions{}, nil, sortOptionf(inv, "sort: options '-cC' are incompatible")
+	}
+	opts.checkOnly = checkDiagnose || checkQuiet
+	opts.checkQuiet = checkQuiet
 
 	return opts, matches.Args("file"), nil
 }
@@ -768,6 +773,9 @@ func parseSortPositiveInt(inv *Invocation, name, value string, minimum int) (int
 		return 0, sortOptionf(inv, "sort: invalid --%s argument %q", name, value)
 	}
 	if parsed < minimum {
+		if name == "parallel" && parsed == 0 {
+			return 0, sortOptionf(inv, "sort: number in parallel must be nonzero")
+		}
 		if name == "batch-size" && parsed >= 0 {
 			return 0, sortOptionf(inv, "sort: invalid --batch-size argument %q\nsort: minimum --batch-size argument is '2'", value)
 		}

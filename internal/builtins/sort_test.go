@@ -111,6 +111,27 @@ func TestSortSupportsCheckEqualsSilent(t *testing.T) {
 	}
 }
 
+func TestSortAllowsEquivalentQuietCheckModes(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'a\\nb\\n' > /tmp/in.txt\nsort -C --check=quiet /tmp/in.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got := result.Stdout; got != "" {
+		t.Fatalf("Stdout = %q, want empty", got)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
 func TestSortSupportsLegacyPlusKeySyntax(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
@@ -218,5 +239,23 @@ func TestSortRejectsMultipleOutputFiles(t *testing.T) {
 	}
 	if !strings.Contains(result.Stderr, "multiple output files specified") {
 		t.Fatalf("Stderr = %q, want multiple-output error", result.Stderr)
+	}
+}
+
+func TestSortRejectsZeroParallel(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'b\\na\\n' > /tmp/in.txt\nsort --parallel=0 /tmp/in.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 2 {
+		t.Fatalf("ExitCode = %d, want 2; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "number in parallel must be nonzero") {
+		t.Fatalf("Stderr = %q, want zero-parallel error", result.Stderr)
 	}
 }
