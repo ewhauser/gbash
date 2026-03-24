@@ -79,6 +79,25 @@ func TestRewritePrintCallsSkipsParameterBindings(t *testing.T) {
 	}
 }
 
+func TestRewritePrintCallsIgnoresEscapedTripleQuotedContent(t *testing.T) {
+	t.Parallel()
+
+	source := "" +
+		"s = \"\"\"line 1\\n\\\\\\\"\\\\\\\"\\\\\\\" print('inside')\\nline 3\"\"\"\n" +
+		"print('outside')\n"
+
+	rewritten, didRewrite := rewritePrintCalls(source)
+	if !didRewrite {
+		t.Fatalf("rewritePrintCalls() did not rewrite %q", source)
+	}
+	if !strings.Contains(rewritten, "print('inside')") {
+		t.Fatalf("rewritePrintCalls() = %q, want triple-quoted content preserved", rewritten)
+	}
+	if !strings.Contains(rewritten, "__gbash_print('outside')") {
+		t.Fatalf("rewritePrintCalls() = %q, want outer print rewritten", rewritten)
+	}
+}
+
 func TestInstrumentSourceForPrintKeepsPrefixedDocstringsBeforeFutureImports(t *testing.T) {
 	t.Parallel()
 
@@ -129,5 +148,28 @@ func TestInstrumentSourceForPrintInjectsBindingForAliasedPrint(t *testing.T) {
 	}
 	if !strings.Contains(instrumented, source) {
 		t.Fatalf("instrumentSourceForPrint() = %q, want original source preserved", instrumented)
+	}
+}
+
+func TestInstrumentSourceForPrintKeepsEscapedTripleQuoteDocstringsBeforeFutureImports(t *testing.T) {
+	t.Parallel()
+
+	source := "" +
+		"\"\"\"docs\n" +
+		"escaped \\\\\\\"\\\\\\\"\\\\\\\" text\n" +
+		"\"\"\"\n" +
+		"from __future__ import annotations\n" +
+		"print('x')\n"
+
+	instrumented := instrumentSourceForPrint(source)
+	prefix := "\"\"\"docs\nescaped \\\\\\\"\\\\\\\"\\\\\\\" text\n\"\"\"\nfrom __future__ import annotations\n"
+	if !strings.HasPrefix(instrumented, prefix) {
+		t.Fatalf("instrumentSourceForPrint() = %q, want prefix %q", instrumented, prefix)
+	}
+	if !strings.Contains(instrumented, pythonPrintPrelude) {
+		t.Fatalf("instrumentSourceForPrint() = %q, want injected prelude", instrumented)
+	}
+	if !strings.Contains(instrumented, pythonPrintBinding) {
+		t.Fatalf("instrumentSourceForPrint() = %q, want injected print binding", instrumented)
 	}
 }

@@ -535,52 +535,21 @@ func instrumentSourceForPrint(source string) string {
 		return pythonPrintPrelude + pythonPrintBinding
 	}
 
-	lines := strings.SplitAfter(source, "\n")
-	var prefix strings.Builder
-	index := 0
-
-	consumeTrivia := func() {
-		for index < len(lines) {
-			trimmed := strings.TrimSpace(lines[index])
-			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-				prefix.WriteString(lines[index])
-				index++
-				continue
-			}
-			break
-		}
+	index := consumePythonTriviaLines(source, 0)
+	if docstringEnd, ok := consumeModuleDocstring(source, index); ok {
+		index = consumePythonTriviaLines(source, docstringEnd)
 	}
-
-	consumeTrivia()
-	if index < len(lines) {
-		trimmed := strings.TrimSpace(lines[index])
-		if start, delimiter, multiline, ok := moduleDocstringLiteral(trimmed); ok {
-			prefix.WriteString(lines[index])
-			index++
-			if multiline && !strings.Contains(trimmed[start+len(delimiter):], delimiter) {
-				for index < len(lines) {
-					prefix.WriteString(lines[index])
-					if strings.Contains(lines[index], delimiter) {
-						index++
-						break
-					}
-					index++
-				}
-			}
-			consumeTrivia()
-		}
-	}
-	for index < len(lines) {
-		trimmed := strings.TrimSpace(lines[index])
+	for index < len(source) {
+		lineEnd := nextPythonLineEnd(source, index)
+		trimmed := strings.TrimSpace(source[index:lineEnd])
 		if strings.HasPrefix(trimmed, "from __future__ import ") || trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			prefix.WriteString(lines[index])
-			index++
+			index = lineEnd
 			continue
 		}
 		break
 	}
 
-	return prefix.String() + pythonPrintPrelude + pythonPrintBinding + strings.Join(lines[index:], "")
+	return source[:index] + pythonPrintPrelude + pythonPrintBinding + source[index:]
 }
 
 type pythonTokenKind uint8
@@ -779,8 +748,14 @@ func consumePythonString(source string, start int) int {
 	if start+2 < len(source) && source[start+1] == quote && source[start+2] == quote {
 		index := start + 3
 		for index+2 < len(source) {
+			if source[index] == '\\' {
+				index += 2
+				continue
+			}
 			if source[index] == quote && source[index+1] == quote && source[index+2] == quote {
-				return index + 3
+				if !isEscapedPythonDelimiter(source, index) {
+					return index + 3
+				}
 			}
 			index++
 		}
@@ -803,6 +778,80 @@ func consumePythonString(source string, start int) int {
 		}
 	}
 	return len(source)
+}
+
+func consumePythonTriviaLines(source string, index int) int {
+	for index < len(source) {
+		lineEnd := nextPythonLineEnd(source, index)
+		trimmed := strings.TrimSpace(source[index:lineEnd])
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			index = lineEnd
+			continue
+		}
+		break
+	}
+	return index
+}
+
+func consumeModuleDocstring(source string, index int) (int, bool) {
+	if index >= len(source) {
+		return 0, false
+	}
+	lineEnd := nextPythonLineEnd(source, index)
+	line := source[index:lineEnd]
+	trimmed := strings.TrimSpace(line)
+	start, _, _, ok := moduleDocstringLiteral(trimmed)
+	if !ok {
+		return 0, false
+	}
+
+	stringStart := index + leadingPythonWhitespace(line) + start
+	stringEnd := consumePythonString(source, stringStart)
+	if stringEnd > len(source) {
+		return 0, false
+	}
+
+	docLineEnd := nextPythonLineEnd(source, stringEnd)
+	remainder := strings.TrimSpace(source[stringEnd:docLineEnd])
+	if remainder != "" && !strings.HasPrefix(remainder, "#") {
+		return 0, false
+	}
+	return docLineEnd, true
+}
+
+func nextPythonLineEnd(source string, index int) int {
+	for index < len(source) {
+		if source[index] == '\n' {
+			return index + 1
+		}
+		index++
+	}
+	return len(source)
+}
+
+func leadingPythonWhitespace(line string) int {
+	index := 0
+	for index < len(line) {
+		switch line[index] {
+		case ' ', '\t', '\r', '\f', '\v':
+			index++
+		default:
+			return index
+		}
+	}
+	return index
+}
+
+func isEscapedPythonDelimiter(source string, index int) bool {
+	backslashes := 0
+	for index > 0 {
+		index--
+		if source[index] != '\\' {
+			break
+		}
+		backslashes++
+	}
+	return backslashes%2 == 1
 }
 
 func moduleDocstringLiteral(line string) (int, string, bool, bool) {
