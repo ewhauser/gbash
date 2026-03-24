@@ -1395,7 +1395,11 @@ func parseLSTimeStyle(inv *Invocation, matches *ParsedCommand) (string, error) {
 	}
 	lookupStyle := style
 	if strippedStyle, ok := strings.CutPrefix(lookupStyle, "posix-"); ok {
-		if inv.Env["LC_TIME"] == "POSIX" || inv.Env["LC_ALL"] == "POSIX" {
+		effectiveLocale := inv.Env["LC_TIME"]
+		if lcAll, ok := inv.Env["LC_ALL"]; ok && lcAll != "" {
+			effectiveLocale = lcAll
+		}
+		if effectiveLocale == "POSIX" {
 			lookupStyle = "locale"
 		} else {
 			lookupStyle = strippedStyle
