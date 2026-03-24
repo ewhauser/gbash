@@ -16,6 +16,11 @@ func TestParseLSTimeStylePosixPrefixRespectsLCAllPrecedence(t *testing.T) {
 		want string
 	}{
 		{
+			name: "default locale falls back to c locale behavior",
+			env:  map[string]string{},
+			want: "locale",
+		},
+		{
 			name: "lc all overrides lc time",
 			env: map[string]string{
 				"LC_ALL":  "C.UTF-8",
@@ -30,6 +35,20 @@ func TestParseLSTimeStylePosixPrefixRespectsLCAllPrecedence(t *testing.T) {
 				"LC_TIME": "C.UTF-8",
 			},
 			want: "locale",
+		},
+		{
+			name: "c locale uses locale style",
+			env: map[string]string{
+				"LC_ALL": "C",
+			},
+			want: "locale",
+		},
+		{
+			name: "lang participates when lc all and lc time are unset",
+			env: map[string]string{
+				"LANG": "C.UTF-8",
+			},
+			want: "long-iso",
 		},
 	}
 
