@@ -3,6 +3,7 @@ package builtins
 import (
 	"math/big"
 	"strconv"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -42,10 +43,11 @@ type exprRegexCharClass struct {
 }
 
 type exprRegexCharClassElem struct {
-	literal string
-	low     rune
-	high    rune
-	isRange bool
+	literal    string
+	posixClass string
+	low        rune
+	high       rune
+	isRange    bool
 }
 
 type exprRegexUnit struct {
@@ -56,9 +58,10 @@ type exprRegexUnit struct {
 }
 
 type exprRegexParser struct {
-	units     []exprRegexUnit
-	pos       int
-	nextGroup int
+	units      []exprRegexUnit
+	pos        int
+	nextGroup  int
+	openGroups []int
 }
 
 type exprRegexCapture struct {
@@ -213,7 +216,9 @@ func (p *exprRegexParser) parseAtom(atExprStart, inGroup bool) (*exprRegexNode, 
 			p.pos += 2
 			p.nextGroup++
 			group := p.nextGroup
+			p.openGroups = append(p.openGroups, group)
 			expr, err := p.parseExpression(true)
+			p.openGroups = p.openGroups[:len(p.openGroups)-1]
 			if err != nil {
 				return nil, err
 			}
@@ -232,7 +237,7 @@ func (p *exprRegexParser) parseAtom(atExprStart, inGroup bool) (*exprRegexNode, 
 			return nil, exprUnmatchedClosingParenError()
 		case next.isDigit():
 			group := int(next.ch - '0')
-			if group == 0 || group > p.nextGroup {
+			if group == 0 || group > p.nextGroup || p.groupIsOpen(group) {
 				return nil, exprInvalidBackReferenceError()
 			}
 			p.pos += 2
@@ -434,7 +439,6 @@ func (p *exprRegexParser) parseCharClass() (*exprRegexNode, error) {
 	if p.hasMore() && p.current().isByte('^') {
 		class.negated = true
 		p.pos++
-		first = false
 	}
 
 	for p.hasMore() {
@@ -497,6 +501,9 @@ func (p *exprRegexParser) parseClassAtom() (exprRegexCharClassElem, error) {
 	if !p.hasMore() {
 		return exprRegexCharClassElem{}, exprInvalidRegexExpressionError()
 	}
+	if element, ok := p.tryParsePOSIXClass(); ok {
+		return element, nil
+	}
 	current := p.current()
 	if current.isByte('\\') && p.pos+1 < len(p.units) {
 		p.pos += 2
@@ -504,6 +511,30 @@ func (p *exprRegexParser) parseClassAtom() (exprRegexCharClassElem, error) {
 	}
 	p.pos++
 	return exprRegexCharClassElem{literal: current.text}, nil
+}
+
+func (p *exprRegexParser) tryParsePOSIXClass() (exprRegexCharClassElem, bool) {
+	if !p.current().isByte('[') || p.pos+1 >= len(p.units) || !p.units[p.pos+1].isByte(':') {
+		return exprRegexCharClassElem{}, false
+	}
+
+	name := make([]byte, 0, 8)
+	for i := p.pos + 2; i+1 < len(p.units); i++ {
+		if p.units[i].isByte(':') && p.units[i+1].isByte(']') {
+			className := string(name)
+			if !exprRegexIsPOSIXClass(className) {
+				return exprRegexCharClassElem{}, false
+			}
+			p.pos = i + 2
+			return exprRegexCharClassElem{posixClass: className}, true
+		}
+		if !p.units[i].isASCIIAlpha() {
+			return exprRegexCharClassElem{}, false
+		}
+		name = append(name, p.units[i].text[0])
+	}
+
+	return exprRegexCharClassElem{}, false
 }
 
 func (m *exprRegexMatcher) matchExpr(expr *exprRegexExpr, state exprRegexState) ([]exprRegexState, error) {
@@ -680,9 +711,12 @@ func (s exprRegexState) withCapture(group int, capture exprRegexCapture) exprReg
 func (c exprRegexCharClass) matches(unit exprRegexUnit) bool {
 	matched := false
 	for _, element := range c.elements {
-		if element.isRange {
+		switch {
+		case element.isRange:
 			matched = unit.ch >= element.low && unit.ch <= element.high
-		} else {
+		case element.posixClass != "":
+			matched = exprRegexMatchesPOSIXClass(element.posixClass, unit)
+		default:
 			matched = unit.text == element.literal
 		}
 		if matched {
@@ -693,6 +727,85 @@ func (c exprRegexCharClass) matches(unit exprRegexUnit) bool {
 		return !matched
 	}
 	return matched
+}
+
+func exprRegexMatchesPOSIXClass(name string, unit exprRegexUnit) bool {
+	if len(unit.text) == 1 {
+		b := unit.text[0]
+		if b < utf8.RuneSelf {
+			return exprRegexMatchesASCIIPOSIXClass(name, b)
+		}
+		return false
+	}
+
+	switch name {
+	case "alnum":
+		return unicode.IsLetter(unit.ch) || unicode.IsDigit(unit.ch)
+	case "alpha":
+		return unicode.IsLetter(unit.ch)
+	case "blank":
+		return unit.ch == ' ' || unit.ch == '\t'
+	case "cntrl":
+		return unicode.IsControl(unit.ch)
+	case "digit":
+		return unicode.IsDigit(unit.ch)
+	case "graph":
+		return unicode.IsGraphic(unit.ch) && !unicode.IsSpace(unit.ch)
+	case "lower":
+		return unicode.IsLower(unit.ch)
+	case "print":
+		return unicode.IsPrint(unit.ch)
+	case "punct":
+		return unicode.IsPunct(unit.ch)
+	case "space":
+		return unicode.IsSpace(unit.ch)
+	case "upper":
+		return unicode.IsUpper(unit.ch)
+	case "xdigit":
+		return ('0' <= unit.ch && unit.ch <= '9') || ('a' <= unit.ch && unit.ch <= 'f') || ('A' <= unit.ch && unit.ch <= 'F')
+	default:
+		return false
+	}
+}
+
+func exprRegexMatchesASCIIPOSIXClass(name string, b byte) bool {
+	switch name {
+	case "alnum":
+		return ('0' <= b && b <= '9') || ('a' <= b && b <= 'z') || ('A' <= b && b <= 'Z')
+	case "alpha":
+		return ('a' <= b && b <= 'z') || ('A' <= b && b <= 'Z')
+	case "blank":
+		return b == ' ' || b == '\t'
+	case "cntrl":
+		return b < 0x20 || b == 0x7f
+	case "digit":
+		return '0' <= b && b <= '9'
+	case "graph":
+		return 0x21 <= b && b <= 0x7e
+	case "lower":
+		return 'a' <= b && b <= 'z'
+	case "print":
+		return 0x20 <= b && b <= 0x7e
+	case "punct":
+		return (0x21 <= b && b <= 0x2f) || (0x3a <= b && b <= 0x40) || (0x5b <= b && b <= 0x60) || (0x7b <= b && b <= 0x7e)
+	case "space":
+		return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\v' || b == '\f'
+	case "upper":
+		return 'A' <= b && b <= 'Z'
+	case "xdigit":
+		return ('0' <= b && b <= '9') || ('a' <= b && b <= 'f') || ('A' <= b && b <= 'F')
+	default:
+		return false
+	}
+}
+
+func exprRegexIsPOSIXClass(name string) bool {
+	switch name {
+	case "alnum", "alpha", "blank", "cntrl", "digit", "graph", "lower", "print", "punct", "space", "upper", "xdigit":
+		return true
+	default:
+		return false
+	}
 }
 
 func exprRegexUnits(text string, byteMode bool) []exprRegexUnit {
@@ -789,4 +902,17 @@ func (u exprRegexUnit) isASCII() bool {
 
 func (u exprRegexUnit) isDigit() bool {
 	return u.isASCII() && u.text[0] >= '0' && u.text[0] <= '9'
+}
+
+func (u exprRegexUnit) isASCIIAlpha() bool {
+	return u.isASCII() && ((u.text[0] >= 'a' && u.text[0] <= 'z') || (u.text[0] >= 'A' && u.text[0] <= 'Z'))
+}
+
+func (p *exprRegexParser) groupIsOpen(group int) bool {
+	for i := len(p.openGroups) - 1; i >= 0; i-- {
+		if p.openGroups[i] == group {
+			return true
+		}
+	}
+	return false
 }

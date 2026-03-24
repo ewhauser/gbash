@@ -93,6 +93,24 @@ func TestExprRejectsInvalidBackReference(t *testing.T) {
 	}
 }
 
+func TestExprRejectsSelfReferentialBackReference(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "expr a : '\\(\\1a\\)'\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 2 {
+		t.Fatalf("ExitCode = %d, want 2", result.ExitCode)
+	}
+	if got, want := result.Stderr, "expr: Invalid back reference\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
 func TestExprRejectsEmptyBoundedRepeat(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
@@ -125,6 +143,28 @@ func TestExprKeepsReversedRangesNonMatching(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
 	}
 	if got, want := result.Stdout, "0\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
+func TestExprCharacterClassesHandleLeadingBracketAndPOSIXClasses(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "expr a : '[^]]'\n" +
+			"expr 5 : '[[:digit:]]'\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "1\n1\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 	if got := result.Stderr; got != "" {
