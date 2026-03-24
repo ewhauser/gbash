@@ -412,6 +412,281 @@ printf 'ls=%d\n' "$?"
 	}
 }
 
+func TestEnableBuiltinDisablesShadowedGNUCommands(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: `
+PATH=/bin:/usr/bin
+enable -n [ echo false printf pwd test true
+command -v [ echo false printf pwd test true
+echo ---
+(PATH=/bin:/usr/bin; command -v [ echo false printf pwd test true)
+`,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	const want = "" +
+		"/bin/[\n" +
+		"/bin/echo\n" +
+		"/bin/false\n" +
+		"/bin/printf\n" +
+		"/bin/pwd\n" +
+		"/bin/test\n" +
+		"/bin/true\n" +
+		"---\n" +
+		"/bin/[\n" +
+		"/bin/echo\n" +
+		"/bin/false\n" +
+		"/bin/printf\n" +
+		"/bin/pwd\n" +
+		"/bin/test\n" +
+		"/bin/true\n"
+	if got := result.Stdout; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
+func TestEnableBuiltinAffectsCommandTypeAndHelp(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: `
+PATH=/bin:/usr/bin
+enable -n printf
+command -v printf
+command -V printf
+type printf
+builtin printf hi
+echo "builtin=$?"
+help
+echo ---
+help -s printf
+enable printf
+command -V printf
+type printf
+`,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	for _, want := range []string{
+		"/bin/printf\n",
+		"printf is /bin/printf\n",
+		"builtin=1\n",
+		"*printf [-v var] format [arguments]",
+		"printf: printf [-v var] format [arguments]\n",
+		"printf is a shell builtin\n",
+	} {
+		if !strings.Contains(result.Stdout, want) {
+			t.Fatalf("Stdout = %q, want substring %q", result.Stdout, want)
+		}
+	}
+	if got := result.Stderr; got != "builtin: printf: not a shell builtin\n" {
+		t.Fatalf("Stderr = %q, want %q", got, "builtin: printf: not a shell builtin\n")
+	}
+}
+
+func TestEnableBuiltinAllowsEvalFunctionInNormalAndPosixModes(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	tests := []struct {
+		name   string
+		prefix string
+	}{
+		{name: "default"},
+		{name: "posix", prefix: "set -o posix\n"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			result, err := rt.Run(context.Background(), &ExecutionRequest{
+				Script: tc.prefix + `
+enable -n eval
+eval() { echo "eval-fn:$#"; }
+command -V eval
+eval hello
+`,
+			})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result.ExitCode != 0 {
+				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+			}
+			if !strings.Contains(result.Stdout, "eval is a function\n") {
+				t.Fatalf("Stdout = %q, want function description", result.Stdout)
+			}
+			if !strings.Contains(result.Stdout, "eval-fn:1\n") {
+				t.Fatalf("Stdout = %q, want function invocation", result.Stdout)
+			}
+			if got := result.Stderr; got != "" {
+				t.Fatalf("Stderr = %q, want empty", got)
+			}
+		})
+	}
+}
+
+func TestEnableBuiltinDisablesDeclarationBuiltinsInNormalAndPosixModes(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	tests := []struct {
+		name   string
+		prefix string
+	}{
+		{name: "default"},
+		{name: "posix", prefix: "set -o posix\n"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			result, err := rt.Run(context.Background(), &ExecutionRequest{
+				Script: tc.prefix + `
+enable -n export
+export FOO=bar
+echo "status=$?"
+echo "foo=${FOO-unset}"
+enable export
+export BAR=baz
+echo "bar=${BAR-unset}"
+`,
+			})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result.ExitCode != 0 {
+				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+			}
+			if got, want := result.Stdout, "status=127\nfoo=unset\nbar=baz\n"; got != want {
+				t.Fatalf("Stdout = %q, want %q", got, want)
+			}
+			if got := result.Stderr; got != "export: command not found\n" {
+				t.Fatalf("Stderr = %q, want %q", got, "export: command not found\n")
+			}
+		})
+	}
+}
+
+func TestEnableBuiltinDisabledDeclarationBuiltinPreservesCompoundAssignmentArgument(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: `
+enable -n export
+function export {
+  printf 'argc=%s\n' "$#"
+  i=1
+  for arg in "$@"; do
+    printf 'arg%s=<%s>\n' "$i" "$arg"
+    i=$((i+1))
+  done
+}
+export arr=([a]=b [c]=d)
+`,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "argc=1\narg1=<arr=([a]=b [c]=d)>\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
+func TestEnableBuiltinListingModesAndErrors(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: `
+contains_line() {
+  jbgo_target=$1
+  while IFS= read -r jbgo_line; do
+    if [ "$jbgo_line" = "$jbgo_target" ]; then
+      echo "$jbgo_target"
+      return 0
+    fi
+  done
+  return 1
+}
+enable -n printf
+enable -n eval
+enable -n | contains_line 'enable -n printf'
+enable -p | contains_line 'enable echo'
+enable -a | contains_line 'enable -n printf'
+enable -s | contains_line 'enable export'
+enable -ps | contains_line 'enable export'
+enable -ns | contains_line 'enable -n eval'
+enable -s printf
+echo "special-filter=$?"
+enable -z
+echo "badopt=$?"
+enable -f
+echo "missingarg=$?"
+enable -f /tmp/loadable printf
+echo "loadf=$?"
+enable -d printf
+echo "loadd=$?"
+enable missing
+echo "missing=$?"
+`,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	const want = "" +
+		"enable -n printf\n" +
+		"enable echo\n" +
+		"enable -n printf\n" +
+		"enable export\n" +
+		"enable export\n" +
+		"enable -n eval\n" +
+		"special-filter=0\n" +
+		"badopt=2\n" +
+		"missingarg=2\n" +
+		"loadf=1\n" +
+		"loadd=1\n" +
+		"missing=1\n"
+	if got := result.Stdout; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	for _, want := range []string{
+		"enable: -z: invalid option\n",
+		"enable: -f: option requires an argument\n",
+		"enable: dynamic builtin loading is not supported\n",
+		"enable: missing: not a shell builtin\n",
+	} {
+		if !strings.Contains(result.Stderr, want) {
+			t.Fatalf("Stderr = %q, want substring %q", result.Stderr, want)
+		}
+	}
+}
+
 func TestHelpShowsBuiltinSynopsis(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})

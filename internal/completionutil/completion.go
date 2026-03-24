@@ -143,6 +143,7 @@ type Backend interface {
 	ExpandWordlist(wordlist string) ([]string, error)
 	FunctionExists(name string) bool
 	FunctionNames(prefix string) []string
+	EnabledBuiltinNames(prefix string) []string
 	VariableNames(prefix string, exportedOnly bool) []string
 	AliasNames(prefix string) []string
 	SetoptNames(prefix string) []string
@@ -832,7 +833,7 @@ func generateActionMatches(backend Backend, action, prefix string) ([]string, in
 		var matches []string
 		matches = append(matches, backend.AliasNames(prefix)...)
 		matches = append(matches, backend.FunctionNames(prefix)...)
-		matches = append(matches, BuiltinNames(prefix)...)
+		matches = append(matches, backend.EnabledBuiltinNames(prefix)...)
 		matches = append(matches, KeywordNames(prefix)...)
 		external, _ := backend.ExternalCommandNames(prefix)
 		matches = append(matches, external...)

@@ -71,6 +71,13 @@ func (r *Runner) ensureOwnCommandHash() {
 	}
 }
 
+func (r *Runner) ensureOwnDisabledBuiltins() {
+	r.disabledBuiltins = cloneMapOnWrite(r.disabledBuiltins, &r.disabledBuiltinsShared)
+	if r.disabledBuiltins == nil {
+		r.disabledBuiltins = make(map[string]bool)
+	}
+}
+
 func (r *Runner) clearCommandHash() {
 	if r.commandHash == nil {
 		return

@@ -221,6 +221,39 @@ func TestCompgenAcceptsKeywordAndExportActions(t *testing.T) {
 	}
 }
 
+func TestCompgenCommandActionRespectsDisabledBuiltins(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, ""+
+		"enable -n eval\n"+
+		"compgen -A builtin ev\n"+
+		"echo ---\n"+
+		"compgen -A helptopic ev\n"+
+		"echo ---\n"+
+		"compgen -A command ev\n"+
+		"echo ---\n"+
+		"enable -n printf\n"+
+		"PATH=/bin\n"+
+		"compgen -A command printf\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0 (stderr=%q)", result.ExitCode, result.Stderr)
+	}
+	const want = "" +
+		"eval\n" +
+		"---\n" +
+		"eval\n" +
+		"---\n" +
+		"---\n" +
+		"printf\n"
+	if got := result.Stdout; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
 func runBuiltin(tb testing.TB, ctx context.Context, cmd commands.Command, args ...string) (exitCode int) {
 	tb.Helper()
 

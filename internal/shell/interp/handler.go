@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/ewhauser/gbash/host"
+	"github.com/ewhauser/gbash/internal/completionutil"
 	"github.com/ewhauser/gbash/internal/shell/expand"
 	"github.com/ewhauser/gbash/internal/shell/syntax"
 )
@@ -119,6 +120,27 @@ func (hc *HandlerContext) ClearCommandHash() {
 		return
 	}
 	hc.runner.commandHashClear()
+}
+
+func (hc *HandlerContext) IsBuiltin(name string) bool {
+	if hc == nil || hc.runner == nil {
+		return IsBuiltin(name)
+	}
+	return hc.runner.isBuiltinActive(name)
+}
+
+func (hc *HandlerContext) IsBuiltinDisabled(name string) bool {
+	if hc == nil || hc.runner == nil {
+		return false
+	}
+	return hc.runner.isBuiltinDisabled(name)
+}
+
+func (hc *HandlerContext) EnabledBuiltinNames(prefix string) []string {
+	if hc == nil || hc.runner == nil {
+		return completionutil.BuiltinNames(prefix)
+	}
+	return hc.runner.enabledBuiltinNames(prefix)
 }
 
 func withDisabledCommandHash(ctx context.Context) context.Context {

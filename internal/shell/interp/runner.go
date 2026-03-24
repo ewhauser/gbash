@@ -2138,7 +2138,7 @@ func (r *Runner) call(ctx context.Context, pos syntax.Pos, args []string) {
 		r.exit.returning = false
 		return
 	}
-	if IsBuiltin(name) {
+	if r.canDispatchBuiltin(name) {
 		r.exit = r.builtin(ctx, pos, name, args[1:])
 		return
 	}

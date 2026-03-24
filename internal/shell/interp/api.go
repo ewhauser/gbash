@@ -108,6 +108,11 @@ type Runner struct {
 	// runner and must be cloned before mutation.
 	commandHashShared bool
 
+	disabledBuiltins map[string]bool
+	// disabledBuiltinsShared tracks whether disabledBuiltins is shared with
+	// another runner and must be cloned before mutation.
+	disabledBuiltinsShared bool
+
 	// readonly -a/-A on a new unset variable preserves array semantics while bash
 	// still omits the array type from `declare -p` output.
 	hiddenReadonlyArrayDecl map[string]expand.ValueKind
@@ -622,6 +627,7 @@ func (r *Runner) applyConstructorDefaults() error {
 			return err
 		}
 	}
+	r.applyDisabledBuiltinsEnv()
 	r.normalizeVirtualState()
 	return nil
 }
@@ -1111,6 +1117,8 @@ func (r *Runner) Reset() {
 	r.dirStackShared = false
 	// TODO(v4): Use the supplied Env directly if it implements enough methods.
 	r.writeEnv = newScopedOverlayEnviron(r.Env, r.platform.UsesCaseInsensitiveEnv())
+	r.applyDisabledBuiltinsEnv()
+	r.delVar(disabledBuiltinsEnvVar)
 	if !r.writeEnv.Get("TMPDIR").IsSet() {
 		r.setVarString("TMPDIR", r.tempDir)
 	}
@@ -1340,6 +1348,7 @@ func (r *Runner) subshell(_ bool) *Runner {
 		printfEnv:                 r.printfEnv,
 		hiddenReadonlyArrayDecl:   r.hiddenReadonlyArrayDecl,
 		commandHash:               r.commandHash,
+		disabledBuiltins:          r.disabledBuiltins,
 		startupHome:               r.startupHome,
 		origStart:                 r.origStart,
 		origShellStart:            r.origShellStart,
@@ -1365,6 +1374,9 @@ func (r *Runner) subshell(_ bool) *Runner {
 	}
 	if shareMapForSubshell(r.commandHash, &r.commandHashShared) {
 		r2.commandHashShared = true
+	}
+	if shareMapForSubshell(r.disabledBuiltins, &r.disabledBuiltinsShared) {
+		r2.disabledBuiltinsShared = true
 	}
 	r2.writeEnv = newOverlayEnviron(r.writeEnv, true, r.platform.UsesCaseInsensitiveEnv())
 	r2.funcs = r.funcs
