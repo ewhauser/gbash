@@ -185,6 +185,51 @@ func TestRMPromptOrderAndPresumeInputTTY(t *testing.T) {
 	}
 }
 
+func TestRMPromptConsumesBufferedInputAcrossMultipleTargets(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session,
+		"printf 'one' > /tmp/one\n"+
+			"printf 'two' > /tmp/two\n"+
+			"printf 'y\\ny\\n' | rm -i /tmp/one /tmp/two\n"+
+			"[ -e /tmp/one ] && echo one-kept || echo one-removed\n"+
+			"[ -e /tmp/two ] && echo two-kept || echo two-removed\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "one-removed\ntwo-removed\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	for _, want := range []string{
+		"rm: remove file '/tmp/one'? ",
+		"rm: remove file '/tmp/two'? ",
+	} {
+		if !strings.Contains(result.Stderr, want) {
+			t.Fatalf("Stderr = %q, want prompt %q", result.Stderr, want)
+		}
+	}
+}
+
+func TestRMBareInteractiveOverridesPriorInteractiveValue(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session,
+		"printf 'data' > /tmp/target\n"+
+			"printf 'n\\n' | rm --interactive=never --interactive /tmp/target\n"+
+			"[ -e /tmp/target ] && echo kept || echo removed\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "kept\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if !strings.Contains(result.Stderr, "rm: remove file '/tmp/target'? ") {
+		t.Fatalf("Stderr = %q, want trailing bare --interactive prompt", result.Stderr)
+	}
+}
+
 func TestCPSupportsNoClobberPreserveAndVerbose(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})

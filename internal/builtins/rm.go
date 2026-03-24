@@ -33,6 +33,12 @@ type rmOptions struct {
 	verbose         bool
 	progress        bool
 	presumeInputTTY bool
+	promptInput     *rmPromptInput
+}
+
+type rmPromptInput struct {
+	reader *bufio.Reader
+	closer io.Closer
 }
 
 func NewRM() *RM {
@@ -90,6 +96,7 @@ func (c *RM) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedComm
 	if err != nil {
 		return err
 	}
+	defer func() { _ = rmClosePromptInput(opts.promptInput) }()
 
 	files := matches.Args("file")
 	if len(files) == 0 {
@@ -108,7 +115,7 @@ func (c *RM) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedComm
 		if opts.recursive {
 			suffix = " recursively?"
 		}
-		ok, err := rmPromptYes(ctx, inv, fmt.Sprintf("remove %d %s%s", len(files), noun, suffix))
+		ok, err := rmPromptYes(ctx, inv, fmt.Sprintf("remove %d %s%s", len(files), noun, suffix), opts)
 		if err != nil {
 			return err
 		}
@@ -135,10 +142,11 @@ func parseRMMatches(inv *Invocation, matches *ParsedCommand) (rmOptions, error) 
 	opts := rmOptions{
 		interactive:  rmInteractivePromptProtected,
 		preserveRoot: true,
+		promptInput:  &rmPromptInput{},
 	}
 
-	for _, name := range matches.OptionOrder() {
-		switch name {
+	for _, occurrence := range matches.OptionOccurrences() {
+		switch occurrence.Name {
 		case "force":
 			opts.force = true
 			opts.interactive = rmInteractiveNever
@@ -147,7 +155,7 @@ func parseRMMatches(inv *Invocation, matches *ParsedCommand) (rmOptions, error) 
 		case "prompt-once":
 			opts.interactive = rmInteractiveOnce
 		case "interactive":
-			mode, err := parseRMInteractiveMode(inv, matches.Value("interactive"))
+			mode, err := parseRMInteractiveMode(inv, occurrence.Value)
 			if err != nil {
 				return rmOptions{}, err
 			}
@@ -267,7 +275,7 @@ func rmRemoveDirectoryRecursive(ctx context.Context, inv *Invocation, display, a
 	if opts.interactive == rmInteractiveAlways {
 		entries, err := inv.FS.ReadDir(ctx, abs)
 		if err == nil && len(entries) > 0 {
-			ok, err := rmPromptYes(ctx, inv, fmt.Sprintf("descend into directory %s", quoteGNUOperand(display)))
+			ok, err := rmPromptYes(ctx, inv, fmt.Sprintf("descend into directory %s", quoteGNUOperand(display)), opts)
 			if err != nil {
 				return false, err
 			}
@@ -383,16 +391,16 @@ func rmPromptFile(ctx context.Context, inv *Invocation, display string, info std
 
 	if info.Mode()&stdfs.ModeSymlink != 0 {
 		if opts.interactive == rmInteractiveAlways {
-			return rmPromptYes(ctx, inv, fmt.Sprintf("remove symbolic link %s", quoteGNUOperand(display)))
+			return rmPromptYes(ctx, inv, fmt.Sprintf("remove symbolic link %s", quoteGNUOperand(display)), opts)
 		}
 		return true, nil
 	}
 
 	if opts.interactive == rmInteractiveAlways {
 		if info.Size() == 0 {
-			return rmPromptYes(ctx, inv, fmt.Sprintf("remove regular empty file %s", quoteGNUOperand(display)))
+			return rmPromptYes(ctx, inv, fmt.Sprintf("remove regular empty file %s", quoteGNUOperand(display)), opts)
 		}
-		return rmPromptYes(ctx, inv, fmt.Sprintf("remove file %s", quoteGNUOperand(display)))
+		return rmPromptYes(ctx, inv, fmt.Sprintf("remove file %s", quoteGNUOperand(display)), opts)
 	}
 
 	if opts.interactive == rmInteractivePromptProtected && !rmInputIsTTY(inv, opts) {
@@ -402,9 +410,9 @@ func rmPromptFile(ctx context.Context, inv *Invocation, display string, info std
 		return true, nil
 	}
 	if info.Size() == 0 {
-		return rmPromptYes(ctx, inv, fmt.Sprintf("remove write-protected regular empty file %s", quoteGNUOperand(display)))
+		return rmPromptYes(ctx, inv, fmt.Sprintf("remove write-protected regular empty file %s", quoteGNUOperand(display)), opts)
 	}
-	return rmPromptYes(ctx, inv, fmt.Sprintf("remove write-protected regular file %s", quoteGNUOperand(display)))
+	return rmPromptYes(ctx, inv, fmt.Sprintf("remove write-protected regular file %s", quoteGNUOperand(display)), opts)
 }
 
 func rmPromptDirectory(ctx context.Context, inv *Invocation, display string, info stdfs.FileInfo, opts rmOptions) (bool, error) {
@@ -420,25 +428,22 @@ func rmPromptDirectory(ctx context.Context, inv *Invocation, display string, inf
 
 	switch {
 	case !readable && !writable:
-		return rmPromptYes(ctx, inv, fmt.Sprintf("attempt removal of inaccessible directory %s", quoteGNUOperand(display)))
+		return rmPromptYes(ctx, inv, fmt.Sprintf("attempt removal of inaccessible directory %s", quoteGNUOperand(display)), opts)
 	case !readable && opts.interactive == rmInteractiveAlways:
-		return rmPromptYes(ctx, inv, fmt.Sprintf("attempt removal of inaccessible directory %s", quoteGNUOperand(display)))
+		return rmPromptYes(ctx, inv, fmt.Sprintf("attempt removal of inaccessible directory %s", quoteGNUOperand(display)), opts)
 	case !writable:
-		return rmPromptYes(ctx, inv, fmt.Sprintf("remove write-protected directory %s", quoteGNUOperand(display)))
+		return rmPromptYes(ctx, inv, fmt.Sprintf("remove write-protected directory %s", quoteGNUOperand(display)), opts)
 	case opts.interactive == rmInteractiveAlways:
-		return rmPromptYes(ctx, inv, fmt.Sprintf("remove directory %s", quoteGNUOperand(display)))
+		return rmPromptYes(ctx, inv, fmt.Sprintf("remove directory %s", quoteGNUOperand(display)), opts)
 	default:
 		return true, nil
 	}
 }
 
-func rmPromptYes(ctx context.Context, inv *Invocation, prompt string) (bool, error) {
-	reader, closer, err := rmPromptReader(ctx, inv)
+func rmPromptYes(ctx context.Context, inv *Invocation, prompt string, opts rmOptions) (bool, error) {
+	reader, err := rmPromptReader(ctx, inv, opts)
 	if err != nil {
 		return false, err
-	}
-	if closer != nil {
-		defer func() { _ = closer.Close() }()
 	}
 
 	if inv != nil && inv.Stderr != nil {
@@ -456,7 +461,7 @@ func rmPromptYes(ctx context.Context, inv *Invocation, prompt string) (bool, err
 		}
 	}
 
-	line, err := bufio.NewReader(reader).ReadString('\n')
+	line, err := reader.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, exitf(inv, 1, "rm: Failed to read from standard input")
 	}
@@ -472,15 +477,38 @@ func rmPromptYes(ctx context.Context, inv *Invocation, prompt string) (bool, err
 	}
 }
 
-func rmPromptReader(ctx context.Context, inv *Invocation) (io.Reader, io.Closer, error) {
+func rmPromptReader(ctx context.Context, inv *Invocation, opts rmOptions) (*bufio.Reader, error) {
+	if opts.promptInput != nil && opts.promptInput.reader != nil {
+		return opts.promptInput.reader, nil
+	}
+
 	if inv != nil && inv.Stdin != nil {
-		return inv.Stdin, nil, nil
+		reader := bufio.NewReader(inv.Stdin)
+		if opts.promptInput != nil {
+			opts.promptInput.reader = reader
+		}
+		return reader, nil
 	}
 	file, _, err := openRead(ctx, inv, "/dev/tty")
 	if err == nil {
-		return file, file, nil
+		reader := bufio.NewReader(file)
+		if opts.promptInput != nil {
+			opts.promptInput.reader = reader
+			opts.promptInput.closer = file
+		}
+		return reader, nil
 	}
-	return nil, nil, exitf(inv, 1, "rm: failed to open standard input")
+	return nil, exitf(inv, 1, "rm: failed to open standard input")
+}
+
+func rmClosePromptInput(input *rmPromptInput) error {
+	if input == nil || input.closer == nil {
+		return nil
+	}
+	err := input.closer.Close()
+	input.closer = nil
+	input.reader = nil
+	return err
 }
 
 func rmInputIsTTY(inv *Invocation, opts rmOptions) bool {

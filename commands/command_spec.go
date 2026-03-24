@@ -111,8 +111,16 @@ type ParsedCommand struct {
 	optionValues map[string][]string
 	optionCount  map[string]int
 	optionOrder  []string
+	optionEvents []ParsedOptionOccurrence
 	argValues    map[string][]string
 	positionals  []string
+}
+
+// ParsedOptionOccurrence records one parsed option occurrence in order.
+type ParsedOptionOccurrence struct {
+	Name     string
+	Value    string
+	HasValue bool
 }
 
 // Has reports whether option name was seen.
@@ -365,7 +373,7 @@ func parseShortOptions(inv *Invocation, spec *CommandSpec, parsed *ParsedCommand
 			return "version", true, nil
 		}
 		if opt.Arity == OptionNoValue {
-			recordOption(parsed, opt.Name, "")
+			recordOption(parsed, opt.Name, "", false)
 			continue
 		}
 
@@ -418,7 +426,7 @@ func applyOptionValue(inv *Invocation, spec *CommandSpec, parsed *ParsedCommand,
 		if hasValue {
 			return commandUsageError(inv, spec.Name, "option '%s' doesn't allow an argument", shownName)
 		}
-		recordOption(parsed, opt.Name, "")
+		recordOption(parsed, opt.Name, "", false)
 		return nil
 	case OptionRequiredValue:
 		if !hasValue {
@@ -430,24 +438,31 @@ func applyOptionValue(inv *Invocation, spec *CommandSpec, parsed *ParsedCommand,
 			}
 			value = (*rest)[0]
 			*rest = (*rest)[1:]
+			hasValue = true
 		}
-		recordOption(parsed, opt.Name, value)
+		recordOption(parsed, opt.Name, value, hasValue)
 		return nil
 	case OptionOptionalValue:
 		if !hasValue && long && !opt.OptionalValueEqualsOnly && len(*rest) > 0 && !strings.HasPrefix((*rest)[0], "-") {
 			value = (*rest)[0]
 			*rest = (*rest)[1:]
+			hasValue = true
 		}
-		recordOption(parsed, opt.Name, value)
+		recordOption(parsed, opt.Name, value, hasValue)
 		return nil
 	default:
 		return nil
 	}
 }
 
-func recordOption(parsed *ParsedCommand, name, value string) {
+func recordOption(parsed *ParsedCommand, name, value string, hasValue bool) {
 	parsed.optionCount[name]++
 	parsed.optionOrder = append(parsed.optionOrder, name)
+	parsed.optionEvents = append(parsed.optionEvents, ParsedOptionOccurrence{
+		Name:     name,
+		Value:    value,
+		HasValue: hasValue,
+	})
 	if value != "" || slices.Contains([]string{"output-error"}, name) {
 		parsed.optionValues[name] = append(parsed.optionValues[name], value)
 	}
@@ -458,6 +473,15 @@ func (m *ParsedCommand) OptionOrder() []string {
 		return nil
 	}
 	return append([]string(nil), m.optionOrder...)
+}
+
+// OptionOccurrences returns parsed option occurrences in parse order, including
+// whether each occurrence carried an explicit value.
+func (m *ParsedCommand) OptionOccurrences() []ParsedOptionOccurrence {
+	if m == nil {
+		return nil
+	}
+	return append([]ParsedOptionOccurrence(nil), m.optionEvents...)
 }
 
 func assignArgSpecs(inv *Invocation, parsed *ParsedCommand) error {

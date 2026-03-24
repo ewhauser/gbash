@@ -60,6 +60,48 @@ func TestParseRMSpecTreatsBareInteractiveAsAlways(t *testing.T) {
 	}
 }
 
+func TestParseRMSpecUsesPerOccurrenceInteractiveValues(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		args []string
+		want rmInteractiveMode
+	}{
+		{
+			name: "bare interactive overrides prior value",
+			args: []string{"--interactive=never", "--interactive", "target"},
+			want: rmInteractiveAlways,
+		},
+		{
+			name: "explicit never remains last override",
+			args: []string{"--interactive", "--interactive=never", "target"},
+			want: rmInteractiveNever,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			inv, matches, action, err := parseRMSpec(t, tt.args...)
+			if err != nil {
+				t.Fatalf("ParseCommandSpec() error = %v", err)
+			}
+			if action != "" {
+				t.Fatalf("action = %q, want empty", action)
+			}
+			opts, err := parseRMMatches(inv, matches)
+			if err != nil {
+				t.Fatalf("parseRMMatches() error = %v", err)
+			}
+			if got := opts.interactive; got != tt.want {
+				t.Fatalf("interactive = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseRMSpecRejectsAbbreviatedNoPreserveRoot(t *testing.T) {
 	t.Parallel()
 
