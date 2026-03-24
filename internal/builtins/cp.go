@@ -323,11 +323,15 @@ func cpCopyResolvedSource(ctx context.Context, inv *Invocation, source, srcAbs s
 	if srcInfo.IsDir() {
 		return cpCopyDirectory(ctx, inv, source, srcAbs, srcInfo, destAbs, destInfo, destExists, opts)
 	}
+	destIsSymlink := destInfo != nil && destInfo.Mode()&stdfs.ModeSymlink != 0
 	if cpSameFile(ctx, inv, srcAbs, srcInfo, destAbs, destInfo, destExists) {
 		if opts != nil && opts.copyMode == cpCopyHardLink {
-			return nil
+			if !destIsSymlink {
+				return nil
+			}
+		} else {
+			return exitf(inv, 1, "cp: %s and %s are the same file", quoteGNUOperand(source), quoteGNUOperand(path.Base(destAbs)))
 		}
-		return exitf(inv, 1, "cp: %s and %s are the same file", quoteGNUOperand(source), quoteGNUOperand(path.Base(destAbs)))
 	}
 	skip, err := cpShouldSkipExisting(ctx, inv, srcInfo, srcLinkInfo != nil, destAbs, destInfo, destExists, opts)
 	if err != nil {

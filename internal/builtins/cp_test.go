@@ -163,6 +163,57 @@ func TestCPSupportsHardLinkModeAndSameFileNoop(t *testing.T) {
 	}
 }
 
+func TestCPHardLinkModeDoesNotNoopWhenDestinationIsSymlinkToSource(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "echo new > /tmp/src.txt\n" +
+			"ln -s /tmp/src.txt /tmp/dst.txt\n" +
+			"cp -l /tmp/src.txt /tmp/dst.txt\n" +
+			"printf 'plain=%s\\n' \"$?\"\n" +
+			"test -L /tmp/dst.txt && echo still-link || echo replaced\n" +
+			"cp -fl /tmp/src.txt /tmp/dst.txt\n" +
+			"printf 'force=%s\\n' \"$?\"\n" +
+			"test -L /tmp/dst.txt && echo link-after-force || echo file-after-force\n" +
+			"stat -c '%d:%i' /tmp/src.txt /tmp/dst.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	if len(lines) != 6 {
+		t.Fatalf("Stdout lines = %q, want 6 lines", result.Stdout)
+	}
+	if got, want := lines[0], "plain=1"; got != want {
+		t.Fatalf("plain status = %q, want %q", got, want)
+	}
+	if got, want := lines[1], "still-link"; got != want {
+		t.Fatalf("pre-force marker = %q, want %q", got, want)
+	}
+	if got, want := lines[2], "force=0"; got != want {
+		t.Fatalf("force status = %q, want %q", got, want)
+	}
+	if got, want := lines[3], "file-after-force"; got != want {
+		t.Fatalf("post-force marker = %q, want %q", got, want)
+	}
+	if lines[4] != lines[5] {
+		t.Fatalf("hard-link inode lines = %q and %q, want equal", lines[4], lines[5])
+	}
+	if !strings.Contains(result.Stderr, "cp: cannot create hard link 'dst.txt' to '/tmp/src.txt': File exists") {
+		t.Fatalf("Stderr = %q, want file-exists error", result.Stderr)
+	}
+}
+
 func TestCPSupportsSymbolicLinkMode(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
