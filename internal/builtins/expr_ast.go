@@ -211,6 +211,8 @@ func (p *exprParser) parseSimpleExpression() (*exprNode, error) {
 			kind:  exprNodeLeaf,
 			value: newExprString(next),
 		}, nil
+	case ")":
+		return nil, exprUnexpectedClosingParenTokenError()
 	case "(":
 		group, err := p.parseExpression()
 		if err != nil {
@@ -543,19 +545,35 @@ func exprLocaleIndex(text, chars string, byteLocale bool) int {
 
 func exprLocaleSubstr(text, posText, lengthText string, byteLocale bool) string {
 	pos, ok := parseDecimalBigInt(posText)
-	if !ok || pos.Sign() <= 0 || !pos.IsInt64() {
+	if !ok || pos.Sign() <= 0 {
 		return ""
 	}
 	length, ok := parseDecimalBigInt(lengthText)
-	if !ok || length.Sign() <= 0 || !length.IsInt64() {
+	if !ok || length.Sign() <= 0 {
+		return ""
+	}
+
+	units := exprTextUnits(text, byteLocale)
+	if len(units) == 0 {
+		return ""
+	}
+
+	maxPos := big.NewInt(int64(len(units)))
+	if pos.Cmp(maxPos) > 0 {
 		return ""
 	}
 
 	startIndex := int(pos.Int64()) - 1
-	span := int(length.Int64())
-	units := exprTextUnits(text, byteLocale)
-	if startIndex < 0 || startIndex >= len(units) || span <= 0 {
+	if startIndex < 0 || startIndex >= len(units) {
 		return ""
+	}
+
+	span := len(units) - startIndex
+	if length.IsInt64() {
+		requested := int(length.Int64())
+		if requested < span {
+			span = requested
+		}
 	}
 
 	endIndex := startIndex + span - 1
@@ -595,6 +613,10 @@ func exprExpectedClosingParenInsteadOfError(token string) error {
 	return fmt.Errorf("syntax error: expecting ')' instead of %s", quoteGNUOperand(token))
 }
 
+func exprUnexpectedClosingParenTokenError() error {
+	return exprStaticError("syntax error: unexpected ')'")
+}
+
 func exprNonIntegerArgumentError() error {
 	return exprStaticError("non-integer argument")
 }
@@ -625,6 +647,10 @@ func exprTrailingBackslashError() error {
 
 func exprInvalidBackReferenceError() error {
 	return exprStaticError("Invalid back reference")
+}
+
+func exprUnmatchedBracketExpressionError() error {
+	return exprStaticError("Unmatched [, [^, [:, [., or [=")
 }
 
 func exprInvalidCharacterClassNameError() error {

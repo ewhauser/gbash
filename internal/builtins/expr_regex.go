@@ -57,6 +57,11 @@ type exprRegexUnit struct {
 	end   int
 }
 
+const (
+	exprRegexPOSIXClassInvalid   = "__invalid__"
+	exprRegexPOSIXClassUnmatched = "__unmatched__"
+)
+
 type exprRegexParser struct {
 	units      []exprRegexUnit
 	pos        int
@@ -502,8 +507,11 @@ func (p *exprRegexParser) parseClassAtom() (exprRegexCharClassElem, error) {
 		return exprRegexCharClassElem{}, exprInvalidRegexExpressionError()
 	}
 	if element, ok := p.tryParsePOSIXClass(); ok {
-		if element.posixClass == "__invalid__" {
+		switch element.posixClass {
+		case exprRegexPOSIXClassInvalid:
 			return exprRegexCharClassElem{}, exprInvalidCharacterClassNameError()
+		case exprRegexPOSIXClassUnmatched:
+			return exprRegexCharClassElem{}, exprUnmatchedBracketExpressionError()
 		}
 		return element, nil
 	}
@@ -522,25 +530,29 @@ func (p *exprRegexParser) tryParsePOSIXClass() (exprRegexCharClassElem, bool) {
 	}
 
 	name := make([]byte, 0, 8)
-	for i := p.pos + 2; i+1 < len(p.units); i++ {
-		if p.units[i].isByte(':') && p.units[i+1].isByte(']') {
-			className := string(name)
-			if className == "" {
-				return exprRegexCharClassElem{}, false
+	invalidName := false
+	for i := p.pos + 2; i < len(p.units); i++ {
+		if i+1 < len(p.units) && p.units[i].isByte(':') && p.units[i+1].isByte(']') {
+			if len(name) == 0 {
+				return exprRegexCharClassElem{posixClass: exprRegexPOSIXClassUnmatched}, true
 			}
-			if !exprRegexIsPOSIXClass(className) {
-				return exprRegexCharClassElem{posixClass: "__invalid__"}, true
+			className := string(name)
+			if invalidName || !exprRegexIsPOSIXClass(className) {
+				return exprRegexCharClassElem{posixClass: exprRegexPOSIXClassInvalid}, true
 			}
 			p.pos = i + 2
 			return exprRegexCharClassElem{posixClass: className}, true
 		}
 		if !p.units[i].isASCIIAlpha() {
-			return exprRegexCharClassElem{}, false
+			invalidName = true
+			continue
 		}
-		name = append(name, p.units[i].text[0])
+		if !invalidName {
+			name = append(name, p.units[i].text[0])
+		}
 	}
 
-	return exprRegexCharClassElem{}, false
+	return exprRegexCharClassElem{posixClass: exprRegexPOSIXClassUnmatched}, true
 }
 
 func (m *exprRegexMatcher) matchExpr(expr *exprRegexExpr, state exprRegexState) ([]exprRegexState, error) {
