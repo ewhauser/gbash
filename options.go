@@ -28,6 +28,9 @@ func WithConfig(cfg *Config) Option {
 		if cfg.Policy != nil {
 			target.Policy = cfg.Policy
 		}
+		if cfg.LimitOverrides != (policy.Limits{}) {
+			target.LimitOverrides = cfg.LimitOverrides
+		}
 		if cfg.BaseEnv != nil {
 			target.BaseEnv = copyStringMap(cfg.BaseEnv)
 		}
@@ -102,6 +105,16 @@ func WithRegistry(registry commands.CommandRegistry) Option {
 func WithPolicy(p policy.Policy) Option {
 	return func(target *Config) error {
 		target.Policy = p
+		return nil
+	}
+}
+
+// WithLimitOverrides overrides selected runtime limits without replacing the
+// active policy. Zero-valued fields leave the underlying policy/defaults
+// unchanged.
+func WithLimitOverrides(overrides policy.Limits) Option {
+	return func(target *Config) error {
+		target.LimitOverrides = overrides
 		return nil
 	}
 }

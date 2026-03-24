@@ -85,6 +85,11 @@ type Config struct {
 	// When nil, the default static policy is used.
 	Policy policy.Policy
 
+	// LimitOverrides overrides selected runtime limits without replacing the
+	// active policy. Zero-valued fields leave the underlying policy/defaults
+	// unchanged.
+	LimitOverrides policy.Limits
+
 	// BaseEnv provides the base environment visible to each execution before any
 	// per-request environment overrides are applied.
 	BaseEnv map[string]string
@@ -250,15 +255,16 @@ func (cfg *Config) runtimeConfig() *internalruntime.Config {
 		return &internalruntime.Config{}
 	}
 	return &internalruntime.Config{
-		FileSystem:    cfg.FileSystem.runtimeConfig(),
-		Registry:      cfg.Registry,
-		Policy:        cfg.Policy,
-		BaseEnv:       copyStringMap(cfg.BaseEnv),
-		Host:          cfg.Host,
-		Network:       cfg.networkConfig(),
-		NetworkClient: cfg.NetworkClient,
-		Tracing:       cfg.Tracing,
-		Logger:        cfg.Logger,
+		FileSystem:     cfg.FileSystem.runtimeConfig(),
+		Registry:       cfg.Registry,
+		Policy:         cfg.Policy,
+		LimitOverrides: cfg.LimitOverrides,
+		BaseEnv:        copyStringMap(cfg.BaseEnv),
+		Host:           cfg.Host,
+		Network:        cfg.networkConfig(),
+		NetworkClient:  cfg.NetworkClient,
+		Tracing:        cfg.Tracing,
+		Logger:         cfg.Logger,
 	}
 }
 
