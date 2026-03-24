@@ -29,7 +29,7 @@ func WithConfig(cfg *Config) Option {
 			target.Policy = cfg.Policy
 		}
 		if cfg.LimitOverrides != (policy.Limits{}) {
-			target.LimitOverrides = cfg.LimitOverrides
+			target.LimitOverrides = mergeLimitOverrides(target.LimitOverrides, cfg.LimitOverrides)
 		}
 		if cfg.BaseEnv != nil {
 			target.BaseEnv = copyStringMap(cfg.BaseEnv)
@@ -114,9 +114,34 @@ func WithPolicy(p policy.Policy) Option {
 // unchanged.
 func WithLimitOverrides(overrides policy.Limits) Option {
 	return func(target *Config) error {
-		target.LimitOverrides = overrides
+		target.LimitOverrides = mergeLimitOverrides(target.LimitOverrides, overrides)
 		return nil
 	}
+}
+
+func mergeLimitOverrides(base, overrides policy.Limits) policy.Limits {
+	if overrides.MaxCommandCount != 0 {
+		base.MaxCommandCount = overrides.MaxCommandCount
+	}
+	if overrides.MaxGlobOperations != 0 {
+		base.MaxGlobOperations = overrides.MaxGlobOperations
+	}
+	if overrides.MaxLoopIterations != 0 {
+		base.MaxLoopIterations = overrides.MaxLoopIterations
+	}
+	if overrides.MaxSubstitutionDepth != 0 {
+		base.MaxSubstitutionDepth = overrides.MaxSubstitutionDepth
+	}
+	if overrides.MaxStdoutBytes != 0 {
+		base.MaxStdoutBytes = overrides.MaxStdoutBytes
+	}
+	if overrides.MaxStderrBytes != 0 {
+		base.MaxStderrBytes = overrides.MaxStderrBytes
+	}
+	if overrides.MaxFileBytes != 0 {
+		base.MaxFileBytes = overrides.MaxFileBytes
+	}
+	return base
 }
 
 // WithBaseEnv replaces the base environment inherited by each execution.
