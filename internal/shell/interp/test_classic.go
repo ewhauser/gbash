@@ -45,7 +45,7 @@ func (p *testParser) parseArgs(args []string) (syntax.TestExpr, error) {
 		return p.parseTwoArgs(args)
 	case 3:
 		return p.parseThreeArgs(args)
-	case 4:
+	default:
 		switch {
 		case args[0] == "!":
 			expr, err := p.parseArgs(args[1:])
@@ -53,8 +53,8 @@ func (p *testParser) parseArgs(args []string) (syntax.TestExpr, error) {
 				return nil, err
 			}
 			return &syntax.UnaryTest{Op: syntax.TsNot, X: expr}, nil
-		case args[0] == "(" && args[3] == ")":
-			expr, err := p.parseArgs(args[1:3])
+		case len(args) <= 5 && args[0] == "(" && args[len(args)-1] == ")":
+			expr, err := p.parseArgs(args[1 : len(args)-1])
 			if err != nil {
 				return nil, err
 			}
@@ -167,14 +167,25 @@ func (p *testParser) parsePrimary(args []string, pos int) (syntax.TestExpr, int,
 		return nil, pos, fmt.Errorf("argument expected")
 	}
 	if args[pos] == "(" {
-		expr, next, err := p.parseOr(args, pos+1)
+		depth := 1
+		end := pos + 1
+		for end < len(args) && depth > 0 {
+			switch args[end] {
+			case "(":
+				depth++
+			case ")":
+				depth--
+			}
+			end++
+		}
+		if depth != 0 {
+			return nil, pos, fmt.Errorf("reached %q without matching '(' with ')'", args[len(args)-1])
+		}
+		expr, err := p.parseArgs(args[pos+1 : end-1])
 		if err != nil {
 			return nil, pos, err
 		}
-		if next >= len(args) || args[next] != ")" {
-			return nil, pos, fmt.Errorf("reached %q without matching '(' with ')'", args[len(args)-1])
-		}
-		return &syntax.ParenTest{X: expr}, next + 1, nil
+		return &syntax.ParenTest{X: expr}, end, nil
 	}
 	if pos+2 < len(args) {
 		if op := testExprBinaryOp(args[pos+1]); op != illegalTok {

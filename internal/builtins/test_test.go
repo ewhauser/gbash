@@ -140,6 +140,9 @@ func TestTestMatchesBashAmbiguousClassicForms(t *testing.T) {
 		"[ -a -a -a ] && echo triple\n"+
 			"[ -a -a -a -a -a ] || echo quint\n"+
 			"test 0 -eq 0 -a '(' = ')' && echo paren_eq\n"+
+			"test 0 -eq 0 -a '(' -f ')' && echo paren_f\n"+
+			"test 0 -eq 0 -a '(' -t ')' && echo paren_t\n"+
+			"test 0 -eq 0 -a '(' ! ')' && echo paren_bang\n"+
 			"set -- -o; test $# -ne 0 -a \"$1\" != \"--\" && echo trailing_word\n"+
 			"[ -f = ] || echo file_eq\n"+
 			"[ -f == ] || echo file_eqeq\n",
@@ -147,7 +150,7 @@ func TestTestMatchesBashAmbiguousClassicForms(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "triple\nquint\nparen_eq\ntrailing_word\nfile_eq\nfile_eqeq\n"; got != want {
+	if got, want := result.Stdout, "triple\nquint\nparen_eq\nparen_f\nparen_t\nparen_bang\ntrailing_word\nfile_eq\nfile_eqeq\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
