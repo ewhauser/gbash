@@ -22,6 +22,18 @@ printf 'test-lparen:%s\n' "$?"
 [ \( x = \( \) ]
 printf 'bracket-lparen:%s\n' "$?"
 
+test \( x -a \( y \) \)
+printf 'test-nested-and:%s\n' "$?"
+
+[ \( x -a \( y \) \) ]
+printf 'bracket-nested-and:%s\n' "$?"
+
+test \( x -o \( y \) \)
+printf 'test-nested-or:%s\n' "$?"
+
+[ \( x -o \( y \) \) ]
+printf 'bracket-nested-or:%s\n' "$?"
+
 test \( \( x \) \)
 printf 'test-nested-word:%s\n' "$?"
 

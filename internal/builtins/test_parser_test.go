@@ -35,6 +35,11 @@ func TestParseTestClassicDisambiguation(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "grouped nested bool expression still parses",
+			args: []string{"(", "x", "-a", "(", "y", ")", ")"},
+			want: true,
+		},
+		{
 			name:    "nested one-word group is rejected",
 			args:    []string{"(", "(", "x", ")", ")"},
 			wantErr: true,

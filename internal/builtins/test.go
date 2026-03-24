@@ -271,6 +271,9 @@ func (p *testRPNParser) parsePrimary(args []string, pos int) ([]testSymbol, int,
 func (p *testRPNParser) parenStartsNestedGroup(args []string, groupPos, idx int) bool {
 	if idx > groupPos+1 {
 		prev := args[idx-1]
+		if prev == "-a" || prev == "-o" {
+			return p.groupPrefixParsesAsExpr(args[groupPos+1 : idx-1])
+		}
 		return !isTestExprBinaryOp(prev) && !isTestUnaryOp(prev)
 	}
 	nextClose := -1
@@ -288,6 +291,14 @@ func (p *testRPNParser) parenStartsNestedGroup(args []string, groupPos, idx int)
 	}
 	next := args[idx+1]
 	return !isTestExprBinaryOp(next) && next != "-a" && next != "-o"
+}
+
+func (p *testRPNParser) groupPrefixParsesAsExpr(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	_, next, err := p.parseOr(args, 0)
+	return err == nil && next == len(args)
 }
 
 func testLiteralSymbol(token string) testSymbol {
