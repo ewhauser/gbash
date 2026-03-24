@@ -39,7 +39,6 @@ const (
 )
 
 type exprNode struct {
-	id    int
 	kind  exprNodeKind
 	value exprValue
 	op    exprBinaryOp
@@ -116,7 +115,6 @@ func (p *exprParser) parsePrecedence(level int) (*exprNode, error) {
 			return nil, err
 		}
 		left = &exprNode{
-			id:    exprNextNodeID(),
 			kind:  exprNodeBinary,
 			op:    op,
 			left:  left,
@@ -156,7 +154,6 @@ func (p *exprParser) parseSimpleExpression() (*exprNode, error) {
 			return nil, err
 		}
 		return &exprNode{
-			id:    exprNextNodeID(),
 			kind:  exprNodeBinary,
 			op:    exprBinaryMatch,
 			left:  left,
@@ -172,7 +169,6 @@ func (p *exprParser) parseSimpleExpression() (*exprNode, error) {
 			return nil, err
 		}
 		return &exprNode{
-			id:    exprNextNodeID(),
 			kind:  exprNodeBinary,
 			op:    exprBinaryIndex,
 			left:  left,
@@ -192,7 +188,6 @@ func (p *exprParser) parseSimpleExpression() (*exprNode, error) {
 			return nil, err
 		}
 		return &exprNode{
-			id:    exprNextNodeID(),
 			kind:  exprNodeSubstr,
 			left:  text,
 			right: pos,
@@ -204,7 +199,6 @@ func (p *exprParser) parseSimpleExpression() (*exprNode, error) {
 			return nil, err
 		}
 		return &exprNode{
-			id:   exprNextNodeID(),
 			kind: exprNodeLength,
 			left: text,
 		}, nil
@@ -214,7 +208,6 @@ func (p *exprParser) parseSimpleExpression() (*exprNode, error) {
 			return nil, err
 		}
 		return &exprNode{
-			id:    exprNextNodeID(),
 			kind:  exprNodeLeaf,
 			value: newExprString(next),
 		}, nil
@@ -237,13 +230,11 @@ func (p *exprParser) parseSimpleExpression() (*exprNode, error) {
 			return nil, exprExpectedClosingParenInsteadOfError(next)
 		}
 		return &exprNode{
-			id:   exprNextNodeID(),
 			kind: exprNodeGroup,
 			left: group,
 		}, nil
 	default:
 		return &exprNode{
-			id:    exprNextNodeID(),
 			kind:  exprNodeLeaf,
 			value: newExprString(token),
 		}, nil
@@ -276,13 +267,6 @@ type exprEvalFrame struct {
 type exprEvalResult struct {
 	value exprValue
 	err   error
-}
-
-var exprNodeIDCounter int
-
-func exprNextNodeID() int {
-	exprNodeIDCounter++
-	return exprNodeIDCounter
 }
 
 func exprEvaluateNode(root *exprNode, locale builtinLocaleContext) (exprValue, error) {
