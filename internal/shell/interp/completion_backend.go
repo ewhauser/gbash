@@ -82,6 +82,13 @@ func (b *runnerCompletionBackend) FunctionNames(prefix string) []string {
 	return names
 }
 
+func (b *runnerCompletionBackend) EnabledBuiltinNames(prefix string) []string {
+	if b.runner == nil {
+		return nil
+	}
+	return b.runner.enabledBuiltinNames(prefix)
+}
+
 func (b *runnerCompletionBackend) VariableNames(prefix string, exportedOnly bool) []string {
 	if b.runner == nil || b.runner.writeEnv == nil {
 		return nil

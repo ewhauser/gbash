@@ -79,7 +79,7 @@ func (r *Runner) cmdCall(ctx context.Context, cm *syntax.CallExpr, tracingEnable
 	r.lastExpandExit = exitStatus{}
 	fields, decl := r.resolveCallExprArgs(args)
 	if decl != nil {
-		if r.posixMode() && IsPOSIXSpecialBuiltin(decl.Variant.Value) {
+		if r.posixSpecialBuiltinActive(decl.Variant.Value) {
 			restores := r.runSpecialCallAssigns(cm.Assigns)
 			if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting {
 				r.restoreCallAssigns(restores)
@@ -181,7 +181,7 @@ func (r *Runner) cmdCall(ctx context.Context, cm *syntax.CallExpr, tracingEnable
 	assignOverlayCrossesFuncScope := false
 	if r.posixSpecialBuiltinActive(fields[0]) {
 		assignOverlayMode = callAssignOverlayCommit
-	} else if fields[0] == "eval" || fields[0] == "source" || fields[0] == "." {
+	} else if r.canDispatchBuiltin(fields[0]) && (fields[0] == "eval" || fields[0] == "source" || fields[0] == ".") {
 		assignOverlayConsumesLocals = true
 	} else {
 		if info, ok := r.funcInfo(fields[0]); ok && info.body != nil {
@@ -485,7 +485,7 @@ func (r *Runner) cmdFor(ctx context.Context, cm *syntax.ForClause, trace *tracer
 }
 
 func (r *Runner) cmdFuncDecl(cm *syntax.FuncDecl) {
-	if r.posixMode() && IsPOSIXSpecialBuiltin(cm.Name.Value) {
+	if r.posixSpecialBuiltinActive(cm.Name.Value) {
 		r.errf("`%s': is a special builtin\n", cm.Name.Value)
 		r.exit.code = 2
 		if !r.interactive {
@@ -622,6 +622,18 @@ func (r *Runner) cmdDecl(ctx context.Context, cm *syntax.DeclClause, tracingEnab
 	if r.runCommandDebugTrap(ctx, cm) {
 		return
 	}
+	if !r.declVariantActive(cm.Variant.Value) {
+		fields, ok := r.declClauseCommandFields(cm)
+		if !ok || len(fields) == 0 || !r.exit.ok() || r.exit.fatalExit || r.exit.exiting || r.exit.err != nil {
+			return
+		}
+		if tracingEnabled {
+			trace.call(fields[0], fields[1:]...)
+			trace.newLineFlush()
+		}
+		r.call(ctx, cm.Pos(), fields)
+		return
+	}
 	newDeclCommand(r, cm, tracingEnabled, trace).run()
 }
 
@@ -650,6 +662,49 @@ func isDeclVariantName(name string) bool {
 	default:
 		return false
 	}
+}
+
+func (r *Runner) declVariantActive(name string) bool {
+	if name == "nameref" {
+		return true
+	}
+	return r.canDispatchBuiltin(name)
+}
+
+func parseCallWords(src string) ([]*syntax.Word, error) {
+	var words []*syntax.Word
+	p := syntax.NewParser(syntax.Variant(syntax.LangBash))
+	err := p.Words(strings.NewReader(src), func(word *syntax.Word) bool {
+		words = append(words, word)
+		return true
+	})
+	return words, err
+}
+
+func (r *Runner) declClauseCommandFields(cm *syntax.DeclClause) ([]string, bool) {
+	fields := []string{cm.Variant.Value}
+	for _, operand := range r.mergeDeclOperands(cm.Variant.Value, cm.Operands) {
+		src := declOperandString(operand)
+		if src == "" {
+			continue
+		}
+		words, err := parseCallWords(src)
+		if err != nil {
+			r.errf("%v\n", err)
+			r.exit.code = 2
+			return nil, false
+		}
+		if len(words) == 0 {
+			continue
+		}
+		for _, word := range words {
+			fields = append(fields, r.fields(word)...)
+			if !r.exit.ok() || r.exit.fatalExit || r.exit.exiting || r.exit.err != nil {
+				return nil, false
+			}
+		}
+	}
+	return fields, true
 }
 
 func declClauseFromCallWords(variant string, variantWord *syntax.Word, operands []*syntax.Word) *syntax.DeclClause {
@@ -683,12 +738,12 @@ func declOperandFromCallWord(word *syntax.Word) syntax.DeclOperand {
 	return op
 }
 
-func expandedDeclVariant(fields []string) (variant string, matched bool, needMore bool) {
+func expandedDeclVariant(fields []string, isActive func(string) bool) (variant string, matched bool, needMore bool) {
 	sawWrapperPrefix := false
 	lastWasWrapper := false
 	for i := 0; i < len(fields); i++ {
 		name := fields[i]
-		if isDeclVariantName(name) {
+		if isDeclVariantName(name) && isActive(name) {
 			return name, true, false
 		}
 		switch name {
@@ -734,7 +789,7 @@ func (r *Runner) resolveCallExprArgs(args []*syntax.Word) ([]string, *syntax.Dec
 			continue
 		}
 		leading = append(leading, expanded[0])
-		variant, matched, needMore := expandedDeclVariant(leading)
+		variant, matched, needMore := expandedDeclVariant(leading, r.declVariantActive)
 		if matched {
 			return nil, declClauseFromCallWords(variant, arg, args[i+1:])
 		}

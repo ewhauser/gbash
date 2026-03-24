@@ -178,3 +178,51 @@ func TestExplicitPathTooLongReturns126(t *testing.T) {
 		t.Fatalf("Stderr = %q, want File name too long message", result.Stderr)
 	}
 }
+
+func TestEnableBuiltinDisablesBuiltinResolution(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "" +
+			"foo=old\n" +
+			"enable -n printf\n" +
+			"printf -v foo %s hi\n" +
+			"printf '\\nvalue=<%s>\\n' \"$foo\"\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "-v\nvalue=<old>\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, "printf: warning: ignoring excess arguments, starting with 'foo'\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
+func TestEnableBuiltinStatePropagatesToSubshells(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "" +
+			"enable -n printf\n" +
+			"(foo=old; printf -v foo %s hi; printf \"\\\\nchild=<%s>\\\\n\" \"$foo\")\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "-v\nchild=<old>\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, "printf: warning: ignoring excess arguments, starting with 'foo'\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}

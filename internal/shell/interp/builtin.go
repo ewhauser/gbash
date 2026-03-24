@@ -43,6 +43,102 @@ func IsBuiltin(name string) bool {
 	return completionutil.IsBuiltinName(name)
 }
 
+var runtimeBuiltinNames = []string{
+	"[",
+	":",
+	".",
+	"alias",
+	"break",
+	"builtin",
+	"caller",
+	"cd",
+	"command",
+	"compgen",
+	"complete",
+	"compopt",
+	"continue",
+	"declare",
+	"dirs",
+	"echo",
+	"enable",
+	"eval",
+	"exec",
+	"exit",
+	"export",
+	"false",
+	"getopts",
+	"hash",
+	"local",
+	"mapfile",
+	"popd",
+	"printf",
+	"pushd",
+	"pwd",
+	"read",
+	"readarray",
+	"readonly",
+	"return",
+	"set",
+	"shift",
+	"shopt",
+	"source",
+	"test",
+	"times",
+	"trap",
+	"true",
+	"type",
+	"typeset",
+	"ulimit",
+	"unalias",
+	"unset",
+	"wait",
+}
+
+var runtimeBuiltinSet = func() map[string]struct{} {
+	out := make(map[string]struct{}, len(runtimeBuiltinNames))
+	for _, name := range runtimeBuiltinNames {
+		out[name] = struct{}{}
+	}
+	return out
+}()
+
+func isRuntimeBuiltin(name string) bool {
+	_, ok := runtimeBuiltinSet[name]
+	return ok
+}
+
+func (r *Runner) isBuiltinDisabled(name string) bool {
+	if !isRuntimeBuiltin(name) || r == nil || r.disabledBuiltins == nil {
+		return false
+	}
+	return r.disabledBuiltins[name]
+}
+
+func (r *Runner) isBuiltinActive(name string) bool {
+	if !IsBuiltin(name) {
+		return false
+	}
+	return !r.isBuiltinDisabled(name)
+}
+
+func (r *Runner) canDispatchBuiltin(name string) bool {
+	return isRuntimeBuiltin(name) && r.isBuiltinActive(name)
+}
+
+func (r *Runner) enabledBuiltinNames(prefix string) []string {
+	names := completionutil.BuiltinNames(prefix)
+	if len(names) == 0 {
+		return nil
+	}
+	out := names[:0]
+	for _, name := range names {
+		if r.isBuiltinActive(name) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 var posixSpecialBuiltins = map[string]struct{}{
 	":":        {},
 	".":        {},
@@ -72,7 +168,7 @@ func (r *Runner) posixMode() bool {
 }
 
 func (r *Runner) posixSpecialBuiltinActive(name string) bool {
-	return r.posixMode() && IsPOSIXSpecialBuiltin(name)
+	return r.posixMode() && r.canDispatchBuiltin(name) && IsPOSIXSpecialBuiltin(name)
 }
 
 // TODO: atoi is duplicated in the expand package.
@@ -165,6 +261,8 @@ func (r *Runner) builtin(ctx context.Context, pos syntax.Pos, name string, args 
 		return r.echoBuiltin(args)
 	case "printf":
 		return r.printfBuiltin(args)
+	case "enable":
+		return r.enableBuiltin(args)
 	case "complete", "compopt", "compgen":
 		return r.completionBuiltin(ctx, name, args)
 	case "break", "continue":
@@ -614,10 +712,115 @@ func (r *Runner) builtinBuiltin(ctx context.Context, pos syntax.Pos, args []stri
 	if len(args) < 1 {
 		return exitStatus{}
 	}
-	if !IsBuiltin(args[0]) {
+	if !r.canDispatchBuiltin(args[0]) {
 		return r.builtinFailf(1, "builtin: %s: not a shell builtin\n", args[0])
 	}
 	return r.builtin(ctx, pos, args[0], args[1:])
+}
+
+func (r *Runner) enableBuiltin(args []string) exitStatus {
+	disable := false
+	printMode := false
+	listAll := false
+	specialOnly := false
+	loadableFlags := false
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--":
+			args = args[i+1:]
+			goto done
+		case len(arg) <= 1 || arg[0] != '-' || arg == "-":
+			args = args[i:]
+			goto done
+		case strings.HasPrefix(arg, "--"):
+			return r.builtinFailf(2, "enable: %s: invalid option\nenable: usage: enable [-a] [-dnps] [-f filename] [name ...]\n", arg)
+		}
+		for j := 1; j < len(arg); j++ {
+			switch arg[j] {
+			case 'a':
+				listAll = true
+			case 'd':
+				loadableFlags = true
+			case 'f':
+				loadableFlags = true
+				if j+1 < len(arg) {
+					j = len(arg) - 1
+					continue
+				}
+				i++
+				if i >= len(args) {
+					return r.builtinFailf(2, "enable: -f: option requires an argument\nenable: usage: enable [-a] [-dnps] [-f filename] [name ...]\n")
+				}
+			case 'n':
+				disable = true
+			case 'p':
+				printMode = true
+			case 's':
+				specialOnly = true
+			default:
+				return r.builtinFailf(2, "enable: -%c: invalid option\nenable: usage: enable [-a] [-dnps] [-f filename] [name ...]\n", arg[j])
+			}
+		}
+	}
+	args = nil
+
+done:
+	if loadableFlags {
+		return r.builtinFailf(1, "enable: dynamic builtin loading is not supported\n")
+	}
+	if printMode || listAll || len(args) == 0 {
+		return r.enablePrintBuiltins(disable, listAll, specialOnly)
+	}
+
+	exit := exitStatus{}
+	for _, name := range args {
+		if !IsBuiltin(name) {
+			r.errf("enable: %s: not a shell builtin\n", name)
+			exit.code = 1
+			continue
+		}
+		if specialOnly && !IsPOSIXSpecialBuiltin(name) {
+			continue
+		}
+		if !isRuntimeBuiltin(name) {
+			r.errf("enable: %s: not a shell builtin\n", name)
+			exit.code = 1
+			continue
+		}
+		if disable {
+			r.ensureOwnDisabledBuiltins()
+			r.disabledBuiltins[name] = true
+			continue
+		}
+		if r.disabledBuiltins == nil {
+			continue
+		}
+		r.ensureOwnDisabledBuiltins()
+		delete(r.disabledBuiltins, name)
+	}
+	return exit
+}
+
+func (r *Runner) enablePrintBuiltins(disable, listAll, specialOnly bool) exitStatus {
+	for _, name := range runtimeBuiltinNames {
+		if specialOnly && !IsPOSIXSpecialBuiltin(name) {
+			continue
+		}
+		disabled := r.isBuiltinDisabled(name)
+		if !listAll && disabled != disable {
+			continue
+		}
+		line := "enable " + name + "\n"
+		if disabled {
+			line = "enable -n " + name + "\n"
+		}
+		if err := r.writeBuiltinString("enable", line); err != nil {
+			return r.shellBuiltinWriteExit("enable", err)
+		}
+	}
+	return exitStatus{}
 }
 
 func (r *Runner) evalBuiltin(ctx context.Context, args []string) (exit exitStatus) {
@@ -2168,7 +2371,7 @@ func (r *Runner) commandBuiltin(ctx context.Context, pos syntax.Pos, args []stri
 		ctx = withDisabledCommandHash(ctx)
 		defer restorePath()
 	}
-	if !forcePath && !useDefaultPath && IsBuiltin(args[0]) {
+	if !forcePath && !useDefaultPath && r.canDispatchBuiltin(args[0]) {
 		return r.builtin(ctx, pos, args[0], args[1:])
 	}
 	r.exec(ctx, pos, args)
@@ -2714,10 +2917,10 @@ func (r *Runner) typeMatches(ctx context.Context, name string, mode shellTypeMod
 	builtinMatch := shellTypeMatch{}
 	hasBuiltin := false
 	switch {
-	case IsPOSIXSpecialBuiltin(name):
+	case r.canDispatchBuiltin(name) && IsPOSIXSpecialBuiltin(name):
 		builtinMatch = shellTypeMatch{kind: shellTypeSpecialBuiltin}
 		hasBuiltin = true
-	case IsBuiltin(name):
+	case r.isBuiltinActive(name):
 		builtinMatch = shellTypeMatch{kind: shellTypeBuiltin}
 		hasBuiltin = true
 	}

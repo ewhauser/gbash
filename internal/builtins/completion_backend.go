@@ -66,6 +66,10 @@ func (b *staticCompletionBackend) FunctionNames(string) []string {
 	return nil
 }
 
+func (b *staticCompletionBackend) EnabledBuiltinNames(prefix string) []string {
+	return completionutil.BuiltinNames(prefix)
+}
+
 func (b *staticCompletionBackend) VariableNames(prefix string, exportedOnly bool) []string {
 	if b.inv == nil {
 		return nil

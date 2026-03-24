@@ -6,6 +6,9 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/ewhauser/gbash/internal/completionutil"
+	"github.com/ewhauser/gbash/internal/shell/interp"
 )
 
 const bashHelpRelease = "5.3.9"
@@ -255,7 +258,7 @@ func (c *Help) Name() string {
 	return "help"
 }
 
-func (c *Help) Run(_ context.Context, inv *Invocation) error {
+func (c *Help) Run(ctx context.Context, inv *Invocation) error {
 	mode := helpModeDefault
 	args := inv.Args
 	for len(args) > 0 {
@@ -290,7 +293,7 @@ func (c *Help) Run(_ context.Context, inv *Invocation) error {
 	}
 done:
 	if len(args) == 0 {
-		_, _ = fmt.Fprintf(inv.Stdout, "%s\n%s", bashHelpVersionLine(inv), bashHelpListBody)
+		_, _ = fmt.Fprintf(inv.Stdout, "%s\n%s", bashHelpVersionLine(inv), bashHelpListBodyForContext(ctx))
 		return nil
 	}
 
@@ -336,6 +339,73 @@ func bashHelpVersionLine(inv *Invocation) string {
 		return line
 	}
 	return fmt.Sprintf("GNU bash, version %s(1)-release (%s)", bashHelpRelease, bashHelpPlatform(inv))
+}
+
+func bashHelpListBodyForContext(ctx context.Context) string {
+	hc, ok := interp.LookupHandlerContext(ctx)
+	if !ok {
+		return bashHelpListBody
+	}
+	disabled := make(map[string]struct{})
+	for _, name := range completionutil.BuiltinNames("") {
+		if hc.IsBuiltinDisabled(name) {
+			disabled[name] = struct{}{}
+		}
+	}
+	if len(disabled) == 0 {
+		return bashHelpListBody
+	}
+	lines := strings.Split(bashHelpListBody, "\n")
+	for i, line := range lines {
+		left, sep, right, ok := splitHelpListColumns(line)
+		if !ok {
+			lines[i], _ = markDisabledHelpField(line, disabled)
+			continue
+		}
+		var leftChanged, rightChanged bool
+		left, leftChanged = markDisabledHelpField(left, disabled)
+		right, rightChanged = markDisabledHelpField(right, disabled)
+		if leftChanged && sep != "" {
+			sep = sep[:len(sep)-1]
+		}
+		if rightChanged && sep != "" {
+			sep = sep[1:]
+		}
+		lines[i] = left + sep + right
+	}
+	return strings.Join(lines, "\n")
+}
+
+func splitHelpListColumns(line string) (left, sep, right string, ok bool) {
+	runStart := -1
+	for i := 0; i < len(line); i++ {
+		if line[i] != ' ' {
+			runStart = -1
+			continue
+		}
+		if runStart < 0 {
+			runStart = i
+			continue
+		}
+		j := i + 1
+		for j < len(line) && line[j] == ' ' {
+			j++
+		}
+		return line[:runStart], line[runStart:j], line[j:], true
+	}
+	return "", "", "", false
+}
+
+func markDisabledHelpField(field string, disabled map[string]struct{}) (string, bool) {
+	trimmed := strings.TrimLeft(field, " ")
+	if trimmed == "" {
+		return field, false
+	}
+	name := strings.Fields(trimmed)[0]
+	if _, ok := disabled[name]; !ok {
+		return field, false
+	}
+	return "*" + trimmed, true
 }
 
 func lookupHelpTopic(name string) (helpTopic, bool) {

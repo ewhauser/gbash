@@ -120,6 +120,41 @@ func TestSubshellCommandHashIsolation(t *testing.T) {
 	}
 }
 
+func TestSubshellDisabledBuiltinIsolation(t *testing.T) {
+	t.Parallel()
+
+	runner := newTestSubshellCOWRunner(t)
+	runner.ensureOwnDisabledBuiltins()
+	runner.disabledBuiltins["printf"] = true
+
+	child := runner.subshell(true)
+
+	runner.ensureOwnDisabledBuiltins()
+	runner.disabledBuiltins["eval"] = true
+	child.ensureOwnDisabledBuiltins()
+	delete(child.disabledBuiltins, "printf")
+	child.disabledBuiltins["echo"] = true
+
+	if !runner.isBuiltinDisabled("printf") {
+		t.Fatalf("parent printf builtin should remain disabled")
+	}
+	if !runner.isBuiltinDisabled("eval") {
+		t.Fatalf("parent eval builtin should be disabled")
+	}
+	if runner.isBuiltinDisabled("echo") {
+		t.Fatalf("parent echo builtin should remain enabled")
+	}
+	if child.isBuiltinDisabled("printf") {
+		t.Fatalf("child printf builtin should be re-enabled")
+	}
+	if child.isBuiltinDisabled("eval") {
+		t.Fatalf("child eval builtin should remain enabled")
+	}
+	if !child.isBuiltinDisabled("echo") {
+		t.Fatalf("child echo builtin should be disabled")
+	}
+}
+
 func TestSubshellNamedFDReleaseIsolation(t *testing.T) {
 	t.Parallel()
 

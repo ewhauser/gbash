@@ -519,14 +519,14 @@ func (m *core) callHandler(exec *Execution, budget *executionBudget) interp.Call
 			}
 		}
 		if !fromBootstrap {
-			commandInfo := traceCommandInfo(args, interp.IsBuiltin(args[0]), &commandTraceResolution{
+			commandInfo := traceCommandInfo(args, hc.IsBuiltin(args[0]), &commandTraceResolution{
 				Dir:      hc.Dir,
 				Position: hc.Pos.String(),
 			})
 			recordCommand(exec.Trace, trace.EventCallExpanded, commandInfo)
 		}
 
-		if interp.IsBuiltin(args[0]) && shouldRewriteBuiltin(args[0]) {
+		if hc.IsBuiltin(args[0]) && shouldRewriteBuiltin(args[0]) {
 			if _, ok := lookupRegistryCommand(exec, args[0]); ok {
 				rewritten := make([]string, len(args))
 				copy(rewritten[1:], args[1:])
@@ -535,12 +535,12 @@ func (m *core) callHandler(exec *Execution, budget *executionBudget) interp.Call
 			}
 		}
 
-		if interp.IsBuiltin(args[0]) {
+		if hc.IsBuiltin(args[0]) {
 			if err := allowBuiltin(ctx, exec.Policy, args[0], args); err != nil {
 				recordPolicyDenied(exec.Trace, err, "", "", args[0], "builtin")
 				return nil, shellFailure(ctx, 126, "%v", err)
 			}
-			for _, invocation := range wrappedBuiltinInvocations(args) {
+			for _, invocation := range wrappedBuiltinInvocations(hc, args) {
 				if err := allowBuiltin(ctx, exec.Policy, invocation.name, invocation.argv); err != nil {
 					recordPolicyDenied(exec.Trace, err, "", "", invocation.name, "builtin")
 					return nil, shellFailure(ctx, 126, "%v", err)
@@ -567,14 +567,14 @@ type builtinInvocation struct {
 	argv []string
 }
 
-func wrappedBuiltinInvocations(args []string) []builtinInvocation {
+func wrappedBuiltinInvocations(hc *interp.HandlerContext, args []string) []builtinInvocation {
 	current := append([]string(nil), args...)
 	invocations := make([]builtinInvocation, 0, 2)
 	for len(current) > 0 {
 		switch current[0] {
 		case "builtin":
 			next := builtinCommandTarget(current[1:])
-			if len(next) == 0 || !interp.IsBuiltin(next[0]) {
+			if len(next) == 0 || !hc.IsBuiltin(next[0]) {
 				return invocations
 			}
 			current = append([]string(nil), next...)
@@ -584,7 +584,7 @@ func wrappedBuiltinInvocations(args []string) []builtinInvocation {
 			})
 		case "command":
 			next := commandBuiltinTarget(current[1:])
-			if len(next) == 0 || !interp.IsBuiltin(next[0]) {
+			if len(next) == 0 || !hc.IsBuiltin(next[0]) {
 				return invocations
 			}
 			current = append([]string(nil), next...)

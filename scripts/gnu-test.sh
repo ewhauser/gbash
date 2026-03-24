@@ -136,16 +136,71 @@ case "\$host_pwd" in
   "\$root_dir"/*) sandbox_cwd="/\${host_pwd#"\$root_dir"/}" ;;
 esac
 gbash_bin=\$root_dir/build-aux/gbash-harness/gbash
+gnu_disabled_builtins() {
+  jbgo_programs_file=\$root_dir/build-aux/gbash-harness/gnu-programs.txt
+  [ -f "\$jbgo_programs_file" ] || return 0
+  while IFS= read -r jbgo_name || [ -n "\$jbgo_name" ]; do
+    case "\$jbgo_name" in
+      "["|echo|false|printf|pwd|test|true)
+        printf '%s\n' "\$jbgo_name"
+        ;;
+    esac
+  done < "\$jbgo_programs_file"
+}
 PWD=\$sandbox_cwd
 GBASH_UMASK=\$(umask)
 export GBASH_UMASK
 export PWD
 GBASH_UMASK=\$(umask)
+jbgo_disabled_builtins=\$(gnu_disabled_builtins)
 EOF
-  if [[ -n "$command_name" ]]; then
-    printf '%s\n' "exec \"\$gbash_bin\" --readwrite-root \"\$root_dir\" --cwd \"\$sandbox_cwd\" -c 'GBASH_UMASK=\$1; export GBASH_UMASK; POSIXLY_CORRECT=\$2; if [ -n \"\$POSIXLY_CORRECT\" ]; then export POSIXLY_CORRECT; else unset POSIXLY_CORRECT; fi; shift 2; exec \"\$@\"' _ \"\$GBASH_UMASK\" \"\${POSIXLY_CORRECT-}\" $command_name \"\$@\"" >> "$path"
+  if [[ -z "$command_name" ]]; then
+    cat >> "$path" <<EOF
+if [ -e /build-aux/gbash-harness/gnu-programs.txt ]; then
+  if [ "\${1-}" = "-c" ]; then
+    jbgo_command_string=\${2-}
+    shift 2
+    if [ \$# -gt 0 ]; then
+      jbgo_shell_name=\$1
+      shift
+    else
+      jbgo_shell_name=$name
+    fi
+    jbgo_enable_prefix='if [ -n "\$1" ]; then for jbgo_builtin_ in \$1; do enable -n "\$jbgo_builtin_"; done; fi; shift; '
+    exec "/bin/$name" -c "\$jbgo_enable_prefix\$jbgo_command_string" "\$jbgo_shell_name" "\$jbgo_disabled_builtins" "\$@"
+  fi
+  exec "/bin/$name" "\$@"
+fi
+
+if [ "\${1-}" = "-c" ]; then
+  jbgo_command_string=\${2-}
+  shift 2
+  if [ \$# -gt 0 ]; then
+    jbgo_shell_name=\$1
+    shift
   else
-    printf '%s\n' 'exec "$gbash_bin" --readwrite-root "$root_dir" --cwd "$sandbox_cwd" -c '\''GBASH_UMASK=$1; export GBASH_UMASK; POSIXLY_CORRECT=$2; if [ -n "$POSIXLY_CORRECT" ]; then export POSIXLY_CORRECT; else unset POSIXLY_CORRECT; fi; shift 2; exec "$@"'\'' _ "$GBASH_UMASK" "${POSIXLY_CORRECT-}" "$@"' >> "$path"
+    jbgo_shell_name=$name
+  fi
+  if [ -n "\${POSIXLY_CORRECT-}" ]; then
+    export POSIXLY_CORRECT
+  else
+    unset POSIXLY_CORRECT
+  fi
+  jbgo_enable_prefix='if [ -n "\$1" ]; then for jbgo_builtin_ in \$1; do enable -n "\$jbgo_builtin_"; done; fi; shift; '
+  exec "\$gbash_bin" --readwrite-root "\$root_dir" --cwd "\$sandbox_cwd" -c "\$jbgo_enable_prefix\$jbgo_command_string" "\$jbgo_shell_name" "\$jbgo_disabled_builtins" "\$@"
+fi
+EOF
+  else
+    cat >> "$path" <<EOF
+if [ -e /build-aux/gbash-harness/gnu-programs.txt ]; then
+  exec "/bin/$command_name" "\$@"
+fi
+EOF
+  fi
+  if [[ -n "$command_name" ]]; then
+    printf '%s\n' "exec \"\$gbash_bin\" --readwrite-root \"\$root_dir\" --cwd \"\$sandbox_cwd\" -c 'GBASH_UMASK=\$1; export GBASH_UMASK; POSIXLY_CORRECT=\$2; if [ -n \"\$POSIXLY_CORRECT\" ]; then export POSIXLY_CORRECT; else unset POSIXLY_CORRECT; fi; jbgo_disabled_builtins_=\$3; shift 3; if [ -n \"\$jbgo_disabled_builtins_\" ]; then for jbgo_builtin_ in \$jbgo_disabled_builtins_; do enable -n \"\$jbgo_builtin_\"; done; fi; exec \"\$@\"' _ \"\$GBASH_UMASK\" \"\${POSIXLY_CORRECT-}\" \"\$jbgo_disabled_builtins\" $command_name \"\$@\"" >> "$path"
+  else
+    printf '%s\n' 'exec "$gbash_bin" --readwrite-root "$root_dir" --cwd "$sandbox_cwd" -c '\''GBASH_UMASK=$1; export GBASH_UMASK; POSIXLY_CORRECT=$2; if [ -n "$POSIXLY_CORRECT" ]; then export POSIXLY_CORRECT; else unset POSIXLY_CORRECT; fi; jbgo_disabled_builtins_=$3; shift 3; if [ -n "$jbgo_disabled_builtins_" ]; then for jbgo_builtin_ in $jbgo_disabled_builtins_; do enable -n "$jbgo_builtin_"; done; fi; exec "$@"'\'' _ "$GBASH_UMASK" "${POSIXLY_CORRECT-}" "$jbgo_disabled_builtins" "$@"' >> "$path"
   fi
   chmod 755 "$path"
 }
@@ -197,15 +252,66 @@ write_wrapper() {
     printf '%s\n' '  "$root_dir"/*) sandbox_cwd="/${host_pwd#"$root_dir"/}" ;;'
     printf '%s\n' 'esac'
     printf '%s\n' 'gbash_bin=$root_dir/build-aux/gbash-harness/gbash'
+    printf '%s\n' 'gnu_disabled_builtins() {'
+    printf '%s\n' '  jbgo_programs_file=$root_dir/build-aux/gbash-harness/gnu-programs.txt'
+    printf '%s\n' '  [ -f "$jbgo_programs_file" ] || return 0'
+    printf '%s\n' '  while IFS= read -r jbgo_name || [ -n "$jbgo_name" ]; do'
+    printf '%s\n' '    case "$jbgo_name" in'
+    printf '%s\n' '      "["|echo|false|printf|pwd|test|true)'
+    printf '%s\n' '        printf "%s\n" "$jbgo_name"'
+    printf '%s\n' '        ;;'
+    printf '%s\n' '    esac'
+    printf '%s\n' '  done < "$jbgo_programs_file"'
+    printf '%s\n' '}'
     printf '%s\n' 'PWD=$sandbox_cwd'
     printf '%s\n' 'GBASH_UMASK=$(umask)'
     printf '%s\n' 'export GBASH_UMASK'
     printf '%s\n' 'export PWD'
     printf '%s\n' 'GBASH_UMASK=$(umask)'
-    if [ -n "$command_name" ]; then
-      printf '%s\n' "exec \"\$gbash_bin\" --readwrite-root \"\$root_dir\" --cwd \"\$sandbox_cwd\" -c 'GBASH_UMASK=\$1; export GBASH_UMASK; POSIXLY_CORRECT=\$2; if [ -n \"\$POSIXLY_CORRECT\" ]; then export POSIXLY_CORRECT; else unset POSIXLY_CORRECT; fi; shift 2; exec \"\$@\"' _ \"\$GBASH_UMASK\" \"\${POSIXLY_CORRECT-}\" $command_name \"\$@\""
+    printf '%s\n' 'jbgo_disabled_builtins=$(gnu_disabled_builtins)'
+    if [ -z "$command_name" ]; then
+      printf '%s\n' 'if [ -e /build-aux/gbash-harness/gnu-programs.txt ]; then'
+      printf '%s\n' '  if [ "${1-}" = "-c" ]; then'
+      printf '%s\n' '    jbgo_command_string=${2-}'
+      printf '%s\n' '    shift 2'
+      printf '%s\n' '    if [ $# -gt 0 ]; then'
+      printf '%s\n' '      jbgo_shell_name=$1'
+      printf '%s\n' '      shift'
+      printf '%s\n' '    else'
+      printf '%s\n' "      jbgo_shell_name=$name"
+      printf '%s\n' '    fi'
+      printf '%s\n' '    jbgo_enable_prefix='\''if [ -n "$1" ]; then for jbgo_builtin_ in $1; do enable -n "$jbgo_builtin_"; done; fi; shift; '\'''
+      printf '%s\n' "    exec \"/bin/$name\" -c \"\$jbgo_enable_prefix\$jbgo_command_string\" \"\$jbgo_shell_name\" \"\$jbgo_disabled_builtins\" \"\$@\""
+      printf '%s\n' '  fi'
+      printf '%s\n' "  exec \"/bin/$name\" \"\$@\""
+      printf '%s\n' 'fi'
+
+      printf '%s\n' 'if [ "${1-}" = "-c" ]; then'
+      printf '%s\n' '  jbgo_command_string=${2-}'
+      printf '%s\n' '  shift 2'
+      printf '%s\n' '  if [ $# -gt 0 ]; then'
+      printf '%s\n' '    jbgo_shell_name=$1'
+      printf '%s\n' '    shift'
+      printf '%s\n' '  else'
+      printf '%s\n' "    jbgo_shell_name=$name"
+      printf '%s\n' '  fi'
+      printf '%s\n' '  if [ -n "${POSIXLY_CORRECT-}" ]; then'
+      printf '%s\n' '    export POSIXLY_CORRECT'
+      printf '%s\n' '  else'
+      printf '%s\n' '    unset POSIXLY_CORRECT'
+      printf '%s\n' '  fi'
+      printf '%s\n' '  jbgo_enable_prefix='\''if [ -n "$1" ]; then for jbgo_builtin_ in $1; do enable -n "$jbgo_builtin_"; done; fi; shift; '\'''
+      printf '%s\n' '  exec "$gbash_bin" --readwrite-root "$root_dir" --cwd "$sandbox_cwd" -c "$jbgo_enable_prefix$jbgo_command_string" "$jbgo_shell_name" "$jbgo_disabled_builtins" "$@"'
+      printf '%s\n' 'fi'
     else
-      printf '%s\n' 'exec "$gbash_bin" --readwrite-root "$root_dir" --cwd "$sandbox_cwd" -c '\''GBASH_UMASK=$1; export GBASH_UMASK; POSIXLY_CORRECT=$2; if [ -n "$POSIXLY_CORRECT" ]; then export POSIXLY_CORRECT; else unset POSIXLY_CORRECT; fi; shift 2; exec "$@"'\'' _ "$GBASH_UMASK" "${POSIXLY_CORRECT-}" "$@"'
+      printf '%s\n' 'if [ -e /build-aux/gbash-harness/gnu-programs.txt ]; then'
+      printf '%s\n' "  exec \"/bin/$command_name\" \"\$@\""
+      printf '%s\n' 'fi'
+    fi
+    if [ -n "$command_name" ]; then
+      printf '%s\n' "exec \"\$gbash_bin\" --readwrite-root \"\$root_dir\" --cwd \"\$sandbox_cwd\" -c 'GBASH_UMASK=\$1; export GBASH_UMASK; POSIXLY_CORRECT=\$2; if [ -n \"\$POSIXLY_CORRECT\" ]; then export POSIXLY_CORRECT; else unset POSIXLY_CORRECT; fi; jbgo_disabled_builtins_=\$3; shift 3; if [ -n \"\$jbgo_disabled_builtins_\" ]; then for jbgo_builtin_ in \$jbgo_disabled_builtins_; do enable -n \"\$jbgo_builtin_\"; done; fi; exec \"\$@\"' _ \"\$GBASH_UMASK\" \"\${POSIXLY_CORRECT-}\" \"\$jbgo_disabled_builtins\" $command_name \"\$@\""
+    else
+      printf '%s\n' 'exec "$gbash_bin" --readwrite-root "$root_dir" --cwd "$sandbox_cwd" -c '\''GBASH_UMASK=$1; export GBASH_UMASK; POSIXLY_CORRECT=$2; if [ -n "$POSIXLY_CORRECT" ]; then export POSIXLY_CORRECT; else unset POSIXLY_CORRECT; fi; jbgo_disabled_builtins_=$3; shift 3; if [ -n "$jbgo_disabled_builtins_" ]; then for jbgo_builtin_ in $jbgo_disabled_builtins_; do enable -n "$jbgo_builtin_"; done; fi; exec "$@"'\'' _ "$GBASH_UMASK" "${POSIXLY_CORRECT-}" "$jbgo_disabled_builtins" "$@"'
     fi
   } > "$path"
   chmod 755 "$path"
