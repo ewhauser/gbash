@@ -89,6 +89,27 @@ teardown() {
   [ "$output" != "</definitely/outside>" ]
 }
 
+@test "gnu wrappers canonicalize symlinked TMPDIR spellings under the mounted tree" {
+  mkdir -p "${WORKDIR}/tmp/spelling"
+  ln -s "${WORKDIR}" "${TEST_TEMP_DIR}/workdir-link"
+
+  run env PATH=/src:/bin:/usr/bin TMPDIR="${TEST_TEMP_DIR}/workdir-link/tmp/spelling" "${WORKDIR}/src/sh" -c \
+    "printf '<%s>' \"\${TMPDIR-unset}\""
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "</tmp/spelling>" ]
+}
+
+@test "nested gnu wrappers preserve in-sandbox absolute TMPDIR values" {
+  mkdir -p "${WORKDIR}/tmp/nested"
+
+  run env PATH=/src:/bin:/usr/bin TMPDIR="${WORKDIR}/tmp/nested" "${WORKDIR}/src/sh" -c \
+    "PATH=/src:/bin:/usr/bin; export PATH; sh -c 'printf \"<%s>\" \"\${TMPDIR-unset}\"'"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "</tmp/nested>" ]
+}
+
 @test "nested gnu shell wrappers use external commands after disabling builtins" {
   run env PATH=/src:/bin:/usr/bin "${WORKDIR}/src/sh" -c \
     "PATH=/src:/bin:/usr/bin; export PATH; command -v sh; foo=old; printf -v foo %s hi; printf '\\nparent=<%s>\\n' \"\$foo\"; sh -c 'command -v sh; foo=old; printf -v foo %s hi; printf \"\\\\nchild=<%s>\\\\n\" \"\$foo\"; command -v [ echo false printf pwd test true'"

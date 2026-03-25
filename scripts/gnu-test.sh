@@ -204,15 +204,46 @@ GBASH_COMPAT_ROOT=\$root_dir
 export GBASH_UMASK
 export GBASH_COMPAT_ROOT
 export PWD
+gnu_canonicalize_temp_path() {
+  jbgo_path=\${1-}
+  case "\$jbgo_path" in
+    /*)
+      if [ -d "\$jbgo_path" ]; then
+        CDPATH= cd -- "\$jbgo_path" && pwd -P
+        return
+      fi
+      jbgo_parent=\${jbgo_path%/*}
+      jbgo_base=\${jbgo_path##*/}
+      if [ -z "\$jbgo_parent" ] || [ "\$jbgo_parent" = "\$jbgo_path" ]; then
+        jbgo_parent=/
+      fi
+      [ -d "\$jbgo_parent" ] || return 1
+      jbgo_parent=\$(CDPATH= cd -- "\$jbgo_parent" && pwd -P)
+      case "\$jbgo_parent" in
+        /) printf '/%s\n' "\$jbgo_base" ;;
+        *) printf '%s/%s\n' "\$jbgo_parent" "\$jbgo_base" ;;
+      esac
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 gnu_sandbox_temp_path() {
   jbgo_value=\${1-}
   [ -n "\$jbgo_value" ] || return 1
   case "\$jbgo_value" in
     /*)
-      case "\$jbgo_value" in
-        "\$root_dir") printf '/\n' ;;
-        "\$root_dir"/*) printf '/%s\n' "\${jbgo_value#"\$root_dir"/}" ;;
-        *) return 1 ;;
+      jbgo_value=\$(gnu_canonicalize_temp_path "\$jbgo_value") || return 1
+      case "\$root_dir" in
+        /) printf '%s\n' "\$jbgo_value" ;;
+        *)
+          case "\$jbgo_value" in
+            "\$root_dir") printf '/\n' ;;
+            "\$root_dir"/*) printf '/%s\n' "\${jbgo_value#"\$root_dir"/}" ;;
+            *) return 1 ;;
+          esac
+          ;;
       esac
       ;;
     *)
@@ -392,15 +423,46 @@ write_wrapper() {
     printf '%s\n' 'export GBASH_UMASK'
     printf '%s\n' 'export GBASH_COMPAT_ROOT'
     printf '%s\n' 'export PWD'
+    printf '%s\n' 'gnu_canonicalize_temp_path() {'
+    printf '%s\n' '  jbgo_path=${1-}'
+    printf '%s\n' '  case "$jbgo_path" in'
+    printf '%s\n' '    /*)'
+    printf '%s\n' '      if [ -d "$jbgo_path" ]; then'
+    printf '%s\n' '        CDPATH= cd -- "$jbgo_path" && pwd -P'
+    printf '%s\n' '        return'
+    printf '%s\n' '      fi'
+    printf '%s\n' '      jbgo_parent=${jbgo_path%/*}'
+    printf '%s\n' '      jbgo_base=${jbgo_path##*/}'
+    printf '%s\n' '      if [ -z "$jbgo_parent" ] || [ "$jbgo_parent" = "$jbgo_path" ]; then'
+    printf '%s\n' '        jbgo_parent=/'
+    printf '%s\n' '      fi'
+    printf '%s\n' '      [ -d "$jbgo_parent" ] || return 1'
+    printf '%s\n' '      jbgo_parent=$(CDPATH= cd -- "$jbgo_parent" && pwd -P)'
+    printf '%s\n' '      case "$jbgo_parent" in'
+    printf '%s\n' '        /) printf "/%s\n" "$jbgo_base" ;;'
+    printf '%s\n' '        *) printf "%s/%s\n" "$jbgo_parent" "$jbgo_base" ;;'
+    printf '%s\n' '      esac'
+    printf '%s\n' '      ;;'
+    printf '%s\n' '    *)'
+    printf '%s\n' '      return 1'
+    printf '%s\n' '      ;;'
+    printf '%s\n' '  esac'
+    printf '%s\n' '}'
     printf '%s\n' 'gnu_sandbox_temp_path() {'
     printf '%s\n' '  jbgo_value=${1-}'
     printf '%s\n' '  [ -n "$jbgo_value" ] || return 1'
     printf '%s\n' '  case "$jbgo_value" in'
     printf '%s\n' '    /*)'
-    printf '%s\n' '      case "$jbgo_value" in'
-    printf '%s\n' '        "$root_dir") printf "/\n" ;;'
-    printf '%s\n' '        "$root_dir"/*) printf "/%s\n" "${jbgo_value#"$root_dir"/}" ;;'
-    printf '%s\n' '        *) return 1 ;;'
+    printf '%s\n' '      jbgo_value=$(gnu_canonicalize_temp_path "$jbgo_value") || return 1'
+    printf '%s\n' '      case "$root_dir" in'
+    printf '%s\n' '        /) printf "%s\n" "$jbgo_value" ;;'
+    printf '%s\n' '        *)'
+    printf '%s\n' '          case "$jbgo_value" in'
+    printf '%s\n' '            "$root_dir") printf "/\n" ;;'
+    printf '%s\n' '            "$root_dir"/*) printf "/%s\n" "${jbgo_value#"$root_dir"/}" ;;'
+    printf '%s\n' '            *) return 1 ;;'
+    printf '%s\n' '          esac'
+    printf '%s\n' '          ;;'
     printf '%s\n' '      esac'
     printf '%s\n' '      ;;'
     printf '%s\n' '    *)'
