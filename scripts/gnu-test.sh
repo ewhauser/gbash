@@ -9,7 +9,7 @@ GNU_RESULTS_DIR=${GNU_RESULTS_DIR:-"$REPO_ROOT/.cache/gnu/results/docker-latest"
 GNU_GBASH_BIN=${GNU_GBASH_BIN:-"$GNU_CACHE_DIR/bin/gbash"}
 GNU_SOURCE_DIR=${GNU_SOURCE_DIR:-/opt/gnu/coreutils-9.10}
 GNU_GBASH_MAX_FILE_BYTES=${GNU_GBASH_MAX_FILE_BYTES:-52428800}
-GNU_GBASH_INHERIT_ENV=${GNU_GBASH_INHERIT_ENV:-LC_ALL,LC_CTYPE,LANG,LANGUAGE}
+GNU_GBASH_INHERIT_ENV=${GNU_GBASH_INHERIT_ENV:-LC_ALL,LC_CTYPE,LANG,LANGUAGE,TMP,TEMP,TMPDIR}
 
 resolve_repo_path() {
   local path=$1
@@ -96,6 +96,8 @@ write_launcher() {
   local workdir=$1
   local gbash_bin=$2
   local hook_dir=$workdir/build-aux/gbash-harness
+  local system_tmp_dir
+  system_tmp_dir=$(CDPATH= cd -- "$(dirname "$workdir")" && pwd -P)
   mkdir -p "$hook_dir"
 cat > "$hook_dir/gbash" <<EOF
 #!/bin/sh
@@ -145,10 +147,10 @@ jbgo_inherit_env_names() {
 
 jbgo_inherit_env=\$(jbgo_inherit_env_names)
 if [ -n "\$jbgo_inherit_env" ]; then
-  exec $(shell_quote "$gbash_bin") --max-file-bytes $(shell_quote "$GNU_GBASH_MAX_FILE_BYTES") --inherit-env "\$jbgo_inherit_env" "\$@"
+  GBASH_SYSTEM_TMPDIR=$(shell_quote "$system_tmp_dir") exec $(shell_quote "$gbash_bin") --max-file-bytes $(shell_quote "$GNU_GBASH_MAX_FILE_BYTES") --inherit-env "\$jbgo_inherit_env" "\$@"
 fi
 
-exec $(shell_quote "$gbash_bin") --max-file-bytes $(shell_quote "$GNU_GBASH_MAX_FILE_BYTES") "\$@"
+GBASH_SYSTEM_TMPDIR=$(shell_quote "$system_tmp_dir") exec $(shell_quote "$gbash_bin") --max-file-bytes $(shell_quote "$GNU_GBASH_MAX_FILE_BYTES") "\$@"
 EOF
   chmod 755 "$hook_dir/gbash"
 }
@@ -202,6 +204,65 @@ GBASH_COMPAT_ROOT=\$root_dir
 export GBASH_UMASK
 export GBASH_COMPAT_ROOT
 export PWD
+gnu_canonicalize_temp_path() {
+  jbgo_path=\${1-}
+  case "\$jbgo_path" in
+    /*)
+      if [ -d "\$jbgo_path" ]; then
+        CDPATH= cd -- "\$jbgo_path" && pwd -P
+        return
+      fi
+      jbgo_parent=\${jbgo_path%/*}
+      jbgo_base=\${jbgo_path##*/}
+      if [ -z "\$jbgo_parent" ] || [ "\$jbgo_parent" = "\$jbgo_path" ]; then
+        jbgo_parent=/
+      fi
+      [ -d "\$jbgo_parent" ] || return 1
+      jbgo_parent=\$(CDPATH= cd -- "\$jbgo_parent" && pwd -P)
+      case "\$jbgo_parent" in
+        /) printf '/%s\n' "\$jbgo_base" ;;
+        *) printf '%s/%s\n' "\$jbgo_parent" "\$jbgo_base" ;;
+      esac
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+gnu_sandbox_temp_path() {
+  jbgo_value=\${1-}
+  [ -n "\$jbgo_value" ] || return 1
+  case "\$jbgo_value" in
+    /*)
+      jbgo_value=\$(gnu_canonicalize_temp_path "\$jbgo_value") || return 1
+      case "\$root_dir" in
+        /) printf '%s\n' "\$jbgo_value" ;;
+        *)
+          case "\$jbgo_value" in
+            "\$root_dir") printf '/\n' ;;
+            "\$root_dir"/*) printf '/%s\n' "\${jbgo_value#"\$root_dir"/}" ;;
+            *) return 1 ;;
+          esac
+          ;;
+      esac
+      ;;
+    *)
+      printf '%s\n' "\$jbgo_value"
+      ;;
+  esac
+}
+gnu_export_temp_var() {
+  jbgo_name=\$1
+  jbgo_value=\$2
+  if jbgo_mapped=\$(gnu_sandbox_temp_path "\$jbgo_value"); then
+    export "\$jbgo_name=\$jbgo_mapped"
+  else
+    unset "\$jbgo_name"
+  fi
+}
+gnu_export_temp_var TMP "\${TMP-}"
+gnu_export_temp_var TEMP "\${TEMP-}"
+gnu_export_temp_var TMPDIR "\${TMPDIR-}"
 GBASH_UMASK=\$(umask)
 jbgo_disabled_builtins=\$(gnu_disabled_builtins)
 EOF
@@ -362,6 +423,65 @@ write_wrapper() {
     printf '%s\n' 'export GBASH_UMASK'
     printf '%s\n' 'export GBASH_COMPAT_ROOT'
     printf '%s\n' 'export PWD'
+    printf '%s\n' 'gnu_canonicalize_temp_path() {'
+    printf '%s\n' '  jbgo_path=${1-}'
+    printf '%s\n' '  case "$jbgo_path" in'
+    printf '%s\n' '    /*)'
+    printf '%s\n' '      if [ -d "$jbgo_path" ]; then'
+    printf '%s\n' '        CDPATH= cd -- "$jbgo_path" && pwd -P'
+    printf '%s\n' '        return'
+    printf '%s\n' '      fi'
+    printf '%s\n' '      jbgo_parent=${jbgo_path%/*}'
+    printf '%s\n' '      jbgo_base=${jbgo_path##*/}'
+    printf '%s\n' '      if [ -z "$jbgo_parent" ] || [ "$jbgo_parent" = "$jbgo_path" ]; then'
+    printf '%s\n' '        jbgo_parent=/'
+    printf '%s\n' '      fi'
+    printf '%s\n' '      [ -d "$jbgo_parent" ] || return 1'
+    printf '%s\n' '      jbgo_parent=$(CDPATH= cd -- "$jbgo_parent" && pwd -P)'
+    printf '%s\n' '      case "$jbgo_parent" in'
+    printf '%s\n' '        /) printf "/%s\n" "$jbgo_base" ;;'
+    printf '%s\n' '        *) printf "%s/%s\n" "$jbgo_parent" "$jbgo_base" ;;'
+    printf '%s\n' '      esac'
+    printf '%s\n' '      ;;'
+    printf '%s\n' '    *)'
+    printf '%s\n' '      return 1'
+    printf '%s\n' '      ;;'
+    printf '%s\n' '  esac'
+    printf '%s\n' '}'
+    printf '%s\n' 'gnu_sandbox_temp_path() {'
+    printf '%s\n' '  jbgo_value=${1-}'
+    printf '%s\n' '  [ -n "$jbgo_value" ] || return 1'
+    printf '%s\n' '  case "$jbgo_value" in'
+    printf '%s\n' '    /*)'
+    printf '%s\n' '      jbgo_value=$(gnu_canonicalize_temp_path "$jbgo_value") || return 1'
+    printf '%s\n' '      case "$root_dir" in'
+    printf '%s\n' '        /) printf "%s\n" "$jbgo_value" ;;'
+    printf '%s\n' '        *)'
+    printf '%s\n' '          case "$jbgo_value" in'
+    printf '%s\n' '            "$root_dir") printf "/\n" ;;'
+    printf '%s\n' '            "$root_dir"/*) printf "/%s\n" "${jbgo_value#"$root_dir"/}" ;;'
+    printf '%s\n' '            *) return 1 ;;'
+    printf '%s\n' '          esac'
+    printf '%s\n' '          ;;'
+    printf '%s\n' '      esac'
+    printf '%s\n' '      ;;'
+    printf '%s\n' '    *)'
+    printf '%s\n' '      printf "%s\n" "$jbgo_value"'
+    printf '%s\n' '      ;;'
+    printf '%s\n' '  esac'
+    printf '%s\n' '}'
+    printf '%s\n' 'gnu_export_temp_var() {'
+    printf '%s\n' '  jbgo_name=$1'
+    printf '%s\n' '  jbgo_value=$2'
+    printf '%s\n' '  if jbgo_mapped=$(gnu_sandbox_temp_path "$jbgo_value"); then'
+    printf '%s\n' '    export "$jbgo_name=$jbgo_mapped"'
+    printf '%s\n' '  else'
+    printf '%s\n' '    unset "$jbgo_name"'
+    printf '%s\n' '  fi'
+    printf '%s\n' '}'
+    printf '%s\n' 'gnu_export_temp_var TMP "${TMP-}"'
+    printf '%s\n' 'gnu_export_temp_var TEMP "${TEMP-}"'
+    printf '%s\n' 'gnu_export_temp_var TMPDIR "${TMPDIR-}"'
     printf '%s\n' 'GBASH_UMASK=$(umask)'
     printf '%s\n' 'jbgo_disabled_builtins=$(gnu_disabled_builtins)'
     if [ -z "$command_name" ]; then

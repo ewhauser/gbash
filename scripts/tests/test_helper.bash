@@ -6,14 +6,13 @@
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPTS_DIR="${REPO_ROOT}/scripts"
 
-# Build gbash if not already built or if source is newer than the binary.
+# Build gbash for every Bats file so the helper never runs a stale binary.
+# `go build` is cache-backed, so repeated loads stay cheap.
 GBASH_BIN="${REPO_ROOT}/scripts/tests/.gbash-test-bin"
-if [[ ! -x "${GBASH_BIN}" ]] || [[ "${REPO_ROOT}/cmd/gbash/main.go" -nt "${GBASH_BIN}" ]]; then
-	(cd "${REPO_ROOT}" && go build -o "${GBASH_BIN}" ./cmd/gbash/) || {
-		echo "failed to build gbash" >&2
-		return 1
-	}
-fi
+(cd "${REPO_ROOT}" && go build -o "${GBASH_BIN}" ./cmd/gbash/) || {
+	echo "failed to build gbash" >&2
+	return 1
+}
 
 export GBASH_BIN
 export REPO_ROOT
@@ -24,17 +23,22 @@ setup() {
 	TEST_TEMP_DIR="$(mktemp -d)"
 	SANDBOX="${TEST_TEMP_DIR}/sandbox"
 	STUB_BIN="${SANDBOX}/bin"
+	GBASH_SYSTEM_TMPDIR="${TEST_TEMP_DIR}"
+	export GBASH_SYSTEM_TMPDIR
 	mkdir -p "${STUB_BIN}"
 }
 
 teardown() {
+	unset GBASH_SYSTEM_TMPDIR
 	rm -rf "${TEST_TEMP_DIR}"
 }
 
 # Run a script under gbash with --readwrite-root pointed at the sandbox.
 # Usage: run_gbash <script-path-relative-to-sandbox> [args...]
 run_gbash() {
-	run "${GBASH_BIN}" --readwrite-root "${SANDBOX}" -c "
+	local system_tmp_dir="${GBASH_SYSTEM_TMPDIR:-${TEST_TEMP_DIR:-${SANDBOX%/*}}}"
+	system_tmp_dir="$(CDPATH= cd -- "${system_tmp_dir}" && pwd -P)" || return 1
+	run env GBASH_SYSTEM_TMPDIR="${system_tmp_dir}" "${GBASH_BIN}" --readwrite-root "${SANDBOX}" -c "
 		export PATH=/bin:/usr/bin
 		cd /
 		$*
