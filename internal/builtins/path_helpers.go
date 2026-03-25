@@ -70,25 +70,6 @@ func formatModeLong(mode stdfs.FileMode) string {
 	return b.String()
 }
 
-func humanizeBytes(size int64) string {
-	const unit = 1024
-	if size < unit {
-		return fmt.Sprintf("%dB", size)
-	}
-	value := float64(size)
-	suffixes := []string{"K", "M", "G", "T"}
-	for _, suffix := range suffixes {
-		value /= unit
-		if value < unit {
-			if value >= 10 {
-				return fmt.Sprintf("%.0f%s", value, suffix)
-			}
-			return fmt.Sprintf("%.1f%s", value, suffix)
-		}
-	}
-	return fmt.Sprintf("%.1fP", value/unit)
-}
-
 func joinChildPath(parent, child string) string {
 	switch parent {
 	case "", ".":
