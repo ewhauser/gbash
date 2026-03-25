@@ -204,6 +204,34 @@ GBASH_COMPAT_ROOT=\$root_dir
 export GBASH_UMASK
 export GBASH_COMPAT_ROOT
 export PWD
+gnu_sandbox_temp_path() {
+  jbgo_value=\${1-}
+  [ -n "\$jbgo_value" ] || return 1
+  case "\$jbgo_value" in
+    /*)
+      case "\$jbgo_value" in
+        "\$root_dir") printf '/\n' ;;
+        "\$root_dir"/*) printf '/%s\n' "\${jbgo_value#"\$root_dir"/}" ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *)
+      printf '%s\n' "\$jbgo_value"
+      ;;
+  esac
+}
+gnu_export_temp_var() {
+  jbgo_name=\$1
+  jbgo_value=\$2
+  if jbgo_mapped=\$(gnu_sandbox_temp_path "\$jbgo_value"); then
+    export "\$jbgo_name=\$jbgo_mapped"
+  else
+    unset "\$jbgo_name"
+  fi
+}
+gnu_export_temp_var TMP "\${TMP-}"
+gnu_export_temp_var TEMP "\${TEMP-}"
+gnu_export_temp_var TMPDIR "\${TMPDIR-}"
 GBASH_UMASK=\$(umask)
 jbgo_disabled_builtins=\$(gnu_disabled_builtins)
 EOF
@@ -364,6 +392,34 @@ write_wrapper() {
     printf '%s\n' 'export GBASH_UMASK'
     printf '%s\n' 'export GBASH_COMPAT_ROOT'
     printf '%s\n' 'export PWD'
+    printf '%s\n' 'gnu_sandbox_temp_path() {'
+    printf '%s\n' '  jbgo_value=${1-}'
+    printf '%s\n' '  [ -n "$jbgo_value" ] || return 1'
+    printf '%s\n' '  case "$jbgo_value" in'
+    printf '%s\n' '    /*)'
+    printf '%s\n' '      case "$jbgo_value" in'
+    printf '%s\n' '        "$root_dir") printf "/\n" ;;'
+    printf '%s\n' '        "$root_dir"/*) printf "/%s\n" "${jbgo_value#"$root_dir"/}" ;;'
+    printf '%s\n' '        *) return 1 ;;'
+    printf '%s\n' '      esac'
+    printf '%s\n' '      ;;'
+    printf '%s\n' '    *)'
+    printf '%s\n' '      printf "%s\n" "$jbgo_value"'
+    printf '%s\n' '      ;;'
+    printf '%s\n' '  esac'
+    printf '%s\n' '}'
+    printf '%s\n' 'gnu_export_temp_var() {'
+    printf '%s\n' '  jbgo_name=$1'
+    printf '%s\n' '  jbgo_value=$2'
+    printf '%s\n' '  if jbgo_mapped=$(gnu_sandbox_temp_path "$jbgo_value"); then'
+    printf '%s\n' '    export "$jbgo_name=$jbgo_mapped"'
+    printf '%s\n' '  else'
+    printf '%s\n' '    unset "$jbgo_name"'
+    printf '%s\n' '  fi'
+    printf '%s\n' '}'
+    printf '%s\n' 'gnu_export_temp_var TMP "${TMP-}"'
+    printf '%s\n' 'gnu_export_temp_var TEMP "${TEMP-}"'
+    printf '%s\n' 'gnu_export_temp_var TMPDIR "${TMPDIR-}"'
     printf '%s\n' 'GBASH_UMASK=$(umask)'
     printf '%s\n' 'jbgo_disabled_builtins=$(gnu_disabled_builtins)'
     if [ -z "$command_name" ]; then

@@ -62,12 +62,28 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
-@test "gnu launcher inherits temp-related environment variables" {
+@test "gnu launcher inherits translated temp environment variables" {
   run grep -F -- "--inherit-env 'LC_ALL,LC_CTYPE,LANG,LANGUAGE,TMP,TEMP,TMPDIR'" "${WORKDIR}/build-aux/gbash-harness/gbash"
   [ "$status" -eq 0 ]
 
   run grep -F 'GBASH_SYSTEM_TMPDIR=' "${WORKDIR}/build-aux/gbash-harness/gbash"
   [ "$status" -eq 0 ]
+}
+
+@test "gnu wrappers preserve relative TMPDIR values" {
+  run env PATH=/src:/bin:/usr/bin TMPDIR=. "${WORKDIR}/src/sh" -c \
+    "printf '<%s>' \"\${TMPDIR-unset}\""
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "<.>" ]
+}
+
+@test "gnu wrappers drop host TMPDIR paths outside the mounted tree" {
+  run env PATH=/src:/bin:/usr/bin TMPDIR=/definitely/outside "${WORKDIR}/src/sh" -c \
+    "printf '<%s>' \"\${TMPDIR-unset}\""
+
+  [ "$status" -eq 0 ]
+  [ "$output" != "</definitely/outside>" ]
 }
 
 @test "nested gnu shell wrappers use external commands after disabling builtins" {
