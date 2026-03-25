@@ -721,6 +721,7 @@ func TestRunCLIReadWriteRootAllowsTempRootWhenTMPDIRIsOverridden(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"GO_WANT_GBASH_TMPDIR_HELPER=1",
 		"GBASH_TEST_READWRITE_ROOT="+root,
+		"GBASH_SYSTEM_TMPDIR="+filepath.Dir(root),
 		"TMPDIR=.",
 	)
 	output, err := cmd.CombinedOutput()

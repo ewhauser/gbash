@@ -65,6 +65,9 @@ teardown() {
 @test "gnu launcher inherits temp-related environment variables" {
   run grep -F -- "--inherit-env 'LC_ALL,LC_CTYPE,LANG,LANGUAGE,TMP,TEMP,TMPDIR'" "${WORKDIR}/build-aux/gbash-harness/gbash"
   [ "$status" -eq 0 ]
+
+  run grep -F 'GBASH_SYSTEM_TMPDIR=' "${WORKDIR}/build-aux/gbash-harness/gbash"
+  [ "$status" -eq 0 ]
 }
 
 @test "nested gnu shell wrappers use external commands after disabling builtins" {
