@@ -4,7 +4,16 @@ go 1.26.0
 
 require (
 	github.com/ewhauser/gbash v0.0.27
-	github.com/ewhauser/gomonty v0.0.8
+	github.com/ewhauser/gomonty v0.0.9
+)
+
+require (
+	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/term v0.40.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
 )
 
 replace github.com/ewhauser/gbash => ../..
