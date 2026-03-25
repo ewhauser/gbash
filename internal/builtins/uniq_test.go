@@ -95,3 +95,99 @@ func TestUniqRejectsInvalidGroupCombinations(t *testing.T) {
 		t.Fatalf("Stderr = %q, want group conflict error", got)
 	}
 }
+
+func TestUniqUsesGNUQuotedInvalidMethodDiagnostics(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "uniq --all-repeated=badoption\nuniq --group=badoption\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got := result.Stderr; !strings.Contains(got, "uniq: invalid argument 'badoption' for '--all-repeated'") {
+		t.Fatalf("Stderr = %q, want GNU-style all-repeated diagnostic", got)
+	}
+	if got := result.Stderr; strings.Contains(got, "\"badoption\"") {
+		t.Fatalf("Stderr = %q, want single-quoted operand", got)
+	}
+}
+
+func TestUniqAcceptsOverflowingNumericOptions(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'a\\na\\n\\b' | uniq -d -u -w18446744073709551616\nprintf 'a\\na\\n\\b' | uniq -d -u -w18446744073709551617\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got := result.Stdout; got != "" {
+		t.Fatalf("Stdout = %q, want empty", got)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
+func TestUniqSaturatesSkipCharsWithoutOverflowingIndices(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'a key\\nb key\\n' | uniq -f1 -s18446744073709551616\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "a key\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
+func TestUniqEscapesControlBytesInInvalidMethodDiagnostics(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "bad_nl=$(printf 'bad\\nopt')\nuniq --group=\"$bad_nl\" || true\nbad_esc=$(printf 'bad\\033opt')\nuniq --all-repeated=\"$bad_esc\" || true\nbad_c1=$(printf 'bad\\233opt')\nuniq --group=\"$bad_c1\"\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got := result.Stderr; !strings.Contains(got, "'bad'$'\\n''opt'") {
+		t.Fatalf("Stderr = %q, want escaped control-byte diagnostic", got)
+	}
+	if got := result.Stderr; !strings.Contains(got, "'bad'$'\\033''opt'") {
+		t.Fatalf("Stderr = %q, want escaped ESC diagnostic", got)
+	}
+	if got := result.Stderr; !strings.Contains(got, "'bad'$'\\233''opt'") {
+		t.Fatalf("Stderr = %q, want escaped C1 control diagnostic", got)
+	}
+	if got := result.Stderr; strings.Contains(got, "bad\nopt") {
+		t.Fatalf("Stderr = %q, want escaped control byte, not raw newline", got)
+	}
+	if got := result.Stderr; strings.ContainsRune(got, '\x1b') {
+		t.Fatalf("Stderr = %q, want escaped ESC, not raw control byte", got)
+	}
+	if got := result.Stderr; strings.ContainsRune(got, '\x9b') {
+		t.Fatalf("Stderr = %q, want escaped C1 control byte, not raw control byte", got)
+	}
+}

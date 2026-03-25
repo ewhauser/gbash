@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -208,6 +209,10 @@ func parseUniqMatches(inv *Invocation, matches *ParsedCommand) (uniqOptions, err
 func parseUniqNumericOption(inv *Invocation, optionName, raw string) (int, error) {
 	value, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil {
+		var numErr *strconv.NumError
+		if errors.As(err, &numErr) && errors.Is(numErr.Err, strconv.ErrRange) && isDecimalDigits(raw) {
+			return int(^uint(0) >> 1), nil
+		}
 		return 0, exitf(inv, 1, "uniq: invalid %s: %q", optionName, raw)
 	}
 	if value > uint64(^uint(0)>>1) {
@@ -225,7 +230,7 @@ func parseUniqAllRepeatedMethod(inv *Invocation, value string) (uniqDelimiterMod
 	case "separate":
 		return uniqDelimiterSeparate, nil
 	default:
-		return uniqDelimiterNone, exitf(inv, 1, "uniq: invalid argument %q for '--all-repeated'\nValid arguments are:\n  - 'none'\n  - 'prepend'\n  - 'separate'\nTry 'uniq --help' for more information.", value)
+		return uniqDelimiterNone, exitf(inv, 1, "uniq: invalid argument %s for '--all-repeated'\nValid arguments are:\n  - 'none'\n  - 'prepend'\n  - 'separate'\nTry 'uniq --help' for more information.", uniqInvalidMethodArgument(value))
 	}
 }
 
@@ -240,7 +245,7 @@ func parseUniqGroupMethod(inv *Invocation, value string) (uniqDelimiterMode, err
 	case "both":
 		return uniqDelimiterBoth, nil
 	default:
-		return uniqDelimiterNone, exitf(inv, 1, "uniq: invalid argument %q for '--group'\nValid arguments are:\n  - 'prepend'\n  - 'append'\n  - 'separate'\n  - 'both'\nTry 'uniq --help' for more information.", value)
+		return uniqDelimiterNone, exitf(inv, 1, "uniq: invalid argument %s for '--group'\nValid arguments are:\n  - 'prepend'\n  - 'append'\n  - 'separate'\n  - 'both'\nTry 'uniq --help' for more information.", uniqInvalidMethodArgument(value))
 	}
 }
 
@@ -350,9 +355,10 @@ func uniqReadRecord(reader *bufio.Reader, dst *[]byte, terminator byte) bool {
 func uniqBuildMeta(line []byte, opts *uniqOptions, inv *Invocation) uniqLineMeta {
 	start := uniqSkipFieldsOffset(line, opts.skipFields)
 	if opts.skipChars > 0 {
-		start += opts.skipChars
-		if start > len(line) {
+		if opts.skipChars >= len(line)-start {
 			start = len(line)
+		} else {
+			start += opts.skipChars
 		}
 	}
 	end := len(line)
@@ -360,6 +366,54 @@ func uniqBuildMeta(line []byte, opts *uniqOptions, inv *Invocation) uniqLineMeta
 		end = uniqKeyEndIndex(line, start, opts.checkChars, inv)
 	}
 	return uniqLineMeta{keyStart: start, keyEnd: end}
+}
+
+func uniqInvalidMethodArgument(value string) string {
+	var out strings.Builder
+	start := 0
+	for i := 0; i < len(value); i++ {
+		escaped, ok := uniqEscapedControlByte(value[i])
+		if !ok {
+			continue
+		}
+		if start < i {
+			out.WriteString(quoteGNUOperand(value[start:i]))
+		}
+		out.WriteString("$'")
+		out.WriteString(escaped)
+		out.WriteByte('\'')
+		start = i + 1
+	}
+	if out.Len() == 0 {
+		return quoteGNUOperand(value)
+	}
+	if start < len(value) {
+		out.WriteString(quoteGNUOperand(value[start:]))
+	}
+	return out.String()
+}
+
+func uniqEscapedControlByte(b byte) (string, bool) {
+	switch b {
+	case '\a':
+		return "\\a", true
+	case '\b':
+		return "\\b", true
+	case '\f':
+		return "\\f", true
+	case '\n':
+		return "\\n", true
+	case '\r':
+		return "\\r", true
+	case '\t':
+		return "\\t", true
+	case '\v':
+		return "\\v", true
+	}
+	if b < 0x20 || (b >= 0x7f && b <= 0x9f) {
+		return fmt.Sprintf("\\%03o", b), true
+	}
+	return "", false
 }
 
 func uniqSkipFieldsOffset(line []byte, skipFields int) int {
