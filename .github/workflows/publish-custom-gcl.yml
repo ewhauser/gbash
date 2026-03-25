@@ -57,7 +57,7 @@ jobs:
       - name: Compute release tag
         id: tag
         run: |
-          local_deps=$(grep '^ *path:' .custom-gcl.yml 2>/dev/null | sed 's/^ *path: *//' | while read -r d; do find "$d" -type f -name '*.go' 2>/dev/null; done | sort)
+          local_deps=$(grep '^ *path:' .custom-gcl.yml 2>/dev/null | sed 's/^ *path: *//' | while read -r d; do find "$d" -type f -name '*.go' 2>/dev/null | sort; done)
           tag="custom-gcl/$(cat .custom-gcl.yml $local_deps | sha256sum | cut -c1-12)"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
