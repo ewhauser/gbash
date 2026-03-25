@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -208,6 +209,10 @@ func parseUniqMatches(inv *Invocation, matches *ParsedCommand) (uniqOptions, err
 func parseUniqNumericOption(inv *Invocation, optionName, raw string) (int, error) {
 	value, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil {
+		var numErr *strconv.NumError
+		if errors.As(err, &numErr) && errors.Is(numErr.Err, strconv.ErrRange) && isDecimalDigits(raw) {
+			return int(^uint(0) >> 1), nil
+		}
 		return 0, exitf(inv, 1, "uniq: invalid %s: %q", optionName, raw)
 	}
 	if value > uint64(^uint(0)>>1) {
@@ -225,7 +230,7 @@ func parseUniqAllRepeatedMethod(inv *Invocation, value string) (uniqDelimiterMod
 	case "separate":
 		return uniqDelimiterSeparate, nil
 	default:
-		return uniqDelimiterNone, exitf(inv, 1, "uniq: invalid argument %q for '--all-repeated'\nValid arguments are:\n  - 'none'\n  - 'prepend'\n  - 'separate'\nTry 'uniq --help' for more information.", value)
+		return uniqDelimiterNone, exitf(inv, 1, "uniq: invalid argument %s for '--all-repeated'\nValid arguments are:\n  - 'none'\n  - 'prepend'\n  - 'separate'\nTry 'uniq --help' for more information.", quoteGNUOperand(value))
 	}
 }
 
@@ -240,7 +245,7 @@ func parseUniqGroupMethod(inv *Invocation, value string) (uniqDelimiterMode, err
 	case "both":
 		return uniqDelimiterBoth, nil
 	default:
-		return uniqDelimiterNone, exitf(inv, 1, "uniq: invalid argument %q for '--group'\nValid arguments are:\n  - 'prepend'\n  - 'append'\n  - 'separate'\n  - 'both'\nTry 'uniq --help' for more information.", value)
+		return uniqDelimiterNone, exitf(inv, 1, "uniq: invalid argument %s for '--group'\nValid arguments are:\n  - 'prepend'\n  - 'append'\n  - 'separate'\n  - 'both'\nTry 'uniq --help' for more information.", quoteGNUOperand(value))
 	}
 }
 

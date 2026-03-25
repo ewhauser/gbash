@@ -95,3 +95,45 @@ func TestUniqRejectsInvalidGroupCombinations(t *testing.T) {
 		t.Fatalf("Stderr = %q, want group conflict error", got)
 	}
 }
+
+func TestUniqUsesGNUQuotedInvalidMethodDiagnostics(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "uniq --all-repeated=badoption\nuniq --group=badoption\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got := result.Stderr; !strings.Contains(got, "uniq: invalid argument 'badoption' for '--all-repeated'") {
+		t.Fatalf("Stderr = %q, want GNU-style all-repeated diagnostic", got)
+	}
+	if got := result.Stderr; strings.Contains(got, "\"badoption\"") {
+		t.Fatalf("Stderr = %q, want single-quoted operand", got)
+	}
+}
+
+func TestUniqAcceptsOverflowingNumericOptions(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'a\\na\\n\\b' | uniq -d -u -w18446744073709551616\nprintf 'a\\na\\n\\b' | uniq -d -u -w18446744073709551617\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got := result.Stdout; got != "" {
+		t.Fatalf("Stdout = %q, want empty", got)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
