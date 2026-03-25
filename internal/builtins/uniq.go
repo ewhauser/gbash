@@ -369,10 +369,51 @@ func uniqBuildMeta(line []byte, opts *uniqOptions, inv *Invocation) uniqLineMeta
 }
 
 func uniqInvalidMethodArgument(value string) string {
-	if strings.ContainsAny(value, "\a\b\f\n\r\t\v") {
-		return wcDisplayLabel(value)
+	var out strings.Builder
+	start := 0
+	for i := 0; i < len(value); i++ {
+		escaped, ok := uniqEscapedControlByte(value[i])
+		if !ok {
+			continue
+		}
+		if start < i {
+			out.WriteString(quoteGNUOperand(value[start:i]))
+		}
+		out.WriteString("$'")
+		out.WriteString(escaped)
+		out.WriteByte('\'')
+		start = i + 1
 	}
-	return quoteGNUOperand(value)
+	if out.Len() == 0 {
+		return quoteGNUOperand(value)
+	}
+	if start < len(value) {
+		out.WriteString(quoteGNUOperand(value[start:]))
+	}
+	return out.String()
+}
+
+func uniqEscapedControlByte(b byte) (string, bool) {
+	switch b {
+	case '\a':
+		return "\\a", true
+	case '\b':
+		return "\\b", true
+	case '\f':
+		return "\\f", true
+	case '\n':
+		return "\\n", true
+	case '\r':
+		return "\\r", true
+	case '\t':
+		return "\\t", true
+	case '\v':
+		return "\\v", true
+	}
+	if b < 0x20 || b == 0x7f {
+		return fmt.Sprintf("\\%03o", b), true
+	}
+	return "", false
 }
 
 func uniqSkipFieldsOffset(line []byte, skipFields int) int {

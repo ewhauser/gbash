@@ -164,7 +164,7 @@ func TestUniqEscapesControlBytesInInvalidMethodDiagnostics(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "bad=$(printf 'bad\\nopt')\nuniq --group=\"$bad\"\n",
+		Script: "bad_nl=$(printf 'bad\\nopt')\nuniq --group=\"$bad_nl\" || true\nbad_esc=$(printf 'bad\\033opt')\nuniq --all-repeated=\"$bad_esc\"\n",
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -175,7 +175,13 @@ func TestUniqEscapesControlBytesInInvalidMethodDiagnostics(t *testing.T) {
 	if got := result.Stderr; !strings.Contains(got, "'bad'$'\\n''opt'") {
 		t.Fatalf("Stderr = %q, want escaped control-byte diagnostic", got)
 	}
+	if got := result.Stderr; !strings.Contains(got, "'bad'$'\\033''opt'") {
+		t.Fatalf("Stderr = %q, want escaped ESC diagnostic", got)
+	}
 	if got := result.Stderr; strings.Contains(got, "bad\nopt") {
 		t.Fatalf("Stderr = %q, want escaped control byte, not raw newline", got)
+	}
+	if got := result.Stderr; strings.ContainsRune(got, '\x1b') {
+		t.Fatalf("Stderr = %q, want escaped ESC, not raw control byte", got)
 	}
 }
