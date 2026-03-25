@@ -230,7 +230,7 @@ func parseUniqAllRepeatedMethod(inv *Invocation, value string) (uniqDelimiterMod
 	case "separate":
 		return uniqDelimiterSeparate, nil
 	default:
-		return uniqDelimiterNone, exitf(inv, 1, "uniq: invalid argument %s for '--all-repeated'\nValid arguments are:\n  - 'none'\n  - 'prepend'\n  - 'separate'\nTry 'uniq --help' for more information.", quoteGNUOperand(value))
+		return uniqDelimiterNone, exitf(inv, 1, "uniq: invalid argument %s for '--all-repeated'\nValid arguments are:\n  - 'none'\n  - 'prepend'\n  - 'separate'\nTry 'uniq --help' for more information.", uniqInvalidMethodArgument(value))
 	}
 }
 
@@ -245,7 +245,7 @@ func parseUniqGroupMethod(inv *Invocation, value string) (uniqDelimiterMode, err
 	case "both":
 		return uniqDelimiterBoth, nil
 	default:
-		return uniqDelimiterNone, exitf(inv, 1, "uniq: invalid argument %s for '--group'\nValid arguments are:\n  - 'prepend'\n  - 'append'\n  - 'separate'\n  - 'both'\nTry 'uniq --help' for more information.", quoteGNUOperand(value))
+		return uniqDelimiterNone, exitf(inv, 1, "uniq: invalid argument %s for '--group'\nValid arguments are:\n  - 'prepend'\n  - 'append'\n  - 'separate'\n  - 'both'\nTry 'uniq --help' for more information.", uniqInvalidMethodArgument(value))
 	}
 }
 
@@ -355,9 +355,10 @@ func uniqReadRecord(reader *bufio.Reader, dst *[]byte, terminator byte) bool {
 func uniqBuildMeta(line []byte, opts *uniqOptions, inv *Invocation) uniqLineMeta {
 	start := uniqSkipFieldsOffset(line, opts.skipFields)
 	if opts.skipChars > 0 {
-		start += opts.skipChars
-		if start > len(line) {
+		if opts.skipChars >= len(line)-start {
 			start = len(line)
+		} else {
+			start += opts.skipChars
 		}
 	}
 	end := len(line)
@@ -365,6 +366,13 @@ func uniqBuildMeta(line []byte, opts *uniqOptions, inv *Invocation) uniqLineMeta
 		end = uniqKeyEndIndex(line, start, opts.checkChars, inv)
 	}
 	return uniqLineMeta{keyStart: start, keyEnd: end}
+}
+
+func uniqInvalidMethodArgument(value string) string {
+	if strings.ContainsAny(value, "\a\b\f\n\r\t\v") {
+		return wcDisplayLabel(value)
+	}
+	return quoteGNUOperand(value)
 }
 
 func uniqSkipFieldsOffset(line []byte, skipFields int) int {
