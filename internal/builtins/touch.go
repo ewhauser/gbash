@@ -303,18 +303,6 @@ func touchResolveTarget(inv *Invocation, name string, noDereference bool) (targe
 			}
 		}
 	}
-	if inv != nil && inv.Stdin != nil {
-		if redirected, ok := inv.Stdin.(commandutil.RedirectMetadata); ok {
-			if redirectPath := redirected.RedirectPath(); redirectPath != "" {
-				return redirectPath, name, false
-			}
-		}
-		if redirected, ok := resolveUnderlyingReader(inv.Stdin).(commandutil.RedirectMetadata); ok {
-			if redirectPath := redirected.RedirectPath(); redirectPath != "" {
-				return redirectPath, name, false
-			}
-		}
-	}
 	return "", name, false
 }
 

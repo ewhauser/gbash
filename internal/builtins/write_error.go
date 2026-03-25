@@ -12,10 +12,6 @@ type underlyingWriter interface {
 	UnderlyingWriter() io.Writer
 }
 
-type underlyingReader interface {
-	UnderlyingReader() io.Reader
-}
-
 func shellWriteErrorDiagnostic(name string, err error) (string, bool) {
 	if runtime.GOOS == "darwin" {
 		var pathErr *os.PathError
@@ -63,21 +59,6 @@ func resolveUnderlyingWriter(w io.Writer) io.Writer {
 			return w
 		}
 		w = next
-	}
-	return nil
-}
-
-func resolveUnderlyingReader(r io.Reader) io.Reader {
-	for r != nil {
-		ur, ok := r.(underlyingReader)
-		if !ok {
-			return r
-		}
-		next := ur.UnderlyingReader()
-		if next == nil || next == r {
-			return r
-		}
-		r = next
 	}
 	return nil
 }

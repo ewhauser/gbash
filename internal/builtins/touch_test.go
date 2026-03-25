@@ -135,35 +135,6 @@ touch - >> /home/agent/out.txt
 	}
 }
 
-func TestTouchDashTouchesRedirectedStdin(t *testing.T) {
-	t.Parallel()
-	session := newSession(t, &Config{})
-
-	writeSessionFile(t, session, "/home/agent/in.txt", []byte("keep\n"))
-	old := time.Date(2001, time.February, 3, 4, 5, 6, 0, time.UTC)
-	if err := session.FileSystem().Chtimes(context.Background(), "/home/agent/in.txt", old, old); err != nil {
-		t.Fatalf("Chtimes(in.txt) error = %v", err)
-	}
-
-	result := mustExecSession(t, session, `TZ=UTC date --set '2024-05-06 07:08:09' >/dev/null
-touch - 1< /home/agent/in.txt
-`)
-	if result.ExitCode != 0 {
-		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
-	}
-
-	info, err := session.FileSystem().Stat(context.Background(), "/home/agent/in.txt")
-	if err != nil {
-		t.Fatalf("Stat(in.txt) error = %v", err)
-	}
-	if got, want := info.ModTime().UTC().Unix(), time.Date(2024, time.May, 6, 7, 8, 9, 0, time.UTC).Unix(); got != want {
-		t.Fatalf("in.txt ModTime unix = %d, want %d", got, want)
-	}
-	if got, want := string(readSessionFile(t, session, "/home/agent/in.txt")), "keep\n"; got != want {
-		t.Fatalf("in.txt contents = %q, want %q", got, want)
-	}
-}
-
 func TestTouchDashWithoutRedirectDoesNotCreateStdoutPath(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
