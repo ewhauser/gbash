@@ -138,7 +138,7 @@ func (c *DU) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedComm
 		return err
 	}
 
-	targets, targetExitCode, err := duTargets(ctx, inv, opts, matches.Args("file"))
+	targets, targetExitCode, err := duTargets(ctx, inv, &opts, matches.Args("file"))
 	if err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func (c *DU) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedComm
 	}
 
 	if opts.total && len(targets) > 0 {
-		if err := duWriteLine(inv.Stdout, duFormatCount(grandTotal, opts), "total"); err != nil {
+		if err := duWriteLine(inv.Stdout, duFormatCount(grandTotal, &opts), "total"); err != nil {
 			return err
 		}
 	}
@@ -292,10 +292,11 @@ func parseDUThreshold(inv *Invocation, origin, value string) (duThreshold, error
 
 	raw := value
 	negative := false
-	if raw[0] == '-' {
+	switch raw[0] {
+	case '-':
 		negative = true
 		raw = raw[1:]
-	} else if raw[0] == '+' {
+	case '+':
 		raw = raw[1:]
 	}
 	if raw == "" {
@@ -343,7 +344,7 @@ func duReadExcludePatterns(ctx context.Context, inv *Invocation, source string) 
 	}
 	defer func() { _ = file.Close() }()
 
-	data, err := io.ReadAll(file)
+	data, err := readAllReader(ctx, inv, file)
 	if err != nil {
 		return nil, exitf(inv, 1, "du: %s: read error: %s", wcErrorOperand(source), readAllErrorText(err))
 	}
@@ -360,7 +361,7 @@ func duReadExcludePatterns(ctx context.Context, inv *Invocation, source string) 
 	return patterns, nil
 }
 
-func duTargets(ctx context.Context, inv *Invocation, opts duOptions, files []string) ([]string, int, error) {
+func duTargets(ctx context.Context, inv *Invocation, opts *duOptions, files []string) ([]string, int, error) {
 	if opts.files0From == "" {
 		return append([]string(nil), files...), 0, nil
 	}
@@ -468,7 +469,7 @@ func (c *DU) walkRoot(ctx context.Context, inv *Invocation, state *duWalkState, 
 	info := linfo
 	effectiveAbs := abs
 	symlinkDepth := 0
-	if duShouldFollowRoot(state.opts, visible, linfo) {
+	if duShouldFollowRoot(&state.opts, visible, linfo) {
 		info, effectiveAbs, err = duResolveSymlinkInfo(ctx, inv, abs)
 		if err != nil {
 			if writeErr := duWriteAccessError(inv, visible, err); writeErr != nil {
@@ -489,7 +490,7 @@ func (c *DU) walkRoot(ctx context.Context, inv *Invocation, state *duWalkState, 
 		}
 	}
 
-	total, _, err := c.walkNode(ctx, inv, state, effectiveAbs, visible, linfo, info, 0, symlinkDepth)
+	total, _, err := c.walkNode(ctx, inv, state, effectiveAbs, visible, info, 0, symlinkDepth)
 	return total, state.exitCode, err
 }
 
@@ -498,7 +499,7 @@ func (c *DU) walkNode(
 	inv *Invocation,
 	state *duWalkState,
 	abs, visible string,
-	linfo, info stdfs.FileInfo,
+	info stdfs.FileInfo,
 	depth int,
 	symlinkDepth int,
 ) (int64, bool, error) {
@@ -530,7 +531,7 @@ func (c *DU) walkNode(
 		}
 	}
 
-	selfCount := duSelfCount(info, state.opts)
+	selfCount := duSelfCount(info, &state.opts)
 	total := selfCount
 
 	if isDir {
@@ -540,7 +541,7 @@ func (c *DU) walkNode(
 				return 0, true, writeErr
 			}
 			state.exitCode = 1
-			if err := duMaybePrint(inv, state.opts, visible, total, depth, true); err != nil {
+			if err := duMaybePrint(inv, &state.opts, visible, total, depth, true); err != nil {
 				return 0, true, err
 			}
 			return total, true, nil
@@ -561,7 +562,7 @@ func (c *DU) walkNode(
 		}
 	}
 
-	if err := duMaybePrint(inv, state.opts, visible, total, depth, isDir); err != nil {
+	if err := duMaybePrint(inv, &state.opts, visible, total, depth, isDir); err != nil {
 		return 0, isDir, err
 	}
 	return total, isDir, nil
@@ -613,10 +614,10 @@ func (c *DU) walkChild(
 		}
 	}
 
-	return c.walkNode(ctx, inv, state, effectiveAbs, childVisible, linfo, info, depth, nextSymlinkDepth)
+	return c.walkNode(ctx, inv, state, effectiveAbs, childVisible, info, depth, nextSymlinkDepth)
 }
 
-func duShouldFollowRoot(opts duOptions, visible string, info stdfs.FileInfo) bool {
+func duShouldFollowRoot(opts *duOptions, visible string, info stdfs.FileInfo) bool {
 	if info == nil || info.Mode()&stdfs.ModeSymlink == 0 {
 		return false
 	}
@@ -626,7 +627,7 @@ func duShouldFollowRoot(opts duOptions, visible string, info stdfs.FileInfo) boo
 	return visible != "/" && strings.HasSuffix(visible, "/")
 }
 
-func duSelfCount(info stdfs.FileInfo, opts duOptions) int64 {
+func duSelfCount(info stdfs.FileInfo, opts *duOptions) int64 {
 	switch opts.countMode {
 	case duCountInodes:
 		return 1
@@ -640,7 +641,7 @@ func duSelfCount(info stdfs.FileInfo, opts duOptions) int64 {
 	}
 }
 
-func duMaybePrint(inv *Invocation, opts duOptions, visible string, total int64, depth int, isDir bool) error {
+func duMaybePrint(inv *Invocation, opts *duOptions, visible string, total int64, depth int, isDir bool) error {
 	if !duShouldPrint(opts, depth, isDir) {
 		return nil
 	}
@@ -650,7 +651,7 @@ func duMaybePrint(inv *Invocation, opts duOptions, visible string, total int64, 
 	return duWriteLine(inv.Stdout, duFormatCount(total, opts), visible)
 }
 
-func duShouldPrint(opts duOptions, depth int, isDir bool) bool {
+func duShouldPrint(opts *duOptions, depth int, isDir bool) bool {
 	if depth == 0 {
 		return true
 	}
@@ -676,7 +677,7 @@ func duPassesThreshold(value int64, threshold duThreshold) bool {
 	return value >= threshold.value
 }
 
-func duFormatCount(value int64, opts duOptions) string {
+func duFormatCount(value int64, opts *duOptions) string {
 	switch opts.humanMode {
 	case duHumanBinary:
 		return duFormatHumanCount(value, 1024, []string{"K", "M", "G", "T", "P", "E"})

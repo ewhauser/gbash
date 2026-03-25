@@ -2,8 +2,12 @@ package builtins_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	gbruntime "github.com/ewhauser/gbash"
 )
 
 func TestDUVisiblePathAndSymlinkModes(t *testing.T) {
@@ -60,7 +64,7 @@ func TestDUHardLinksDedupAndCountLinks(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
 	}
 
-	const want = "dir\ndir/f_\n---\ndir\ndir/f1\ndir/f2\ndir/f3\n---\ndir\ndir/f_\n"
+	const want = "dir\ndir/f_\ndir/sub\n---\ndir\ndir/f1\ndir/f2\ndir/f3\ndir/sub\n---\ndir\ndir/f_\ndir/sub\n"
 	if got := result.Stdout; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
@@ -157,13 +161,33 @@ func TestDUInodesThresholdAndWarnings(t *testing.T) {
 func TestDUMaxDepthAndUnreadableDirectoryContinuation(t *testing.T) {
 	t.Parallel()
 
-	session := newSession(t, &Config{})
-	mustExecSession(t, session, strings.Join([]string{
-		"mkdir -p /tmp/a/b/c/d",
-		"mkdir -p /tmp/f/a /tmp/f/b /tmp/f/c /tmp/f/d /tmp/f/e",
-		"touch /tmp/f/c/j",
-		"chmod 000 /tmp/f/c",
-	}, "\n"))
+	root := t.TempDir()
+	for _, dir := range []string{
+		filepath.Join(root, "tmp", "a", "b", "c", "d"),
+		filepath.Join(root, "tmp", "f", "a"),
+		filepath.Join(root, "tmp", "f", "b"),
+		filepath.Join(root, "tmp", "f", "c"),
+		filepath.Join(root, "tmp", "f", "d"),
+		filepath.Join(root, "tmp", "f", "e"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q) error = %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "tmp", "f", "c", "j"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile(c/j) error = %v", err)
+	}
+	unreadableDir := filepath.Join(root, "tmp", "f", "c")
+	if err := os.Chmod(unreadableDir, 0o000); err != nil {
+		t.Fatalf("Chmod(%q) error = %v", unreadableDir, err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(unreadableDir, 0o755)
+	})
+
+	session := newSession(t, &Config{
+		FileSystem: gbruntime.ReadWriteDirectoryFileSystem(root, gbruntime.ReadWriteDirectoryOptions{}),
+	})
 
 	maxDepth := mustExecSession(t, session, "cd /tmp\ndu -d 1 a | cut -f2-\n")
 	if got, want := maxDepth.ExitCode, 0; got != want {
