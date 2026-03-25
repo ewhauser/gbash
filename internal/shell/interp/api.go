@@ -727,8 +727,10 @@ func stdinReader(r io.Reader, pipeFactory func() (io.ReadCloser, io.WriteCloser,
 
 type redirectedStdinReader struct {
 	StdinReader
-	underlying io.Reader
-	meta       commandutil.RedirectMetadata
+	handle io.Reader
+	path   string
+	flags  int
+	offset int64
 }
 
 func wrapRedirectedStdinReader(reader StdinReader, underlying io.Reader, meta commandutil.RedirectMetadata) StdinReader {
@@ -738,36 +740,55 @@ func wrapRedirectedStdinReader(reader StdinReader, underlying io.Reader, meta co
 	if underlying == nil {
 		underlying = reader
 	}
-	return redirectedStdinReader{StdinReader: reader, underlying: underlying, meta: meta}
+	return redirectedStdinReader{
+		StdinReader: reader,
+		handle:      underlying,
+		path:        meta.RedirectPath(),
+		flags:       meta.RedirectFlags(),
+		offset:      meta.RedirectOffset(),
+	}
 }
 
 func (r redirectedStdinReader) RedirectPath() string {
-	return r.meta.RedirectPath()
+	return r.path
 }
 
 func (r redirectedStdinReader) RedirectFlags() int {
-	return r.meta.RedirectFlags()
+	return r.flags
 }
 
 func (r redirectedStdinReader) RedirectOffset() int64 {
-	return r.meta.RedirectOffset()
-}
-
-func (r redirectedStdinReader) UnderlyingReader() io.Reader {
-	if r.underlying == nil {
-		return r.StdinReader
-	}
-	return r.underlying
+	return r.offset
 }
 
 func (r redirectedStdinReader) Stat() (stdfs.FileInfo, error) {
 	type statter interface {
 		Stat() (stdfs.FileInfo, error)
 	}
-	if statter, ok := r.UnderlyingReader().(statter); ok {
+	if statter, ok := r.handle.(statter); ok {
 		return statter.Stat()
 	}
 	return nil, errors.New("bad file descriptor")
+}
+
+func (r redirectedStdinReader) Seek(offset int64, whence int) (int64, error) {
+	type seeker interface {
+		Seek(offset int64, whence int) (int64, error)
+	}
+	if seeker, ok := r.handle.(seeker); ok {
+		return seeker.Seek(offset, whence)
+	}
+	return 0, errors.New("bad file descriptor")
+}
+
+func (r redirectedStdinReader) Fd() uintptr {
+	type fileDescriber interface {
+		Fd() uintptr
+	}
+	if file, ok := r.handle.(fileDescriber); ok {
+		return file.Fd()
+	}
+	return 0
 }
 
 func newPipe(pipeFactory func() (io.ReadCloser, io.WriteCloser, error)) (StdinReader, io.WriteCloser, error) {
