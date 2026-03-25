@@ -410,7 +410,7 @@ func uniqEscapedControlByte(b byte) (string, bool) {
 	case '\v':
 		return "\\v", true
 	}
-	if b < 0x20 || b == 0x7f {
+	if b < 0x20 || (b >= 0x7f && b <= 0x9f) {
 		return fmt.Sprintf("\\%03o", b), true
 	}
 	return "", false
