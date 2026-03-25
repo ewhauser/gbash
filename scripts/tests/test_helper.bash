@@ -37,6 +37,7 @@ teardown() {
 # Usage: run_gbash <script-path-relative-to-sandbox> [args...]
 run_gbash() {
 	local system_tmp_dir="${GBASH_SYSTEM_TMPDIR:-${TEST_TEMP_DIR:-${SANDBOX%/*}}}"
+	system_tmp_dir="$(CDPATH= cd -- "${system_tmp_dir}" && pwd -P)" || return 1
 	run env GBASH_SYSTEM_TMPDIR="${system_tmp_dir}" "${GBASH_BIN}" --readwrite-root "${SANDBOX}" -c "
 		export PATH=/bin:/usr/bin
 		cd /

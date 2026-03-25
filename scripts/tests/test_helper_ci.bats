@@ -19,3 +19,17 @@ teardown() {
 	[ "$status" -eq 0 ]
 	[ "$output" = "ok" ]
 }
+
+@test "run_gbash canonicalizes a relative host temp root" {
+	relative_tmp_root=".bats-relative-host-tmp"
+	mkdir -p "${relative_tmp_root}"
+	TEST_TEMP_DIR="$(TMPDIR="${relative_tmp_root}" mktemp -d)"
+	SANDBOX="${TEST_TEMP_DIR}/sandbox"
+	STUB_BIN="${SANDBOX}/bin"
+	mkdir -p "${STUB_BIN}"
+
+	run_gbash "printf '%s' ok"
+	[ "$status" -eq 0 ]
+	[ "$output" = "ok" ]
+	rm -rf "${relative_tmp_root}"
+}
