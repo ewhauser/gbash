@@ -101,6 +101,29 @@ func TestCLIRegistersStableExtras(t *testing.T) {
 	}
 }
 
+func TestCLIRegistersBundledPythonWhenAvailable(t *testing.T) {
+	t.Parallel()
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), []string{"-c", "python -c 'print(\"py\")'\npython3 -c 'print(\"py3\")'"}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if strings.Contains(stderr.String(), "monty native bindings are unavailable") {
+		t.Skip("gomonty unavailable on this build")
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got, want := stdout.String(), "py\npy3\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
 func TestCLIDoesNotRegisterNodeJSByDefault(t *testing.T) {
 	t.Parallel()
 	var stdout strings.Builder

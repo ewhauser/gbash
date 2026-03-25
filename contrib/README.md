@@ -17,6 +17,7 @@ Today that includes:
 - `contrib/htmltomarkdown` for the optional sandboxed `html-to-markdown` command
 - `contrib/jq` for the optional sandboxed `jq` command and its JSON/query stack
 - `contrib/nodejs` for the optional experimental sandboxed `nodejs` command backed by `goja` and a curated `goja_nodejs` allowlist; it is intentionally not included in `contrib/extras` yet as it is absolutely not secure in its current implementation, and its module-level design notes live in `contrib/nodejs/README.md`
+- `contrib/python` for the optional sandboxed `python` and `python3` commands backed by `gomonty`; it is included in `contrib/extras` and remains outside `gbash.DefaultRegistry()`
 - `contrib/sqlite3` for the optional sandboxed `sqlite3` command
 - `contrib/yq` for the optional sandboxed `yq` command and its YAML/query stack
 

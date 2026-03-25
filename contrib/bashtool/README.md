@@ -25,7 +25,7 @@ Defaults stay gbash-native:
 - hostname: `gbash`
 - command profile: plain `gbash`
 
-Use `CommandProfileExtras` when you want the stable extras registry (`awk`, `html-to-markdown`, `jq`, `sqlite3`, `yq`) reflected in the prompt/help/execute surface.
+Use `CommandProfileExtras` when you want the stable extras registry (`awk`, `html-to-markdown`, `jq`, `python`, `python3`, `sqlite3`, `yq`) reflected in the prompt/help/execute surface.
 
 ## Quick Start
 
