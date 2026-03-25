@@ -812,6 +812,28 @@ func TestLSLongFormatCustomTimeStyle(t *testing.T) {
 	}
 }
 
+func TestLSLongFormatCustomTimeStylePreservesIncompleteDirective(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/tmp/ls-custom-incomplete/data.txt", []byte("x"))
+	when := time.Date(2024, time.May, 6, 7, 8, 9, 0, time.UTC)
+	if err := session.FileSystem().Chtimes(context.Background(), "/tmp/ls-custom-incomplete/data.txt", when, when); err != nil {
+		t.Fatalf("Chtimes(data.txt) error = %v", err)
+	}
+
+	result := mustExecSession(t, session, "TZ=UTC ls -l --time-style=+% /tmp/ls-custom-incomplete/data.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, " % ") {
+		t.Fatalf("Stdout = %q, want literal custom format output", result.Stdout)
+	}
+	if strings.Contains(result.Stdout, "May  6") || strings.Contains(result.Stdout, "07:08") {
+		t.Fatalf("Stdout = %q, want custom format instead of default timestamp", result.Stdout)
+	}
+}
+
 func TestLSHyperlinkMode(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
