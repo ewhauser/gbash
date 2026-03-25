@@ -63,7 +63,10 @@ teardown() {
 }
 
 @test "gnu launcher inherits translated temp environment variables" {
-  run grep -F -- "--inherit-env 'LC_ALL,LC_CTYPE,LANG,LANGUAGE,TMP,TEMP,TMPDIR'" "${WORKDIR}/build-aux/gbash-harness/gbash"
+  run grep -F 'jbgo_inherit_env_names() {' "${WORKDIR}/build-aux/gbash-harness/gbash"
+  [ "$status" -eq 0 ]
+
+  run grep -F -- "-v extra_env='LC_ALL,LC_CTYPE,LANG,LANGUAGE,TMP,TEMP,TMPDIR'" "${WORKDIR}/build-aux/gbash-harness/gbash"
   [ "$status" -eq 0 ]
 
   run grep -F 'GBASH_SYSTEM_TMPDIR=' "${WORKDIR}/build-aux/gbash-harness/gbash"
