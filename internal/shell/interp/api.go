@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/ewhauser/gbash/host"
+	"github.com/ewhauser/gbash/internal/commandutil"
 	"github.com/ewhauser/gbash/internal/shell/expand"
 	"github.com/ewhauser/gbash/internal/shell/syntax"
 )
@@ -701,9 +702,13 @@ func (r *Runner) now() time.Time {
 }
 
 func stdinReader(r io.Reader, pipeFactory func() (io.ReadCloser, io.WriteCloser, error)) StdinReader {
+	var redirectMeta commandutil.RedirectMetadata
+	if meta, ok := r.(commandutil.RedirectMetadata); ok {
+		redirectMeta = meta
+	}
 	switch r := r.(type) {
 	case StdinReader:
-		return r
+		return wrapRedirectedStdinReader(r, redirectMeta)
 	case nil:
 		return nil
 	default:
@@ -715,8 +720,32 @@ func stdinReader(r io.Reader, pipeFactory func() (io.ReadCloser, io.WriteCloser,
 			io.Copy(pw, r)
 			pw.Close()
 		}()
-		return pr
+		return wrapRedirectedStdinReader(pr, redirectMeta)
 	}
+}
+
+type redirectedStdinReader struct {
+	StdinReader
+	meta commandutil.RedirectMetadata
+}
+
+func wrapRedirectedStdinReader(reader StdinReader, meta commandutil.RedirectMetadata) StdinReader {
+	if reader == nil || meta == nil {
+		return reader
+	}
+	return redirectedStdinReader{StdinReader: reader, meta: meta}
+}
+
+func (r redirectedStdinReader) RedirectPath() string {
+	return r.meta.RedirectPath()
+}
+
+func (r redirectedStdinReader) RedirectFlags() int {
+	return r.meta.RedirectFlags()
+}
+
+func (r redirectedStdinReader) RedirectOffset() int64 {
+	return r.meta.RedirectOffset()
 }
 
 func newPipe(pipeFactory func() (io.ReadCloser, io.WriteCloser, error)) (StdinReader, io.WriteCloser, error) {

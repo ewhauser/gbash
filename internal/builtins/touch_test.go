@@ -135,6 +135,35 @@ touch - >> /home/agent/out.txt
 	}
 }
 
+func TestTouchDashTouchesRedirectedStdin(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/home/agent/in.txt", []byte("keep\n"))
+	old := time.Date(2001, time.February, 3, 4, 5, 6, 0, time.UTC)
+	if err := session.FileSystem().Chtimes(context.Background(), "/home/agent/in.txt", old, old); err != nil {
+		t.Fatalf("Chtimes(in.txt) error = %v", err)
+	}
+
+	result := mustExecSession(t, session, `TZ=UTC date --set '2024-05-06 07:08:09' >/dev/null
+touch - 1< /home/agent/in.txt
+`)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	info, err := session.FileSystem().Stat(context.Background(), "/home/agent/in.txt")
+	if err != nil {
+		t.Fatalf("Stat(in.txt) error = %v", err)
+	}
+	if got, want := info.ModTime().UTC().Unix(), time.Date(2024, time.May, 6, 7, 8, 9, 0, time.UTC).Unix(); got != want {
+		t.Fatalf("in.txt ModTime unix = %d, want %d", got, want)
+	}
+	if got, want := string(readSessionFile(t, session, "/home/agent/in.txt")), "keep\n"; got != want {
+		t.Fatalf("in.txt contents = %q, want %q", got, want)
+	}
+}
+
 func TestTouchDashWithoutRedirectDoesNotCreateStdoutPath(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
@@ -148,6 +177,105 @@ touch - | cat >/dev/null
 
 	if _, err := session.FileSystem().Stat(context.Background(), "/dev/stdout"); !os.IsNotExist(err) {
 		t.Fatalf("Stat(/dev/stdout) error = %v, want not exist", err)
+	}
+}
+
+func TestTouchSupportsLegacyTimestampAfterDoubleDash(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, `TZ=UTC date --set '2024-05-06 07:08:09' >/dev/null
+_POSIX2_VERSION=199209 touch -- 01010000 /home/agent/out.txt
+`)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	info, err := session.FileSystem().Stat(context.Background(), "/home/agent/out.txt")
+	if err != nil {
+		t.Fatalf("Stat(out.txt) error = %v", err)
+	}
+	if got, want := info.ModTime().UTC(), time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("out.txt ModTime = %v, want %v", got, want)
+	}
+	if _, err := session.FileSystem().Stat(context.Background(), "/home/agent/01010000"); !os.IsNotExist(err) {
+		t.Fatalf("Stat(01010000) error = %v, want not exist", err)
+	}
+}
+
+func TestTouchCreatesDanglingSymlinkTarget(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	if err := session.FileSystem().MkdirAll(context.Background(), "/home/agent", 0o755); err != nil {
+		t.Fatalf("MkdirAll(/home/agent) error = %v", err)
+	}
+	if err := session.FileSystem().Symlink(context.Background(), "target.txt", "/home/agent/link.txt"); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	result := mustExecSession(t, session, "touch /home/agent/link.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	if _, err := session.FileSystem().Stat(context.Background(), "/home/agent/target.txt"); err != nil {
+		t.Fatalf("Stat(target.txt) error = %v", err)
+	}
+	info, err := session.FileSystem().Lstat(context.Background(), "/home/agent/link.txt")
+	if err != nil {
+		t.Fatalf("Lstat(link.txt) error = %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("Lstat(link.txt).Mode() = %v, want symlink", info.Mode())
+	}
+}
+
+func TestTouchReportsCreateFailures(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "touch /home/agent/missing/child\n")
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stderr, "touch: cannot touch '/home/agent/missing/child': No such file or directory\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}
+
+func TestTouchNoDereferenceUpdatesSymlinkTimes(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/home/agent/target.txt", []byte("keep\n"))
+	old := time.Date(2001, time.February, 3, 4, 5, 6, 0, time.UTC)
+	if err := session.FileSystem().Chtimes(context.Background(), "/home/agent/target.txt", old, old); err != nil {
+		t.Fatalf("Chtimes(target.txt) error = %v", err)
+	}
+	if err := session.FileSystem().Symlink(context.Background(), "/home/agent/target.txt", "/home/agent/link.txt"); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	result := mustExecSession(t, session, "touch -m -h -d '2009-10-10 00:00:00 UTC' /home/agent/link.txt\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	linkInfo, err := session.FileSystem().Lstat(context.Background(), "/home/agent/link.txt")
+	if err != nil {
+		t.Fatalf("Lstat(link.txt) error = %v", err)
+	}
+	if got, want := linkInfo.ModTime().UTC(), time.Date(2009, time.October, 10, 0, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("link.txt ModTime = %v, want %v", got, want)
+	}
+
+	targetInfo, err := session.FileSystem().Stat(context.Background(), "/home/agent/target.txt")
+	if err != nil {
+		t.Fatalf("Stat(target.txt) error = %v", err)
+	}
+	if got, want := targetInfo.ModTime().UTC(), old; !got.Equal(want) {
+		t.Fatalf("target.txt ModTime = %v, want %v", got, want)
 	}
 }
 
