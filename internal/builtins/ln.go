@@ -135,13 +135,14 @@ func runLN(ctx context.Context, inv *Invocation, opts *lnOptions, files []string
 		}
 		return lnLinkIntoDirectory(ctx, inv, opts, files, ".")
 	case 2:
+		destHasTrailingSlash := hasTrailingSlash(files[1])
 		if opts.noTargetDir {
-			if hasTrailingSlash(files[1]) {
+			if destHasTrailingSlash {
 				return exitf(inv, 1, "ln: failed to access %s: Not a directory", quoteGNUOperand(files[1]))
 			}
 		} else {
 			statFn := statMaybe
-			if opts.noDereference {
+			if opts.noDereference && !destHasTrailingSlash {
 				statFn = lstatMaybe
 			}
 			if info, _, exists, err := statFn(ctx, inv, files[1]); err != nil {
@@ -248,7 +249,7 @@ func lnPrepareDestination(ctx context.Context, inv *Invocation, opts *lnOptions,
 	if !replacing {
 		return exitf(inv, 1, "ln: failed to create link %s: File exists", quoteGNUOperand(linkName))
 	}
-	if err := lnCheckSameFile(ctx, inv, opts, target, linkName); err != nil {
+	if err := lnCheckSameFile(ctx, inv, opts, target, linkName, info); err != nil {
 		return err
 	}
 
@@ -278,8 +279,19 @@ func lnPrepareDestination(ctx context.Context, inv *Invocation, opts *lnOptions,
 	return nil
 }
 
-func lnCheckSameFile(ctx context.Context, inv *Invocation, opts *lnOptions, target, linkName string) error {
-	if allowPath(inv, target) == allowPath(inv, linkName) {
+func lnCheckSameFile(ctx context.Context, inv *Invocation, opts *lnOptions, target, linkName string, destInfo stdfs.FileInfo) error {
+	samePath := allowPath(inv, target) == allowPath(inv, linkName)
+	if samePath {
+		if opts.symbolic {
+			switch {
+			case opts.backupMode != backupNone:
+				return nil
+			case opts.force && destInfo != nil && destInfo.Mode()&stdfs.ModeSymlink != 0:
+				return nil
+			default:
+				return exitf(inv, 1, "ln: %s and %s are the same file", quoteGNUOperand(target), quoteGNUOperand(linkName))
+			}
+		}
 		return exitf(inv, 1, "ln: %s and %s are the same file", quoteGNUOperand(target), quoteGNUOperand(linkName))
 	}
 	if opts.symbolic {

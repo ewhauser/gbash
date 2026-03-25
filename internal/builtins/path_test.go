@@ -1112,7 +1112,34 @@ func TestLNNoTargetDirectoryRejectsTrailingSlashDestination(t *testing.T) {
 	}
 }
 
-func TestLNSymbolicForceRejectsIdenticalSourceAndDestination(t *testing.T) {
+func TestLNNoDereferenceTreatsTrailingSlashSymlinkDestAsDirectory(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	result := mustExecSession(t, session, strings.Join([]string{
+		"printf 'payload\\n' > /tmp/src.txt",
+		"mkdir /tmp/real-dir",
+		"ln -s real-dir /tmp/link-dir",
+		"ln -ns /tmp/src.txt /tmp/link-dir/",
+		"readlink /tmp/real-dir/src.txt",
+		"readlink /tmp/link-dir",
+		"",
+	}, "\n"))
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "/tmp/src.txt\nreal-dir\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestLNSymbolicForceRejectsIdenticalRegularFileSourceAndDestination(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
 
@@ -1125,6 +1152,38 @@ func TestLNSymbolicForceRejectsIdenticalSourceAndDestination(t *testing.T) {
 	}
 	if got, want := string(readSessionFile(t, session, "/tmp/file.txt")), "payload\n"; got != want {
 		t.Fatalf("file contents = %q, want %q", got, want)
+	}
+}
+
+func TestLNSymbolicForceAllowsSelfRelinkOnExistingSymlink(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "ln -s target /tmp/link\nln -sf /tmp/link /tmp/link\nreadlink /tmp/link\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "/tmp/link\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestLNSymbolicBackupAllowsSelfRelinkOnRegularFile(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, strings.Join([]string{
+		"printf 'payload\\n' > /tmp/file.txt",
+		"ln -s --backup /tmp/file.txt /tmp/file.txt",
+		"readlink /tmp/file.txt",
+		"cat /tmp/file.txt~",
+		"",
+	}, "\n"))
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "/tmp/file.txt\npayload\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
 
