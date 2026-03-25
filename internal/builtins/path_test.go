@@ -1059,6 +1059,175 @@ func TestLNAcceptsGroupedShortSymlinkFlags(t *testing.T) {
 	}
 }
 
+func TestLNBackupCreatesSuffixedBackupAndReplacesDestination(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, strings.Join([]string{
+		"printf 'fresh\\n' > /tmp/src.txt",
+		"printf 'stale\\n' > /tmp/dst.txt",
+		"ln --backup=simple --suffix=.bak /tmp/src.txt /tmp/dst.txt",
+		"printf 'updated\\n' > /tmp/dst.txt",
+		"cat /tmp/src.txt",
+		"cat /tmp/dst.txt.bak",
+		"",
+	}, "\n"))
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "updated\nstale\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestLNBackupReportsSameFileBeforeReplacingDestination(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "printf 'payload\\n' > /tmp/file.txt\nln --backup /tmp/file.txt /tmp/file.txt\n")
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stderr, "ln: '/tmp/file.txt' and '/tmp/file.txt' are the same file\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+	if got, want := string(readSessionFile(t, session, "/tmp/file.txt")), "payload\n"; got != want {
+		t.Fatalf("file contents = %q, want %q", got, want)
+	}
+	if _, err := session.FileSystem().Stat(context.Background(), "/tmp/file.txt~"); err == nil {
+		t.Fatalf("Stat(backup) succeeded, want no backup created")
+	}
+}
+
+func TestLNNoTargetDirectoryRejectsTrailingSlashDestination(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "printf 'payload\\n' > /tmp/src.txt\nln -T /tmp/src.txt /tmp/no-such-file/\n")
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if _, err := session.FileSystem().Stat(context.Background(), "/tmp/no-such-file"); err == nil {
+		t.Fatalf("Stat(cleaned destination) succeeded, want no file created")
+	}
+}
+
+func TestLNNoTargetDirectoryExistingDirectorySlashReportsFileExists(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "printf 'payload\\n' > /tmp/src.txt\nmkdir /tmp/existing-dir\nln -T /tmp/src.txt /tmp/existing-dir/\n")
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stderr, "ln: failed to create link '/tmp/existing-dir/': File exists\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
+func TestLNNoDereferenceTreatsTrailingSlashSymlinkDestAsDirectory(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	result := mustExecSession(t, session, strings.Join([]string{
+		"printf 'payload\\n' > /tmp/src.txt",
+		"mkdir /tmp/real-dir",
+		"ln -s real-dir /tmp/link-dir",
+		"ln -ns /tmp/src.txt /tmp/link-dir/",
+		"readlink /tmp/real-dir/src.txt",
+		"readlink /tmp/link-dir",
+		"",
+	}, "\n"))
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "/tmp/src.txt\nreal-dir\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestLNSymbolicForceRejectsIdenticalRegularFileSourceAndDestination(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "printf 'payload\\n' > /tmp/file.txt\nln -sf /tmp/file.txt /tmp/file.txt\n")
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stderr, "ln: '/tmp/file.txt' and '/tmp/file.txt' are the same file\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+	if got, want := string(readSessionFile(t, session, "/tmp/file.txt")), "payload\n"; got != want {
+		t.Fatalf("file contents = %q, want %q", got, want)
+	}
+}
+
+func TestLNSymbolicForceAllowsSelfRelinkOnExistingSymlink(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "ln -s target /tmp/link\nln -sf /tmp/link /tmp/link\nreadlink /tmp/link\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "/tmp/link\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestLNSymbolicBackupAllowsSelfRelinkOnRegularFile(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, strings.Join([]string{
+		"printf 'payload\\n' > /tmp/file.txt",
+		"ln -s --backup /tmp/file.txt /tmp/file.txt",
+		"readlink /tmp/file.txt",
+		"cat /tmp/file.txt~",
+		"",
+	}, "\n"))
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "/tmp/file.txt\npayload\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestLNNoDereferenceReplacesSymlinkToDirectory(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, strings.Join([]string{
+		"printf 'payload\\n' > /tmp/target.txt",
+		"mkdir /tmp/real-dir",
+		"ln -s real-dir /tmp/link-dir",
+		"ln --no-dereference -fs /tmp/target.txt /tmp/link-dir",
+		"readlink /tmp/link-dir",
+		"",
+	}, "\n"))
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "/tmp/target.txt\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+
+	info, err := session.FileSystem().Lstat(context.Background(), "/tmp/link-dir")
+	if err != nil {
+		t.Fatalf("Lstat(link-dir) error = %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("Lstat(link-dir).Mode() = %v, want symlink", info.Mode())
+	}
+}
+
 func TestLinkHardLinkSharesContent(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
