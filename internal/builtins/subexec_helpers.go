@@ -16,8 +16,9 @@ import (
 )
 
 type commandResolution struct {
-	Name string
-	Path string
+	Name           string
+	Path           string
+	InvocationPath string
 }
 
 const (
@@ -55,19 +56,27 @@ func executeCommand(ctx context.Context, inv *Invocation, opts *executeCommandOp
 		return nil, err
 	}
 	if !ok {
-		return &ExecutionResult{ExitCode: 127}, nil
+		return &ExecutionResult{ExitCode: 127, CommandNotFound: true}, nil
+	}
+	if resolved == nil {
+		return nil, fmt.Errorf("command resolution returned nil result")
 	}
 
-	argv := append([]string{resolved.Path}, opts.Argv[1:]...) //nolint:nilaway // resolved is non-nil when ok is true
+	argv0 := resolved.InvocationPath
+	if argv0 == "" {
+		argv0 = resolved.Path
+	}
+	argv := append([]string{argv0}, opts.Argv[1:]...) //nolint:nilaway // resolved is non-nil when ok is true
 	return inv.Exec(ctx, &ExecutionRequest{
-		Command:    argv,
-		Env:        env,
-		WorkDir:    workDir,
-		ReplaceEnv: opts.ReplaceEnv,
-		Stdin:      opts.Stdin,
-		Stdout:     opts.Stdout,
-		Stderr:     opts.Stderr,
-		Timeout:    opts.Timeout,
+		Command:     argv,
+		CommandPath: resolved.Path,
+		Env:         env,
+		WorkDir:     workDir,
+		ReplaceEnv:  opts.ReplaceEnv,
+		Stdin:       opts.Stdin,
+		Stdout:      opts.Stdout,
+		Stderr:      opts.Stderr,
+		Timeout:     opts.Timeout,
 	})
 }
 
@@ -103,50 +112,58 @@ func resolveCommand(ctx context.Context, inv *Invocation, env map[string]string,
 }
 
 func resolveCommandPath(ctx context.Context, inv *Invocation, candidate string) (*commandResolution, bool, error) {
-	resolvedPath, exists, err := resolveExecutableCommandPath(ctx, inv, candidate)
+	resolvedPath, invocationPath, exists, err := resolveExecutableCommandPath(ctx, inv, candidate)
 	if err != nil {
 		return nil, false, err
 	}
 	if !exists {
 		return nil, false, nil
 	}
-	if compatPath, ok, err := maybeCompatWrapperCommand(ctx, inv, resolvedPath); ok || err != nil {
+	if compatPath, ok, err := maybeCompatWrapperCommand(ctx, inv, invocationPath); ok || err != nil {
 		if err != nil {
 			return nil, false, err
 		}
-		return &commandResolution{Name: path.Base(compatPath), Path: compatPath}, true, nil
+		return &commandResolution{
+			Name:           path.Base(compatPath),
+			Path:           compatPath,
+			InvocationPath: compatPath,
+		}, true, nil
 	}
-	return &commandResolution{Name: path.Base(resolvedPath), Path: resolvedPath}, true, nil
+	return &commandResolution{
+		Name:           path.Base(invocationPath),
+		Path:           resolvedPath,
+		InvocationPath: invocationPath,
+	}, true, nil
 }
 
-func resolveExecutableCommandPath(ctx context.Context, inv *Invocation, candidate string) (string, bool, error) {
+func resolveExecutableCommandPath(ctx context.Context, inv *Invocation, candidate string) (string, string, bool, error) {
 	info, abs, exists, err := lstatMaybe(ctx, inv, candidate)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
 	if !exists || info.IsDir() {
-		return "", false, nil
+		return "", "", false, nil
 	}
 	if info.Mode()&stdfs.ModeSymlink == 0 {
-		return abs, true, nil
+		return abs, abs, true, nil
 	}
 
 	resolved, err := canonicalizeReadlink(ctx, inv, abs, readlinkModeCanonicalizeExisting)
 	if err != nil {
 		if errors.Is(err, stdfs.ErrNotExist) {
-			return "", false, nil
+			return "", "", false, nil
 		}
-		return "", false, err
+		return "", "", false, err
 	}
 
 	info, resolvedAbs, exists, err := lstatMaybe(ctx, inv, resolved)
 	if err != nil {
-		return "", false, err
+		return "", "", false, err
 	}
 	if !exists || info.IsDir() {
-		return "", false, nil
+		return "", "", false, nil
 	}
-	return resolvedAbs, true, nil
+	return resolvedAbs, abs, true, nil
 }
 
 func maybeCompatWrapperCommand(ctx context.Context, inv *Invocation, fullPath string) (string, bool, error) {
@@ -193,32 +210,32 @@ func registeredCommand(inv *Invocation, name string) bool {
 func resolveAllCommands(ctx context.Context, inv *Invocation, env map[string]string, dir, name string) ([]string, error) {
 	name = remapCompatHostPath(inv, name)
 	if strings.Contains(name, "/") {
-		resolvedPath, exists, err := resolveExecutableCommandPath(ctx, inv, name)
+		_, invocationPath, exists, err := resolveExecutableCommandPath(ctx, inv, name)
 		if err != nil {
 			return nil, err
 		}
 		if !exists {
 			return nil, nil
 		}
-		return []string{resolvedPath}, nil
+		return []string{invocationPath}, nil
 	}
 
 	matches := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, pathDir := range commandSearchDirs(inv, env, dir) {
 		candidate := gbfs.Resolve(pathDir, name)
-		resolvedPath, exists, err := resolveExecutableCommandPath(ctx, inv, candidate)
+		_, invocationPath, exists, err := resolveExecutableCommandPath(ctx, inv, candidate)
 		if err != nil {
 			return nil, err
 		}
 		if !exists {
 			continue
 		}
-		if _, ok := seen[resolvedPath]; ok {
+		if _, ok := seen[invocationPath]; ok {
 			continue
 		}
-		seen[resolvedPath] = struct{}{}
-		matches = append(matches, resolvedPath)
+		seen[invocationPath] = struct{}{}
+		matches = append(matches, invocationPath)
 	}
 	return matches, nil
 }

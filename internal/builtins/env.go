@@ -151,7 +151,7 @@ func (c *Env) runParsed(ctx context.Context, inv *Invocation, matches *ParsedCom
 	if err != nil {
 		return err
 	}
-	if result != nil && result.ExitCode == 127 && result.Stdout == "" && result.Stderr == "" {
+	if result != nil && result.CommandNotFound {
 		return envCommandNotFound(inv, argv[0])
 	}
 	if err := writeExecutionOutputs(inv, result); err != nil {

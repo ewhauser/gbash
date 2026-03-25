@@ -597,6 +597,63 @@ func TestEnvFollowsSymlinkCommandsFromEmptyPathEntry(t *testing.T) {
 	}
 }
 
+func TestEnvDoesNotRewriteSilentExit127FromExistingCommand(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "env sh -c 'exit 127'\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 127 {
+		t.Fatalf("ExitCode = %d, want 127; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got := result.Stdout; got != "" {
+		t.Fatalf("Stdout = %q, want empty", got)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
+func TestEnvPreservesInvokedSymlinkNameForNestedCommands(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"${0##*/}\"\n"
+	if err := os.WriteFile(filepath.Join(root, "show_argv0"), []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile(show_argv0) error = %v", err)
+	}
+	if err := os.Symlink("show_argv0", filepath.Join(root, "alias0")); err != nil {
+		t.Fatalf("Symlink(alias0) error = %v", err)
+	}
+
+	rt := newRuntime(t, &Config{
+		FileSystem: gbruntime.ReadWriteDirectoryFileSystem(root, gbruntime.ReadWriteDirectoryOptions{}),
+	})
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		WorkDir: "/",
+		Script: "PATH=/bin:/usr/bin:\n" +
+			"export PATH\n" +
+			"env alias0\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if got, want := result.Stdout, "alias0\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
+	}
+}
+
 func TestEnvMapsHostAbsoluteCompatWrapperPathsFromTopBuilddir(t *testing.T) {
 	t.Parallel()
 

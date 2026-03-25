@@ -17,7 +17,10 @@ type ExecutionRequest struct {
 	Script          string
 	// Command runs an already-tokenized command argv without shell parsing.
 	// Script and Command are mutually exclusive.
-	Command        []string
+	Command []string
+	// CommandPath optionally overrides the executable looked up for Command[0]
+	// while preserving Command[0] as the presented argv0.
+	CommandPath    string
 	Args           []string
 	StartupOptions []string
 	Env            map[string]string
@@ -37,10 +40,13 @@ type ExecutionResult struct {
 	Stdout        string
 	Stderr        string
 	ControlStderr string
-	FinalEnv      map[string]string
-	StartedAt     time.Time
-	FinishedAt    time.Time
-	Duration      time.Duration
+	// CommandNotFound reports that nested command resolution failed before any
+	// child process or builtin was invoked.
+	CommandNotFound bool
+	FinalEnv        map[string]string
+	StartedAt       time.Time
+	FinishedAt      time.Time
+	Duration        time.Duration
 	// Events contains structured execution events when tracing is enabled on the
 	// parent runtime. It is empty by default.
 	Events          []trace.Event

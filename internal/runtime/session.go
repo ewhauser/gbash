@@ -153,6 +153,7 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 		ScriptPath:      req.ScriptPath,
 		Script:          script,
 		Command:         cloneStrings(req.Command),
+		CommandPath:     req.CommandPath,
 		Args:            req.Args,
 		StartupOptions:  req.StartupOptions,
 		StartupHome:     req.StartupHome,
