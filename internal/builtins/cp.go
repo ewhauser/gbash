@@ -10,6 +10,8 @@ import (
 	"os"
 	"path"
 	"strings"
+
+	gbfs "github.com/ewhauser/gbash/fs"
 )
 
 type CP struct{}
@@ -564,14 +566,9 @@ func cpCopyResolvedSource(ctx context.Context, inv *Invocation, source, srcAbs s
 
 	destIsSymlink := destInfo != nil && destInfo.Mode()&stdfs.ModeSymlink != 0
 	sameFile := cpSameFile(ctx, inv, srcAbs, srcInfo, destAbs, destInfo, destExists)
+	_, preservedLinkCandidate := cpPreservedLinkDestination(state, opts, srcAbs, srcInfo, srcLinkInfo, destAbs)
 
-	if linked, linkErr := cpTryPreservedLink(ctx, inv, source, srcAbs, srcInfo, srcLinkInfo, destAbs, destDisplay, destInfo, destExists, opts, state); linkErr != nil {
-		return linkErr
-	} else if linked {
-		return cpWriteCopyResult(inv, source, destDisplay, opts, "")
-	}
-
-	skip, err := cpShouldSkipExisting(ctx, inv, srcInfo, srcLinkInfo != nil, destAbs, destDisplay, destInfo, destExists, sameFile, opts)
+	skip, err := cpShouldSkipExisting(ctx, inv, srcInfo, srcLinkInfo != nil, destAbs, destDisplay, destInfo, destExists, sameFile, preservedLinkCandidate, opts)
 	if err != nil {
 		return err
 	}
@@ -613,6 +610,12 @@ func cpCopyResolvedSource(ctx context.Context, inv *Invocation, source, srcAbs s
 		if !ok {
 			return &ExitError{Code: 1}
 		}
+	}
+
+	if linked, linkErr := cpTryPreservedLink(ctx, inv, source, srcAbs, srcInfo, srcLinkInfo, destAbs, destDisplay, destInfo, destExists, opts, state); linkErr != nil {
+		return linkErr
+	} else if linked {
+		return cpWriteCopyResult(inv, source, destDisplay, opts, "")
 	}
 
 	copySourceAbs, destInfo, destExists, err := prepareCPDestination(ctx, inv, source, srcAbs, srcInfo, srcLinkInfo != nil, destAbs, destDisplay, destInfo, destExists, sameFile, opts, state)
@@ -657,15 +660,15 @@ func cpCopyResolvedSource(ctx context.Context, inv *Invocation, source, srcAbs s
 				if err := cpEnsureSpecialDestination(inv, destDisplay, destInfo, destExists); err != nil {
 					return err
 				}
-			} else if err := cpCopyNamedPipe(ctx, inv, destAbs); err != nil {
+			} else if err := cpCopyNamedPipe(ctx, inv, destAbs, srcInfo); err != nil {
 				return err
 			}
 		default:
 			if opts != nil && opts.attributesOnly {
-				if err := cpEnsureRegularDestination(ctx, inv, destAbs, destDisplay, destInfo, destExists); err != nil {
+				if err := cpEnsureRegularDestination(ctx, inv, destAbs, destDisplay, srcInfo, destInfo, destExists); err != nil {
 					return err
 				}
-			} else if err := copyFileContents(ctx, inv, copySourceAbs, writeTargetAbs, cpCreateFileMode(inv)); err != nil {
+			} else if err := copyFileContents(ctx, inv, copySourceAbs, writeTargetAbs, cpCreateFileMode(inv, srcInfo)); err != nil {
 				return err
 			}
 		}
@@ -863,7 +866,7 @@ func cpValidateSkippedDestination(ctx context.Context, inv *Invocation, copyingS
 	return nil
 }
 
-func cpShouldSkipExisting(ctx context.Context, inv *Invocation, srcInfo stdfs.FileInfo, copyingSymlink bool, destAbs, destDisplay string, destInfo stdfs.FileInfo, destExists, sameFile bool, opts *cpOptions) (bool, error) {
+func cpShouldSkipExisting(ctx context.Context, inv *Invocation, srcInfo stdfs.FileInfo, copyingSymlink bool, destAbs, destDisplay string, destInfo stdfs.FileInfo, destExists, sameFile, preservedLinkCandidate bool, opts *cpOptions) (bool, error) {
 	if !destExists {
 		return false, nil
 	}
@@ -888,6 +891,9 @@ func cpShouldSkipExisting(ctx context.Context, inv *Invocation, srcInfo stdfs.Fi
 	case cpUpdateNoneFail:
 		return false, exitf(inv, 1, "cp: not replacing %s", quoteGNUOperand(destDisplay))
 	case cpUpdateOlder:
+		if preservedLinkCandidate {
+			return false, nil
+		}
 		if sameFile {
 			return false, nil
 		}
@@ -1101,7 +1107,10 @@ func cpTemporaryDirMode() stdfs.FileMode {
 	return 0o700
 }
 
-func cpCreateFileMode(inv *Invocation) stdfs.FileMode {
+func cpCreateFileMode(inv *Invocation, srcInfo stdfs.FileInfo) stdfs.FileMode {
+	if srcInfo != nil {
+		return srcInfo.Mode().Perm() &^ stdfs.FileMode(umaskValue(inv))
+	}
 	return stdfs.FileMode(uint32(0o666) &^ umaskValue(inv))
 }
 
@@ -1116,7 +1125,7 @@ func cpDesiredDirectoryMode(inv *Invocation, srcInfo stdfs.FileInfo, opts *cpOpt
 	return cpCreateDirMode(inv)
 }
 
-func cpEnsureRegularDestination(ctx context.Context, inv *Invocation, destAbs, destDisplay string, destInfo stdfs.FileInfo, destExists bool) error {
+func cpEnsureRegularDestination(ctx context.Context, inv *Invocation, destAbs, destDisplay string, srcInfo, destInfo stdfs.FileInfo, destExists bool) error {
 	if destExists {
 		if destInfo != nil && destInfo.IsDir() {
 			return exitf(inv, 1, "cp: cannot overwrite directory %q with non-directory", destDisplay)
@@ -1126,7 +1135,7 @@ func cpEnsureRegularDestination(ctx context.Context, inv *Invocation, destAbs, d
 	if err := ensureParentDirExists(ctx, inv, destAbs); err != nil {
 		return err
 	}
-	file, err := inv.FS.OpenFile(ctx, destAbs, os.O_CREATE|os.O_WRONLY|os.O_EXCL, cpCreateFileMode(inv))
+	file, err := inv.FS.OpenFile(ctx, destAbs, os.O_CREATE|os.O_WRONLY|os.O_EXCL, cpCreateFileMode(inv, srcInfo))
 	if err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
@@ -1144,11 +1153,11 @@ func cpEnsureSpecialDestination(inv *Invocation, destDisplay string, destInfo st
 	return nil
 }
 
-func cpCopyNamedPipe(ctx context.Context, inv *Invocation, destAbs string) error {
+func cpCopyNamedPipe(ctx context.Context, inv *Invocation, destAbs string, srcInfo stdfs.FileInfo) error {
 	if err := ensureParentDirExists(ctx, inv, destAbs); err != nil {
 		return err
 	}
-	if err := inv.FS.Mkfifo(ctx, destAbs, cpCreateFileMode(inv)); err != nil {
+	if err := inv.FS.Mkfifo(ctx, destAbs, cpCreateFileMode(inv, srcInfo)); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
 	recordFileMutation(inv.TraceRecorder(), "copy", destAbs, destAbs, destAbs)
@@ -1160,6 +1169,13 @@ func cpApplyMetadata(ctx context.Context, inv *Invocation, srcInfo, srcLinkInfo 
 		return nil
 	}
 	if srcLinkInfo != nil {
+		if opts.preserve&cpPreserveOwnership != 0 {
+			if ownership, ok := gbfs.OwnershipFromFileInfo(srcInfo); ok {
+				if err := inv.FS.Chown(ctx, destAbs, ownership.UID, ownership.GID, false); err != nil {
+					return &ExitError{Code: 1, Err: err}
+				}
+			}
+		}
 		if opts.preserve&cpPreserveTimestamps != 0 {
 			atime, ok := statAccessTime(srcInfo)
 			if !ok {
@@ -1170,6 +1186,13 @@ func cpApplyMetadata(ctx context.Context, inv *Invocation, srcInfo, srcLinkInfo 
 			}
 		}
 		return nil
+	}
+	if opts.preserve&cpPreserveOwnership != 0 {
+		if ownership, ok := gbfs.OwnershipFromFileInfo(srcInfo); ok {
+			if err := inv.FS.Chown(ctx, destAbs, ownership.UID, ownership.GID, true); err != nil {
+				return &ExitError{Code: 1, Err: err}
+			}
+		}
 	}
 	if opts.preserve&cpPreserveMode != 0 {
 		if err := inv.FS.Chmod(ctx, destAbs, srcInfo.Mode()); err != nil {
@@ -1210,12 +1233,8 @@ func cpPOSIXWriteTarget(ctx context.Context, inv *Invocation, destAbs string, de
 }
 
 func cpTryPreservedLink(ctx context.Context, inv *Invocation, source, srcAbs string, srcInfo, srcLinkInfo stdfs.FileInfo, destAbs, destDisplay string, destInfo stdfs.FileInfo, destExists bool, opts *cpOptions, state *cpRunState) (bool, error) {
-	if state == nil || opts == nil || opts.preserve&cpPreserveLinks == 0 || srcInfo == nil || srcInfo.IsDir() || srcLinkInfo != nil {
-		return false, nil
-	}
-	key := cpPreservedLinkKey(srcAbs, srcInfo)
-	linkedDest, ok := state.preservedLinks[key]
-	if !ok || linkedDest == "" || linkedDest == destAbs {
+	linkedDest, ok := cpPreservedLinkDestination(state, opts, srcAbs, srcInfo, srcLinkInfo, destAbs)
+	if !ok {
 		return false, nil
 	}
 	linkedInfo, _, linkedExists, err := lstatMaybe(ctx, inv, linkedDest)
@@ -1251,6 +1270,17 @@ func cpRememberPreservedLink(state *cpRunState, opts *cpOptions, srcAbs string, 
 		return
 	}
 	state.preservedLinks[cpPreservedLinkKey(srcAbs, srcInfo)] = destAbs
+}
+
+func cpPreservedLinkDestination(state *cpRunState, opts *cpOptions, srcAbs string, srcInfo, srcLinkInfo stdfs.FileInfo, destAbs string) (string, bool) {
+	if state == nil || opts == nil || opts.preserve&cpPreserveLinks == 0 || srcInfo == nil || srcInfo.IsDir() || srcLinkInfo != nil {
+		return "", false
+	}
+	linkedDest, ok := state.preservedLinks[cpPreservedLinkKey(srcAbs, srcInfo)]
+	if !ok || linkedDest == "" || linkedDest == destAbs {
+		return "", false
+	}
+	return linkedDest, true
 }
 
 func cpPreservedLinkKey(srcAbs string, srcInfo stdfs.FileInfo) string {

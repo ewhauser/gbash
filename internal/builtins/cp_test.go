@@ -804,6 +804,48 @@ func TestCPParentsCreatesIntermediateDirectoriesWithoutPreservingMode(t *testing
 	}
 }
 
+func TestCPCreatesNewFilesWithSourcePermissions(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf '#!/bin/sh\\n' > /tmp/src.sh\n" +
+			"chmod 755 /tmp/src.sh\n" +
+			"cp /tmp/src.sh /tmp/dst.sh\n" +
+			"stat -c '%a' /tmp/src.sh /tmp/dst.sh\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "755\n755\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestCPPreserveOwnershipCopiesFileOwnership(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'payload\\n' > /tmp/src.txt\n" +
+			"chown 41:42 /tmp/src.txt\n" +
+			"cp -p /tmp/src.txt /tmp/dst.txt\n" +
+			"stat -c '%u:%g' /tmp/dst.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "41:42\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestCPPreserveLinksRelinksMissingDestinationWhenUpdateOlderSkipsCanonical(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
@@ -830,6 +872,48 @@ func TestCPPreserveLinksRelinksMissingDestinationWhenUpdateOlderSkipsCanonical(t
 	}
 	if lines[0] != lines[1] {
 		t.Fatalf("inode lines = %q and %q, want equal", lines[0], lines[1])
+	}
+}
+
+func TestCPPreserveLinksHonorsNoClobberBeforeRelinking(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkdir -p /tmp/src /tmp/dst\n" +
+			"printf 'source' > /tmp/src/a\n" +
+			"ln /tmp/src/a /tmp/src/b\n" +
+			"printf 'keep-a' > /tmp/dst/a\n" +
+			"printf 'keep-b' > /tmp/dst/b\n" +
+			"cd /tmp\n" +
+			"cp -an src/. dst\n" +
+			"printf 'before-a=%s\\n' \"$(cat /tmp/dst/a)\"\n" +
+			"printf 'before-b=%s\\n' \"$(cat /tmp/dst/b)\"\n" +
+			"printf '+tail' >> /tmp/dst/a\n" +
+			"printf 'after-a=%s\\n' \"$(cat /tmp/dst/a)\"\n" +
+			"printf 'after-b=%s\\n' \"$(cat /tmp/dst/b)\"\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("Stdout lines = %q, want 4 lines", result.Stdout)
+	}
+	if got, want := lines[0], "before-a=keep-a"; got != want {
+		t.Fatalf("dst/a = %q, want %q", got, want)
+	}
+	if got, want := lines[1], "before-b=keep-b"; got != want {
+		t.Fatalf("dst/b = %q, want %q", got, want)
+	}
+	if got, want := lines[2], "after-a=keep-a+tail"; got != want {
+		t.Fatalf("dst/a after mutation = %q, want %q", got, want)
+	}
+	if got, want := lines[3], "after-b=keep-b"; got != want {
+		t.Fatalf("dst/b after mutating dst/a = %q, want %q", got, want)
 	}
 }
 
