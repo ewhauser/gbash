@@ -417,6 +417,34 @@ func TestDdGNUCompatRegressions(t *testing.T) {
 		}
 	})
 
+	t.Run("redirected stdout seek is relative to current offset", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+
+		result := execSessionScriptWithInput(t, session, "{ printf AB; dd seek=1 bs=1 count=1 status=none; } > /tmp/out\n", []byte("Z"))
+		if got, want := result.ExitCode, 0; got != want {
+			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if got, want := readSessionFile(t, session, "/tmp/out"), []byte{'A', 'B', 0, 'Z'}; !bytes.Equal(got, want) {
+			t.Fatalf("output = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("redirected stdout honors oflag directory", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+
+		result := execSessionScriptWithInput(t, session, "dd if=/dev/null oflag=directory status=none > /tmp/out\n", nil)
+		if got, want := result.ExitCode, 1; got != want {
+			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if !strings.Contains(result.Stderr, "setting flags for 'standard output': Not a directory") {
+			t.Fatalf("Stderr = %q, want standard-output directory diagnostic", result.Stderr)
+		}
+	})
+
 	t.Run("skip past eof on file is silent", func(t *testing.T) {
 		t.Parallel()
 

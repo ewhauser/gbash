@@ -1065,6 +1065,9 @@ func openDdOutput(ctx context.Context, inv *Invocation, settings *ddSettings) (d
 	if err != nil {
 		return nil, err
 	}
+	if settings.oflags.directory && !settings.outfileSet {
+		return nil, exitf(inv, 1, "dd: setting flags for %s: Not a directory", quoteGNUOperand("standard output"))
+	}
 
 	if !settings.outfileSet {
 		if path := ddRedirectPath(inv.Stdout); path != "" {
@@ -1081,7 +1084,7 @@ func openDdOutput(ctx context.Context, inv *Invocation, settings *ddSettings) (d
 			if writer, ok := openDdSeekableWriter(inv.Stdout, settings, int64(seekBytes)); ok {
 				return writer, nil
 			}
-			writer, err := openDdPathOutput(ctx, inv, settings, path, ddRedirectOffset(inv.Stdout))
+			writer, err := openDdPathOutput(ctx, inv, settings, path, ddRedirectOffset(inv.Stdout), true)
 			if err != nil {
 				return nil, err
 			}
@@ -1090,10 +1093,6 @@ func openDdOutput(ctx context.Context, inv *Invocation, settings *ddSettings) (d
 			}
 			return writer, nil
 		}
-	}
-
-	if settings.oflags.directory && !settings.outfileSet {
-		return nil, exitf(inv, 1, "dd: setting flags for %s: Not a directory", quoteGNUOperand("standard output"))
 	}
 
 	if !settings.outfileSet {
@@ -1106,10 +1105,10 @@ func openDdOutput(ctx context.Context, inv *Invocation, settings *ddSettings) (d
 			buffered: settings.buffered,
 		}, nil
 	}
-	return openDdPathOutput(ctx, inv, settings, settings.outfile, 0)
+	return openDdPathOutput(ctx, inv, settings, settings.outfile, 0, false)
 }
 
-func openDdPathOutput(ctx context.Context, inv *Invocation, settings *ddSettings, target string, initialOffset int64) (ddOutputWriter, error) {
+func openDdPathOutput(ctx context.Context, inv *Invocation, settings *ddSettings, target string, initialOffset int64, seekFromCurrent bool) (ddOutputWriter, error) {
 	seekBytes, err := ddScaledOffset(inv, "seek", settings.seek, settings.obs)
 	if err != nil {
 		return nil, err
@@ -1151,7 +1150,14 @@ func openDdPathOutput(ctx context.Context, inv *Invocation, settings *ddSettings
 	existing := []byte{}
 	cursor64 := max(initialOffset, int64(0))
 	if seekBytes > 0 {
-		cursor64 = int64(seekBytes)
+		if seekFromCurrent {
+			if seekBytes > uint64(math.MaxInt64-cursor64) {
+				return nil, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(strconv.FormatUint(seekBytes, 10)))
+			}
+			cursor64 += int64(seekBytes)
+		} else {
+			cursor64 = int64(seekBytes)
+		}
 	}
 	needExisting := exists && info != nil && (cursor64 > 0 || settings.conv.notrunc)
 	if exists && info != nil {
@@ -1222,7 +1228,7 @@ func openDdSeekableWriter(handle io.Writer, settings *ddSettings, seekBytes int6
 		return nil, false
 	}
 	if seekBytes > 0 {
-		position, err = seeker.Seek(seekBytes, io.SeekStart)
+		position, err = seeker.Seek(seekBytes, io.SeekCurrent)
 		if err != nil {
 			return nil, false
 		}
