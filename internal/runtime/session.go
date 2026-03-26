@@ -92,7 +92,7 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 	stderr := newCaptureBuffer(limits.MaxStderrBytes)
 	stdoutWriter := newCapturePassthroughWriter(stdout, req.Stdout)
 	stderrWriter := newCapturePassthroughWriter(stderr, req.Stderr)
-	ctx = bindExecutionTTY(ctx, req.Stdin, stdoutWriter)
+	ctx, execStdin := bindExecutionTTY(ctx, req.Stdin, stdoutWriter)
 	executionID := nextTraceID("exec")
 	recorder, traceBuffer := newExecutionTraceRecorder(ctx, s.id, executionID, s.cfg.Tracing, true)
 	if s.layout != nil {
@@ -168,7 +168,7 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 		HostPlatform:    hostPlatform(s.cfg.Host),
 		HostProcessMeta: processMeta,
 		NewPipe:         s.cfg.Host.NewPipe,
-		Stdin:           stdinOrEmpty(req.Stdin),
+		Stdin:           stdinOrEmpty(execStdin),
 		Stdout:          stdoutWriter,
 		Stderr:          stderrWriter,
 		FS:              s.fs,

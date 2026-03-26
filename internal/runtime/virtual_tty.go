@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	gbfs "github.com/ewhauser/gbash/fs"
 	"github.com/ewhauser/gbash/internal/commandutil"
@@ -36,6 +37,10 @@ type executionTTYFile struct {
 	closed atomic.Bool
 }
 
+type executionTTYReader struct {
+	source *executionTTY
+}
+
 func withExecutionTTY(ctx context.Context, source *executionTTY) context.Context {
 	if ctx == nil || source == nil {
 		return ctx
@@ -51,20 +56,21 @@ func executionTTYFromContext(ctx context.Context) *executionTTY {
 	return source
 }
 
-func bindExecutionTTY(ctx context.Context, stdin io.Reader, stdout io.Writer) context.Context {
+func bindExecutionTTY(ctx context.Context, stdin io.Reader, stdout io.Writer) (context.Context, io.Reader) {
 	if source := executionTTYFromReader(stdin); source != nil {
-		return withExecutionTTY(ctx, source)
+		return withExecutionTTY(ctx, source), stdin
 	}
 	if executionTTYFromContext(ctx) != nil {
-		return ctx
+		return ctx, stdin
 	}
 	if !readerLooksLikeTTY(stdin) {
-		return ctx
+		return ctx, stdin
 	}
-	return withExecutionTTY(ctx, &executionTTY{
+	source := &executionTTY{
 		reader: stdin,
 		writer: stdout,
-	})
+	}
+	return withExecutionTTY(ctx, source), &executionTTYReader{source: source}
 }
 
 func forceExecutionTTY(ctx context.Context, stdin io.Reader, stdout io.Writer) context.Context {
@@ -213,6 +219,61 @@ func (f *executionTTYFile) executionTTYSource() *executionTTY {
 		return nil
 	}
 	return f.source
+}
+
+func (r *executionTTYReader) Read(p []byte) (int, error) {
+	if r == nil || r.source == nil || r.source.reader == nil {
+		return 0, io.EOF
+	}
+	r.source.readMu.Lock()
+	defer r.source.readMu.Unlock()
+	return r.source.reader.Read(p)
+}
+
+func (r *executionTTYReader) Close() error {
+	return nil
+}
+
+func (r *executionTTYReader) SetReadDeadline(deadline time.Time) error {
+	if r == nil || r.source == nil || r.source.reader == nil {
+		return nil
+	}
+	deadliner, ok := r.source.reader.(interface {
+		SetReadDeadline(time.Time) error
+	})
+	if !ok {
+		return nil
+	}
+	return deadliner.SetReadDeadline(deadline)
+}
+
+func (r *executionTTYReader) RedirectPath() string {
+	if r == nil || r.source == nil || r.source.reader == nil {
+		return ""
+	}
+	return virtualTTYDevice
+}
+
+func (r *executionTTYReader) RedirectFlags() int {
+	return os.O_RDONLY
+}
+
+func (r *executionTTYReader) RedirectOffset() int64 {
+	return 0
+}
+
+func (r *executionTTYReader) Stat() (stdfs.FileInfo, error) {
+	if r == nil || r.source == nil || r.source.reader == nil {
+		return nil, stdfs.ErrInvalid
+	}
+	return virtualTTYInfo(path.Base(virtualTTYDevice)), nil
+}
+
+func (r *executionTTYReader) executionTTYSource() *executionTTY {
+	if r == nil {
+		return nil
+	}
+	return r.source
 }
 
 var _ gbfs.File = (*executionTTYFile)(nil)
