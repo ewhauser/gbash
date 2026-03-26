@@ -640,6 +640,31 @@ func TestMVSymlinkOntoHardlinkToSameFileFails(t *testing.T) {
 	}
 }
 
+func TestMVRejectsTrailingSlashMissingFileTargets(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: ": > plain\n" +
+			"mv plain missing/ 2>/dev/null\n" +
+			"printf 'status1=%s\\n' \"$?\"\n" +
+			"[ -f plain ] && echo plain-still-there\n" +
+			": > plain2\n" +
+			"mv -T plain2 missing2/ 2>/dev/null\n" +
+			"printf 'status2=%s\\n' \"$?\"\n" +
+			"[ -f plain2 ] && echo plain2-still-there\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "status1=1\nplain-still-there\nstatus2=1\nplain2-still-there\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestFindSupportsRelativeRootAndNameFilter(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})

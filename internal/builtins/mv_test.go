@@ -138,7 +138,11 @@ func TestMVUpdateModesIsolated(t *testing.T) {
 			"mv --update=none-fail src-fail dst-fail\n" +
 			"printf 'status2=%s\\n' \"$?\"\n" +
 			"[ -e src-fail ] && echo src-fail-exists\n" +
-			"cat dst-fail\n",
+			"cat dst-fail\n" +
+			"echo same > same\n" +
+			"mv --update=none same same\n" +
+			"printf 'status3=%s\\n' \"$?\"\n" +
+			"cat same\n",
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -146,10 +150,13 @@ func TestMVUpdateModesIsolated(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "status1=0\nsrc\ndst\nstatus2=1\nsrc-fail-exists\ndst\n"; got != want {
+	if got, want := result.Stdout, "status1=0\nsrc\ndst\nstatus2=1\nsrc-fail-exists\ndst\nstatus3=0\nsame\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 	if !strings.Contains(result.Stderr, "mv: not replacing") {
 		t.Fatalf("Stderr = %q, want update=none-fail diagnostic", result.Stderr)
+	}
+	if strings.Contains(result.Stderr, "same file") {
+		t.Fatalf("Stderr = %q, want update=none same-file case to skip quietly", result.Stderr)
 	}
 }

@@ -325,6 +325,14 @@ func mvMoveOne(ctx context.Context, inv *Invocation, sourceArg, destArg string, 
 	}
 
 	sameFile := mvSameFile(ctx, inv, sourceArg, srcAbs, srcLInfo, dest.abs, destLInfo, destExists)
+	if sameFile {
+		switch opts.updateMode {
+		case cpUpdateNone:
+			return mvMoveOutcomeSkipped, nil
+		case cpUpdateNoneFail:
+			return mvMoveOutcomeSkipped, exitf(inv, 1, "mv: not replacing %s", quoteGNUOperand(dest.display))
+		}
+	}
 	if sameFile && srcAbs == dest.abs {
 		return mvMoveOutcomeSkipped, exitf(inv, 1, "mv: %s and %s are the same file", quoteGNUOperand(sourceArg), quoteGNUOperand(dest.display))
 	}
@@ -420,8 +428,8 @@ func mvResolveDestination(ctx context.Context, inv *Invocation, sourceArg string
 		if err != nil {
 			return mvResolvedDestination{}, err
 		}
-		if hasTrailingSlash(destArg) && exists && info != nil && !info.IsDir() {
-			return mvResolvedDestination{}, exitf(inv, 1, "mv: target %s: Not a directory", quoteGNUOperand(destArg))
+		if hasTrailingSlash(destArg) && !sourceIsDir && (!exists || info == nil || !info.IsDir()) {
+			return mvResolvedDestination{}, exitf(inv, 1, "mv: cannot move %s to %s: Not a directory", quoteGNUOperand(sourceArg), quoteGNUOperand(destArg))
 		}
 		return mvResolvedDestination{
 			abs:     allowPath(inv, destArg),
@@ -468,8 +476,8 @@ func mvResolveDestination(ctx context.Context, inv *Invocation, sourceArg string
 	if trimmed == "" {
 		trimmed = "/"
 	}
-	if hasTrailingSlash(destArg) && !sourceIsDir && exists && info != nil && !info.IsDir() {
-		return mvResolvedDestination{}, exitf(inv, 1, "mv: target %s: Not a directory", quoteGNUOperand(destArg))
+	if hasTrailingSlash(destArg) && !sourceIsDir && (!exists || info == nil || !info.IsDir()) {
+		return mvResolvedDestination{}, exitf(inv, 1, "mv: cannot move %s to %s: Not a directory", quoteGNUOperand(sourceArg), quoteGNUOperand(destArg))
 	}
 	return mvResolvedDestination{
 		abs:     allowPath(inv, destArg),
