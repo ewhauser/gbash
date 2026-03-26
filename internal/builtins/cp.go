@@ -674,7 +674,7 @@ func cpCopyResolvedSource(ctx context.Context, inv *Invocation, source, srcAbs s
 		switch {
 		case srcLinkInfo != nil:
 			if opts != nil && opts.attributesOnly && destExists && !opts.removeDestination {
-				return &ExitError{Code: 1}
+				return exitf(inv, 1, "cp: cannot create symbolic link %s: File exists", quoteGNUOperand(path.Base(destDisplay)))
 			}
 			if err := copySymlink(ctx, inv, copySourceAbs, destAbs, destDisplay, state); err != nil {
 				return err
@@ -1270,7 +1270,11 @@ func cpApplyMetadata(ctx context.Context, inv *Invocation, srcInfo, srcLinkInfo 
 			return &ExitError{Code: 1, Err: err}
 		}
 	} else if isDir && created {
-		if err := inv.FS.Chmod(ctx, destAbs, cpCreateDirMode(inv)); err != nil {
+		dirMode := cpCreateDirMode(inv)
+		if srcInfo != nil {
+			dirMode = cpCreateFileMode(inv, srcInfo)
+		}
+		if err := inv.FS.Chmod(ctx, destAbs, dirMode); err != nil {
 			return &ExitError{Code: 1, Err: err}
 		}
 	}

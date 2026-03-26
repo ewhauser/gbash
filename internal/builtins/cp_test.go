@@ -829,6 +829,31 @@ func TestCPAttributesOnlyPreservesDataAndCanReplaceWithSymlink(t *testing.T) {
 	if got, want := result.Stdout, "2plain=1\n2forced=0\nsymlink\nfile1\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
+	if !strings.Contains(result.Stderr, "cp: cannot create symbolic link 'file2': File exists") {
+		t.Fatalf("Stderr = %q, want attributes-only symlink conflict message", result.Stderr)
+	}
+}
+
+func TestCPRecursiveCopyRetainsSourceDirectoryMode(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkdir -p /tmp/src/private\n" +
+			"chmod 700 /tmp/src/private\n" +
+			"echo payload > /tmp/src/private/file.txt\n" +
+			"cp -R /tmp/src /tmp/dst\n" +
+			"stat -c '%a' /tmp/dst/private\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "700\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
 }
 
 func TestCPParentsCreatesIntermediateDirectoriesWithoutPreservingMode(t *testing.T) {
