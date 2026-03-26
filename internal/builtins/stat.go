@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"io"
 	stdfs "io/fs"
-	"os"
+	"path"
 	"reflect"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	gbfs "github.com/ewhauser/gbash/fs"
 )
 
 type Stat struct{}
@@ -665,7 +666,26 @@ func statStdin(inv *Invocation) (stdfs.FileInfo, string, error) {
 	if inv != nil {
 		reader = inv.Stdin
 	}
+	ttyPath := ""
 	for {
+		if statter, ok := reader.(interface {
+			Stat() (stdfs.FileInfo, error)
+		}); ok {
+			info, err := statter.Stat()
+			if err == nil {
+				return info, "-", nil
+			}
+			if !statIsBadFileDescriptor(err) {
+				return nil, "-", err
+			}
+		}
+		if meta, ok := reader.(interface {
+			RedirectPath() string
+		}); ok && ttyPath == "" {
+			if redirectPath, ok := ttyRecognizedPath(meta.RedirectPath()); ok {
+				ttyPath = redirectPath
+			}
+		}
 		unwrapper, ok := reader.(interface {
 			UnderlyingReader() io.Reader
 		})
@@ -678,17 +698,10 @@ func statStdin(inv *Invocation) (stdfs.FileInfo, string, error) {
 		}
 		reader = next
 	}
-	statter, ok := reader.(interface {
-		Stat() (stdfs.FileInfo, error)
-	})
-	if !ok {
-		return nil, "-", &os.PathError{Op: "stat", Path: "-", Err: syscall.EBADF}
+	if ttyPath != "" {
+		return statSyntheticStdinFileInfo(path.Base(ttyPath), stdfs.ModeDevice|stdfs.ModeCharDevice|0o600), "-", nil
 	}
-	info, err := statter.Stat()
-	if err != nil {
-		return nil, "-", err
-	}
-	return info, "-", nil
+	return statSyntheticStdinFileInfo("-", stdfs.ModeNamedPipe|0o600), "-", nil
 }
 
 func statWarnf(inv *Invocation, format string, args ...any) {
@@ -702,12 +715,48 @@ func isStatHexDigit(b byte) bool {
 	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')
 }
 
+func statIsBadFileDescriptor(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "bad file descriptor")
+}
+
+func statSyntheticStdinFileInfo(name string, mode stdfs.FileMode) stdfs.FileInfo {
+	ownership := gbfs.DefaultOwnership()
+	return statSyntheticFileInfo{
+		name:    name,
+		mode:    mode,
+		modTime: time.Unix(0, 0).UTC(),
+		uid:     ownership.UID,
+		gid:     ownership.GID,
+	}
+}
+
 type statInvalidDirectiveError struct {
 	spec string
 }
 
 func (e *statInvalidDirectiveError) Error() string {
 	return fmt.Sprintf("invalid directive %s", e.spec)
+}
+
+type statSyntheticFileInfo struct {
+	name    string
+	mode    stdfs.FileMode
+	modTime time.Time
+	uid     uint32
+	gid     uint32
+}
+
+func (fi statSyntheticFileInfo) Name() string         { return fi.name }
+func (fi statSyntheticFileInfo) Size() int64          { return 0 }
+func (fi statSyntheticFileInfo) Mode() stdfs.FileMode { return fi.mode }
+func (fi statSyntheticFileInfo) ModTime() time.Time   { return fi.modTime }
+func (fi statSyntheticFileInfo) IsDir() bool          { return fi.mode.IsDir() }
+func (fi statSyntheticFileInfo) Sys() any             { return gbfs.FileOwnership{UID: fi.uid, GID: fi.gid} }
+func (fi statSyntheticFileInfo) Ownership() (gbfs.FileOwnership, bool) {
+	return gbfs.FileOwnership{UID: fi.uid, GID: fi.gid}, true
 }
 
 var _ Command = (*Stat)(nil)

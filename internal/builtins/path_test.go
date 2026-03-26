@@ -2156,6 +2156,19 @@ func TestStatUsesOperandNameForFormatsAndStdinDash(t *testing.T) {
 	}
 }
 
+func TestStatTreatsPipeBackedStdinAsFifo(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, "printf 'hello' | stat --format='%F %n' -\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "fifo -\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestStatPrintfEscapesWarningsAndDirectiveErrorsMatchGNU(t *testing.T) {
 	t.Parallel()
 

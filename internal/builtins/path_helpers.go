@@ -12,6 +12,14 @@ func fileTypeName(info stdfs.FileInfo) string {
 		return "symbolic link"
 	case info.IsDir():
 		return "directory"
+	case info.Mode()&stdfs.ModeNamedPipe != 0:
+		return "fifo"
+	case info.Mode()&stdfs.ModeDevice != 0 && info.Mode()&stdfs.ModeCharDevice != 0:
+		return "character special file"
+	case info.Mode()&stdfs.ModeDevice != 0:
+		return "block special file"
+	case info.Mode()&stdfs.ModeSocket != 0:
+		return "socket"
 	default:
 		return "regular file"
 	}
@@ -32,6 +40,14 @@ func formatModeLong(mode stdfs.FileMode) string {
 		b.WriteByte('l')
 	case mode.IsDir():
 		b.WriteByte('d')
+	case mode&stdfs.ModeNamedPipe != 0:
+		b.WriteByte('p')
+	case mode&stdfs.ModeDevice != 0 && mode&stdfs.ModeCharDevice != 0:
+		b.WriteByte('c')
+	case mode&stdfs.ModeDevice != 0:
+		b.WriteByte('b')
+	case mode&stdfs.ModeSocket != 0:
+		b.WriteByte('s')
 	default:
 		b.WriteByte('-')
 	}
