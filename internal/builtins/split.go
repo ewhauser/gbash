@@ -163,49 +163,32 @@ func (c *Split) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedC
 		return err
 	}
 
-	rawChunks, stdoutData, err := splitContent(input.data, &opts)
-	if err != nil {
-		return err
-	}
-	if stdoutData != nil {
-		if _, err := inv.Stdout.Write(stdoutData); err != nil {
-			return &ExitError{Code: 1, Err: err}
+	if opts.mode == splitModeNumber {
+		if splitNumberWritesStdout(&opts) {
+			stdoutData := splitNumberStdoutData(input.data, &opts)
+			if _, err := inv.Stdout.Write(stdoutData); err != nil {
+				return &ExitError{Code: 1, Err: err}
+			}
+			return nil
 		}
-		return nil
+		return splitWriteNumberContent(ctx, inv, input, prefix, &opts)
 	}
 
-	suffixes, err := newSplitSuffixGenerator(inv, &opts)
+	rawChunks := splitContent(input.data, &opts)
+	return splitWriteChunks(ctx, inv, input, prefix, &opts, rawChunks)
+}
+
+func splitWriteChunks(ctx context.Context, inv *Invocation, input splitInput, prefix string, opts *splitOptions, chunks [][]byte) error {
+	suffixes, err := newSplitSuffixGenerator(inv, opts)
 	if err != nil {
 		return err
 	}
-	for _, chunk := range rawChunks {
+	for _, chunk := range chunks {
 		if opts.elideEmpty && len(chunk) == 0 {
 			continue
 		}
-
-		name, err := suffixes.Next(inv)
-		if err != nil {
+		if err := splitWriteChunk(ctx, inv, input, prefix, opts, suffixes, chunk); err != nil {
 			return err
-		}
-		displayName := prefix + name + opts.additionalSuffix
-		target := gbfs.Resolve(inv.Cwd, displayName)
-		resolvedTarget, targetInfo := splitResolveOutputTarget(ctx, inv, target)
-		if splitWouldOverwriteInput(ctx, inv, target, resolvedTarget, input.abs, input.info, targetInfo) {
-			return exitf(inv, 1, "split: %s would overwrite input; aborting", quoteGNUOperand(resolvedTarget))
-		}
-		if opts.verbose {
-			if _, err := fmt.Fprintf(inv.Stdout, "creating file '%s'\n", displayName); err != nil {
-				return &ExitError{Code: 1, Err: err}
-			}
-		}
-		if opts.filter != "" {
-			if err := runSplitFilter(ctx, inv, opts.filter, displayName, chunk); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := writeFileContents(ctx, inv, resolvedTarget, chunk, stdfs.FileMode(0o644)); err != nil {
-			return exitf(inv, 1, "split: %s: %s", displayName, splitWriteErrorText(err))
 		}
 	}
 	return nil
@@ -499,38 +482,32 @@ func parseSplitNumber(value string) (splitNumberSpec, error) {
 	}
 }
 
-func splitContent(data []byte, opts *splitOptions) ([][]byte, []byte, error) {
+func splitContent(data []byte, opts *splitOptions) [][]byte {
 	switch opts.mode {
 	case splitModeBytes:
-		return splitByBytes(data, opts.bytes), nil, nil
+		return splitByBytes(data, opts.bytes)
 	case splitModeLines:
-		return splitByRecordCount(splitRecords(data, opts.separator), opts.lines), nil, nil
+		return splitByRecordCount(splitRecords(data, opts.separator), opts.lines)
 	case splitModeLineBytes:
-		return splitByLineBytes(data, opts.separator, opts.lineBytes), nil, nil
+		return splitByLineBytes(data, opts.separator, opts.lineBytes)
 	case splitModeNumber:
-		return splitNumberContent(data, opts)
+		return nil
 	default:
-		return nil, nil, nil
+		return nil
 	}
 }
 
-func splitNumberContent(data []byte, opts *splitOptions) ([][]byte, []byte, error) {
+func splitNumberStdoutData(data []byte, opts *splitOptions) []byte {
 	records := splitRecords(data, opts.separator)
 	switch opts.number.mode {
-	case splitNumberBytes:
-		return splitByByteChunks(data, opts.number.chunks), nil, nil
 	case splitNumberKthBytes:
-		return nil, splitExtractByteChunk(data, opts.number.kth, opts.number.chunks), nil
-	case splitNumberLines:
-		return splitByLineChunks(records, len(data), opts.number.chunks), nil, nil
+		return splitExtractByteChunk(data, opts.number.kth, opts.number.chunks)
 	case splitNumberKthLines:
-		return nil, splitExtractLineChunk(records, len(data), opts.number.kth, opts.number.chunks), nil
-	case splitNumberRoundRobin:
-		return splitRoundRobin(records, opts.number.chunks), nil, nil
+		return splitExtractLineChunk(records, len(data), opts.number.kth, opts.number.chunks)
 	case splitNumberKthRoundRobin:
-		return nil, splitExtractRoundRobinChunk(records, opts.number.kth, opts.number.chunks), nil
+		return splitExtractRoundRobinChunk(records, opts.number.kth, opts.number.chunks)
 	default:
-		return nil, nil, nil
+		return nil
 	}
 }
 
@@ -674,54 +651,6 @@ func splitByLineBytes(data []byte, sep byte, limit uint64) [][]byte {
 	return out
 }
 
-func splitByByteChunks(data []byte, chunks uint64) [][]byte {
-	if chunks == 0 {
-		return nil
-	}
-	count := splitAllocChunkCount(chunks)
-	out := make([][]byte, 0, count)
-	base := uint64(len(data)) / chunks
-	remainder := uint64(len(data)) % chunks
-	offset := 0
-	for i := range chunks {
-		size := base
-		if i < remainder {
-			size++
-		}
-		end := offset + int(size)
-		end = min(end, len(data))
-		out = append(out, append([]byte(nil), data[offset:end]...))
-		offset = end
-	}
-	return out
-}
-
-func splitByLineChunks(records [][]byte, totalBytes int, chunks uint64) [][]byte {
-	if chunks == 0 {
-		return nil
-	}
-	count := splitAllocChunkCount(chunks)
-	out := make([][]byte, count)
-	if len(records) == 0 {
-		return out
-	}
-
-	base := uint64(totalBytes) / chunks
-	remainder := uint64(totalBytes) % chunks
-	chunkIndex := uint64(0)
-	chunkEnd := splitChunkBoundary(base, remainder, chunkIndex)
-	offset := uint64(0)
-	for _, record := range records {
-		out[int(chunkIndex)] = append(out[int(chunkIndex)], record...)
-		offset += uint64(len(record))
-		for chunkIndex < chunks-1 && offset >= chunkEnd {
-			chunkIndex++
-			chunkEnd += splitChunkSize(base, remainder, chunkIndex)
-		}
-	}
-	return out
-}
-
 func splitExtractLineChunk(records [][]byte, totalBytes int, kth, chunks uint64) []byte {
 	if chunks == 0 || kth == 0 || kth > chunks {
 		return []byte{}
@@ -745,18 +674,6 @@ func splitExtractLineChunk(records [][]byte, totalBytes int, kth, chunks uint64)
 			chunkIndex++
 			chunkEnd += splitChunkSize(base, remainder, chunkIndex)
 		}
-	}
-	return out
-}
-
-func splitRoundRobin(records [][]byte, chunks uint64) [][]byte {
-	if chunks == 0 {
-		return nil
-	}
-	count := splitAllocChunkCount(chunks)
-	out := make([][]byte, count)
-	for i, record := range records {
-		out[uint64(i)%chunks] = append(out[uint64(i)%chunks], record...)
 	}
 	return out
 }
@@ -788,6 +705,184 @@ func splitExtractByteChunk(data []byte, kth, chunks uint64) []byte {
 		return []byte{}
 	}
 	return append([]byte(nil), data[int(start):int(end)]...)
+}
+
+func splitWriteNumberContent(ctx context.Context, inv *Invocation, input splitInput, prefix string, opts *splitOptions) error {
+	suffixes, err := newSplitSuffixGenerator(inv, opts)
+	if err != nil {
+		return err
+	}
+
+	writeChunk := func(chunk []byte) error {
+		if opts.elideEmpty && len(chunk) == 0 {
+			return nil
+		}
+		return splitWriteChunk(ctx, inv, input, prefix, opts, suffixes, chunk)
+	}
+
+	switch opts.number.mode {
+	case splitNumberBytes:
+		return splitEmitByteChunks(input.data, opts.number.chunks, opts.elideEmpty, writeChunk)
+	case splitNumberLines:
+		return splitEmitLineChunks(splitRecords(input.data, opts.separator), len(input.data), opts.number.chunks, opts.elideEmpty, writeChunk)
+	case splitNumberRoundRobin:
+		return splitEmitRoundRobin(splitRecords(input.data, opts.separator), opts.number.chunks, opts.elideEmpty, writeChunk)
+	default:
+		return nil
+	}
+}
+
+func splitWriteChunk(ctx context.Context, inv *Invocation, input splitInput, prefix string, opts *splitOptions, suffixes *splitSuffixGenerator, chunk []byte) error {
+	name, err := suffixes.Next(inv)
+	if err != nil {
+		return err
+	}
+	displayName := prefix + name + opts.additionalSuffix
+	target := gbfs.Resolve(inv.Cwd, displayName)
+	resolvedTarget, targetInfo := splitResolveOutputTarget(ctx, inv, target)
+	if splitWouldOverwriteInput(ctx, inv, target, resolvedTarget, input.abs, input.info, targetInfo) {
+		return exitf(inv, 1, "split: %s would overwrite input; aborting", quoteGNUOperand(resolvedTarget))
+	}
+	if opts.verbose {
+		if _, err := fmt.Fprintf(inv.Stdout, "creating file '%s'\n", displayName); err != nil {
+			return &ExitError{Code: 1, Err: err}
+		}
+	}
+	if opts.filter != "" {
+		return runSplitFilter(ctx, inv, opts.filter, displayName, chunk)
+	}
+	if err := writeFileContents(ctx, inv, resolvedTarget, chunk, stdfs.FileMode(0o644)); err != nil {
+		return exitf(inv, 1, "split: %s: %s", displayName, splitWriteErrorText(err))
+	}
+	return nil
+}
+
+func splitEmitByteChunks(data []byte, chunks uint64, elideEmpty bool, emit func([]byte) error) error {
+	if chunks == 0 {
+		return nil
+	}
+
+	nonEmpty := min(chunks, uint64(len(data)))
+	base := uint64(0)
+	remainder := uint64(0)
+	if chunks > 0 {
+		base = uint64(len(data)) / chunks
+		remainder = uint64(len(data)) % chunks
+	}
+	offset := 0
+	for i := range nonEmpty {
+		size := base
+		if i < remainder {
+			size++
+		}
+		end := min(offset+int(size), len(data))
+		if err := emit(append([]byte(nil), data[offset:end]...)); err != nil {
+			return err
+		}
+		offset = end
+	}
+	if elideEmpty {
+		return nil
+	}
+	for i := nonEmpty; i < chunks; i++ {
+		if err := emit(nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func splitEmitLineChunks(records [][]byte, totalBytes int, chunks uint64, elideEmpty bool, emit func([]byte) error) error {
+	if chunks == 0 {
+		return nil
+	}
+	if len(records) == 0 {
+		if elideEmpty {
+			return nil
+		}
+		for range chunks {
+			if err := emit(nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	base := uint64(totalBytes) / chunks
+	remainder := uint64(totalBytes) % chunks
+	chunkIndex := uint64(0)
+	chunkEnd := splitChunkBoundary(base, remainder, chunkIndex)
+	offset := uint64(0)
+	var current []byte
+	flushUntil := func(target uint64) error {
+		for chunkIndex < target && chunkIndex < chunks {
+			if !elideEmpty || len(current) > 0 {
+				if err := emit(current); err != nil {
+					return err
+				}
+			}
+			current = nil
+			chunkIndex++
+		}
+		return nil
+	}
+
+	for _, record := range records {
+		current = append(current, record...)
+		offset += uint64(len(record))
+
+		nextChunk := chunkIndex
+		nextBoundary := chunkEnd
+		for nextChunk < chunks-1 && offset >= nextBoundary {
+			nextChunk++
+			nextBoundary += splitChunkSize(base, remainder, nextChunk)
+		}
+		if err := flushUntil(nextChunk); err != nil {
+			return err
+		}
+		chunkEnd = nextBoundary
+	}
+
+	if !elideEmpty || len(current) > 0 {
+		if err := emit(current); err != nil {
+			return err
+		}
+	}
+	chunkIndex++
+	if elideEmpty {
+		return nil
+	}
+	for ; chunkIndex < chunks; chunkIndex++ {
+		if err := emit(nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func splitEmitRoundRobin(records [][]byte, chunks uint64, elideEmpty bool, emit func([]byte) error) error {
+	if chunks == 0 {
+		return nil
+	}
+	nonEmpty := min(chunks, uint64(len(records)))
+	for chunkIndex := range nonEmpty {
+		var out []byte
+		for recordIndex := chunkIndex; recordIndex < uint64(len(records)); recordIndex += chunks {
+			out = append(out, records[recordIndex]...)
+		}
+		if err := emit(out); err != nil {
+			return err
+		}
+	}
+	if elideEmpty {
+		return nil
+	}
+	for chunkIndex := nonEmpty; chunkIndex < chunks; chunkIndex++ {
+		if err := emit(nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func splitNumberWritesStdout(opts *splitOptions) bool {
@@ -1205,13 +1300,6 @@ func parseSplitSuffixLength(raw string) (int, error) {
 		return 0, fmt.Errorf("invalid suffix length")
 	}
 	return int(value), nil
-}
-
-func splitAllocChunkCount(chunks uint64) int {
-	if chunks > uint64(math.MaxInt) {
-		return math.MaxInt
-	}
-	return int(chunks)
 }
 
 func splitChunkSize(base, remainder, index uint64) uint64 {

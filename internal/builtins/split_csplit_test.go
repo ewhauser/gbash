@@ -58,6 +58,38 @@ func TestSplitAcceptsLargeCountsWithoutOverflow(t *testing.T) {
 	}
 }
 
+func TestSplitElidesHugeNumberModesWithoutAllocatingAllChunks(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session, ""+
+		"touch /tmp/in\n"+
+		"split -e -n 18446744073709551615 /tmp/in /tmp/bytes-\n"+
+		"printf 'bytes=%s\\n' $?\n"+
+		"split -e -n l/18446744073709551615 /tmp/in /tmp/lines-\n"+
+		"printf 'lines=%s\\n' $?\n"+
+		"split -e -n r/18446744073709551615 /tmp/in /tmp/rr-\n"+
+		"printf 'rr=%s\\n' $?\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "bytes=0\nlines=0\nrr=0\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty stderr", result.Stderr)
+	}
+	if files := sessionFilesWithPrefix(t, session, "bytes-"); len(files) != 0 {
+		t.Fatalf("bytes files = %v, want none", files)
+	}
+	if files := sessionFilesWithPrefix(t, session, "lines-"); len(files) != 0 {
+		t.Fatalf("lines files = %v, want none", files)
+	}
+	if files := sessionFilesWithPrefix(t, session, "rr-"); len(files) != 0 {
+		t.Fatalf("rr files = %v, want none", files)
+	}
+}
+
 func TestSplitLineBytesSplitsLongRecords(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
@@ -146,7 +178,7 @@ func TestSplitFixedWidthNumericSuffixesKeepCreatedFilesOnExhaustion(t *testing.T
 	if got, want := result.Stderr, "split: output file suffixes exhausted\n"; got != want {
 		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
-	files := sessionFilesWithPrefix(t, session, "/tmp", "out-")
+	files := sessionFilesWithPrefix(t, session, "out-")
 	if got, want := len(files), 11; got != want {
 		t.Fatalf("created files = %d, want %d (%v)", got, want, files)
 	}
@@ -168,7 +200,7 @@ func TestSplitAutoGrowsNumericAndHexSuffixes(t *testing.T) {
 	if numeric.ExitCode != 0 {
 		t.Fatalf("numeric ExitCode = %d, want 0; stderr=%q", numeric.ExitCode, numeric.Stderr)
 	}
-	if got, want := len(sessionFilesWithPrefix(t, session, "/tmp", "num-")), 91; got != want {
+	if got, want := len(sessionFilesWithPrefix(t, session, "num-")), 91; got != want {
 		t.Fatalf("numeric file count = %d, want %d", got, want)
 	}
 	if !sessionFileExists(t, session, "/tmp/num-89") || !sessionFileExists(t, session, "/tmp/num-9000") {
@@ -179,7 +211,7 @@ func TestSplitAutoGrowsNumericAndHexSuffixes(t *testing.T) {
 	if hex.ExitCode != 0 {
 		t.Fatalf("hex ExitCode = %d, want 0; stderr=%q", hex.ExitCode, hex.Stderr)
 	}
-	if got, want := len(sessionFilesWithPrefix(t, session, "/tmp", "hex-")), 241; got != want {
+	if got, want := len(sessionFilesWithPrefix(t, session, "hex-")), 241; got != want {
 		t.Fatalf("hex file count = %d, want %d", got, want)
 	}
 	if !sessionFileExists(t, session, "/tmp/hex-ef") || !sessionFileExists(t, session, "/tmp/hex-f000") {
@@ -409,12 +441,12 @@ func sessionFileExists(tb testing.TB, session *Session, name string) bool {
 	return err == nil
 }
 
-func sessionFilesWithPrefix(tb testing.TB, session *Session, dir, prefix string) []string {
+func sessionFilesWithPrefix(tb testing.TB, session *Session, prefix string) []string {
 	tb.Helper()
 
-	entries, err := session.FileSystem().ReadDir(context.Background(), dir)
+	entries, err := session.FileSystem().ReadDir(context.Background(), "/tmp")
 	if err != nil {
-		tb.Fatalf("ReadDir(%q) error = %v", dir, err)
+		tb.Fatalf("ReadDir(%q) error = %v", "/tmp", err)
 	}
 	var out []string
 	for _, entry := range entries {
