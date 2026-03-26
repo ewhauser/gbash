@@ -750,6 +750,13 @@ type redirectedStdinReader struct {
 	offset atomic.Int64
 }
 
+type seekableRedirectedStdinReader struct {
+	*redirectedStdinReader
+	seeker interface {
+		Seek(offset int64, whence int) (int64, error)
+	}
+}
+
 func wrapRedirectedStdinReader(reader StdinReader, underlying io.Reader, meta redirectedStdinMetadata) StdinReader {
 	if reader == nil || meta.path == "" {
 		return reader
@@ -764,6 +771,14 @@ func wrapRedirectedStdinReader(reader StdinReader, underlying io.Reader, meta re
 		flags:       meta.flags,
 	}
 	wrapped.offset.Store(meta.offset)
+	if seeker, ok := reader.(interface {
+		Seek(offset int64, whence int) (int64, error)
+	}); ok {
+		return &seekableRedirectedStdinReader{
+			redirectedStdinReader: wrapped,
+			seeker:                seeker,
+		}
+	}
 	return wrapped
 }
 
@@ -797,18 +812,12 @@ func (r *redirectedStdinReader) Stat() (stdfs.FileInfo, error) {
 	return nil, errors.New("bad file descriptor")
 }
 
-func (r *redirectedStdinReader) Seek(offset int64, whence int) (int64, error) {
-	type seeker interface {
-		Seek(offset int64, whence int) (int64, error)
+func (r *seekableRedirectedStdinReader) Seek(offset int64, whence int) (int64, error) {
+	position, err := r.seeker.Seek(offset, whence)
+	if err == nil && position >= 0 {
+		r.offset.Store(position)
 	}
-	if seeker, ok := r.handle.(seeker); ok {
-		position, err := seeker.Seek(offset, whence)
-		if err == nil && position >= 0 {
-			r.offset.Store(position)
-		}
-		return position, err
-	}
-	return 0, errors.New("bad file descriptor")
+	return position, err
 }
 
 func (r *redirectedStdinReader) Fd() uintptr {
