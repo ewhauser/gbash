@@ -662,7 +662,6 @@ func splitExtractLineChunk(records [][]byte, totalBytes int, kth, chunks uint64)
 	base := uint64(totalBytes) / chunks
 	remainder := uint64(totalBytes) % chunks
 	chunkIndex := uint64(0)
-	chunkEnd := splitChunkBoundary(base, remainder, chunkIndex)
 	offset := uint64(0)
 	var out []byte
 	for _, record := range records {
@@ -670,10 +669,7 @@ func splitExtractLineChunk(records [][]byte, totalBytes int, kth, chunks uint64)
 			out = append(out, record...)
 		}
 		offset += uint64(len(record))
-		for chunkIndex < chunks-1 && offset >= chunkEnd {
-			chunkIndex++
-			chunkEnd += splitChunkSize(base, remainder, chunkIndex)
-		}
+		chunkIndex = splitChunkIndexForOffset(base, remainder, chunks, offset)
 	}
 	return out
 }
@@ -811,15 +807,22 @@ func splitEmitLineChunks(records [][]byte, totalBytes int, chunks uint64, elideE
 	base := uint64(totalBytes) / chunks
 	remainder := uint64(totalBytes) % chunks
 	chunkIndex := uint64(0)
-	chunkEnd := splitChunkBoundary(base, remainder, chunkIndex)
 	offset := uint64(0)
 	var current []byte
 	flushUntil := func(target uint64) error {
-		for chunkIndex < target && chunkIndex < chunks {
-			if !elideEmpty || len(current) > 0 {
+		if elideEmpty {
+			if len(current) > 0 && chunkIndex < target {
 				if err := emit(current); err != nil {
 					return err
 				}
+			}
+			current = nil
+			chunkIndex = min(target, chunks)
+			return nil
+		}
+		for chunkIndex < target && chunkIndex < chunks {
+			if err := emit(current); err != nil {
+				return err
 			}
 			current = nil
 			chunkIndex++
@@ -830,17 +833,10 @@ func splitEmitLineChunks(records [][]byte, totalBytes int, chunks uint64, elideE
 	for _, record := range records {
 		current = append(current, record...)
 		offset += uint64(len(record))
-
-		nextChunk := chunkIndex
-		nextBoundary := chunkEnd
-		for nextChunk < chunks-1 && offset >= nextBoundary {
-			nextChunk++
-			nextBoundary += splitChunkSize(base, remainder, nextChunk)
-		}
+		nextChunk := splitChunkIndexForOffset(base, remainder, chunks, offset)
 		if err := flushUntil(nextChunk); err != nil {
 			return err
 		}
-		chunkEnd = nextBoundary
 	}
 
 	if !elideEmpty || len(current) > 0 {
@@ -1302,15 +1298,22 @@ func parseSplitSuffixLength(raw string) (int, error) {
 	return int(value), nil
 }
 
-func splitChunkSize(base, remainder, index uint64) uint64 {
-	if index < remainder {
-		return base + 1
+func splitChunkIndexForOffset(base, remainder, chunks, offset uint64) uint64 {
+	if chunks == 0 {
+		return 0
 	}
-	return base
-}
-
-func splitChunkBoundary(base, remainder, index uint64) uint64 {
-	return splitChunkSize(base, remainder, index)
+	totalBytes := base*chunks + remainder
+	if offset >= totalBytes {
+		return chunks - 1
+	}
+	if base == 0 {
+		return offset
+	}
+	largeBytes := remainder * (base + 1)
+	if offset < largeBytes {
+		return offset / (base + 1)
+	}
+	return remainder + (offset-largeBytes)/base
 }
 
 func splitSaturatingAdd(a, b uint64) uint64 {

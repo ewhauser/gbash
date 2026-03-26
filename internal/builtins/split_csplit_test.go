@@ -251,6 +251,35 @@ func TestSplitLineChunkPartitioningAndKthExtraction(t *testing.T) {
 	}
 }
 
+func TestSplitHugeLineChunkCountsShortCircuitZeroWidthBoundaries(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/tmp/in.txt", []byte("abcdef"))
+
+	emit := mustExecSession(t, session, "split -e -n l/18446744073709551615 /tmp/in.txt /tmp/out-\n")
+	if emit.ExitCode != 0 {
+		t.Fatalf("emit ExitCode = %d, want 0; stderr=%q", emit.ExitCode, emit.Stderr)
+	}
+	files := sessionFilesWithPrefix(t, session, "out-")
+	if got := len(files); got != 1 {
+		t.Fatalf("output file count = %d, want 1 (%v)", got, files)
+	}
+	if got, want := string(readSessionFile(t, session, "/tmp/"+files[0])), "abcdef"; got != want {
+		t.Fatalf("%s = %q, want %q", files[0], got, want)
+	}
+
+	kth := mustExecSession(t, session, "split -n l/1/18446744073709551615 /tmp/in.txt\n")
+	if kth.ExitCode != 0 {
+		t.Fatalf("kth ExitCode = %d, want 0; stderr=%q", kth.ExitCode, kth.Stderr)
+	}
+	if got, want := kth.Stdout, "abcdef"; got != want {
+		t.Fatalf("kth Stdout = %q, want %q", got, want)
+	}
+	if kth.Stderr != "" {
+		t.Fatalf("kth Stderr = %q, want empty stderr", kth.Stderr)
+	}
+}
+
 func TestSplitStopsAfterFirstOutputError(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
