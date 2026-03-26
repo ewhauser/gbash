@@ -665,6 +665,61 @@ func TestMVRejectsTrailingSlashMissingFileTargets(t *testing.T) {
 	}
 }
 
+func TestMVTargetDirectoryIsValidatedOnceBeforeSources(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: ": > src1\n" +
+			": > src2\n" +
+			"mv -t missing src1 src2\n" +
+			"printf 'status=%s\\n' \"$?\"\n" +
+			"[ -f src1 ] && echo src1-still-there\n" +
+			"[ -f src2 ] && echo src2-still-there\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "status=1\nsrc1-still-there\nsrc2-still-there\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, "mv: target directory 'missing': No such file or directory\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
+func TestMVBackupRefusesToDeleteDirectoryCollision(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "echo src > x\n" +
+			"mkdir d\n" +
+			"echo dst > d/x\n" +
+			"mkdir d/x~\n" +
+			"mv --backup=simple x d/\n" +
+			"printf 'status=%s\\n' \"$?\"\n" +
+			"[ -f x ] && echo src-still-there\n" +
+			"[ -f d/x ] && echo dst-still-there\n" +
+			"[ -d d/x~ ] && echo backup-dir-still-there\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "status=1\nsrc-still-there\ndst-still-there\nbackup-dir-still-there\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, "mv: cannot backup 'd/x': Is a directory\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
 func TestFindSupportsRelativeRootAndNameFilter(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})

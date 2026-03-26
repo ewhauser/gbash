@@ -116,7 +116,11 @@ func (c *MV) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedComm
 	if err != nil {
 		return err
 	}
-	if len(sources) > 1 && opts.targetDir == "" && !opts.noTarget {
+	if opts.targetDir != "" {
+		if _, err := mvRequireDestinationDirectory(ctx, inv, destArg, true); err != nil {
+			return err
+		}
+	} else if len(sources) > 1 && !opts.noTarget {
 		if _, err := mvRequireDestinationDirectory(ctx, inv, destArg, false); err != nil {
 			return err
 		}
@@ -376,8 +380,8 @@ func mvMoveOne(ctx context.Context, inv *Invocation, sourceArg, destArg string, 
 		if err != nil {
 			return mvMoveOutcomeSkipped, err
 		}
-		if err := mvRemoveIfExists(ctx, inv, backupAbs); err != nil {
-			return mvMoveOutcomeSkipped, mvMoveError(inv, sourceArg, mvDisplaySiblingPath(dest.display, backupAbs), err)
+		if err := mvRemoveIfExists(ctx, inv, backupAbs, dest.display); err != nil {
+			return mvMoveOutcomeSkipped, err
 		}
 		if err := inv.FS.Rename(ctx, dest.abs, backupAbs); err != nil {
 			return mvMoveOutcomeSkipped, mvMoveError(inv, sourceArg, mvDisplaySiblingPath(dest.display, backupAbs), err)
@@ -709,11 +713,16 @@ func mvRemoveDestination(ctx context.Context, inv *Invocation, sourceArg, destAb
 	return nil
 }
 
-func mvRemoveIfExists(ctx context.Context, inv *Invocation, targetAbs string) error {
-	if _, _, exists, err := lstatMaybe(ctx, inv, targetAbs); err != nil {
+func mvRemoveIfExists(ctx context.Context, inv *Invocation, targetAbs, destDisplay string) error {
+	info, _, exists, err := lstatMaybe(ctx, inv, targetAbs)
+	if err != nil {
 		return err
-	} else if !exists {
+	}
+	if !exists {
 		return nil
+	}
+	if info != nil && info.IsDir() {
+		return exitf(inv, 1, "mv: cannot backup %s: Is a directory", quoteGNUOperand(destDisplay))
 	}
 	return inv.FS.Remove(ctx, targetAbs, true)
 }
