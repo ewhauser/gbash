@@ -87,6 +87,7 @@
     { "pattern": "tests/tail-2/inotify-race2.sh", "reason": "inotify is out of scope in v1" },
     { "pattern": "tests/tail-2/inotify-rotate.sh", "reason": "inotify is out of scope in v1" },
     { "pattern": "tests/tail-2/inotify-rotate-resources.sh", "reason": "inotify is out of scope in v1" },
+    { "pattern": "tests/tail/symlink.sh", "reason": "tail symlink-follow tests require source symlink traversal, which the default gbash sandbox denies" },
     { "pattern": "tests/cksum/cksum-c.sh", "reason": "test uses strace which is out of scope in v1" },
     { "pattern": "tests/chroot/*", "reason": "chroot command is out of scope in v1" },
     { "pattern": "tests/nice/*", "reason": "nice command is out of scope in v1" },

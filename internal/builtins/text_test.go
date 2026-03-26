@@ -361,6 +361,24 @@ func TestTailSupportsFromByteSyntax(t *testing.T) {
 	}
 }
 
+func TestTailLongBytesFlagSupportsFromByteSyntax(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'abcdef\\n' > /tmp/in.txt\n tail --bytes=+3 /tmp/in.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "cdef\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestTailWorksInPipeline(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
@@ -412,6 +430,92 @@ func TestTailLongLinesFlagDoesNotEnableFromLineMode(t *testing.T) {
 	}
 	if got, want := result.Stdout, "two\nthree\nfour\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestTailSupportsObsoleteSyntaxForms(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'abcd' > /tmp/bytes.txt\n" +
+			"printf 'x\\ny\\n' > /tmp/lines.txt\n" +
+			"tail +2c /tmp/bytes.txt\n" +
+			"printf '\\nSEP\\n'\n" +
+			"tail -1l /tmp/lines.txt\n" +
+			"printf 'SEP\\n'\n" +
+			"tail -n -1 /tmp/lines.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "bcd\nSEP\ny\nSEP\ny\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestTailSupportsZeroTerminatedRecords(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'x\\000y' > /tmp/in.bin\n" +
+			"tail -z -n 1 /tmp/in.bin\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "y"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestTailZeroCountDoesNotReadUnreadableFile(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'secret\\n' > /tmp/unreadable\n" +
+			"chmod 0 /tmp/unreadable\n" +
+			"tail -c0 /tmp/unreadable\n" +
+			"tail -n0 /tmp/unreadable\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got := result.Stdout; got != "" {
+		t.Fatalf("Stdout = %q, want empty output", got)
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty stderr", got)
+	}
+}
+
+func TestTailInvalidObsoleteContextUsesGNUError(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf 'abcd' > /tmp/in.txt\n" +
+			"tail -2cX /tmp/in.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stderr, "tail: option used in invalid context -- 2\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }
 

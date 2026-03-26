@@ -1920,7 +1920,7 @@ func TestRunCLIHostUtilityTailFollowByNameWithoutRetryTracksReappearingFileWhile
 	}
 }
 
-func TestRunCLIHostUtilityTailFollowPidIsUnsupported(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowPidWaitsWhileAnyPidIsAlive(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
 
@@ -1928,25 +1928,28 @@ func TestRunCLIHostUtilityTailFollowPidIsUnsupported(t *testing.T) {
 		t.Fatalf("WriteFile(here) error = %v", err)
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLIHostUtility(t, context.Background(), tmp, "tail", []string{"-f", "-s0.05", "--pid=2147483647", "--pid=" + strconv.Itoa(os.Getpid()), "here"}, strings.NewReader(""), &stdout, &stderr, nil)
+	exitCode, err := runCLIHostUtility(t, ctx, tmp, "tail", []string{"-f", "-s0.05", "--pid=2147483647", "--pid=" + strconv.Itoa(os.Getpid()), "here"}, strings.NewReader(""), &stdout, &stderr, nil)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
-	if exitCode != 1 {
-		t.Fatalf("exitCode = %d, want 1; stderr=%q", exitCode, stderr.String())
+	if exitCode != 124 {
+		t.Fatalf("exitCode = %d, want 124; stderr=%q", exitCode, stderr.String())
 	}
 	if got := stdout.String(); got != "" {
 		t.Fatalf("stdout = %q, want empty", got)
 	}
-	if got := stderr.String(); got != "tail: --pid is unsupported in this sandbox\n" {
-		t.Fatalf("stderr = %q, want unsupported --pid error", got)
+	if got := stderr.String(); !strings.Contains(got, "execution timed out") {
+		t.Fatalf("stderr = %q, want execution timeout marker", got)
 	}
 }
 
-func TestRunCLIHostUtilityTailFollowPidIsUnsupportedForDeadPidToo(t *testing.T) {
+func TestRunCLIHostUtilityTailFollowPidExitsWhenAllPidsAreDead(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
 
@@ -1961,14 +1964,14 @@ func TestRunCLIHostUtilityTailFollowPidIsUnsupportedForDeadPidToo(t *testing.T) 
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
-	if exitCode != 1 {
-		t.Fatalf("exitCode = %d, want 1; stderr=%q", exitCode, stderr.String())
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
 	}
 	if got := stdout.String(); got != "" {
 		t.Fatalf("stdout = %q, want empty", got)
 	}
-	if got := stderr.String(); got != "tail: --pid is unsupported in this sandbox\n" {
-		t.Fatalf("stderr = %q, want unsupported --pid error", got)
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty stderr", got)
 	}
 }
 
