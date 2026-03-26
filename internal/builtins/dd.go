@@ -8,9 +8,13 @@ import (
 	"io"
 	stdfs "io/fs"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+
+	"github.com/ewhauser/gbash/internal/commandutil"
 )
 
 type Dd struct{}
@@ -204,6 +208,20 @@ type ddTransformState struct {
 	blockOverflow bool
 }
 
+type ddSizeSuffix struct {
+	text string
+	mult uint64
+}
+
+var ddSizeSuffixes = []ddSizeSuffix{
+	{"KiB", 1 << 10}, {"MiB", 1 << 20}, {"GiB", 1 << 30}, {"TiB", 1 << 40},
+	{"PiB", 1 << 50}, {"EiB", 1 << 60},
+	{"kB", 1000}, {"KB", 1000}, {"MB", 1000 * 1000}, {"GB", 1000 * 1000 * 1000},
+	{"TB", 1000 * 1000 * 1000 * 1000}, {"PB", 1000 * 1000 * 1000 * 1000 * 1000},
+	{"K", 1 << 10}, {"M", 1 << 20}, {"G", 1 << 30}, {"T", 1 << 40}, {"P", 1 << 50}, {"E", 1 << 60},
+	{"B", 1}, {"c", 1}, {"w", 2}, {"b", 512},
+}
+
 type ddOutputWriter interface {
 	WriteData([]byte) (ddWriteStats, error)
 	Flush() (ddWriteStats, error)
@@ -234,6 +252,25 @@ type ddFileWriter struct {
 	pending  []byte
 	data     []byte
 	cursor   int
+}
+
+type ddRedirectedFileWriter struct {
+	*ddFileWriter
+	handle any
+}
+
+type ddSeekableWriter struct {
+	writer io.Writer
+	seeker interface {
+		Seek(int64, int) (int64, error)
+	}
+	statter interface {
+		Stat() (stdfs.FileInfo, error)
+	}
+	obs        int
+	buffered   bool
+	pending    []byte
+	targetSize int64
 }
 
 func parseDdOperands(inv *Invocation, operands []string) (ddSettings, error) {
@@ -337,6 +374,9 @@ func parseDdOperands(inv *Invocation, operands []string) (ddSettings, error) {
 		settings.count = &count
 	}
 	if err := validateDdConv(inv, &settings); err != nil {
+		return settings, err
+	}
+	if err := validateDdFlags(inv, &settings); err != nil {
 		return settings, err
 	}
 	settings.buffered = !bsSet || settings.conv.hasDataTransform()
@@ -488,7 +528,7 @@ func parseDdNumber(inv *Invocation, raw string) (ddNumber, error) {
 	if err != nil {
 		return ddNumber{}, err
 	}
-	return ddNumber{value: value, bytes: strings.Contains(raw, "B")}, nil
+	return ddNumber{value: value, bytes: ddCountsBytes(raw)}, nil
 }
 
 func parseDdBlockSize(inv *Invocation, label, raw string) (int, error) {
@@ -511,13 +551,25 @@ func parseDdSize(inv *Invocation, raw string) (uint64, error) {
 		return parseDdSizePart(inv, raw, parts[0])
 	}
 	total := uint64(1)
+	zeroProduct := false
 	for _, part := range parts {
 		if part == "0" {
 			ddWarn(inv, "warning: %s is a zero multiplier; use %s if that is intended", quoteGNUOperand("0x"), quoteGNUOperand("00x"))
 		}
+		if zeroProduct {
+			if !ddValidSizePartSyntax(part) {
+				return 0, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(raw))
+			}
+			continue
+		}
 		n, err := parseDdSizePart(inv, raw, part)
 		if err != nil {
 			return 0, err
+		}
+		if n == 0 {
+			total = 0
+			zeroProduct = true
+			continue
 		}
 		if n != 0 && total > math.MaxUint64/n {
 			return 0, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(raw))
@@ -531,19 +583,7 @@ func parseDdSizePart(inv *Invocation, full, part string) (uint64, error) {
 	if part == "" {
 		return 0, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(full))
 	}
-	type suffix struct {
-		text string
-		mult uint64
-	}
-	suffixes := []suffix{
-		{"KiB", 1 << 10}, {"MiB", 1 << 20}, {"GiB", 1 << 30}, {"TiB", 1 << 40},
-		{"PiB", 1 << 50}, {"EiB", 1 << 60},
-		{"kB", 1000}, {"KB", 1000}, {"MB", 1000 * 1000}, {"GB", 1000 * 1000 * 1000},
-		{"TB", 1000 * 1000 * 1000 * 1000}, {"PB", 1000 * 1000 * 1000 * 1000 * 1000},
-		{"K", 1 << 10}, {"M", 1 << 20}, {"G", 1 << 30}, {"T", 1 << 40}, {"P", 1 << 50}, {"E", 1 << 60},
-		{"B", 1}, {"c", 1}, {"w", 2}, {"b", 512},
-	}
-	for _, candidate := range suffixes {
+	for _, candidate := range ddSizeSuffixes {
 		if !strings.HasSuffix(part, candidate.text) {
 			continue
 		}
@@ -565,6 +605,42 @@ func parseDdSizePart(inv *Invocation, full, part string) (uint64, error) {
 		return 0, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(full))
 	}
 	return value, nil
+}
+
+func ddCountsBytes(raw string) bool {
+	for part := range strings.SplitSeq(raw, "x") {
+		if len(part) < 2 || !strings.HasSuffix(part, "B") {
+			continue
+		}
+		prefix := part[:len(part)-1]
+		last := prefix[len(prefix)-1]
+		if last >= '0' && last <= '9' {
+			return true
+		}
+	}
+	return false
+}
+
+func ddValidSizePartSyntax(part string) bool {
+	if part == "" {
+		return false
+	}
+	for _, candidate := range ddSizeSuffixes {
+		if !strings.HasSuffix(part, candidate.text) {
+			continue
+		}
+		part = part[:len(part)-len(candidate.text)]
+		break
+	}
+	if part == "" {
+		return false
+	}
+	for _, r := range part {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func validateDdConv(inv *Invocation, settings *ddSettings) error {
@@ -596,6 +672,16 @@ func validateDdConv(inv *Invocation, settings *ddSettings) error {
 		settings.conv.blockMode = ddBlockModeUnblock
 	default:
 		settings.conv.blockMode = implied
+	}
+	return nil
+}
+
+func validateDdFlags(inv *Invocation, settings *ddSettings) error {
+	if settings.iflags.direct && settings.iflags.nocache {
+		return exitf(inv, 1, "dd: cannot combine direct and nocache")
+	}
+	if settings.oflags.direct && settings.oflags.nocache {
+		return exitf(inv, 1, "dd: cannot combine direct and nocache")
 	}
 	return nil
 }
@@ -849,18 +935,96 @@ func ddScaledOffset(inv *Invocation, operand string, value ddNumber, blockSize i
 	return value.value * uint64(blockSize), nil
 }
 
-func openDdInput(ctx context.Context, inv *Invocation, settings *ddSettings) (*ddInput, error) {
-	if settings.iflags.directory && !settings.infileSet {
-		return nil, exitf(inv, 1, "dd: setting flags for %s: Not a directory", quoteGNUOperand("standard input"))
+func ddRedirectPath(handle any) string {
+	meta, ok := handle.(commandutil.RedirectMetadata)
+	if !ok {
+		return ""
 	}
+	return meta.RedirectPath()
+}
+
+func ddRedirectOffset(handle any) int64 {
+	meta, ok := handle.(commandutil.RedirectMetadata)
+	if !ok {
+		return 0
+	}
+	return meta.RedirectOffset()
+}
+
+func ddRedirectFlags(handle any) int {
+	meta, ok := handle.(commandutil.RedirectMetadata)
+	if !ok {
+		return 0
+	}
+	return meta.RedirectFlags()
+}
+
+func ddStatHandle(ctx context.Context, inv *Invocation, handle any, path string) (stdfs.FileInfo, error) {
+	if statter, ok := handle.(interface {
+		Stat() (stdfs.FileInfo, error)
+	}); ok {
+		return statter.Stat()
+	}
+	if path == "" {
+		return nil, stdfs.ErrInvalid
+	}
+	info, _, err := statPath(ctx, inv, path)
+	return info, err
+}
+
+func ddHandleIsNamedPipe(ctx context.Context, inv *Invocation, handle any, path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := ddStatHandle(ctx, inv, handle, path)
+	if err != nil || info == nil {
+		return false
+	}
+	return info.Mode()&stdfs.ModeNamedPipe != 0
+}
+
+func ddHandleIsRegularFile(ctx context.Context, inv *Invocation, handle any, path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := ddStatHandle(ctx, inv, handle, path)
+	if err != nil || info == nil {
+		return false
+	}
+	return info.Mode().IsRegular()
+}
+
+func ddSeekCurrent(handle any, delta uint64) bool {
+	if delta == 0 {
+		return true
+	}
+	if delta > math.MaxInt64 {
+		return false
+	}
+	seeker, ok := handle.(interface {
+		Seek(offset int64, whence int) (int64, error)
+	})
+	if !ok {
+		return false
+	}
+	_, err := seeker.Seek(int64(delta), io.SeekCurrent)
+	return err == nil
+}
+
+func openDdInput(ctx context.Context, inv *Invocation, settings *ddSettings) (*ddInput, error) {
 	var (
 		reader io.Reader
 		label  string
 		closer io.Closer
+		path   string
 	)
 	if !settings.infileSet {
 		reader = inv.Stdin
 		label = "standard input"
+		path = ddRedirectPath(reader)
+		if path != "" {
+			label = path
+		}
 	} else {
 		if settings.infile == "" {
 			return nil, exitf(inv, 1, "dd: failed to open %s: No such file or directory", quoteGNUOperand(settings.infile))
@@ -886,6 +1050,21 @@ func openDdInput(ctx context.Context, inv *Invocation, settings *ddSettings) (*d
 		reader = file
 		label = settings.infile
 		closer = file
+		path = settings.infile
+	}
+
+	if settings.iflags.directory {
+		info, err := ddStatHandle(ctx, inv, reader, path)
+		if err != nil || !info.IsDir() {
+			if closer != nil {
+				_ = closer.Close()
+			}
+			return nil, exitf(inv, 1, "dd: setting flags for %s: Not a directory", quoteGNUOperand(label))
+		}
+	}
+
+	if settings.iflags.nocache && !settings.infileSet && path == "" {
+		return nil, exitf(inv, 1, "dd: failed to discard cache for %s: Illegal seek", quoteGNUOperand(label))
 	}
 
 	skipBytes, err := ddScaledOffset(inv, "skip", settings.skip, settings.ibs)
@@ -896,15 +1075,17 @@ func openDdInput(ctx context.Context, inv *Invocation, settings *ddSettings) (*d
 		return nil, err
 	}
 	if skipBytes > 0 {
-		discarded, err := ddDiscard(reader, skipBytes)
-		if err != nil {
-			if closer != nil {
-				_ = closer.Close()
+		if !ddSeekCurrent(reader, skipBytes) {
+			discarded, err := ddDiscard(reader, skipBytes)
+			if err != nil {
+				if closer != nil {
+					_ = closer.Close()
+				}
+				return nil, exitf(inv, 1, "dd: error reading %s: %v", quoteGNUOperand(label), err)
 			}
-			return nil, exitf(inv, 1, "dd: error reading %s: %v", quoteGNUOperand(label), err)
-		}
-		if discarded < skipBytes {
-			ddWarn(inv, "%s: cannot skip to specified offset", quoteGNUOperand(label))
+			if discarded < skipBytes && (path == "" || ddHandleIsNamedPipe(ctx, inv, reader, path)) {
+				ddWarn(inv, "%s: cannot skip to specified offset", quoteGNUOperand(label))
+			}
 		}
 	}
 	return &ddInput{reader: reader, label: label, closer: closer}, nil
@@ -915,9 +1096,47 @@ func openDdOutput(ctx context.Context, inv *Invocation, settings *ddSettings) (d
 	if err != nil {
 		return nil, err
 	}
-
 	if settings.oflags.directory && !settings.outfileSet {
 		return nil, exitf(inv, 1, "dd: setting flags for %s: Not a directory", quoteGNUOperand("standard output"))
+	}
+
+	if !settings.outfileSet {
+		if path := ddRedirectPath(inv.Stdout); path != "" {
+			if flags := ddRedirectFlags(inv.Stdout); flags&os.O_APPEND != 0 {
+				if seekBytes > math.MaxInt64 {
+					return nil, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(strconv.FormatUint(seekBytes, 10)))
+				}
+				return &ddStdoutWriter{
+					writer:   inv.Stdout,
+					obs:      settings.obs,
+					buffered: settings.buffered,
+				}, nil
+			}
+			if seekBytes == 0 {
+				return &ddStdoutWriter{
+					writer:   inv.Stdout,
+					obs:      settings.obs,
+					buffered: settings.buffered,
+				}, nil
+			}
+			if seekBytes > math.MaxInt64 {
+				return nil, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(strconv.FormatUint(seekBytes, 10)))
+			}
+			if writer, ok := openDdSeekableWriter(inv.Stdout, settings, int64(seekBytes)); ok {
+				return writer, nil
+			}
+			if !ddHandleIsRegularFile(ctx, inv, inv.Stdout, path) {
+				return nil, exitf(inv, 1, "dd: %s: cannot seek: Illegal seek", quoteGNUOperand("standard output"))
+			}
+			writer, err := openDdPathOutput(ctx, inv, settings, path, ddRedirectOffset(inv.Stdout), true)
+			if err != nil {
+				return nil, err
+			}
+			if fileWriter, ok := writer.(*ddFileWriter); ok {
+				return &ddRedirectedFileWriter{ddFileWriter: fileWriter, handle: inv.Stdout}, nil
+			}
+			return writer, nil
+		}
 	}
 
 	if !settings.outfileSet {
@@ -930,60 +1149,79 @@ func openDdOutput(ctx context.Context, inv *Invocation, settings *ddSettings) (d
 			buffered: settings.buffered,
 		}, nil
 	}
-	if settings.outfile == "" {
-		return nil, exitf(inv, 1, "dd: failed to open %s: No such file or directory", quoteGNUOperand(settings.outfile))
+	return openDdPathOutput(ctx, inv, settings, settings.outfile, 0, false)
+}
+
+func openDdPathOutput(ctx context.Context, inv *Invocation, settings *ddSettings, target string, initialOffset int64, seekFromCurrent bool) (ddOutputWriter, error) {
+	seekBytes, err := ddScaledOffset(inv, "seek", settings.seek, settings.obs)
+	if err != nil {
+		return nil, err
+	}
+	if target == "" {
+		return nil, exitf(inv, 1, "dd: failed to open %s: No such file or directory", quoteGNUOperand(target))
 	}
 	if settings.oflags.nofollow {
-		if info, _, err := lstatPath(ctx, inv, settings.outfile); err == nil && info.Mode()&stdfs.ModeSymlink != 0 {
-			return nil, exitf(inv, 1, "dd: failed to open %s: Too many levels of symbolic links", quoteGNUOperand(settings.outfile))
+		if info, _, err := lstatPath(ctx, inv, target); err == nil && info.Mode()&stdfs.ModeSymlink != 0 {
+			return nil, exitf(inv, 1, "dd: failed to open %s: Too many levels of symbolic links", quoteGNUOperand(target))
 		}
 	}
 
-	abs := allowPath(inv, settings.outfile)
+	abs := allowPath(inv, target)
 	if err := ensureParentDirExists(ctx, inv, abs); err != nil {
-		return nil, exitf(inv, 1, "dd: failed to open %s: %s", quoteGNUOperand(settings.outfile), ddPathErrorText(err))
+		return nil, exitf(inv, 1, "dd: failed to open %s: %s", quoteGNUOperand(target), ddPathErrorText(err))
 	}
 
-	info, _, exists, err := statMaybe(ctx, inv, settings.outfile)
+	info, _, exists, err := statMaybe(ctx, inv, target)
 	if err != nil {
-		return nil, exitf(inv, 1, "dd: failed to open %s: %s", quoteGNUOperand(settings.outfile), readAllErrorText(err))
+		return nil, exitf(inv, 1, "dd: failed to open %s: %s", quoteGNUOperand(target), readAllErrorText(err))
 	}
 	if settings.conv.excl && exists {
-		return nil, exitf(inv, 1, "dd: failed to open %s: File exists", quoteGNUOperand(settings.outfile))
+		return nil, exitf(inv, 1, "dd: failed to open %s: File exists", quoteGNUOperand(target))
 	}
 	if settings.conv.nocreat && !exists {
-		return nil, exitf(inv, 1, "dd: failed to open %s: No such file or directory", quoteGNUOperand(settings.outfile))
+		return nil, exitf(inv, 1, "dd: failed to open %s: No such file or directory", quoteGNUOperand(target))
 	}
 	if settings.oflags.directory {
 		if !exists || (info != nil && !info.IsDir()) {
-			return nil, exitf(inv, 1, "dd: failed to open %s: Invalid argument", quoteGNUOperand(settings.outfile))
+			return nil, exitf(inv, 1, "dd: failed to open %s: Invalid argument", quoteGNUOperand(target))
 		}
 	}
 	if exists && info != nil && info.IsDir() {
-		return nil, exitf(inv, 1, "dd: failed to open %s: Invalid argument", quoteGNUOperand(settings.outfile))
+		return nil, exitf(inv, 1, "dd: failed to open %s: Invalid argument", quoteGNUOperand(target))
 	}
 
 	perm := stdfs.FileMode(0o644)
 	existing := []byte{}
-	needExisting := exists && info != nil && (seekBytes > 0 || settings.conv.notrunc)
+	cursor64 := max(initialOffset, int64(0))
+	if seekBytes > 0 {
+		if seekFromCurrent {
+			if seekBytes > uint64(math.MaxInt64-cursor64) {
+				return nil, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(strconv.FormatUint(seekBytes, 10)))
+			}
+			cursor64 += int64(seekBytes)
+		} else {
+			cursor64 = int64(seekBytes)
+		}
+	}
+	needExisting := exists && info != nil && (cursor64 > 0 || settings.conv.notrunc)
 	if exists && info != nil {
 		perm = info.Mode().Perm()
 		if perm == 0 {
 			perm = 0o644
 		}
 		if needExisting {
-			data, _, readErr := readAllFile(ctx, inv, settings.outfile)
+			data, _, readErr := readAllFile(ctx, inv, target)
 			if readErr != nil {
-				return nil, exitf(inv, 1, "dd: error reading %s: %s", quoteGNUOperand(settings.outfile), readAllErrorText(readErr))
+				return nil, exitf(inv, 1, "dd: error reading %s: %s", quoteGNUOperand(target), readAllErrorText(readErr))
 			}
 			existing = data
 		}
 	}
-	if seekBytes > math.MaxInt {
-		return nil, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(strconv.FormatUint(seekBytes, 10)))
+	if cursor64 > math.MaxInt {
+		return nil, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(strconv.FormatInt(cursor64, 10)))
 	}
 
-	cursor := int(seekBytes)
+	cursor := int(cursor64)
 	var data []byte
 	switch {
 	case settings.oflags.append && settings.conv.notrunc:
@@ -1014,6 +1252,39 @@ func openDdOutput(ctx context.Context, inv *Invocation, settings *ddSettings) (d
 		data:     data,
 		cursor:   cursor,
 	}, nil
+}
+
+func openDdSeekableWriter(handle io.Writer, settings *ddSettings, seekBytes int64) (*ddSeekableWriter, bool) {
+	seeker, ok := handle.(interface {
+		Seek(int64, int) (int64, error)
+	})
+	if !ok {
+		return nil, false
+	}
+	statter, ok := handle.(interface {
+		Stat() (stdfs.FileInfo, error)
+	})
+	if !ok {
+		return nil, false
+	}
+	position, err := seeker.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return nil, false
+	}
+	if seekBytes > 0 {
+		position, err = seeker.Seek(seekBytes, io.SeekCurrent)
+		if err != nil {
+			return nil, false
+		}
+	}
+	return &ddSeekableWriter{
+		writer:     handle,
+		seeker:     seeker,
+		statter:    statter,
+		obs:        settings.obs,
+		buffered:   settings.buffered,
+		targetSize: position,
+	}, true
 }
 
 func readDdBlock(reader io.Reader, size int, fullblock bool) ([]byte, ddReadStats, bool, error) {
@@ -1122,15 +1393,15 @@ func ddTranslate(buf, table []byte) {
 
 func ddApplyCase(buf []byte, mode ddCaseMode) {
 	for i, b := range buf {
+		r := rune(b)
 		switch mode {
 		case ddCaseUpper:
-			if b >= 'a' && b <= 'z' {
-				buf[i] = b - ('a' - 'A')
-			}
+			r = unicode.ToUpper(r)
 		case ddCaseLower:
-			if b >= 'A' && b <= 'Z' {
-				buf[i] = b + ('a' - 'A')
-			}
+			r = unicode.ToLower(r)
+		}
+		if r <= math.MaxUint8 {
+			buf[i] = byte(r)
 		}
 	}
 }
@@ -1300,7 +1571,109 @@ func (w *ddFileWriter) Materialize(ctx context.Context, inv *Invocation) error {
 	return writeFileContents(ctx, inv, w.abs, w.data, w.perm)
 }
 
+func (w *ddRedirectedFileWriter) Finalize(ctx context.Context, inv *Invocation) error {
+	if err := w.ddFileWriter.Finalize(ctx, inv); err != nil {
+		return err
+	}
+	ddSyncRedirectOffset(w.handle, w.cursor)
+	return nil
+}
+
+func (w *ddRedirectedFileWriter) Materialize(ctx context.Context, inv *Invocation) error {
+	if err := w.ddFileWriter.Materialize(ctx, inv); err != nil {
+		return err
+	}
+	ddSyncRedirectOffset(w.handle, w.cursor)
+	return nil
+}
+
+func (w *ddSeekableWriter) WriteData(data []byte) (ddWriteStats, error) {
+	if !w.buffered {
+		return w.writeChunks(data)
+	}
+	w.pending = append(w.pending, data...)
+	full := len(w.pending) - (len(w.pending) % w.obs)
+	if full == 0 {
+		return ddWriteStats{}, nil
+	}
+	stats, err := w.writeChunks(w.pending[:full])
+	if err != nil {
+		return stats, err
+	}
+	copy(w.pending, w.pending[full:])
+	w.pending = w.pending[:len(w.pending)-full]
+	return stats, nil
+}
+
+func (w *ddSeekableWriter) Flush() (ddWriteStats, error) {
+	if len(w.pending) == 0 {
+		return ddWriteStats{}, nil
+	}
+	stats, err := w.writeChunks(w.pending)
+	if err != nil {
+		return stats, err
+	}
+	w.pending = nil
+	return stats, nil
+}
+
+func (w *ddSeekableWriter) Sync() error {
+	if syncer, ok := w.writer.(interface{ Sync() error }); ok {
+		return syncer.Sync()
+	}
+	if flusher, ok := w.writer.(interface{ Flush() error }); ok {
+		return flusher.Flush()
+	}
+	return nil
+}
+
+func (w *ddSeekableWriter) Finalize(context.Context, *Invocation) error {
+	if w.targetSize > 0 {
+		info, err := w.statter.Stat()
+		if err != nil {
+			return err
+		}
+		if info.Size() < w.targetSize {
+			if _, err := w.seeker.Seek(w.targetSize-1, io.SeekStart); err != nil {
+				return err
+			}
+			if _, err := w.writer.Write([]byte{0}); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := w.seeker.Seek(w.targetSize, io.SeekStart)
+	return err
+}
+
+func (w *ddSeekableWriter) SkipZeros(size int) (ddWriteStats, error) {
+	if len(w.pending) > 0 {
+		if _, err := w.Flush(); err != nil {
+			return ddWriteStats{}, err
+		}
+	}
+	if _, err := w.seeker.Seek(int64(size), io.SeekCurrent); err != nil {
+		return ddWriteStats{}, err
+	}
+	w.targetSize += int64(size)
+	return ddCountWriteStats(size, w.obs), nil
+}
+
+func (w *ddSeekableWriter) writeChunks(data []byte) (ddWriteStats, error) {
+	stats, err := ddWriteChunks(w.writer, data, w.obs)
+	if err != nil {
+		return stats, err
+	}
+	w.targetSize += int64(len(data))
+	return stats, nil
+}
+
 func (w *ddFileWriter) SkipZeros(size int) (ddWriteStats, error) {
+	if len(w.pending) > 0 {
+		if _, err := w.Flush(); err != nil {
+			return ddWriteStats{}, err
+		}
+	}
 	w.cursor += size
 	w.ensureSize()
 	return ddCountWriteStats(size, w.obs), nil
@@ -1358,6 +1731,16 @@ func ddCountWriteStats(size, obs int) ddWriteStats {
 		size -= chunkLen
 	}
 	return stats
+}
+
+func ddSyncRedirectOffset(handle any, cursor int) {
+	seeker, ok := handle.(interface {
+		Seek(offset int64, whence int) (int64, error)
+	})
+	if !ok {
+		return
+	}
+	_, _ = seeker.Seek(int64(cursor), io.SeekStart)
 }
 
 func ddWriteFinalStats(w io.Writer, status ddStatusLevel, progressPrinted bool, reads ddReadStats, writes ddWriteStats, duration time.Duration) error {

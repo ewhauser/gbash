@@ -405,3 +405,44 @@ func TestDdFileWriterSkipZerosPreservesExistingData(t *testing.T) {
 		t.Fatalf("cursor = %d, want %d", got, want)
 	}
 }
+
+func TestParseDdNumberTracksBareByteSuffix(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		raw       string
+		wantValue uint64
+		wantBytes bool
+	}{
+		{raw: "14B", wantValue: 14, wantBytes: true},
+		{raw: "1Bx8", wantValue: 8, wantBytes: true},
+		{raw: "2x4B", wantValue: 8, wantBytes: true},
+		{raw: "1KB", wantValue: 1000, wantBytes: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.raw, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := parseDdNumber(nil, tc.raw)
+			if err != nil {
+				t.Fatalf("parseDdNumber(%q) error = %v", tc.raw, err)
+			}
+			if got.value != tc.wantValue || got.bytes != tc.wantBytes {
+				t.Fatalf("parseDdNumber(%q) = %+v, want value=%d bytes=%v", tc.raw, got, tc.wantValue, tc.wantBytes)
+			}
+		})
+	}
+}
+
+func TestParseDdSizeAllowsHugeFactorAfterZeroMultiplier(t *testing.T) {
+	t.Parallel()
+
+	value, err := parseDdSize(nil, "00x9999999999999999999999999999999999999999999999999999999999999")
+	if err != nil {
+		t.Fatalf("parseDdSize() error = %v", err)
+	}
+	if value != 0 {
+		t.Fatalf("parseDdSize() = %d, want 0", value)
+	}
+}
