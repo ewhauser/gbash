@@ -2,6 +2,7 @@ package builtins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	stdfs "io/fs"
@@ -298,7 +299,7 @@ func (c *Tail) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCo
 
 	for {
 		if opts.follow != tailFollowNone && len(opts.pids) > 0 {
-			alive, err := tailAnyPIDAlive(opts.pids)
+			alive, err := tailAnyPIDAlive(inv, opts.pids)
 			if err != nil {
 				return err
 			}
@@ -348,8 +349,6 @@ func normalizeTailInvocation(args []string) []string {
 			normalized[i] = "--disable-inotify"
 		case strings.HasPrefix(arg, "--lines=+"):
 			normalized[i] = "--lines=" + strings.TrimPrefix(arg, "--lines=+")
-		case strings.HasPrefix(arg, "--bytes=+"):
-			normalized[i] = "--bytes=" + strings.TrimPrefix(arg, "--bytes=+")
 		}
 	}
 	if len(normalized) == 0 || normalized[0] == "--" {
@@ -825,10 +824,13 @@ func tailNormalizeMissingCountValue(value string) string {
 	return value
 }
 
-func tailAnyPIDAlive(pids []int) (bool, error) {
+func tailAnyPIDAlive(inv *Invocation, pids []int) (bool, error) {
 	for _, pid := range pids {
 		alive, err := tailPIDIsAlive(pid)
 		if err != nil {
+			if errors.Is(err, errTailPIDUnsupported) {
+				return false, exitf(inv, 1, "tail: --pid is unsupported on this platform")
+			}
 			return false, err
 		}
 		if alive {
