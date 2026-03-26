@@ -76,6 +76,11 @@ type cpRunState struct {
 	interactiveSkipped bool
 }
 
+type cpParsedUpdate struct {
+	value            string
+	hasExplicitValue bool
+}
+
 func NewCP() *CP {
 	return &CP{}
 }
@@ -288,7 +293,7 @@ func parseCPMatches(inv *Invocation, matches *ParsedCommand) (cpOptions, error) 
 				opts.backupMode = backupExisting
 			}
 		case "update":
-			updateMode := cpParseUpdateMode(occurrence.Value, occurrence.HasValue)
+			updateMode := cpParseUpdateModeValue(occurrence.Value, occurrence.HasValue)
 			if updateMode == cpUpdateInvalid {
 				if opts.updateMode != cpUpdateInvalid {
 					opts.updateArg = occurrence.Value
@@ -364,7 +369,11 @@ func cpBackupModeForOccurrence(inv *Invocation, occurrence ParsedOptionOccurrenc
 	return backupExisting, nil
 }
 
-func cpParseUpdateMode(value string, hasExplicitValue bool) cpUpdateMode {
+func cpParseUpdateMode(update cpParsedUpdate) cpUpdateMode {
+	return cpParseUpdateModeValue(update.value, update.hasExplicitValue)
+}
+
+func cpParseUpdateModeValue(value string, hasExplicitValue bool) cpUpdateMode {
 	if !hasExplicitValue {
 		return cpUpdateOlder
 	}
