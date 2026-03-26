@@ -671,3 +671,186 @@ func TestCPUpdateNoneDoesNotSkipDanglingDestinationSymlink(t *testing.T) {
 		t.Fatalf("Stderr = %q, want dangling-symlink error", result.Stderr)
 	}
 }
+
+func TestCPBackupSelfCopyWithSuffix(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "echo payload > /tmp/file.txt\n" +
+			"cp --force --backup=simple --suffix=.bak /tmp/file.txt /tmp/file.txt\n" +
+			"printf 'status=%s\\n' \"$?\"\n" +
+			"cat /tmp/file.txt\n" +
+			"cat /tmp/file.txt.bak\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "status=0\npayload\npayload\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestCPBackupRejectsSourceBackupCollision(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "echo a > /tmp/a\n" +
+			"echo b > /tmp/a~\n" +
+			"cp --backup=simple /tmp/a~ /tmp/a\n" +
+			"printf 'status=%s\\n' \"$?\"\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "status=1\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if !strings.Contains(result.Stderr, "backing up '/tmp/a' might destroy source;  '/tmp/a~' not copied") {
+		t.Fatalf("Stderr = %q, want backup-collision error", result.Stderr)
+	}
+}
+
+func TestCPNoClobberStillWinsOverLaterForce(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "echo old > /tmp/dst.txt\n" +
+			"echo new > /tmp/src.txt\n" +
+			"echo y | cp -vni /tmp/src.txt /tmp/dst.txt\n" +
+			"printf 'ni=%s\\n' \"$?\"\n" +
+			"cat /tmp/dst.txt\n" +
+			"echo y | cp -vnf /tmp/src.txt /tmp/dst.txt\n" +
+			"printf 'nf=%s\\n' \"$?\"\n" +
+			"cat /tmp/dst.txt\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "'/tmp/src.txt' -> '/tmp/dst.txt'\nni=0\nnew\nnf=0\nnew\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestCPAttributesOnlyPreservesDataAndCanReplaceWithSymlink(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "cd /tmp\n" +
+			"printf '1' > file1\n" +
+			"printf '2' > file2\n" +
+			"cp --attributes-only file1 file2\n" +
+			"cat file2\n" +
+			"ln -s file1 sym1\n" +
+			"cp -a --attributes-only sym1 file2\n" +
+			"printf 'plain=%s\\n' \"$?\"\n" +
+			"cat file2\n" +
+			"cp -a --remove-destination --attributes-only sym1 file2\n" +
+			"printf 'forced=%s\\n' \"$?\"\n" +
+			"test -L file2 && echo symlink || echo regular\n" +
+			"readlink file2\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "2plain=1\n2forced=0\nsymlink\nfile1\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestCPParentsCreatesIntermediateDirectoriesWithoutPreservingMode(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkdir -p /tmp/src/a/b\n" +
+			"chmod 700 /tmp/src/a\n" +
+			"echo payload > /tmp/src/a/b/file.txt\n" +
+			"mkdir /tmp/out\n" +
+			"cd /tmp/src\n" +
+			"cp --parents --no-preserve=mode a/b/file.txt /tmp/out\n" +
+			"cat /tmp/out/a/b/file.txt\n" +
+			"stat -c '%a' /tmp/out/a\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "payload\n755\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestCPPreserveLinksRelinksMissingDestinationWhenUpdateOlderSkipsCanonical(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkdir -p /tmp/s /tmp/t/s\n" +
+			"touch /tmp/s/f\n" +
+			"ln /tmp/s/f /tmp/s/link\n" +
+			"touch -d '2024-01-01 00:00:00 UTC' /tmp/s/f\n" +
+			"touch /tmp/t/s/f\n" +
+			"touch -d '2025-01-01 00:00:00 UTC' /tmp/t/s/f\n" +
+			"cp -au /tmp/s /tmp/t\n" +
+			"stat -c '%d:%i' /tmp/t/s/f /tmp/t/s/link\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("Stdout lines = %q, want 2 lines", result.Stdout)
+	}
+	if lines[0] != lines[1] {
+		t.Fatalf("inode lines = %q and %q, want equal", lines[0], lines[1])
+	}
+}
+
+func TestCPPOSIXLYCORRECTWritesThroughDanglingSymlink(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "echo hi > /tmp/src.txt\n" +
+			"cd /tmp\n" +
+			"ln -s missing dst.txt\n" +
+			"POSIXLY_CORRECT=1 cp /tmp/src.txt dst.txt\n" +
+			"cat /tmp/missing\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "hi\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
