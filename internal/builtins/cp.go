@@ -73,6 +73,7 @@ type cpRunState struct {
 	promptInput        *cpPromptInput
 	justCreatedSymlink map[string]string
 	preservedLinks     map[string]string
+	interactiveSkipped bool
 }
 
 func NewCP() *CP {
@@ -174,6 +175,9 @@ func (c *CP) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedComm
 			return err
 		}
 	}
+	if state.interactiveSkipped {
+		return &ExitError{Code: 1}
+	}
 
 	return nil
 }
@@ -196,6 +200,7 @@ type cpOptions struct {
 	updateArg         string
 	backupMode        backupMode
 	backupSuffix      string
+	copyContents      bool
 	attributesOnly    bool
 	debug             bool
 	parents           bool
@@ -279,6 +284,9 @@ func parseCPMatches(inv *Invocation, matches *ParsedCommand) (cpOptions, error) 
 			opts.backupMode = mode
 		case "suffix":
 			opts.backupSuffix = determineBackupSuffix(inv, matches)
+			if opts.backupMode == backupNone {
+				opts.backupMode = backupExisting
+			}
 		case "update":
 			updateMode := cpParseUpdateMode(occurrence.Value, occurrence.HasValue)
 			if updateMode == cpUpdateInvalid {
@@ -292,7 +300,9 @@ func parseCPMatches(inv *Invocation, matches *ParsedCommand) (cpOptions, error) 
 				opts.updateArg = occurrence.Value
 				opts.updateMode = updateMode
 			}
-		case "copy-contents", "reflink":
+		case "copy-contents":
+			opts.copyContents = true
+		case "reflink":
 			// Accepted for forward GNU compatibility; semantics will be filled in incrementally.
 		}
 	}
@@ -608,7 +618,10 @@ func cpCopyResolvedSource(ctx context.Context, inv *Invocation, source, srcAbs s
 			return err
 		}
 		if !ok {
-			return &ExitError{Code: 1}
+			if state != nil {
+				state.interactiveSkipped = true
+			}
+			return nil
 		}
 	}
 
@@ -660,7 +673,11 @@ func cpCopyResolvedSource(ctx context.Context, inv *Invocation, source, srcAbs s
 				if err := cpEnsureSpecialDestination(inv, destDisplay, destInfo, destExists); err != nil {
 					return err
 				}
-			} else if err := cpCopyNamedPipe(ctx, inv, destAbs, srcInfo); err != nil {
+			} else if cpShouldPreserveNamedPipe(opts) {
+				if err := cpCopyNamedPipe(ctx, inv, destAbs, srcInfo); err != nil {
+					return err
+				}
+			} else if err := copyFileContents(ctx, inv, copySourceAbs, writeTargetAbs, cpCreateFileMode(inv, srcInfo)); err != nil {
 				return err
 			}
 		default:
@@ -1162,6 +1179,13 @@ func cpCopyNamedPipe(ctx context.Context, inv *Invocation, destAbs string, srcIn
 	}
 	recordFileMutation(inv.TraceRecorder(), "copy", destAbs, destAbs, destAbs)
 	return nil
+}
+
+func cpShouldPreserveNamedPipe(opts *cpOptions) bool {
+	if opts == nil {
+		return false
+	}
+	return opts.recursive && !opts.copyContents
 }
 
 func cpApplyMetadata(ctx context.Context, inv *Invocation, srcInfo, srcLinkInfo stdfs.FileInfo, destAbs string, isDir, created bool, opts *cpOptions) error {

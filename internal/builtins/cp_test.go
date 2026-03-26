@@ -718,6 +718,28 @@ func TestCPBackupRejectsSourceBackupCollision(t *testing.T) {
 	}
 }
 
+func TestCPSuffixAloneEnablesBackups(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "echo old > /tmp/dst.txt\n" +
+			"echo new > /tmp/src.txt\n" +
+			"cp -S .bak /tmp/src.txt /tmp/dst.txt\n" +
+			"cat /tmp/dst.txt\n" +
+			"cat /tmp/dst.txt.bak\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "new\nold\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestCPNoClobberStillWinsOverLaterForce(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
@@ -740,6 +762,36 @@ func TestCPNoClobberStillWinsOverLaterForce(t *testing.T) {
 	}
 	if got, want := result.Stdout, "'/tmp/src.txt' -> '/tmp/dst.txt'\nni=0\nnew\nnf=0\nnew\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestCPInteractiveNoContinuesToLaterSources(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkdir -p /tmp/out\n" +
+			"echo old-a > /tmp/out/a\n" +
+			"echo old-b > /tmp/out/b\n" +
+			"echo new-a > /tmp/a\n" +
+			"echo new-b > /tmp/b\n" +
+			"cp -i /tmp/a /tmp/b /tmp/out\n" +
+			"printf 'status=%s\\n' \"$?\"\n" +
+			"cat /tmp/out/a\n" +
+			"cat /tmp/out/b\n",
+		Stdin: strings.NewReader("n\ny\n"),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "status=1\nold-a\nnew-b\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got := strings.Count(result.Stderr, "cp: overwrite "); got != 2 {
+		t.Fatalf("Stderr = %q, want 2 overwrite prompts", result.Stderr)
 	}
 }
 
@@ -842,6 +894,31 @@ func TestCPPreserveOwnershipCopiesFileOwnership(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
 	if got, want := result.Stdout, "41:42\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestCPPlainFIFOProducesRegularFile(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkfifo /tmp/src.pipe\n" +
+			"( printf 'payload\\n' > /tmp/src.pipe ) &\n" +
+			"cp /tmp/src.pipe /tmp/dst.txt\n" +
+			"wait\n" +
+			"cat /tmp/dst.txt\n" +
+			"test -p /tmp/dst.txt && echo pipe || echo regular\n" +
+			"cp -a /tmp/src.pipe /tmp/dst.pipe\n" +
+			"test -p /tmp/dst.pipe && echo preserved-pipe || echo preserved-regular\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "payload\nregular\npreserved-pipe\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
