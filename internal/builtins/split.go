@@ -811,12 +811,15 @@ func splitEmitLineChunks(records [][]byte, totalBytes int, chunks uint64, elideE
 	var current []byte
 	flushUntil := func(target uint64) error {
 		if elideEmpty {
-			if len(current) > 0 && chunkIndex < target {
+			if chunkIndex >= target {
+				return nil
+			}
+			if len(current) > 0 {
 				if err := emit(current); err != nil {
 					return err
 				}
+				current = nil
 			}
-			current = nil
 			chunkIndex = min(target, chunks)
 			return nil
 		}
@@ -1283,6 +1286,12 @@ func splitBigUint64(value *big.Int, clampOverflow bool) (uint64, error) {
 func parseSplitStrictUint(raw string) (uint64, error) {
 	if raw == "" {
 		return 0, fmt.Errorf("invalid value")
+	}
+	if strings.HasPrefix(raw, "+") {
+		raw = raw[1:]
+		if raw == "" {
+			return 0, fmt.Errorf("invalid value")
+		}
 	}
 	return strconv.ParseUint(raw, 10, 64)
 }

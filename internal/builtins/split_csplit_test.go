@@ -280,6 +280,63 @@ func TestSplitHugeLineChunkCountsShortCircuitZeroWidthBoundaries(t *testing.T) {
 	}
 }
 
+func TestSplitElideEmptyLineChunksKeepsBufferedRecords(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/tmp/in.txt", []byte("a\nb\nc\n"))
+
+	result := mustExecSession(t, session, "split -e -n l/2 /tmp/in.txt /tmp/out-\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := sessionFilesWithPrefix(t, session, "out-"), []string{"out-aa", "out-ab"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("output files = %v, want %v", got, want)
+	}
+	if got, want := string(readSessionFile(t, session, "/tmp/out-aa")), "a\nb\n"; got != want {
+		t.Fatalf("out-aa = %q, want %q", got, want)
+	}
+	if got, want := string(readSessionFile(t, session, "/tmp/out-ab")), "c\n"; got != want {
+		t.Fatalf("out-ab = %q, want %q", got, want)
+	}
+}
+
+func TestSplitNumberAcceptsPlusPrefixedChunkFields(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/tmp/bytes.txt", []byte("abcd"))
+	writeSessionFile(t, session, "/tmp/lines.txt", []byte("a\nb\nc\n"))
+
+	bytes := mustExecSession(t, session, "split -n +2 /tmp/bytes.txt /tmp/bytes-\n")
+	if bytes.ExitCode != 0 {
+		t.Fatalf("bytes ExitCode = %d, want 0; stderr=%q", bytes.ExitCode, bytes.Stderr)
+	}
+	if got, want := sessionFilesWithPrefix(t, session, "bytes-"), []string{"bytes-aa", "bytes-ab"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("bytes files = %v, want %v", got, want)
+	}
+
+	lines := mustExecSession(t, session, "split -n l/+2 /tmp/lines.txt /tmp/lines-\n")
+	if lines.ExitCode != 0 {
+		t.Fatalf("lines ExitCode = %d, want 0; stderr=%q", lines.ExitCode, lines.Stderr)
+	}
+	if got, want := string(readSessionFile(t, session, "/tmp/lines-aa")), "a\nb\n"; got != want {
+		t.Fatalf("lines-aa = %q, want %q", got, want)
+	}
+	if got, want := string(readSessionFile(t, session, "/tmp/lines-ab")), "c\n"; got != want {
+		t.Fatalf("lines-ab = %q, want %q", got, want)
+	}
+
+	kth := mustExecSession(t, session, "split -n +1/+2 /tmp/bytes.txt\n")
+	if kth.ExitCode != 0 {
+		t.Fatalf("kth ExitCode = %d, want 0; stderr=%q", kth.ExitCode, kth.Stderr)
+	}
+	if got, want := kth.Stdout, "ab"; got != want {
+		t.Fatalf("kth Stdout = %q, want %q", got, want)
+	}
+	if kth.Stderr != "" {
+		t.Fatalf("kth Stderr = %q, want empty stderr", kth.Stderr)
+	}
+}
+
 func TestSplitStopsAfterFirstOutputError(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
