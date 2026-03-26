@@ -453,8 +453,8 @@ func (f *formatter) addWarning(message string) {
 func (f *formatter) applySpec(spec *formatSpec) bool {
 	if spec.widthFromArg {
 		arg, present := f.nextArg()
-		width, ok, diag, hard := parseWidthArg(arg, present, f.opts)
-		if diag != "" {
+		width, ok, diags, hard := parseWidthArg(arg, present, f.opts)
+		for _, diag := range diags {
 			f.addDiagnostic(diag)
 		}
 		if hard {
@@ -474,8 +474,8 @@ func (f *formatter) applySpec(spec *formatSpec) bool {
 	}
 	if spec.precisionFromArg {
 		arg, present := f.nextArg()
-		precision, ok, diag, hard := parsePrecisionArg(arg, present, f.opts)
-		if diag != "" {
+		precision, ok, diags, hard := parsePrecisionArg(arg, present, f.opts)
+		for _, diag := range diags {
 			f.addDiagnostic(diag)
 		}
 		if hard {
@@ -670,8 +670,8 @@ func (f *formatter) gnuArgAt(base, slot int) (string, bool) {
 func (f *formatter) applyGNUSpec(spec *formatSpec, cycleBase int) bool {
 	if spec.widthFromArg {
 		arg, present := f.gnuArgAt(cycleBase, spec.widthSlot)
-		width, ok, diag, hard := parseWidthArg(arg, present, f.opts)
-		if diag != "" {
+		width, ok, diags, hard := parseWidthArg(arg, present, f.opts)
+		for _, diag := range diags {
 			f.addDiagnostic(diag)
 		}
 		if hard {
@@ -691,8 +691,8 @@ func (f *formatter) applyGNUSpec(spec *formatSpec, cycleBase int) bool {
 	}
 	if spec.precisionFromArg {
 		arg, present := f.gnuArgAt(cycleBase, spec.precisionSlot)
-		precision, ok, diag, hard := parsePrecisionArg(arg, present, f.opts)
-		if diag != "" {
+		precision, ok, diags, hard := parsePrecisionArg(arg, present, f.opts)
+		for _, diag := range diags {
 			f.addDiagnostic(diag)
 		}
 		if hard {

@@ -27,20 +27,20 @@ type gnuNumericParse struct {
 	diagnose string
 }
 
-func parseWidthArg(arg string, present bool, opts Options) (int, bool, string, bool) {
+func parseWidthArg(arg string, present bool, opts Options) (int, bool, []string, bool) {
 	if opts.Dialect == DialectGNU {
 		return parseGNUFieldArg(arg, present, opts, "field width")
 	}
 	value, ok, diag := parseShellWidthArg(arg, present)
-	return value, ok, diag, false
+	return value, ok, singleDiagnostic(diag), false
 }
 
-func parsePrecisionArg(arg string, present bool, opts Options) (int, bool, string, bool) {
+func parsePrecisionArg(arg string, present bool, opts Options) (int, bool, []string, bool) {
 	if opts.Dialect == DialectGNU {
 		return parseGNUFieldArg(arg, present, opts, "precision")
 	}
 	value, ok, diag := parseShellWidthArg(arg, present)
-	return value, ok, diag, false
+	return value, ok, singleDiagnostic(diag), false
 }
 
 func parseShellWidthArg(arg string, present bool) (int, bool, string) {
@@ -54,25 +54,31 @@ func parseShellWidthArg(arg string, present bool) (int, bool, string) {
 	return clampInt(parsed.value), true, ""
 }
 
-func parseGNUFieldArg(arg string, present bool, opts Options, label string) (int, bool, string, bool) {
+func parseGNUFieldArg(arg string, present bool, opts Options, label string) (int, bool, []string, bool) {
 	if !present {
-		return 0, true, "", false
+		return 0, true, nil, false
 	}
 	parsed := parseGNUInteger(arg, true, opts)
-	if parsed.diagnose != "" {
-		return clampGNUInt(parsed.value), false, fmt.Sprintf("invalid %s: %s", label, quoteGNUDiagnosticOperand(arg)), false
-	}
 	value := clampGNUInt(parsed.value)
+	diags := singleDiagnostic(parsed.diagnose)
 	if parsed.value != nil {
 		maxLimit := big.NewInt(int64(gnuMaxArgIndex))
 		if parsed.value.Sign() < 0 {
-			return value, true, "", false
+			return value, true, diags, false
 		}
 		if parsed.value.Cmp(maxLimit) > 0 {
-			return value, false, fmt.Sprintf("invalid %s: %s", label, quoteGNUDiagnosticOperand(arg)), true
+			diags = append(diags, fmt.Sprintf("invalid %s: %s", label, quoteGNUDiagnosticOperand(arg)))
+			return value, false, diags, true
 		}
 	}
-	return value, true, "", false
+	return value, true, diags, false
+}
+
+func singleDiagnostic(diag string) []string {
+	if diag == "" {
+		return nil
+	}
+	return []string{diag}
 }
 
 func clampInt(value *big.Int) int {
@@ -296,11 +302,40 @@ func formatFloatGNU(arg string, present bool, spec *formatSpec, opts Options) (s
 	diag := ""
 	switch {
 	case err != nil:
-		diag = overflowDiagnostic(arg)
+		diag = gnuOverflowDiagnostic(arg)
 	case prefix != trimmed:
 		diag = fmt.Sprintf("%s: value not completely converted", quoteGNUDiagnosticOperand(arg))
 	}
-	return fmt.Sprintf(buildNumericFormat(spec, spec.verb), value), diag, ""
+	return formatGNUFloat(spec, value), diag, ""
+}
+
+func formatGNUFloat(spec *formatSpec, value float64) string {
+	if !math.IsInf(value, 0) && !math.IsNaN(value) {
+		return fmt.Sprintf(buildNumericFormat(spec, spec.verb), value)
+	}
+	token := "nan"
+	if math.IsInf(value, 0) {
+		token = "inf"
+	}
+	if strings.ContainsRune("EFG", rune(spec.verb)) {
+		token = strings.ToUpper(token)
+	}
+	sign := ""
+	switch {
+	case math.Signbit(value):
+		sign = "-"
+	case spec.forceSign:
+		sign = "+"
+	}
+	text := sign + token
+	if !spec.widthSet || len(text) >= spec.width {
+		return text
+	}
+	padding := strings.Repeat(" ", spec.width-len(text))
+	if spec.leftJustify {
+		return text + padding
+	}
+	return padding + text
 }
 
 func floatPrefix(s string) string {
@@ -500,7 +535,7 @@ func parseGNUInteger(arg string, present bool, opts Options) gnuNumericParse {
 	if prefixLen == 2 && digits == "" {
 		digits = "0"
 	}
-	hadDigits := endDigits > 0 || prefixLen == 1
+	hadDigits := endDigits > 0 || prefixLen > 0
 
 	value := new(big.Int)
 	value.SetString(digits, base)
@@ -513,6 +548,11 @@ func parseGNUInteger(arg string, present bool, opts Options) gnuNumericParse {
 		return gnuNumericParse{
 			value:    big.NewInt(0),
 			diagnose: fmt.Sprintf("%s: expected a numeric value", quoteGNUDiagnosticOperand(arg)),
+		}
+	case prefixLen == 2 && endDigits == 0:
+		return gnuNumericParse{
+			value:    value,
+			diagnose: fmt.Sprintf("%s: value not completely converted", quoteGNUDiagnosticOperand(arg)),
 		}
 	case endDigits != len(startDigits):
 		return gnuNumericParse{

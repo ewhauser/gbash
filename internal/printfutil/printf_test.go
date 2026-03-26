@@ -2,6 +2,7 @@ package printfutil
 
 import (
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 )
@@ -398,6 +399,88 @@ func TestFormatGNUMatchesNumericDiagnosticsAndCharacterConstantWarnings(t *testi
 				}
 			} else if len(result.Warnings) != 1 || result.Warnings[0] != tt.wantWarning {
 				t.Fatalf("Warnings = %v, want [%q]", result.Warnings, tt.wantWarning)
+			}
+		})
+	}
+}
+
+func TestFormatGNUFieldArgumentsPreserveParsedPrefixAndReportDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		format     string
+		args       []string
+		wantOutput string
+		wantDiag   []string
+	}{
+		{
+			name:       "width partial conversion keeps width",
+			format:     "%*d",
+			args:       []string{"9z", "1"},
+			wantOutput: "        1",
+			wantDiag:   []string{"'9z': value not completely converted"},
+		},
+		{
+			name:       "precision partial conversion keeps precision",
+			format:     "%.*d",
+			args:       []string{"9z", "1"},
+			wantOutput: "000000001",
+			wantDiag:   []string{"'9z': value not completely converted"},
+		},
+		{
+			name:       "oversized malformed width reports both diagnostics",
+			format:     "%*dX",
+			args:       []string{"2147483648z", "1"},
+			wantOutput: "",
+			wantDiag: []string{
+				"'2147483648z': value not completely converted",
+				"invalid field width: '2147483648z'",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := Format(tt.format, tt.args, Options{Dialect: DialectGNU})
+			if got := result.Output; got != tt.wantOutput {
+				t.Fatalf("Output = %q, want %q", got, tt.wantOutput)
+			}
+			if !slices.Equal(result.Diagnostics, tt.wantDiag) {
+				t.Fatalf("Diagnostics = %v, want %v", result.Diagnostics, tt.wantDiag)
+			}
+		})
+	}
+}
+
+func TestFormatGNUHandlesBareHexPrefixesAndFloatOverflow(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		format     string
+		args       []string
+		wantOutput string
+		wantDiag   string
+	}{
+		{name: "bare hex prefix", format: "%d", args: []string{"0x"}, wantOutput: "0", wantDiag: "'0x': value not completely converted"},
+		{name: "bare hex prefix with trailing text", format: "%d", args: []string{"0xg"}, wantOutput: "0", wantDiag: "'0xg': value not completely converted"},
+		{name: "float overflow", format: "%f", args: []string{"1e5000"}, wantOutput: "inf", wantDiag: "'1e5000': Result too large"},
+		{name: "uppercase float overflow", format: "%F", args: []string{"1e5000"}, wantOutput: "INF", wantDiag: "'1e5000': Result too large"},
+	}
+	if runtime.GOOS == "linux" {
+		tests[2].wantDiag = "'1e5000': Numerical result out of range"
+		tests[3].wantDiag = "'1e5000': Numerical result out of range"
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := Format(tt.format, tt.args, Options{Dialect: DialectGNU})
+			if got := result.Output; got != tt.wantOutput {
+				t.Fatalf("Output = %q, want %q", got, tt.wantOutput)
+			}
+			if len(result.Diagnostics) != 1 || result.Diagnostics[0] != tt.wantDiag {
+				t.Fatalf("Diagnostics = %v, want [%q]", result.Diagnostics, tt.wantDiag)
 			}
 		})
 	}
