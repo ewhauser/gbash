@@ -89,8 +89,14 @@ func (f *redirectedFile) Fd() uintptr {
 	return file.Fd()
 }
 
-func (f *redirectedFile) SetReadDeadline(time.Time) error {
-	return nil
+func (f *redirectedFile) SetReadDeadline(t time.Time) error {
+	deadliner, ok := f.file.(interface {
+		SetReadDeadline(time.Time) error
+	})
+	if !ok {
+		return nil
+	}
+	return deadliner.SetReadDeadline(t)
 }
 
 func (f *redirectedFile) RedirectPath() string {
