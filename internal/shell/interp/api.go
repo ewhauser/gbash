@@ -747,7 +747,7 @@ type redirectedStdinReader struct {
 	handle io.Reader
 	path   string
 	flags  int
-	offset int64
+	offset atomic.Int64
 }
 
 func wrapRedirectedStdinReader(reader StdinReader, underlying io.Reader, meta redirectedStdinMetadata) StdinReader {
@@ -757,28 +757,37 @@ func wrapRedirectedStdinReader(reader StdinReader, underlying io.Reader, meta re
 	if underlying == nil {
 		underlying = reader
 	}
-	return redirectedStdinReader{
+	wrapped := &redirectedStdinReader{
 		StdinReader: reader,
 		handle:      underlying,
 		path:        meta.path,
 		flags:       meta.flags,
-		offset:      meta.offset,
 	}
+	wrapped.offset.Store(meta.offset)
+	return wrapped
 }
 
-func (r redirectedStdinReader) RedirectPath() string {
+func (r *redirectedStdinReader) Read(p []byte) (int, error) {
+	n, err := r.StdinReader.Read(p)
+	if n > 0 {
+		r.offset.Add(int64(n))
+	}
+	return n, err
+}
+
+func (r *redirectedStdinReader) RedirectPath() string {
 	return r.path
 }
 
-func (r redirectedStdinReader) RedirectFlags() int {
+func (r *redirectedStdinReader) RedirectFlags() int {
 	return r.flags
 }
 
-func (r redirectedStdinReader) RedirectOffset() int64 {
-	return r.offset
+func (r *redirectedStdinReader) RedirectOffset() int64 {
+	return r.offset.Load()
 }
 
-func (r redirectedStdinReader) Stat() (stdfs.FileInfo, error) {
+func (r *redirectedStdinReader) Stat() (stdfs.FileInfo, error) {
 	type statter interface {
 		Stat() (stdfs.FileInfo, error)
 	}
@@ -788,7 +797,7 @@ func (r redirectedStdinReader) Stat() (stdfs.FileInfo, error) {
 	return nil, errors.New("bad file descriptor")
 }
 
-func (r redirectedStdinReader) Seek(offset int64, whence int) (int64, error) {
+func (r *redirectedStdinReader) Seek(offset int64, whence int) (int64, error) {
 	type seeker interface {
 		Seek(offset int64, whence int) (int64, error)
 	}
@@ -798,7 +807,7 @@ func (r redirectedStdinReader) Seek(offset int64, whence int) (int64, error) {
 	return 0, errors.New("bad file descriptor")
 }
 
-func (r redirectedStdinReader) Fd() uintptr {
+func (r *redirectedStdinReader) Fd() uintptr {
 	type fileDescriber interface {
 		Fd() uintptr
 	}

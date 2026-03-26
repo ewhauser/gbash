@@ -90,7 +90,7 @@ func (c *Touch) NormalizeInvocation(inv *Invocation) *Invocation {
 	}
 	clone := *inv
 	normalized := normalizeTouchLegacyTimestamp(inv.Args[index])
-	if endOfOptions >= 0 {
+	if endOfOptions >= 0 && index > endOfOptions {
 		clone.Args = append([]string{}, inv.Args[:endOfOptions]...)
 		clone.Args = append(clone.Args, "--posix-stamp", normalized, "--")
 		clone.Args = append(clone.Args, inv.Args[index+1:]...)
