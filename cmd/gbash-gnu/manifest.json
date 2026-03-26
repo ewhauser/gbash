@@ -73,6 +73,7 @@
     { "pattern": "tests/df/*", "reason": "df command tests are out of scope in v1" },
     { "pattern": "tests/shred/*", "reason": "shred command tests are out of scope in v1" },
     { "pattern": "tests/cat/cat-buf.sh", "reason": "hangs: FIFO-based buffering test deadlocks under gbash sandbox (#687)" },
+    { "pattern": "tests/dd/stats.sh", "reason": "dd stats test streams 250 MB through wc, exceeding the compat sandbox's 50 MiB per-process file I/O cap" },
     { "pattern": "tests/misc/false-status.sh", "reason": "test depends on --version/--help output from true/false builtins, out of scope in v1" },
     { "pattern": "tests/misc/kill.sh", "reason": "kill command tests are out of scope in v1" },
     { "pattern": "tests/misc/nohup.sh", "reason": "nohup command is out of scope in v1" },

@@ -391,3 +391,139 @@ func TestDdDiagnosticsAndStatusModes(t *testing.T) {
 		}
 	})
 }
+
+func TestDdGNUCompatRegressions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("redirected stdout seek bytes", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+
+		result := execSessionScriptWithInput(t, session, "dd oseek=8B bs=5 status=none > /tmp/out\n", []byte("abcdefghijklm"))
+		if got, want := result.ExitCode, 0; got != want {
+			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if got, want := readSessionFile(t, session, "/tmp/out"), append(make([]byte, 8), []byte("abcdefghijklm")...); !bytes.Equal(got, want) {
+			t.Fatalf("output = %v, want %v", got, want)
+		}
+
+		result = execSessionScriptWithInput(t, session, "dd oseek=8B bs=5 count=0 status=none > /tmp/out2\n", nil)
+		if got, want := result.ExitCode, 0; got != want {
+			t.Fatalf("count=0 ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if got, want := readSessionFile(t, session, "/tmp/out2"), make([]byte, 8); !bytes.Equal(got, want) {
+			t.Fatalf("count=0 output = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("skip past eof on file is silent", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+		writeSessionFile(t, session, "/tmp/in.txt", []byte("data\n"))
+
+		result := execSessionScriptWithInput(t, session, "dd status=none if=/tmp/in.txt skip=2 of=/dev/null\n", nil)
+		if got, want := result.ExitCode, 0; got != want {
+			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if result.Stderr != "" {
+			t.Fatalf("Stderr = %q, want empty", result.Stderr)
+		}
+	})
+
+	t.Run("latin1 case conversion", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+		writeSessionFile(t, session, "/tmp/upper.txt", []byte{0xC9, '\n'})
+		writeSessionFile(t, session, "/tmp/lower.txt", []byte{0xE9, '\n'})
+
+		result := execSessionScriptWithInput(t, session, "dd if=/tmp/upper.txt of=/tmp/out-lower.txt conv=lcase status=none\n", nil)
+		if got, want := result.ExitCode, 0; got != want {
+			t.Fatalf("lower ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if got, want := readSessionFile(t, session, "/tmp/out-lower.txt"), []byte{0xE9, '\n'}; !bytes.Equal(got, want) {
+			t.Fatalf("lower output = %v, want %v", got, want)
+		}
+
+		result = execSessionScriptWithInput(t, session, "dd if=/tmp/lower.txt of=/tmp/out-upper.txt conv=ucase status=none\n", nil)
+		if got, want := result.ExitCode, 0; got != want {
+			t.Fatalf("upper ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if got, want := readSessionFile(t, session, "/tmp/out-upper.txt"), []byte{0xC9, '\n'}; !bytes.Equal(got, want) {
+			t.Fatalf("upper output = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("zero multiplier with huge factor becomes zero", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+		writeSessionFile(t, session, "/tmp/in.txt", []byte("abcdef"))
+		big := strings.Repeat("9", 61)
+
+		result := execSessionScriptWithInput(t, session, "dd if=/tmp/in.txt of=/tmp/out.txt count=00x"+big+" status=noxfer\n", nil)
+		if got, want := result.ExitCode, 0; got != want {
+			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if got := len(readSessionFile(t, session, "/tmp/out.txt")); got != 0 {
+			t.Fatalf("output length = %d, want 0", got)
+		}
+		if got, want := result.Stderr, "0+0 records in\n0+0 records out\n"; got != want {
+			t.Fatalf("Stderr = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("iflag nocache rejects pipe", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+
+		result := execSessionScriptWithInput(t, session, "dd count=0 status=none | dd iflag=nocache count=0 status=none\n", nil)
+		if got, want := result.ExitCode, 1; got != want {
+			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+	})
+
+	t.Run("iflag nocache rejects direct", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+
+		result := execSessionScriptWithInput(t, session, "dd iflag=nocache,direct if=/dev/null status=none\n", nil)
+		if got, want := result.ExitCode, 1; got != want {
+			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+	})
+
+	t.Run("redirected stdin preserves offset across dd invocations", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+		writeSessionFile(t, session, "/tmp/in.txt", []byte("abcde\n"))
+
+		result := execSessionScriptWithInput(t, session, "(dd skip=1 count=1 bs=1 status=none; dd skip=1 bs=1 status=none) < /tmp/in.txt > /tmp/out.txt\n", nil)
+		if got, want := result.ExitCode, 0; got != want {
+			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if got, want := string(readSessionFile(t, session, "/tmp/out.txt")), "bde\n"; got != want {
+			t.Fatalf("output = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("count zero still advances redirected stdin offset", func(t *testing.T) {
+		t.Parallel()
+
+		session := newSession(t, &Config{})
+		writeSessionFile(t, session, "/tmp/in.txt", []byte("LA:3456789abcdef\n"))
+
+		result := execSessionScriptWithInput(t, session, "(dd bs=1 skip=3 count=0 status=none && dd bs=5 status=none) < /tmp/in.txt > /tmp/out.txt\n", nil)
+		if got, want := result.ExitCode, 0; got != want {
+			t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
+		}
+		if got, want := string(readSessionFile(t, session, "/tmp/out.txt")), "3456789abcdef\n"; got != want {
+			t.Fatalf("output = %q, want %q", got, want)
+		}
+	})
+}

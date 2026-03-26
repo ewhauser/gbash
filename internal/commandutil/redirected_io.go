@@ -4,6 +4,7 @@ import (
 	"io"
 	stdfs "io/fs"
 	"os"
+	"time"
 
 	gbfs "github.com/ewhauser/gbash/fs"
 )
@@ -25,10 +26,19 @@ func WrapRedirectedFile(file gbfs.File, path string, flag int) io.ReadWriteClose
 	if file == nil {
 		return nil
 	}
+	offset := int64(0)
+	if seeker, ok := file.(interface {
+		Seek(offset int64, whence int) (int64, error)
+	}); ok {
+		if position, err := seeker.Seek(0, io.SeekCurrent); err == nil && position >= 0 {
+			offset = position
+		}
+	}
 	return &redirectedFile{
-		file: file,
-		path: path,
-		flag: flag,
+		file:   file,
+		path:   path,
+		flag:   flag,
+		offset: offset,
 	}
 }
 
@@ -77,6 +87,10 @@ func (f *redirectedFile) Fd() uintptr {
 		return 0
 	}
 	return file.Fd()
+}
+
+func (f *redirectedFile) SetReadDeadline(time.Time) error {
+	return nil
 }
 
 func (f *redirectedFile) RedirectPath() string {

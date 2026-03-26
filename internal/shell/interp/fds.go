@@ -45,14 +45,42 @@ func (fd *shellFD) Stat() (stdfs.FileInfo, error) {
 	if statter, ok := fd.reader.(statter); ok {
 		return statter.Stat()
 	}
+	if statter, ok := fd.writer.(statter); ok {
+		return statter.Stat()
+	}
 	if statter, ok := fd.closer.(statter); ok {
 		return statter.Stat()
 	}
 	return nil, errors.New("bad file descriptor")
 }
 
+func (fd *shellFD) Seek(offset int64, whence int) (int64, error) {
+	if fd == nil {
+		return 0, errors.New("bad file descriptor")
+	}
+	type seeker interface {
+		Seek(offset int64, whence int) (int64, error)
+	}
+	if seeker, ok := fd.reader.(seeker); ok {
+		return seeker.Seek(offset, whence)
+	}
+	if seeker, ok := fd.writer.(seeker); ok {
+		return seeker.Seek(offset, whence)
+	}
+	if seeker, ok := fd.closer.(seeker); ok {
+		return seeker.Seek(offset, whence)
+	}
+	return 0, errors.New("bad file descriptor")
+}
+
 func (fd *shellFD) RedirectPath() string {
 	if meta, ok := fd.reader.(commandutil.RedirectMetadata); ok {
+		return meta.RedirectPath()
+	}
+	if meta, ok := fd.writer.(commandutil.RedirectMetadata); ok {
+		return meta.RedirectPath()
+	}
+	if meta, ok := fd.closer.(commandutil.RedirectMetadata); ok {
 		return meta.RedirectPath()
 	}
 	return ""
@@ -62,11 +90,23 @@ func (fd *shellFD) RedirectFlags() int {
 	if meta, ok := fd.reader.(commandutil.RedirectMetadata); ok {
 		return meta.RedirectFlags()
 	}
+	if meta, ok := fd.writer.(commandutil.RedirectMetadata); ok {
+		return meta.RedirectFlags()
+	}
+	if meta, ok := fd.closer.(commandutil.RedirectMetadata); ok {
+		return meta.RedirectFlags()
+	}
 	return 0
 }
 
 func (fd *shellFD) RedirectOffset() int64 {
 	if meta, ok := fd.reader.(commandutil.RedirectMetadata); ok {
+		return meta.RedirectOffset()
+	}
+	if meta, ok := fd.writer.(commandutil.RedirectMetadata); ok {
+		return meta.RedirectOffset()
+	}
+	if meta, ok := fd.closer.(commandutil.RedirectMetadata); ok {
 		return meta.RedirectOffset()
 	}
 	return 0
