@@ -22,5 +22,7 @@ jobs:
       - run: go mod download
 
       - run: make lint
+        env:
+          GH_TOKEN: ${{ github.token }}
       - run: make lint-contrib
       - run: make lint-examples
