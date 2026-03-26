@@ -54,37 +54,6 @@ func (fd *shellFD) Stat() (stdfs.FileInfo, error) {
 	return nil, errors.New("bad file descriptor")
 }
 
-func (fd *shellFD) Seek(offset int64, whence int) (int64, error) {
-	if fd == nil {
-		return 0, errors.New("bad file descriptor")
-	}
-	type seeker interface {
-		Seek(offset int64, whence int) (int64, error)
-	}
-	seek := func(target seeker) (int64, error) {
-		seekOffset := offset
-		if fd.buffered && whence == io.SeekCurrent {
-			// PeekByte has already advanced the underlying descriptor by one byte.
-			seekOffset--
-		}
-		position, err := target.Seek(seekOffset, whence)
-		if err == nil {
-			fd.buffered = false
-		}
-		return position, err
-	}
-	if seeker, ok := fd.reader.(seeker); ok {
-		return seek(seeker)
-	}
-	if seeker, ok := fd.writer.(seeker); ok {
-		return seek(seeker)
-	}
-	if seeker, ok := fd.closer.(seeker); ok {
-		return seek(seeker)
-	}
-	return 0, errors.New("bad file descriptor")
-}
-
 func (fd *shellFD) RedirectPath() string {
 	if meta, ok := fd.reader.(commandutil.RedirectMetadata); ok {
 		return meta.RedirectPath()
@@ -245,25 +214,35 @@ func (fd *shellFD) UnderlyingWriter() io.Writer {
 }
 
 func (fd *shellFD) Seek(offset int64, whence int) (int64, error) {
-	if fd == nil || fd.reader == nil {
+	if fd == nil {
 		return 0, errors.New("bad file descriptor")
 	}
-	seeker, ok := fd.reader.(interface {
+	type seeker interface {
 		Seek(offset int64, whence int) (int64, error)
-	})
-	if !ok {
-		return 0, errors.New("illegal seek")
 	}
-	adjusted := offset
-	if fd.buffered && whence == io.SeekCurrent {
-		adjusted--
+	seek := func(target seeker) (int64, error) {
+		adjusted := offset
+		if fd.buffered && whence == io.SeekCurrent {
+			// PeekByte has already advanced the underlying descriptor by one byte.
+			adjusted--
+		}
+		position, err := target.Seek(adjusted, whence)
+		if err != nil {
+			return position, err
+		}
+		fd.buffered = false
+		return position, nil
 	}
-	position, err := seeker.Seek(adjusted, whence)
-	if err != nil {
-		return position, err
+	if seeker, ok := fd.reader.(seeker); ok {
+		return seek(seeker)
 	}
-	fd.buffered = false
-	return position, nil
+	if seeker, ok := fd.writer.(seeker); ok {
+		return seek(seeker)
+	}
+	if seeker, ok := fd.closer.(seeker); ok {
+		return seek(seeker)
+	}
+	return 0, errors.New("bad file descriptor")
 }
 
 func (fd *shellFD) SetReadDeadline(t time.Time) error {
