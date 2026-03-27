@@ -68,6 +68,31 @@ func fileInfoAllocatedBytes(info stdfs.FileInfo) int64 {
 	return max(info.Size(), 0)
 }
 
+func fileInfoLinkCount(info stdfs.FileInfo) (uint64, bool) {
+	if info == nil {
+		return 0, false
+	}
+	sys := reflect.ValueOf(info.Sys())
+	if !sys.IsValid() {
+		return 0, false
+	}
+	if sys.Kind() == reflect.Pointer {
+		if sys.IsNil() {
+			return 0, false
+		}
+		sys = sys.Elem()
+	}
+	if sys.Kind() != reflect.Struct {
+		return 0, false
+	}
+	for _, field := range []string{"Nlink", "NLink"} {
+		if value := sys.FieldByName(field); value.IsValid() {
+			return fileInfoUintField(value), true
+		}
+	}
+	return 0, false
+}
+
 func fileInfoUintField(value reflect.Value) uint64 {
 	switch value.Kind() {
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
