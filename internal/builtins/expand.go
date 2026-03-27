@@ -272,6 +272,12 @@ func parseExpandTabList(raw string) (expandRemainingMode, []int, error) {
 }
 
 func parseExpandTabNumber(raw string) (int, error) {
+	return parseTabNumber(raw, func(raw string) error {
+		return fmt.Errorf("tab stop is too large %s", quoteGNUOperand(raw))
+	})
+}
+
+func parseTabNumber(raw string, overflowf func(string) error) (int, error) {
 	value, err := strconv.ParseUint(raw, 10, strconv.IntSize)
 	if err == nil {
 		return int(value), nil
@@ -285,7 +291,7 @@ func parseExpandTabNumber(raw string) (int, error) {
 
 	var rangeErr *strconv.NumError
 	if strings.Contains(err.Error(), "value out of range") || (errors.As(err, &rangeErr) && errors.Is(err, strconv.ErrRange)) {
-		return 0, fmt.Errorf("tab stop is too large %s", quoteGNUOperand(raw))
+		return 0, overflowf(raw)
 	}
 	return 0, fmt.Errorf("tab size contains invalid character(s): %s", quoteGNUOperand(digitsTrimmed))
 }

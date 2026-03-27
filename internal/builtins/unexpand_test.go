@@ -182,6 +182,17 @@ func TestUnexpandErrorsMatchCoreutilsStyle(t *testing.T) {
 		t.Fatalf("invalidChar stderr = %q, want %q", got, want)
 	}
 
+	overflowTabs, err := rt.Run(context.Background(), &ExecutionRequest{Script: "unexpand --tabs=18446744073709551616\n"})
+	if err != nil {
+		t.Fatalf("Run(overflowTabs) error = %v", err)
+	}
+	if overflowTabs.ExitCode != 1 {
+		t.Fatalf("overflowTabs ExitCode = %d, want 1", overflowTabs.ExitCode)
+	}
+	if got, want := overflowTabs.Stderr, "unexpand: tab stop value is too large\n"; got != want {
+		t.Fatalf("overflowTabs stderr = %q, want %q", got, want)
+	}
+
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/ok.txt", []byte("        a\n"))
 	multiResult := mustExecSession(t, session, "mkdir /tmp/dir\nunexpand /tmp/ok.txt /tmp/dir /tmp/missing.txt\n")

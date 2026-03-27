@@ -240,7 +240,7 @@ func parseUnexpandTabList(raw string) (expandRemainingMode, []int, error) {
 			}
 		}
 
-		num, err := parseExpandTabNumber(word)
+		num, err := parseUnexpandTabNumber(word)
 		if err != nil {
 			return expandRemainingNone, nil, err
 		}
@@ -268,6 +268,12 @@ func parseUnexpandTabList(raw string) (expandRemainingMode, []int, error) {
 		remainingMode = expandRemainingNone
 	}
 	return remainingMode, tabstops, nil
+}
+
+func parseUnexpandTabNumber(raw string) (int, error) {
+	return parseTabNumber(raw, func(string) error {
+		return fmt.Errorf("tab stop value is too large")
+	})
 }
 
 func unexpandBytes(data []byte, opts *unexpandOptions) []byte {
