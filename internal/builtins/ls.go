@@ -53,6 +53,7 @@ type lsOptions struct {
 	numericIDs            bool
 	identityDB            *permissionIdentityDB
 	identityDBLoader      func(context.Context, *Invocation) *permissionIdentityDB
+	timeMode              lsTimeMode
 	timeStyle             string
 	dereference           lsDereferenceMode
 	dired                 bool
@@ -139,6 +140,8 @@ type lsFormatMode int
 
 type lsSortMode int
 
+type lsTimeMode int
+
 type lsIndicatorMode int
 
 type lsQuotingMode int
@@ -166,6 +169,13 @@ const (
 	lsSortExtension
 	lsSortNone
 	lsSortWidth
+)
+
+const (
+	lsTimeModification lsTimeMode = iota
+	lsTimeAccess
+	lsTimeChange
+	lsTimeBirth
 )
 
 const (
@@ -415,7 +425,8 @@ func lsOptionsFromParsed(inv *Invocation, matches *ParsedCommand) (lsOptions, er
 	if err != nil {
 		return lsOptions{}, err
 	}
-	if err := parseLSTimeWord(inv, matches); err != nil {
+	timeMode, err := parseLSTimeMode(inv, matches)
+	if err != nil {
 		return lsOptions{}, err
 	}
 	humanReadable := matches.Has("human-readable")
@@ -494,6 +505,7 @@ func lsOptionsFromParsed(inv *Invocation, matches *ParsedCommand) (lsOptions, er
 		showGroup:             !matches.Has("long-no-group") && !matches.Has("no-group"),
 		showOwner:             !matches.Has("long-no-owner"),
 		numericIDs:            matches.Has("numeric-uid-gid"),
+		timeMode:              timeMode,
 		timeStyle:             timeStyle,
 		dereference:           dereference,
 		dired:                 diredActive,
@@ -1491,15 +1503,21 @@ func parseLSBlockSizeValue(inv *Invocation, value string) (int64, error) {
 	return parseBlockSizeValue(inv, "ls", value)
 }
 
-func parseLSTimeWord(inv *Invocation, matches *ParsedCommand) error {
+func parseLSTimeMode(inv *Invocation, matches *ParsedCommand) (lsTimeMode, error) {
 	if !matches.Has("time") {
-		return nil
+		return lsTimeModification, nil
 	}
 	switch matches.Value("time") {
-	case "access", "atime", "use", "status", "ctime", "birth", "creation", "mtime", "modification":
-		return nil
+	case "access", "atime", "use":
+		return lsTimeAccess, nil
+	case "status", "ctime":
+		return lsTimeChange, nil
+	case "birth", "creation":
+		return lsTimeBirth, nil
+	case "mtime", "modification":
+		return lsTimeModification, nil
 	default:
-		return exitf(inv, 2, "ls: invalid argument %s for '--time'", quoteGNUOperand(matches.Value("time")))
+		return lsTimeModification, exitf(inv, 2, "ls: invalid argument %s for '--time'", quoteGNUOperand(matches.Value("time")))
 	}
 }
 
@@ -2274,10 +2292,12 @@ func sortLSEntries(entries []lsEntry, opts *lsOptions) {
 		})
 	case lsSortTime:
 		sort.SliceStable(entries, func(i, j int) bool {
-			if entries[i].info.ModTime().Equal(entries[j].info.ModTime()) {
+			leftTime := lsSelectedTime(entries[i].info, opts)
+			rightTime := lsSelectedTime(entries[j].info, opts)
+			if leftTime.Equal(rightTime) {
 				return entries[i].name < entries[j].name
 			}
-			return entries[i].info.ModTime().After(entries[j].info.ModTime())
+			return leftTime.After(rightTime)
 		})
 	case lsSortVersion:
 		sort.SliceStable(entries, func(i, j int) bool {
@@ -2416,10 +2436,12 @@ func sortLSPathArgs(args []lsPathArg, opts *lsOptions) {
 		})
 	case lsSortTime:
 		sort.SliceStable(args, func(i, j int) bool {
-			if args[i].info.ModTime().Equal(args[j].info.ModTime()) {
+			leftTime := lsSelectedTime(args[i].info, opts)
+			rightTime := lsSelectedTime(args[j].info, opts)
+			if leftTime.Equal(rightTime) {
 				return args[i].name < args[j].name
 			}
-			return args[i].info.ModTime().After(args[j].info.ModTime())
+			return leftTime.After(rightTime)
 		})
 	case lsSortVersion:
 		sort.SliceStable(args, func(i, j int) bool {
@@ -2516,7 +2538,7 @@ func lsBuildLongFields(info stdfs.FileInfo, opts *lsOptions, now time.Time) lsLo
 	userToken, groupToken, authorToken := lsIdentityTokens(info, opts.numericIDs, opts.identityDB)
 	fields := lsLongFields{
 		mode: formatModeLong(info.Mode()), //nolint:nilaway // caller guarantees non-nil info
-		date: formatLSDateStyle(info.ModTime(), opts, now),
+		date: formatLSDateStyle(lsSelectedTime(info, opts), opts, now),
 		size: formatLSSize(info, opts),
 	}
 	if opts.showInode {
@@ -2540,6 +2562,29 @@ func lsBuildLongFields(info stdfs.FileInfo, opts *lsOptions, now time.Time) lsLo
 		fields.author = authorToken
 	}
 	return fields
+}
+
+func lsSelectedTime(info stdfs.FileInfo, opts *lsOptions) time.Time {
+	if info == nil {
+		return time.Time{}
+	}
+	if opts != nil {
+		switch opts.timeMode {
+		case lsTimeAccess:
+			if atime, ok := statAccessTime(info); ok {
+				return atime
+			}
+		case lsTimeChange:
+			if ctime, ok := statChangeTime(info); ok {
+				return ctime
+			}
+		case lsTimeBirth:
+			if birth, ok := statBirthTime(info); ok {
+				return birth
+			}
+		}
+	}
+	return info.ModTime()
 }
 
 func lsLongLineParts(info stdfs.FileInfo, opts *lsOptions, layout *lsLongLayout, nameRanges []lsByteRange, now time.Time) (string, []lsByteRange) {

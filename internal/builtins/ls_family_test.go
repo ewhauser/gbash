@@ -1372,6 +1372,55 @@ func TestLSTimeOptionAcceptsBirthAndCreation(t *testing.T) {
 	}
 }
 
+func TestLSTimeOptionUsesAccessTimeForSortingAndDisplay(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/tmp/ls-time-mode/a-old.txt", []byte("old"))
+	writeSessionFile(t, session, "/tmp/ls-time-mode/z-new.txt", []byte("new"))
+
+	modTime := time.Date(2025, time.January, 5, 6, 7, 8, 0, time.UTC)
+	oldAccess := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
+	newAccess := time.Date(2024, time.January, 3, 4, 5, 6, 0, time.UTC)
+	for _, item := range []struct {
+		path  string
+		atime time.Time
+	}{
+		{path: "/tmp/ls-time-mode/a-old.txt", atime: oldAccess},
+		{path: "/tmp/ls-time-mode/z-new.txt", atime: newAccess},
+	} {
+		if err := session.FileSystem().Chtimes(context.Background(), item.path, item.atime, modTime); err != nil {
+			t.Fatalf("Chtimes(%q) error = %v", item.path, err)
+		}
+	}
+
+	result := mustExecSession(t, session,
+		"TZ=UTC ls -lt --time=atime --time-style=+%Y-%m-%dT%H:%M:%S /tmp/ls-time-mode/a-old.txt /tmp/ls-time-mode/z-new.txt\n",
+	)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+
+	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("Stdout lines = %q, want 2 lines", result.Stdout)
+	}
+	newAccessText := newAccess.In(time.Local).Format("2006-01-02T15:04:05")
+	oldAccessText := oldAccess.In(time.Local).Format("2006-01-02T15:04:05")
+	if !strings.Contains(lines[0], newAccessText) || !strings.Contains(lines[0], "/tmp/ls-time-mode/z-new.txt") {
+		t.Fatalf("first line = %q, want newer atime for z-new.txt", lines[0])
+	}
+	if !strings.Contains(lines[1], oldAccessText) || !strings.Contains(lines[1], "/tmp/ls-time-mode/a-old.txt") {
+		t.Fatalf("second line = %q, want older atime for a-old.txt", lines[1])
+	}
+	if strings.Contains(result.Stdout, modTime.Format("2006-01-02T15:04:05")) {
+		t.Fatalf("Stdout = %q, want access-time timestamps rather than mtime", result.Stdout)
+	}
+}
+
 func TestLSLongColorClearsToEndOfLine(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
