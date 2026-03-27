@@ -182,6 +182,17 @@ func TestExpandErrorsMatchCoreutilsStyle(t *testing.T) {
 		t.Fatalf("invalidLegacyTabs stderr = %q, want %q", got, want)
 	}
 
+	overflowTabs, err := rt.Run(context.Background(), &ExecutionRequest{Script: "expand --tabs=18446744073709551616\n"})
+	if err != nil {
+		t.Fatalf("Run(overflowTabs) error = %v", err)
+	}
+	if overflowTabs.ExitCode != 1 {
+		t.Fatalf("overflowTabs ExitCode = %d, want 1", overflowTabs.ExitCode)
+	}
+	if got, want := overflowTabs.Stderr, "expand: tab stop is too large '18446744073709551616'\n"; got != want {
+		t.Fatalf("overflowTabs stderr = %q, want %q", got, want)
+	}
+
 	session := newSession(t, &Config{})
 	writeSessionFile(t, session, "/tmp/ok.txt", []byte("a\tb\n"))
 	multiResult := mustExecSession(t, session, "mkdir /tmp/dir\nexpand --tabs=4 /tmp/ok.txt /tmp/dir /tmp/missing.txt\n")
