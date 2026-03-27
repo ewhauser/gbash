@@ -106,13 +106,6 @@ func readerLooksLikeTTY(reader io.Reader) bool {
 	if meta, ok := reader.(commandutil.RedirectMetadata); ok && recognizedTTYPath(meta.RedirectPath()) {
 		return true
 	}
-	if statter, ok := reader.(interface {
-		Stat() (stdfs.FileInfo, error)
-	}); ok {
-		if info, err := statter.Stat(); err == nil && info.Mode()&stdfs.ModeCharDevice != 0 {
-			return true
-		}
-	}
 	if fd, ok := reader.(interface{ Fd() uintptr }); ok {
 		if descriptor := fd.Fd(); descriptor != 0 && term.IsTerminal(int(descriptor)) {
 			return true
