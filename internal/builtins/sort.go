@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
+	stdfs "io/fs"
 	"math/big"
 	"os"
 	"path"
@@ -694,10 +696,8 @@ func validateSortOptions(inv *Invocation, opts *sortOptions) error {
 		}
 		return sortOptionf(inv, "sort: options '-co' are incompatible")
 	}
-	if len(opts.keys) == 0 {
-		if err := validateSortOrderingOptions(inv, sortModeFlagsFromOptions(opts), opts.dictionaryOrder, opts.ignoreNonprinting, opts.ignoreCase); err != nil {
-			return err
-		}
+	if err := validateSortOrderingOptions(inv, sortModeFlagsFromOptions(opts), opts.dictionaryOrder, opts.ignoreNonprinting, opts.ignoreCase); err != nil {
+		return err
 	}
 	for _, key := range opts.keys {
 		if err := validateSortOrderingOptions(inv, sortModeFlagsFromKey(key), key.dictionaryOrder, key.ignoreNonprinting, key.ignoreCase); err != nil {
@@ -971,7 +971,7 @@ func collectSortInputs(ctx context.Context, inv *Invocation, opts *sortOptions, 
 	if err != nil {
 		return nil, "", 0, err
 	}
-	if err := sortValidateMergeResources(inv, opts, len(inputFiles)); err != nil {
+	if err := sortValidateMergeResources(ctx, inv, opts, len(inputFiles)); err != nil {
 		return nil, "", 0, err
 	}
 
@@ -1053,14 +1053,51 @@ func sortOutputOpenError(inv *Invocation, name string, err error) error {
 	return sortOptionf(inv, "sort: open failed: %s: %s", name, readAllErrorText(err))
 }
 
-func sortValidateMergeResources(inv *Invocation, opts *sortOptions, inputCount int) error {
+func sortValidateMergeResources(ctx context.Context, inv *Invocation, opts *sortOptions, inputCount int) error {
 	if !opts.merge || !opts.batchSizeSet || inputCount <= opts.batchSize {
 		return nil
 	}
 	if len(opts.tempDirs) == 0 {
 		return nil
 	}
+	for _, dir := range opts.tempDirs {
+		if err := sortProbeTempDir(ctx, inv, dir); err == nil {
+			return nil
+		}
+	}
 	return sortOptionf(inv, "sort: cannot create temporary file in %s:", quoteGNUOperand(opts.tempDirs[0]))
+}
+
+func sortProbeTempDir(ctx context.Context, inv *Invocation, rawDir string) error {
+	info, dirAbs, exists, err := statMaybe(ctx, inv, rawDir)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return stdfs.ErrNotExist
+	}
+	if !info.IsDir() {
+		return stdfs.ErrInvalid
+	}
+
+	var nonce [8]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return err
+	}
+	probe := path.Join(dirAbs, fmt.Sprintf(".gbash-sort-%x", nonce[:]))
+	file, err := inv.FS.OpenFile(ctx, probe, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	closeErr := file.Close()
+	removeErr := inv.FS.Remove(ctx, probe, false)
+	if closeErr != nil {
+		return closeErr
+	}
+	if removeErr != nil && !errors.Is(removeErr, stdfs.ErrNotExist) {
+		return removeErr
+	}
+	return nil
 }
 
 func sortInputFiles(ctx context.Context, inv *Invocation, opts *sortOptions, files []string) ([]string, error) {
