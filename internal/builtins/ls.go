@@ -30,6 +30,7 @@ type lsOptions struct {
 	si                    bool
 	kibibytes             bool
 	blockSize             int64
+	blockSizeSet          bool
 	recursive             bool
 	reverse               bool
 	sortMode              lsSortMode
@@ -258,6 +259,7 @@ Supported options:
                       show nongraphic characters as-is
   --si                like -h, but use powers of 1000 not 1024
   --sort=WORD         name, none, size, time, version, extension, width
+  --time=WORD         change the default time to show or sort by
   --time-style=STYLE  full-iso, long-iso, iso, locale, or +FORMAT
   --width=COLS        set output width to COLS
   --zero              end each output entry with NUL, not newline
@@ -369,6 +371,7 @@ func lsOptionSpecs() []OptionSpec {
 		{Name: "author", Long: "author", Help: "with -l, print the author of each file"},
 		{Name: "si", Long: "si", Help: "like -h, but use powers of 1000 not 1024"},
 		{Name: "block-size", Long: "block-size", ValueName: "SIZE", Arity: OptionRequiredValue, Help: "scale sizes by SIZE before printing them"},
+		{Name: "time", Long: "time", ValueName: "WORD", Arity: OptionRequiredValue, Help: "change the default time to show or sort by"},
 		{Name: "time-style", Long: "time-style", ValueName: "STYLE", Arity: OptionRequiredValue, Help: "full-iso, long-iso, iso, locale, or +FORMAT"},
 		{Name: "full-time", Long: "full-time", Help: "like -l --time-style=full-iso"},
 		{Name: "hyperlink", Long: "hyperlink", ValueName: "WHEN", Arity: OptionOptionalValue, OptionalValueEqualsOnly: true, Help: "hyperlink file names; WHEN can be 'always', 'auto', or 'never'"},
@@ -408,9 +411,26 @@ func lsOptionsFromParsed(inv *Invocation, matches *ParsedCommand) (lsOptions, er
 	if err != nil {
 		return lsOptions{}, err
 	}
-	blockSize, err := parseLSBlockSize(inv, matches)
+	blockSize, blockSizeSet, err := parseLSBlockSize(inv, matches)
 	if err != nil {
 		return lsOptions{}, err
+	}
+	if err := parseLSTimeWord(inv, matches); err != nil {
+		return lsOptions{}, err
+	}
+	humanReadable := matches.Has("human-readable")
+	si := matches.Has("si")
+	blockSizeSource := lsBlockSizeSource(inv)
+	if matches.Has("block-size") {
+		blockSizeSource = strings.TrimSpace(matches.Value("block-size"))
+	}
+	switch blockSizeSource {
+	case "human-readable":
+		humanReadable = true
+		blockSizeSet = false
+	case "si":
+		si = true
+		blockSizeSet = false
 	}
 	var timeStyle string
 	if longFormat {
@@ -449,10 +469,11 @@ func lsOptionsFromParsed(inv *Invocation, matches *ParsedCommand) (lsOptions, er
 		ignorePatterns:        matches.Values("ignore"),
 		ignoreBackups:         matches.Has("ignore-backups"),
 		longFormat:            longFormat,
-		humanReadable:         matches.Has("human-readable"),
-		si:                    matches.Has("si"),
+		humanReadable:         humanReadable,
+		si:                    si,
 		kibibytes:             matches.Has("kibibytes"),
 		blockSize:             blockSize,
+		blockSizeSet:          blockSizeSet,
 		recursive:             matches.Has("recursive"),
 		reverse:               matches.Has("reverse"),
 		sortMode:              sortMode,
@@ -715,7 +736,7 @@ func (c *LS) renderPathEntry(ctx context.Context, inv *Invocation, target, abs s
 	firstColor := false
 	if opts.longFormat {
 		prefix, dired := lsLongLineParts(info, opts, nil, ranges, inv.Now())
-		line := lsRenderColoredValue(prefix, name, suffix, style, &firstColor) + "\n"
+		line := lsAppendClearToEOL(lsRenderColoredValue(prefix, name, suffix, style, &firstColor)+"\n", opts)
 		if opts.dired {
 			line = "  " + line
 			for i := range dired {
@@ -780,7 +801,7 @@ func lsRenderEntries(ctx context.Context, inv *Invocation, dirAbs string, entrie
 		}
 		if opts.longFormat {
 			prefix, dired := lsLongLineParts(entry.info, opts, layout, ranges, inv.Now())
-			line := lsRenderColoredValue(prefix, name, suffix, style, &firstColor) + "\n"
+			line := lsAppendClearToEOL(lsRenderColoredValue(prefix, name, suffix, style, &firstColor)+"\n", opts)
 			if opts.dired {
 				line = "  " + line
 				for i := range dired {
@@ -830,7 +851,7 @@ func lsRenderPathArgs(ctx context.Context, inv *Invocation, args []lsPathArg, op
 		}
 		if opts.longFormat {
 			prefix, dired := lsLongLineParts(arg.info, opts, layout, ranges, inv.Now())
-			line := lsRenderColoredValue(prefix, name, suffix, style, &firstColor) + "\n"
+			line := lsAppendClearToEOL(lsRenderColoredValue(prefix, name, suffix, style, &firstColor)+"\n", opts)
 			if opts.dired {
 				line = "  " + line
 				for i := range dired {
@@ -1442,47 +1463,44 @@ func lsJoinRecursiveTarget(base, name string) string {
 	}
 }
 
-func parseLSBlockSize(inv *Invocation, matches *ParsedCommand) (int64, error) {
+func parseLSBlockSize(inv *Invocation, matches *ParsedCommand) (int64, bool, error) {
 	if matches.Has("block-size") {
-		return parseLSBlockSizeValue(inv, matches.Value("block-size"))
+		blockSize, err := parseLSBlockSizeValue(inv, matches.Value("block-size"))
+		return blockSize, true, err
 	}
-	if matches.Has("human-readable") {
-		return 1, nil
+	if value := lsBlockSizeSource(inv); value != "" {
+		blockSize, err := parseLSBlockSizeValue(inv, value)
+		return blockSize, true, err
 	}
-	if matches.Has("si") {
-		return 1, nil
+	return 1, false, nil
+}
+
+func lsBlockSizeSource(inv *Invocation) string {
+	if inv != nil {
+		if value := strings.TrimSpace(inv.Env["LS_BLOCK_SIZE"]); value != "" {
+			return value
+		}
+		if value := strings.TrimSpace(inv.Env["BLOCK_SIZE"]); value != "" {
+			return value
+		}
 	}
-	if matches.Has("kibibytes") {
-		return 1024, nil
-	}
-	return 1, nil
+	return ""
 }
 
 func parseLSBlockSizeValue(inv *Invocation, value string) (int64, error) {
-	switch value {
-	case "human-readable", "si":
-		return 1, nil
+	return parseBlockSizeValue(inv, "ls", value)
+}
+
+func parseLSTimeWord(inv *Invocation, matches *ParsedCommand) error {
+	if !matches.Has("time") {
+		return nil
 	}
-	if value == "" || value == "0" {
-		return 0, exitf(inv, 1, "ls: invalid --block-size argument %s", quoteGNUOperand(value))
+	switch matches.Value("time") {
+	case "access", "atime", "use", "status", "ctime", "birth", "creation", "mtime", "modification":
+		return nil
+	default:
+		return exitf(inv, 2, "ls: invalid argument %s for '--time'", quoteGNUOperand(matches.Value("time")))
 	}
-	multiplier := int64(1)
-	switch last := value[len(value)-1]; last {
-	case 'K', 'k':
-		multiplier = 1024
-		value = value[:len(value)-1]
-	case 'M', 'm':
-		multiplier = 1024 * 1024
-		value = value[:len(value)-1]
-	case 'G', 'g':
-		multiplier = 1024 * 1024 * 1024
-		value = value[:len(value)-1]
-	}
-	n, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || n <= 0 {
-		return 0, exitf(inv, 1, "ls: invalid --block-size argument %s", quoteGNUOperand(value))
-	}
-	return n * multiplier, nil
 }
 
 func parseLSTimeStyle(inv *Invocation, matches *ParsedCommand) (string, error) {
@@ -1810,15 +1828,12 @@ func lsColorStyleFromEnv(ctx context.Context, inv *Invocation, abs string, info,
 	if err != nil {
 		return lsColorStyle{}, err
 	}
-	if indicator != "" {
-		if code, ok := parsed.entries[indicator]; ok {
-			if lsColorCodeIsResetOnly(code) {
-				return style, nil
-			}
-			style.nameCode = code
-			style.nameExplicit = true
-			return style, nil
-		}
+	if code, ok, terminal := lsResolvedIndicatorColor(parsed.entries, indicator); ok {
+		style.nameCode = code
+		style.nameExplicit = true
+		return style, nil
+	} else if terminal {
+		return style, nil
 	}
 	name := path.Base(abs)
 	patternGroups := lsColorPatternGroups(parsed.patterns)
@@ -1848,20 +1863,74 @@ func lsColorStyleFromEnv(ctx context.Context, inv *Invocation, abs string, info,
 	return style, nil
 }
 
+func lsResolvedIndicatorColor(entries map[string]string, indicator string) (code string, ok, terminal bool) {
+	if indicator == "" {
+		return "", false, false
+	}
+	switch indicator {
+	case "tw", "ow", "st", "di":
+		for _, key := range lsDirectoryColorFallbackChain(indicator) {
+			if envCode, exists := entries[key]; exists {
+				if lsColorCodeIsResetOnly(envCode) {
+					continue
+				}
+				return envCode, true, true
+			}
+			if defaultCode := lsDefaultColorCodeForKey(key); defaultCode != "" {
+				return defaultCode, true, true
+			}
+		}
+		return "", false, true
+	case "mh":
+		envCode, exists := entries[indicator]
+		switch {
+		case !exists:
+			return "", false, false
+		case lsColorCodeIsResetOnly(envCode):
+			return "", false, false
+		default:
+			return envCode, true, true
+		}
+	default:
+		if envCode, exists := entries[indicator]; exists {
+			if lsColorCodeIsResetOnly(envCode) {
+				return "", false, true
+			}
+			return envCode, true, true
+		}
+		if defaultCode := lsDefaultColorCodeForKey(indicator); defaultCode != "" {
+			return defaultCode, true, true
+		}
+		return "", false, indicator != "fi"
+	}
+}
+
+func lsDirectoryColorFallbackChain(indicator string) []string {
+	switch indicator {
+	case "tw":
+		return []string{"tw", "ow", "st", "di"}
+	case "ow":
+		return []string{"ow", "di"}
+	case "st":
+		return []string{"st", "di"}
+	case "di":
+		return []string{"di"}
+	default:
+		return nil
+	}
+}
+
 func lsColorCodeIsResetOnly(code string) bool {
-	fields := strings.Split(code, ";")
-	sawValue := false
-	for _, field := range fields {
+	for field := range strings.SplitSeq(code, ";") {
 		field = strings.TrimSpace(field)
 		if field == "" {
 			continue
 		}
-		sawValue = true
 		if field != "0" && field != "00" {
 			return false
 		}
 	}
-	return !sawValue || true
+	return true
 }
 
 func lsColorPatternGroups(patterns []lsColorPattern) map[string]lsColorPatternGroup {
@@ -1970,6 +2039,20 @@ func lsRenderColoredValue(prefix, name, suffix string, style lsColorStyle, first
 	b.WriteString("\x1b[0m")
 	b.WriteString(suffix)
 	return b.String()
+}
+
+func lsAppendClearToEOL(line string, opts *lsOptions) string {
+	if opts == nil || !opts.longFormat || opts.width <= 0 {
+		return line
+	}
+	if !strings.HasSuffix(line, "\n") || !strings.Contains(line, "\x1b[") {
+		return line
+	}
+	trimmed := strings.TrimSuffix(line, "\n")
+	if lsVisibleWidthTabAware(trimmed, opts.tabSize) < opts.width {
+		return line
+	}
+	return trimmed + "\x1b[K\n"
 }
 
 func parseLSColorsEnv(value string) lsParsedColors {
@@ -2093,62 +2176,61 @@ func lsDefaultColorCode(info stdfs.FileInfo) string {
 	if info == nil {
 		return ""
 	}
-	for _, entry := range dircolorsFileTypes {
-		switch entry.Key {
-		case "ln":
-			if info.Mode()&stdfs.ModeSymlink != 0 {
-				return entry.Code
-			}
-		case "tw":
-			if info.IsDir() && info.Mode()&stdfs.ModeSticky != 0 && info.Mode().Perm()&0o002 != 0 {
-				return entry.Code
-			}
-		case "ow":
-			if info.IsDir() && info.Mode().Perm()&0o002 != 0 && info.Mode()&stdfs.ModeSticky == 0 {
-				return entry.Code
-			}
-		case "st":
-			if info.IsDir() && info.Mode()&stdfs.ModeSticky != 0 && info.Mode().Perm()&0o002 == 0 {
-				return entry.Code
-			}
-		case "di":
-			if info.IsDir() {
-				return entry.Code
-			}
-		case "pi":
-			if info.Mode()&stdfs.ModeNamedPipe != 0 {
-				return entry.Code
-			}
-		case "so":
-			if info.Mode()&stdfs.ModeSocket != 0 {
-				return entry.Code
-			}
-		case "cd":
-			if info.Mode()&stdfs.ModeDevice != 0 && info.Mode()&stdfs.ModeCharDevice != 0 {
-				return entry.Code
-			}
-		case "bd":
-			if info.Mode()&stdfs.ModeDevice != 0 && info.Mode()&stdfs.ModeCharDevice == 0 {
-				return entry.Code
-			}
-		case "su":
-			if info.Mode()&0o4000 != 0 {
-				return entry.Code
-			}
-		case "sg":
-			if info.Mode()&0o2000 != 0 {
-				return entry.Code
-			}
-		case "ex":
-			if info.Mode()&0o111 != 0 {
-				return entry.Code
-			}
-		}
+	if code := lsDefaultColorCodeForKey(lsDefaultColorIndicator(info)); code != "" {
+		return code
 	}
 	name := strings.ToLower(path.Base(info.Name()))
 	for _, entry := range dircolorsFileColors {
 		pattern := strings.ToLower(strings.TrimPrefix(entry.Pattern, "*"))
 		if pattern == "" || strings.HasSuffix(name, pattern) {
+			return entry.Code
+		}
+	}
+	return ""
+}
+
+func lsDefaultColorIndicator(info stdfs.FileInfo) string {
+	if info == nil {
+		return ""
+	}
+	switch {
+	case info.Mode()&stdfs.ModeSymlink != 0:
+		return "ln"
+	case info.IsDir():
+		otherWritable := info.Mode().Perm()&0o002 != 0
+		sticky := info.Mode()&stdfs.ModeSticky != 0
+		switch {
+		case sticky && otherWritable:
+			return "tw"
+		case otherWritable:
+			return "ow"
+		case sticky:
+			return "st"
+		default:
+			return "di"
+		}
+	case info.Mode()&stdfs.ModeNamedPipe != 0:
+		return "pi"
+	case info.Mode()&stdfs.ModeSocket != 0:
+		return "so"
+	case info.Mode()&stdfs.ModeDevice != 0 && info.Mode()&stdfs.ModeCharDevice != 0:
+		return "cd"
+	case info.Mode()&stdfs.ModeDevice != 0:
+		return "bd"
+	case info.Mode()&0o4000 != 0:
+		return "su"
+	case info.Mode()&0o2000 != 0:
+		return "sg"
+	case info.Mode()&0o111 != 0:
+		return "ex"
+	default:
+		return ""
+	}
+}
+
+func lsDefaultColorCodeForKey(key string) string {
+	for _, entry := range dircolorsFileTypes {
+		if entry.Key == key {
 			return entry.Code
 		}
 	}
@@ -2558,7 +2640,7 @@ func formatLSSize(info stdfs.FileInfo, opts *lsOptions) string {
 		return formatHumanSizeBase(size, 1000, []string{"K", "M", "G", "T", "P", "E"})
 	case opts.humanReadable:
 		return formatHumanSize(size)
-	case opts.blockSize > 1:
+	case opts.blockSizeSet:
 		return strconv.FormatInt((size+opts.blockSize-1)/opts.blockSize, 10)
 	default:
 		return strconv.FormatInt(size, 10)
@@ -2566,8 +2648,11 @@ func formatLSSize(info stdfs.FileInfo, opts *lsOptions) string {
 }
 
 func lsBlockCountValue(info stdfs.FileInfo, opts *lsOptions) int64 {
-	blockSize := opts.blockSize
-	if blockSize <= 0 {
+	blockSize := int64(1024)
+	switch {
+	case opts.blockSizeSet:
+		blockSize = opts.blockSize
+	case opts.kibibytes:
 		blockSize = 1024
 	}
 	size := fileInfoAllocatedBytes(info)

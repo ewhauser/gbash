@@ -234,6 +234,7 @@ func (m *core) runnerConfig(exec *Execution, budget *executionBudget) *interp.Ru
 	}
 	cfg.StartupHome = exec.StartupHome
 	cfg.Dir = exec.Dir
+	cfg.VisibleDir = exec.VisiblePWD
 	cfg.Stdin = exec.Stdin
 	cfg.Stdout = exec.Stdout
 	cfg.Stderr = exec.Stderr
@@ -655,7 +656,10 @@ func (m *core) execHandler(exec *Execution, budget *executionBudget) interp.Exec
 		if !ok {
 			return fmt.Errorf("missing handler context")
 		}
-		virtualWD := hc.Dir
+		virtualWD := hc.VisibleDir
+		if strings.TrimSpace(virtualWD) == "" {
+			virtualWD = hc.Dir
+		}
 		currentEnv := envMap(hc.Env)
 		internal := isInternalHelperCommand(args[0])
 		fromBootstrap := hc.Internal
