@@ -121,6 +121,45 @@ func TestIDProvidesCompatUsersForGNUZeroDelimitedGroupList(t *testing.T) {
 	}
 }
 
+func TestIDKeepsCompatUsersResolvableAcrossCurrentIdentityCollisions(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	uidCollision, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "id root\n",
+		Env: map[string]string{
+			"USER": "agent",
+			"UID":  "0",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run(uid-collision) error = %v", err)
+	}
+	if uidCollision.ExitCode != 0 {
+		t.Fatalf("uid-collision ExitCode = %d, want 0; stderr=%q", uidCollision.ExitCode, uidCollision.Stderr)
+	}
+	if got, want := uidCollision.Stdout, "uid=0(root) gid=0(root) groups=0(root)\n"; got != want {
+		t.Fatalf("uid-collision Stdout = %q, want %q", got, want)
+	}
+
+	nameCollision, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "id 6\n",
+		Env: map[string]string{
+			"USER": "man",
+			"UID":  "1000",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run(name-collision) error = %v", err)
+	}
+	if nameCollision.ExitCode != 0 {
+		t.Fatalf("name-collision ExitCode = %d, want 0; stderr=%q", nameCollision.ExitCode, nameCollision.Stderr)
+	}
+	if got, want := nameCollision.Stdout, "uid=6(man) gid=12(man) groups=12(man)\n"; got != want {
+		t.Fatalf("name-collision Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestYesRepeatsDefaultAndCustomOperandsUntilTimeout(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})

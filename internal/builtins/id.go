@@ -382,20 +382,7 @@ func idKnownIdentities(current *idIdentity) []idIdentity {
 
 	identities := make([]idIdentity, 0, len(idCompatUsers)+1)
 	identities = append(identities, *current)
-
-	seenNames := map[string]struct{}{current.userName: {}}
-	seenUIDs := map[uint32]struct{}{current.uid: {}}
-	for _, identity := range idCompatUsers {
-		if _, ok := seenNames[identity.userName]; ok {
-			continue
-		}
-		if _, ok := seenUIDs[identity.uid]; ok {
-			continue
-		}
-		identities = append(identities, identity)
-		seenNames[identity.userName] = struct{}{}
-		seenUIDs[identity.uid] = struct{}{}
-	}
+	identities = append(identities, idCompatUsers...)
 	return identities
 }
 
