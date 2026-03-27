@@ -1886,7 +1886,7 @@ func lsColorPatternGroups(patterns []lsColorPattern) map[string]lsColorPatternGr
 
 func lsComparableColorCode(code string) string {
 	parts := make([]string, 0, 4)
-	for _, part := range strings.Split(code, ";") {
+	for part := range strings.SplitSeq(code, ";") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
@@ -2447,7 +2447,7 @@ func lsBuildLongFields(info stdfs.FileInfo, opts *lsOptions, now time.Time) lsLo
 
 func lsLongLineParts(info stdfs.FileInfo, opts *lsOptions, layout *lsLongLayout, nameRanges []lsByteRange, now time.Time) (string, []lsByteRange) {
 	fields := lsBuildLongFields(info, opts, now)
-	prefix := lsFormatLongPrefix(fields, layout, opts)
+	prefix := lsFormatLongPrefix(&fields, layout, opts)
 	dired := make([]lsByteRange, 0, len(nameRanges))
 	for _, entry := range nameRanges {
 		dired = append(dired, lsByteRange{start: len(prefix) + entry.start, end: len(prefix) + entry.end})
@@ -2455,7 +2455,7 @@ func lsLongLineParts(info stdfs.FileInfo, opts *lsOptions, layout *lsLongLayout,
 	return prefix, dired
 }
 
-func lsFormatLongPrefix(fields lsLongFields, layout *lsLongLayout, opts *lsOptions) string {
+func lsFormatLongPrefix(fields *lsLongFields, layout *lsLongLayout, opts *lsOptions) string {
 	padRight := func(value string, width int) string {
 		if width <= len(value) {
 			return value

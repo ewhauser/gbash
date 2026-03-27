@@ -538,6 +538,7 @@ func TestLSAndDirInvalidOptionUseExitCodeTwo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := mustExecSession(t, session, tt.script)
 			if result.ExitCode != 2 {
 				t.Fatalf("ExitCode = %d, want 2; stderr=%q", result.ExitCode, result.Stderr)
