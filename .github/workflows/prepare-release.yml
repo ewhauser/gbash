@@ -27,15 +27,6 @@ jobs:
 
       - run: go mod download
 
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-        with:
-          run_install: false
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          cache: pnpm
-          node-version: "20"
-
       - name: Fetch tags
         run: git fetch --force --tags origin
 
@@ -78,26 +69,6 @@ jobs:
       - name: Sync module versions
         run: make fix-modules MODULE_VERSION='${{ steps.version.outputs.version }}'
 
-      - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile
-
-      - uses: cachix/install-nix-action@v30
-
-      - name: Run tests
-        run: make test
-
-      - name: Run lint
-        run: make lint-all
-
-      - name: Check release config
-        run: make release-check
-
-      - name: Build @ewhauser/gbash-wasm
-        run: pnpm --filter @ewhauser/gbash-wasm build
-
-      - name: Test @ewhauser/gbash-wasm
-        run: pnpm --filter @ewhauser/gbash-wasm test
-
       - name: Create or update release PR
         uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8
         with:
@@ -111,6 +82,6 @@ jobs:
 
             This PR:
             - syncs nested module requirements and local replaces via `make fix-modules`
-            - validates the release candidate with `make test`, `make lint`, `make release-check`, `@ewhauser/gbash-wasm` build, and `@ewhauser/gbash-wasm` tests
+            - CI on this PR validates the release candidate via the standard PR checks
           labels: release
           delete-branch: false
