@@ -3,6 +3,7 @@ package builtins
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -22,6 +23,20 @@ type permissionDeniedReadDirFS struct {
 	targets map[string]struct{}
 }
 
+type wrappedTTYReader struct {
+	reader any
+}
+
+type redirectMetadataReader struct {
+	*strings.Reader
+	path string
+}
+
+type redirectFDReader struct {
+	redirectMetadataReader
+	fd uintptr
+}
+
 func (fs removeNotExistAfterDeleteFS) Remove(ctx context.Context, name string, recursive bool) error {
 	if name == fs.target {
 		if err := fs.FileSystem.Remove(ctx, name, recursive); err != nil {
@@ -38,6 +53,27 @@ func (fs permissionDeniedReadDirFS) ReadDir(ctx context.Context, name string) ([
 	}
 	return fs.FileSystem.ReadDir(ctx, name)
 }
+
+func (r wrappedTTYReader) Read(p []byte) (int, error) {
+	reader, _ := r.reader.(io.Reader)
+	if reader == nil {
+		return 0, io.EOF
+	}
+	return reader.Read(p)
+}
+
+func (r wrappedTTYReader) UnderlyingReader() io.Reader {
+	reader, _ := r.reader.(io.Reader)
+	return reader
+}
+
+func (r redirectMetadataReader) RedirectPath() string { return r.path }
+
+func (redirectMetadataReader) RedirectFlags() int { return 0 }
+
+func (redirectMetadataReader) RedirectOffset() int64 { return 0 }
+
+func (r redirectFDReader) Fd() uintptr { return r.fd }
 
 func parseRMSpec(t *testing.T, args ...string) (*Invocation, *ParsedCommand, string, error) {
 	t.Helper()
@@ -448,6 +484,35 @@ func TestRMDirDoesNotPromptWhenTTYEnvButRedirectedStdin(t *testing.T) {
 	}
 	if _, err := inv.FS.Lstat(ctx, "/tmp/inacc"); !errorsIsNotExist(err) {
 		t.Fatalf("post-remove Lstat() error = %v, want not exist", err)
+	}
+}
+
+func TestRMInputIsTTYUnwrapsRedirectedReaders(t *testing.T) {
+	t.Parallel()
+
+	if rmInputIsTTY(&Invocation{
+		Stdin: wrappedTTYReader{
+			reader: redirectMetadataReader{Reader: strings.NewReader(""), path: "/dev/null"},
+		},
+	}, rmOptions{}) {
+		t.Fatal("rmInputIsTTY(/dev/null) = true, want false")
+	}
+
+	if !rmInputIsTTY(&Invocation{
+		Stdin: wrappedTTYReader{
+			reader: redirectMetadataReader{Reader: strings.NewReader(""), path: "/dev/tty"},
+		},
+	}, rmOptions{}) {
+		t.Fatal("rmInputIsTTY(/dev/tty) = false, want true")
+	}
+
+	if rmInputIsTTY(&Invocation{
+		Stdin: redirectFDReader{
+			redirectMetadataReader: redirectMetadataReader{Reader: strings.NewReader(""), path: "/dev/null"},
+			fd:                     0,
+		},
+	}, rmOptions{}) {
+		t.Fatal("rmInputIsTTY(/dev/null fd=0) = true, want false")
 	}
 }
 
