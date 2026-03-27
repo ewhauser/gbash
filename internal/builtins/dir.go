@@ -22,6 +22,10 @@ func (c *Dir) Run(ctx context.Context, inv *Invocation) error {
 	return RunCommand(ctx, c, inv)
 }
 
+func (c *Dir) NormalizeParseError(inv *Invocation, err error) error {
+	return normalizeLSLikeParseError(inv, err)
+}
+
 func (c *Dir) Spec() CommandSpec {
 	return CommandSpec{
 		Name:  "dir",
@@ -148,19 +152,25 @@ func (c *Dir) listPath(ctx context.Context, inv *Invocation, commandName, target
 }
 
 func (c *Dir) renderPathEntry(ctx context.Context, inv *Invocation, target, abs string, info stdfs.FileInfo, opts *lsOptions, defaultColumns bool) (output string, rendered lsRenderResult, err error) {
-	name, _, err := lsDecoratedName(ctx, inv, target, abs, info, opts, dirQuoteName)
+	name, suffix, _, err := lsDecoratedName(ctx, inv, target, abs, info, opts, dirQuoteName)
 	if err != nil {
 		return "", lsRenderResult{}, err
 	}
+	style, err := lsNameColorStyle(ctx, inv, abs, info, opts, nil)
+	if err != nil {
+		return "", lsRenderResult{}, err
+	}
+	firstColor := false
 	if opts.longFormat {
-		line, _ := formatLSLongLine(name, info, opts, nil, inv.Now())
+		prefix, _ := lsLongLineParts(info, opts, nil, nil, inv.Now())
+		line := lsRenderColoredValue(prefix, name, suffix, style, &firstColor) + "\n"
 		return line, lsRenderResult{text: line}, nil
 	}
 	if defaultColumns {
-		line := name + lsTerminator(opts)
+		line := lsRenderColoredValue("", name, suffix, style, &firstColor) + lsTerminator(opts)
 		return line, lsRenderResult{text: line}, nil
 	}
-	line := name + lsTerminator(opts)
+	line := lsRenderColoredValue("", name, suffix, style, &firstColor) + lsTerminator(opts)
 	return line, lsRenderResult{text: line}, nil
 }
 
@@ -233,3 +243,4 @@ const dirVersionText = "dir (gbash) dev\n"
 var _ Command = (*Dir)(nil)
 var _ SpecProvider = (*Dir)(nil)
 var _ ParsedRunner = (*Dir)(nil)
+var _ ParseErrorNormalizer = (*Dir)(nil)

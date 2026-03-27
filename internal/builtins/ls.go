@@ -88,6 +88,10 @@ type lsColorPattern struct {
 	code   string
 }
 
+type lsColorPatternGroup struct {
+	caseInsensitive bool
+}
+
 type lsByteRange struct {
 	start int
 	end   int
@@ -97,6 +101,35 @@ type lsRenderResult struct {
 	text     string
 	dired    []lsByteRange
 	subdired []lsByteRange
+}
+
+type lsColorStyle struct {
+	normalCode   string
+	normalSet    bool
+	nameCode     string
+	nameExplicit bool
+}
+
+type lsLongFields struct {
+	inode  string
+	blocks string
+	mode   string
+	links  string
+	owner  string
+	group  string
+	author string
+	size   string
+	date   string
+}
+
+type lsLongLayout struct {
+	inodeWidth  int
+	blocksWidth int
+	linksWidth  int
+	ownerWidth  int
+	groupWidth  int
+	authorWidth int
+	sizeWidth   int
 }
 
 type lsColorMode int
@@ -245,6 +278,10 @@ func (c *LS) Name() string {
 
 func (c *LS) Run(ctx context.Context, inv *Invocation) error {
 	return RunCommand(ctx, c, inv)
+}
+
+func (c *LS) NormalizeParseError(inv *Invocation, err error) error {
+	return normalizeLSLikeParseError(inv, err)
 }
 
 func (c *LS) Spec() CommandSpec {
@@ -473,6 +510,23 @@ func renderStaticVersion(text string) func(io.Writer, CommandSpec) error {
 	}
 }
 
+func normalizeLSLikeParseError(inv *Invocation, err error) error {
+	if err == nil {
+		return nil
+	}
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		return err
+	}
+	if inv != nil && inv.Stderr != nil {
+		message := strings.TrimSpace(err.Error())
+		if message != "" {
+			_, _ = io.WriteString(inv.Stderr, message+"\n")
+		}
+	}
+	return &ExitError{Code: 2}
+}
+
 func (c *LS) listPath(ctx context.Context, inv *Invocation, target string, opts *lsOptions, showHeader bool) (output string, status int, rendered lsRenderResult, err error) {
 	info, abs, exists, err := lsStatMaybeForTarget(ctx, inv, target, opts)
 	if err != nil {
@@ -526,7 +580,7 @@ func (c *LS) listPath(ctx context.Context, inv *Invocation, target string, opts 
 	}
 	if opts.recursive || showHeader {
 		header := lsQuoteName(target, opts.quotingMode, opts.hideControlChars)
-		if lsShouldUseColor(inv, opts.hyperlinkMode) {
+		if lsShouldUseHyperlinks(inv, opts.hyperlinkMode) {
 			header = lsHyperlink(header, lsHeaderHyperlinkTarget(ctx, inv, abs, info, opts))
 		}
 		if opts.dired {
@@ -650,12 +704,18 @@ func lsStatMaybeForTarget(ctx context.Context, inv *Invocation, target string, o
 }
 
 func (c *LS) renderPathEntry(ctx context.Context, inv *Invocation, target, abs string, info stdfs.FileInfo, opts *lsOptions) (output string, status int, rendered lsRenderResult, err error) {
-	name, ranges, err := lsDecoratedName(ctx, inv, target, abs, info, opts, func(value string) string { return value })
+	name, suffix, ranges, err := lsDecoratedName(ctx, inv, target, abs, info, opts, func(value string) string { return value })
 	if err != nil {
 		return "", 0, lsRenderResult{}, err
 	}
+	style, err := lsNameColorStyle(ctx, inv, abs, info, opts, nil)
+	if err != nil {
+		return "", 0, lsRenderResult{}, err
+	}
+	firstColor := false
 	if opts.longFormat {
-		line, dired := formatLSLongLine(name, info, opts, ranges, inv.Now())
+		prefix, dired := lsLongLineParts(info, opts, nil, ranges, inv.Now())
+		line := lsRenderColoredValue(prefix, name, suffix, style, &firstColor) + "\n"
 		if opts.dired {
 			line = "  " + line
 			for i := range dired {
@@ -665,7 +725,7 @@ func (c *LS) renderPathEntry(ctx context.Context, inv *Invocation, target, abs s
 		}
 		return line, 0, lsRenderResult{text: line, dired: dired}, nil
 	}
-	line := formatLSShortPrefix(info, opts, false) + name + lsTerminator(opts)
+	line := lsRenderColoredValue(formatLSShortPrefix(info, opts, false), name, suffix, style, &firstColor) + lsTerminator(opts)
 	return line, 0, lsRenderResult{text: line}, nil
 }
 
@@ -699,13 +759,28 @@ func lsRenderEntries(ctx context.Context, inv *Invocation, dirAbs string, entrie
 	names := make([]string, 0, len(entries))
 	result := lsRenderResult{}
 	offset := 0
+	infos := make([]stdfs.FileInfo, 0, len(entries))
 	for _, entry := range entries {
-		name, ranges, err := lsDecoratedName(ctx, inv, entry.name, path.Join(dirAbs, entry.name), entry.info, opts, quote)
+		infos = append(infos, entry.info)
+	}
+	hardlinkCounts := lsHardlinkIdentityCounts(infos)
+	var layout *lsLongLayout
+	if opts.longFormat {
+		layout = lsLongLayoutForInfos(infos, opts, inv.Now())
+	}
+	firstColor := false
+	for _, entry := range entries {
+		name, suffix, ranges, err := lsDecoratedName(ctx, inv, entry.name, path.Join(dirAbs, entry.name), entry.info, opts, quote)
+		if err != nil {
+			return lsRenderResult{}, err
+		}
+		style, err := lsNameColorStyle(ctx, inv, path.Join(dirAbs, entry.name), entry.info, opts, hardlinkCounts)
 		if err != nil {
 			return lsRenderResult{}, err
 		}
 		if opts.longFormat {
-			line, dired := formatLSLongLine(name, entry.info, opts, ranges, inv.Now())
+			prefix, dired := lsLongLineParts(entry.info, opts, layout, ranges, inv.Now())
+			line := lsRenderColoredValue(prefix, name, suffix, style, &firstColor) + "\n"
 			if opts.dired {
 				line = "  " + line
 				for i := range dired {
@@ -720,7 +795,7 @@ func lsRenderEntries(ctx context.Context, inv *Invocation, dirAbs string, entrie
 			offset += len(line)
 			continue
 		}
-		names = append(names, formatLSShortPrefix(entry.info, opts, entry.unknownShortMetadata)+name)
+		names = append(names, lsRenderColoredValue(formatLSShortPrefix(entry.info, opts, entry.unknownShortMetadata), name, suffix, style, &firstColor))
 	}
 	if opts.longFormat {
 		result.text = strings.Join(names, "")
@@ -734,13 +809,28 @@ func lsRenderPathArgs(ctx context.Context, inv *Invocation, args []lsPathArg, op
 	names := make([]string, 0, len(args))
 	result := lsRenderResult{}
 	offset := 0
+	infos := make([]stdfs.FileInfo, 0, len(args))
 	for _, arg := range args {
-		name, ranges, err := lsDecoratedName(ctx, inv, arg.name, arg.abs, arg.info, opts, quote)
+		infos = append(infos, arg.info)
+	}
+	hardlinkCounts := lsHardlinkIdentityCounts(infos)
+	var layout *lsLongLayout
+	if opts.longFormat {
+		layout = lsLongLayoutForInfos(infos, opts, inv.Now())
+	}
+	firstColor := false
+	for _, arg := range args {
+		name, suffix, ranges, err := lsDecoratedName(ctx, inv, arg.name, arg.abs, arg.info, opts, quote)
+		if err != nil {
+			return lsRenderResult{}, err
+		}
+		style, err := lsNameColorStyle(ctx, inv, arg.abs, arg.info, opts, hardlinkCounts)
 		if err != nil {
 			return lsRenderResult{}, err
 		}
 		if opts.longFormat {
-			line, dired := formatLSLongLine(name, arg.info, opts, ranges, inv.Now())
+			prefix, dired := lsLongLineParts(arg.info, opts, layout, ranges, inv.Now())
+			line := lsRenderColoredValue(prefix, name, suffix, style, &firstColor) + "\n"
 			if opts.dired {
 				line = "  " + line
 				for i := range dired {
@@ -755,7 +845,7 @@ func lsRenderPathArgs(ctx context.Context, inv *Invocation, args []lsPathArg, op
 			offset += len(line)
 			continue
 		}
-		names = append(names, formatLSShortPrefix(arg.info, opts, false)+name)
+		names = append(names, lsRenderColoredValue(formatLSShortPrefix(arg.info, opts, false), name, suffix, style, &firstColor))
 	}
 	if opts.longFormat {
 		result.text = strings.Join(names, "")
@@ -945,6 +1035,9 @@ func lsRenderGrid(names []string, across bool, width, tabSize int) string {
 		cols = min(cols, len(names))
 	}
 	rows := (len(names) + cols - 1) / cols
+	if across && rows == 1 && (width == 0 || !lsGridNeedsQuotedAlignment(names)) {
+		return strings.Join(names, "  ")
+	}
 
 	var lines []string
 	for row := range rows {
@@ -971,6 +1064,15 @@ func lsRenderGrid(names []string, across bool, width, tabSize int) string {
 		lines = append(lines, strings.TrimRight(line.String(), " "))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func lsGridNeedsQuotedAlignment(names []string) bool {
+	for _, name := range names {
+		if strings.ContainsAny(name, `'"`) {
+			return true
+		}
+	}
+	return false
 }
 
 func lsVisibleWidth(value string) int {
@@ -1441,10 +1543,10 @@ func parseLSDereferenceMode(matches *ParsedCommand, longFormat bool, indicator l
 	return lsDerefDirArgs
 }
 
-func lsDecoratedName(ctx context.Context, inv *Invocation, rawName, abs string, info stdfs.FileInfo, opts *lsOptions, quote func(string) string) (string, []lsByteRange, error) {
+func lsDecoratedName(ctx context.Context, inv *Invocation, rawName, abs string, info stdfs.FileInfo, opts *lsOptions, quote func(string) string) (string, string, []lsByteRange, error) {
 	display, diredRanges, err := lsQuotedNameWithDired(ctx, inv, rawName, abs, info, opts, quote)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	leadingSpace := opts.longFormat && opts.quotingMode == lsQuoteShell && !lsNeedsShellQuoting(rawName)
 	if leadingSpace {
@@ -1455,32 +1557,17 @@ func lsDecoratedName(ctx context.Context, inv *Invocation, rawName, abs string, 
 	}
 	suffix, linfo, err := lsSuffixAndInfo(ctx, inv, abs, info, rawName, opts)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
-	display += suffix
-	if lsShouldUseColor(inv, opts.hyperlinkMode) {
-		display = lsHyperlink(display, abs)
-	}
-	if !lsShouldUseColor(inv, opts.colorMode) {
-		if leadingSpace {
-			display = " " + display
-		}
-		return display, diredRanges, nil
-	}
-	code, err := lsColorCode(ctx, inv, abs, info, linfo)
-	if err != nil {
-		return "", nil, err
-	}
-	if code == "" {
-		if leadingSpace {
-			display = " " + display
-		}
-		return display, diredRanges, nil
+	if lsShouldUseHyperlinks(inv, opts.hyperlinkMode) {
+		display = lsHyperlink(display+suffix, abs)
+		suffix = ""
 	}
 	if leadingSpace {
-		return " " + "\x1b[0m\x1b[" + code + "m" + display + "\x1b[0m", diredRanges, nil
+		return " " + display, suffix, diredRanges, nil
 	}
-	return "\x1b[0m\x1b[" + code + "m" + display + "\x1b[0m", diredRanges, nil
+	_ = linfo
+	return display, suffix, diredRanges, nil
 }
 
 func lsHyperlink(label, target string) string {
@@ -1646,12 +1733,40 @@ func lsSuffixAndInfo(ctx context.Context, inv *Invocation, abs string, info stdf
 func lsShouldUseColor(inv *Invocation, mode lsColorMode) bool {
 	switch mode {
 	case lsColorAlways:
+		return lsEnvSupportsColor(inv)
+	case lsColorNever:
+		return false
+	default:
+		return lsTerminalWriter(inv.Stdout) && lsEnvSupportsColor(inv)
+	}
+}
+
+func lsShouldUseHyperlinks(inv *Invocation, mode lsColorMode) bool {
+	switch mode {
+	case lsColorAlways:
 		return true
 	case lsColorNever:
 		return false
 	default:
+		if inv == nil {
+			return false
+		}
 		return lsTerminalWriter(inv.Stdout)
 	}
+}
+
+func lsEnvSupportsColor(inv *Invocation) bool {
+	if inv == nil {
+		return false
+	}
+	if strings.TrimSpace(inv.Env["LS_COLORS"]) != "" {
+		return true
+	}
+	if strings.TrimSpace(inv.Env["COLORTERM"]) != "" {
+		return true
+	}
+	termValue := strings.TrimSpace(inv.Env["TERM"])
+	return termValue != "" && termValue != "dumb"
 }
 
 func lsTerminalWriter(writer io.Writer) bool {
@@ -1662,52 +1777,199 @@ func lsTerminalWriter(writer io.Writer) bool {
 	return term.IsTerminal(int(file.Fd()))
 }
 
-func lsColorCode(ctx context.Context, inv *Invocation, abs string, info, linfo stdfs.FileInfo) (string, error) {
-	if inv != nil && inv.Env["LS_COLORS"] != "" {
-		if code, ok, err := lsColorCodeFromEnv(ctx, inv, abs, info, linfo); err != nil {
-			return "", err
-		} else if ok {
-			return code, nil
-		}
-		return "", nil
+func lsNameColorStyle(ctx context.Context, inv *Invocation, abs string, info stdfs.FileInfo, opts *lsOptions, hardlinkCounts map[fileInfoIdentityKey]int) (lsColorStyle, error) {
+	if opts == nil || !lsShouldUseColor(inv, opts.colorMode) {
+		return lsColorStyle{}, nil
 	}
-	return lsDefaultColorCode(linfo), nil
+	linfo, _, err := lstatPath(ctx, inv, abs)
+	if err != nil {
+		return lsColorStyle{}, err
+	}
+	if inv != nil && inv.Env["LS_COLORS"] != "" {
+		return lsColorStyleFromEnv(ctx, inv, abs, info, linfo, hardlinkCounts)
+	}
+	code := lsDefaultColorCode(linfo)
+	if code == "" {
+		return lsColorStyle{}, nil
+	}
+	return lsColorStyle{nameCode: code, nameExplicit: true}, nil
 }
 
-func lsColorCodeFromEnv(ctx context.Context, inv *Invocation, abs string, info, linfo stdfs.FileInfo) (code string, ok bool, err error) {
+func lsColorStyleFromEnv(ctx context.Context, inv *Invocation, abs string, info, linfo stdfs.FileInfo, hardlinkCounts map[fileInfoIdentityKey]int) (lsColorStyle, error) {
 	lsColors := inv.Env["LS_COLORS"]
 	if lsColors == "" {
-		return "", false, nil
+		return lsColorStyle{}, nil
 	}
 	parsed := parseLSColorsEnv(lsColors)
-	indicator, err := lsColorIndicator(ctx, inv, abs, info, linfo, parsed.entries)
+	style := lsColorStyle{}
+	if code, ok := parsed.entries["no"]; ok {
+		style.normalCode = code
+		style.normalSet = true
+	}
+	indicator, err := lsColorIndicator(ctx, inv, abs, info, linfo, parsed.entries, hardlinkCounts)
 	if err != nil {
-		return "", false, err
+		return lsColorStyle{}, err
 	}
 	if indicator != "" {
 		if code, ok := parsed.entries[indicator]; ok {
-			return code, true, nil
+			if lsColorCodeIsResetOnly(code) {
+				return style, nil
+			}
+			style.nameCode = code
+			style.nameExplicit = true
+			return style, nil
 		}
 	}
 	name := path.Base(abs)
-	lastMatch := ""
-	matched := false
+	patternGroups := lsColorPatternGroups(parsed.patterns)
 	for _, pattern := range parsed.patterns {
-		if pattern.suffix == "" || strings.HasSuffix(name, pattern.suffix) {
-			lastMatch = pattern.code
-			matched = true
+		group, ok := patternGroups[strings.ToLower(pattern.suffix)]
+		matches := false
+		switch {
+		case pattern.suffix == "":
+			matches = true
+		case ok && group.caseInsensitive:
+			matches = strings.HasSuffix(strings.ToLower(name), strings.ToLower(pattern.suffix))
+		default:
+			matches = strings.HasSuffix(name, pattern.suffix)
+		}
+		if matches {
+			style.nameCode = pattern.code
+			style.nameExplicit = true
 		}
 	}
-	if matched {
-		return lastMatch, true, nil
+	if style.nameExplicit {
+		return style, nil
 	}
 	if code, ok := parsed.entries["fi"]; ok {
-		return code, true, nil
+		style.nameCode = code
+		style.nameExplicit = true
 	}
-	if code, ok := parsed.entries["no"]; ok {
-		return code, true, nil
+	return style, nil
+}
+
+func lsColorCodeIsResetOnly(code string) bool {
+	fields := strings.Split(code, ";")
+	sawValue := false
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		sawValue = true
+		if field != "0" && field != "00" {
+			return false
+		}
 	}
-	return "", false, nil
+	return !sawValue || true
+}
+
+func lsColorPatternGroups(patterns []lsColorPattern) map[string]lsColorPatternGroup {
+	type groupState struct {
+		exactCodes map[string]string
+	}
+
+	states := make(map[string]*groupState)
+	for _, pattern := range patterns {
+		key := strings.ToLower(pattern.suffix)
+		state := states[key]
+		if state == nil {
+			state = &groupState{exactCodes: make(map[string]string)}
+			states[key] = state
+		}
+		state.exactCodes[pattern.suffix] = lsComparableColorCode(pattern.code)
+	}
+
+	groups := make(map[string]lsColorPatternGroup, len(states))
+	for key, state := range states {
+		caseInsensitive := true
+		reference := ""
+		for _, code := range state.exactCodes {
+			if reference == "" {
+				reference = code
+				continue
+			}
+			if code != reference {
+				caseInsensitive = false
+				break
+			}
+		}
+		groups[key] = lsColorPatternGroup{caseInsensitive: caseInsensitive}
+	}
+	return groups
+}
+
+func lsComparableColorCode(code string) string {
+	parts := make([]string, 0, 4)
+	for part := range strings.SplitSeq(code, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		part = strings.TrimLeft(part, "0")
+		if part == "" {
+			part = "0"
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, ";")
+}
+
+func lsRenderColoredValue(prefix, name, suffix string, style lsColorStyle, firstColor *bool) string {
+	leadingSpaces := 0
+	for leadingSpaces < len(name) && name[leadingSpaces] == ' ' {
+		leadingSpaces++
+	}
+	if leadingSpaces > 0 {
+		prefix += name[:leadingSpaces]
+		name = name[leadingSpaces:]
+	}
+
+	if !style.normalSet && !style.nameExplicit {
+		return prefix + name + suffix
+	}
+
+	var b strings.Builder
+	writeStart := func() {
+		if firstColor != nil && !*firstColor {
+			b.WriteString("\x1b[0m")
+			*firstColor = true
+		}
+	}
+	writeCode := func(code string) {
+		if code == "" {
+			b.WriteString("\x1b[m")
+			return
+		}
+		b.WriteString("\x1b[")
+		b.WriteString(code)
+		b.WriteString("m")
+	}
+
+	if style.nameExplicit {
+		if style.normalSet {
+			writeStart()
+			writeCode(style.normalCode)
+			b.WriteString(prefix)
+			b.WriteString("\x1b[m")
+		} else {
+			b.WriteString(prefix)
+			writeStart()
+		}
+		writeCode(style.nameCode)
+		b.WriteString(name)
+		b.WriteString("\x1b[0m")
+		b.WriteString(suffix)
+		return b.String()
+	}
+
+	writeStart()
+	writeCode(style.normalCode)
+	b.WriteString(prefix)
+	b.WriteString(name)
+	b.WriteString("\x1b[0m")
+	b.WriteString(suffix)
+	return b.String()
 }
 
 func parseLSColorsEnv(value string) lsParsedColors {
@@ -1732,7 +1994,7 @@ func parseLSColorsEnv(value string) lsParsedColors {
 	return parsed
 }
 
-func lsColorIndicator(ctx context.Context, inv *Invocation, abs string, info, linfo stdfs.FileInfo, entries map[string]string) (string, error) {
+func lsColorIndicator(ctx context.Context, inv *Invocation, abs string, info, linfo stdfs.FileInfo, entries map[string]string, hardlinkCounts map[fileInfoIdentityKey]int) (string, error) {
 	if linfo.Mode()&stdfs.ModeSymlink != 0 { //nolint:nilaway // caller guarantees non-nil linfo
 		if entries["ln"] == "target" {
 			targetInfo, _, exists, err := statMaybe(ctx, inv, abs)
@@ -1785,9 +2047,46 @@ func lsColorIndicator(ctx context.Context, inv *Invocation, abs string, info, li
 		return "sg", nil
 	case linfo.Mode()&0o111 != 0:
 		return "ex", nil
+	case entries["mh"] != "" || hasLSColorEntry(entries, "mh"):
+		if lsHasMultipleLinks(info, linfo, hardlinkCounts) {
+			return "mh", nil
+		}
 	default:
 		return "", nil
 	}
+	return "", nil
+}
+
+func hasLSColorEntry(entries map[string]string, key string) bool {
+	_, ok := entries[key]
+	return ok
+}
+
+func lsHasMultipleLinks(info, linfo stdfs.FileInfo, hardlinkCounts map[fileInfoIdentityKey]int) bool {
+	for _, candidate := range []stdfs.FileInfo{linfo, info} {
+		if links, ok := fileInfoLinkCount(candidate); ok && links > 1 {
+			return true
+		}
+	}
+	for _, candidate := range []stdfs.FileInfo{linfo, info} {
+		if identity, ok := fileInfoIdentity(candidate); ok && hardlinkCounts[identity] > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func lsHardlinkIdentityCounts(infos []stdfs.FileInfo) map[fileInfoIdentityKey]int {
+	counts := make(map[fileInfoIdentityKey]int)
+	for _, info := range infos {
+		if identity, ok := fileInfoIdentity(info); ok {
+			counts[identity]++
+		}
+	}
+	if len(counts) == 0 {
+		return nil
+	}
+	return counts
 }
 
 func lsDefaultColorCode(info stdfs.FileInfo) string {
@@ -2113,36 +2412,102 @@ func lsNumericChunk(value string) (chunk, rest string) {
 	return value[:index], value[index:]
 }
 
-func formatLSLongLine(name string, info stdfs.FileInfo, opts *lsOptions, nameRanges []lsByteRange, now time.Time) (string, []lsByteRange) {
-	fields := make([]string, 0, 9)
+func lsLongLayoutForInfos(infos []stdfs.FileInfo, opts *lsOptions, now time.Time) *lsLongLayout {
+	if len(infos) == 0 {
+		return nil
+	}
+	layout := &lsLongLayout{}
+	for _, info := range infos {
+		fields := lsBuildLongFields(info, opts, now)
+		layout.inodeWidth = max(layout.inodeWidth, len(fields.inode))
+		layout.blocksWidth = max(layout.blocksWidth, len(fields.blocks))
+		layout.linksWidth = max(layout.linksWidth, len(fields.links))
+		layout.ownerWidth = max(layout.ownerWidth, len(fields.owner))
+		layout.groupWidth = max(layout.groupWidth, len(fields.group))
+		layout.authorWidth = max(layout.authorWidth, len(fields.author))
+		layout.sizeWidth = max(layout.sizeWidth, len(fields.size))
+	}
+	return layout
+}
+
+func lsBuildLongFields(info stdfs.FileInfo, opts *lsOptions, now time.Time) lsLongFields {
 	userToken, groupToken, authorToken := lsIdentityTokens(info, opts.numericIDs, opts.identityDB)
+	fields := lsLongFields{
+		mode: formatModeLong(info.Mode()), //nolint:nilaway // caller guarantees non-nil info
+		date: formatLSDateStyle(info.ModTime(), opts, now),
+		size: formatLSSize(info, opts),
+	}
 	if opts.showInode {
-		fields = append(fields, strconv.FormatUint(statInode(info), 10))
+		fields.inode = strconv.FormatUint(statInode(info), 10)
 	}
 	if opts.showAllocSize {
-		fields = append(fields, formatLSBlockCount(info, opts))
+		fields.blocks = formatLSBlockCount(info, opts)
 	}
-	fields = append(fields, formatModeLong(info.Mode()), "1") //nolint:nilaway // caller guarantees non-nil info
+	if links, ok := fileInfoLinkCount(info); ok {
+		fields.links = strconv.FormatUint(links, 10)
+	} else {
+		fields.links = "1"
+	}
 	if opts.showOwner {
-		fields = append(fields, userToken)
+		fields.owner = userToken
 	}
 	if opts.showGroup {
-		fields = append(fields, groupToken)
+		fields.group = groupToken
 	}
 	if opts.showAuthor {
-		fields = append(fields, authorToken)
+		fields.author = authorToken
 	}
-	fields = append(fields, formatLSSize(info, opts), formatLSDateStyle(info.ModTime(), opts, now))
-	prefix := strings.Join(fields, " ")
-	if prefix != "" {
-		prefix += " "
-	}
-	line := prefix + name + "\n"
+	return fields
+}
+
+func lsLongLineParts(info stdfs.FileInfo, opts *lsOptions, layout *lsLongLayout, nameRanges []lsByteRange, now time.Time) (string, []lsByteRange) {
+	fields := lsBuildLongFields(info, opts, now)
+	prefix := lsFormatLongPrefix(&fields, layout, opts)
 	dired := make([]lsByteRange, 0, len(nameRanges))
 	for _, entry := range nameRanges {
 		dired = append(dired, lsByteRange{start: len(prefix) + entry.start, end: len(prefix) + entry.end})
 	}
-	return line, dired
+	return prefix, dired
+}
+
+func lsFormatLongPrefix(fields *lsLongFields, layout *lsLongLayout, opts *lsOptions) string {
+	padRight := func(value string, width int) string {
+		if width <= len(value) {
+			return value
+		}
+		return strings.Repeat(" ", width-len(value)) + value
+	}
+
+	parts := make([]string, 0, 9)
+	if opts.showInode {
+		parts = append(parts, padRight(fields.inode, lsLayoutWidth(layout, func(l *lsLongLayout) int { return l.inodeWidth })))
+	}
+	if opts.showAllocSize {
+		parts = append(parts, padRight(fields.blocks, lsLayoutWidth(layout, func(l *lsLongLayout) int { return l.blocksWidth })))
+	}
+	parts = append(parts, fields.mode, padRight(fields.links, lsLayoutWidth(layout, func(l *lsLongLayout) int { return l.linksWidth })))
+	if opts.showOwner {
+		parts = append(parts, padRight(fields.owner, lsLayoutWidth(layout, func(l *lsLongLayout) int { return l.ownerWidth })))
+	}
+	if opts.showGroup {
+		parts = append(parts, padRight(fields.group, lsLayoutWidth(layout, func(l *lsLongLayout) int { return l.groupWidth })))
+	}
+	if opts.showAuthor {
+		parts = append(parts, padRight(fields.author, lsLayoutWidth(layout, func(l *lsLongLayout) int { return l.authorWidth })))
+	}
+	parts = append(parts, padRight(fields.size, lsLayoutWidth(layout, func(l *lsLongLayout) int { return l.sizeWidth })), fields.date)
+	prefix := strings.Join(parts, " ")
+	if prefix != "" {
+		prefix += " "
+	}
+	return prefix
+}
+
+func lsLayoutWidth(layout *lsLongLayout, pick func(*lsLongLayout) int) int {
+	if layout == nil {
+		return 0
+	}
+	return pick(layout)
 }
 
 func formatHumanSize(bytes int64) string {
@@ -2205,7 +2570,7 @@ func lsBlockCountValue(info stdfs.FileInfo, opts *lsOptions) int64 {
 	if blockSize <= 0 {
 		blockSize = 1024
 	}
-	size := info.Size() //nolint:nilaway // caller guarantees non-nil info
+	size := fileInfoAllocatedBytes(info)
 	return (size + blockSize - 1) / blockSize
 }
 
@@ -2308,6 +2673,12 @@ func classifyLSSuffix(info stdfs.FileInfo) string {
 	if info.IsDir() {
 		return "/"
 	}
+	if info.Mode()&stdfs.ModeNamedPipe != 0 {
+		return "|"
+	}
+	if info.Mode()&stdfs.ModeSocket != 0 {
+		return "="
+	}
 	if info.Mode()&0o111 != 0 {
 		return "*"
 	}
@@ -2320,6 +2691,12 @@ func fileTypeLSSuffix(info stdfs.FileInfo) string {
 	}
 	if info.IsDir() {
 		return "/"
+	}
+	if info.Mode()&stdfs.ModeNamedPipe != 0 {
+		return "|"
+	}
+	if info.Mode()&stdfs.ModeSocket != 0 {
+		return "="
 	}
 	return ""
 }
@@ -2350,6 +2727,8 @@ func lsQuoteName(value string, mode lsQuotingMode, hideControlChars bool) string
 		return base
 	}
 }
+
+var _ ParseErrorNormalizer = (*LS)(nil)
 
 func lsNeedsShellQuoting(value string) bool {
 	if value == "" {

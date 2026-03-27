@@ -515,6 +515,41 @@ func TestVdirInvalidOptionUsesVdirPrefixAndExitCode(t *testing.T) {
 	}
 }
 
+func TestLSAndDirInvalidOptionUseExitCodeTwo(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	tests := []struct {
+		name   string
+		script string
+		stderr string
+	}{
+		{
+			name:   "ls",
+			script: "ls -/\n",
+			stderr: "ls: invalid option -- '/'\nTry 'ls --help' for more information.\n",
+		},
+		{
+			name:   "dir",
+			script: "dir -/\n",
+			stderr: "dir: invalid option -- '/'\nTry 'dir --help' for more information.\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := mustExecSession(t, session, tt.script)
+			if result.ExitCode != 2 {
+				t.Fatalf("ExitCode = %d, want 2; stderr=%q", result.ExitCode, result.Stderr)
+			}
+			if result.Stderr != tt.stderr {
+				t.Fatalf("Stderr = %q, want %q", result.Stderr, tt.stderr)
+			}
+		})
+	}
+}
+
 func TestLSColorFlagsAndLSColorsOverride(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
@@ -552,6 +587,74 @@ func TestLSColorFlagsAndLSColorsOverride(t *testing.T) {
 	}
 }
 
+func TestLSColorCompatNormalStylesAndTermFiltering(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/tmp/ls-color-compat/exe", []byte("x"))
+	writeSessionFile(t, session, "/tmp/ls-color-compat/plain", []byte("x"))
+	if err := session.FileSystem().Chmod(context.Background(), "/tmp/ls-color-compat/exe", 0o755); err != nil {
+		t.Fatalf("Chmod(exe) error = %v", err)
+	}
+
+	result := mustExecSession(t, session,
+		"cd /tmp/ls-color-compat\n"+
+			"env TERM=xterm TIME_STYLE=+norm LS_COLORS='no=7:ex=01;32' ls -gGU --color=always exe\n"+
+			"echo ---\n"+
+			"env TERM=xterm TIME_STYLE=+norm LS_COLORS='no=7:ex=01;32' ls -xU --color=always exe plain\n"+
+			"echo ---\n"+
+			"env TERM=dumb COLORTERM='' ls --color=always exe\n",
+	)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	parts := strings.Split(result.Stdout, "---\n")
+	if len(parts) != 3 {
+		t.Fatalf("Stdout blocks = %q, want 3 blocks", result.Stdout)
+	}
+	normalizedLong := regexp.MustCompile(`-r.*norm`).ReplaceAllString(parts[0], "norm")
+	if got, want := normalizedLong, "\x1b[0m\x1b[7mnorm \x1b[m\x1b[01;32mexe\x1b[0m\n"; got != want {
+		t.Fatalf("long color output = %q, want %q", got, want)
+	}
+	if got, want := parts[1], "\x1b[0m\x1b[7m\x1b[m\x1b[01;32mexe\x1b[0m  \x1b[7mplain\x1b[0m\n"; got != want {
+		t.Fatalf("grid color output = %q, want %q", got, want)
+	}
+	if got, want := parts[2], "exe\n"; got != want {
+		t.Fatalf("TERM=dumb output = %q, want %q", got, want)
+	}
+}
+
+func TestLSHardlinkColorCompat(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session,
+		"cd /tmp\n"+
+			"touch file1\n"+
+			"link file1 file2\n"+
+			"mv file2 file2.png\n"+
+			"env TERM=xterm LS_COLORS='mh=44;37:*.png=01;35' ls -U1 --color=always file1 file2.png\n"+
+			"echo ---\n"+
+			"chmod a+x file2.png\n"+
+			"env TERM=xterm LS_COLORS='mh=44;37:*.png=01;35:ex=01;32' ls -U1 --color=always file1 file2.png\n",
+	)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	parts := strings.Split(result.Stdout, "---\n")
+	if len(parts) != 2 {
+		t.Fatalf("Stdout blocks = %q, want 2 blocks", result.Stdout)
+	}
+	if got, want := parts[0], "\x1b[0m\x1b[44;37mfile1\x1b[0m\n\x1b[44;37mfile2.png\x1b[0m\n"; got != want {
+		t.Fatalf("hardlink color output = %q, want %q", got, want)
+	}
+	if got, want := parts[1], "\x1b[0m\x1b[01;32mfile1\x1b[0m\n\x1b[01;32mfile2.png\x1b[0m\n"; got != want {
+		t.Fatalf("executable color output = %q, want %q", got, want)
+	}
+}
+
 func TestLSColorsRespectOrderedCaseSensitiveExtensions(t *testing.T) {
 	t.Parallel()
 	session := newSession(t, &Config{})
@@ -564,13 +667,13 @@ func TestLSColorsRespectOrderedCaseSensitiveExtensions(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if !strings.Contains(result.Stdout, "\x1b[0m\x1b[01;35mimg1.jpg\x1b[0m") {
+	if !strings.Contains(result.Stdout, "\x1b[01;35mimg1.jpg\x1b[0m") {
 		t.Fatalf("Stdout = %q, want lowercase extension color", result.Stdout)
 	}
-	if !strings.Contains(result.Stdout, "\x1b[0m\x1b[01;35;46mIMG2.JPG\x1b[0m") {
+	if !strings.Contains(result.Stdout, "\x1b[01;35;46mIMG2.JPG\x1b[0m") {
 		t.Fatalf("Stdout = %q, want ordered uppercase extension override", result.Stdout)
 	}
-	if strings.Contains(result.Stdout, "\x1b[0m\x1b[01;35mimg3.JpG\x1b[0m") || strings.Contains(result.Stdout, "\x1b[0m\x1b[01;35;46mimg3.JpG\x1b[0m") {
+	if strings.Contains(result.Stdout, "\x1b[01;35mimg3.JpG\x1b[0m") || strings.Contains(result.Stdout, "\x1b[01;35;46mimg3.JpG\x1b[0m") {
 		t.Fatalf("Stdout = %q, want mixed-case extension left uncolored", result.Stdout)
 	}
 }
@@ -585,7 +688,7 @@ func TestLSColorsUseWritableAndStickyDirectoryClasses(t *testing.T) {
 	if err := session.FileSystem().Chmod(context.Background(), "/tmp/ls-color-dir/other-writable", 0o777); err != nil {
 		t.Fatalf("Chmod(other-writable) error = %v", err)
 	}
-	if err := session.FileSystem().Chmod(context.Background(), "/tmp/ls-color-dir/sticky", 0o1755); err != nil {
+	if err := session.FileSystem().Chmod(context.Background(), "/tmp/ls-color-dir/sticky", stdfs.ModeSticky|0o755); err != nil {
 		t.Fatalf("Chmod(sticky) error = %v", err)
 	}
 	stickyInfo, err := session.FileSystem().Stat(context.Background(), "/tmp/ls-color-dir/sticky")
@@ -598,16 +701,35 @@ func TestLSColorsUseWritableAndStickyDirectoryClasses(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
 	wants := []string{
-		"\x1b[0m\x1b[01;34mdefault\x1b[0m",
-		"\x1b[0m\x1b[34;42mother-writable\x1b[0m",
+		"\x1b[01;34mdefault\x1b[0m",
+		"\x1b[34;42mother-writable\x1b[0m",
 	}
 	if stickyInfo.Mode()&stdfs.ModeSticky != 0 {
-		wants = append(wants, "\x1b[0m\x1b[37;44msticky\x1b[0m")
+		wants = append(wants, "\x1b[37;44msticky\x1b[0m")
 	}
 	for _, want := range wants {
 		if !strings.Contains(result.Stdout, want) {
 			t.Fatalf("Stdout = %q, want %q", result.Stdout, want)
 		}
+	}
+}
+
+func TestLSColorsResetOnlyIndicatorPreventsFallbackColor(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	writeSessionFile(t, session, "/tmp/ls-color-reset/plain.txt", []byte("plain\n"))
+	writeSessionFile(t, session, "/tmp/ls-color-reset/dir/file", []byte("dir\n"))
+
+	result := mustExecSession(t, session, "LS_COLORS='di=0:fi=31' ls --color=always /tmp/ls-color-reset\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stdout, "\x1b[31mplain.txt\x1b[0m") {
+		t.Fatalf("Stdout = %q, want plain file to use fi color", result.Stdout)
+	}
+	if strings.Contains(result.Stdout, "\x1b[31mdir\x1b[0m") {
+		t.Fatalf("Stdout = %q, want reset-only di color to prevent fi fallback", result.Stdout)
 	}
 }
 
@@ -787,6 +909,60 @@ func TestLSLongFormatMetadataFlags(t *testing.T) {
 	}
 	if !strings.Contains(parts[7], "2.0K") && !strings.Contains(parts[7], "2.1K") {
 		t.Fatalf("--si output = %q, want SI human-readable size", parts[7])
+	}
+}
+
+func TestLSLongFormatAlignsSizeColumns(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session,
+		"cd /tmp\n"+
+			"truncate -s 0 small\n"+
+			"truncate -s 123456 large\n"+
+			"printf x > alloc\n"+
+			"ls -s -l small alloc large\n",
+	)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	lines := splitRawLines(result.Stdout)
+	if len(lines) != 3 {
+		t.Fatalf("lines = %v, want 3", lines)
+	}
+	width := len(lines[0])
+	for _, line := range lines[1:] {
+		if len(line) != width {
+			t.Fatalf("line widths = %q, want all width %d", result.Stdout, width)
+		}
+	}
+}
+
+func TestLSFileTypeMarksFIFOs(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := mustExecSession(t, session,
+		"mkdir -p /tmp/ls-file-type\n"+
+			"mkfifo /tmp/ls-file-type/fifo\n"+
+			"ls -F /tmp/ls-file-type\n"+
+			"echo ---\n"+
+			"ls --indicator-style=file-type /tmp/ls-file-type\n",
+	)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+
+	parts := strings.Split(result.Stdout, "---\n")
+	if len(parts) != 2 {
+		t.Fatalf("Stdout blocks = %q, want 2", result.Stdout)
+	}
+	if got, want := strings.TrimSpace(parts[0]), "fifo|"; got != want {
+		t.Fatalf("classify output = %q, want %q", got, want)
+	}
+	if got, want := strings.TrimSpace(parts[1]), "fifo|"; got != want {
+		t.Fatalf("file-type output = %q, want %q", got, want)
 	}
 }
 
@@ -1376,6 +1552,14 @@ func splitTrimmedLines(block string) []string {
 		return nil
 	}
 	return strings.Split(trimmed, "\n")
+}
+
+func splitRawLines(block string) []string {
+	block = strings.TrimSuffix(block, "\n")
+	if block == "" {
+		return nil
+	}
+	return strings.Split(block, "\n")
 }
 
 func extractDiredFields(t *testing.T, output string) []string {
