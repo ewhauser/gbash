@@ -1425,6 +1425,9 @@ func (r *Runner) run(ctx context.Context, node syntax.Node, runExitTrap, manageM
 	r.filename = ""
 	switch node := node.(type) {
 	case *syntax.File:
+		if r.Arg0 == "" && strings.TrimSpace(node.Name) != "" {
+			r.Arg0 = node.Name
+		}
 		r.filename = node.Name
 		if manageMainFrame && !r.internalRun && r.topLevelScriptPath != "" && node.Name == r.topLevelScriptPath {
 			restoreFrame := r.pushFrame(execFrame{
