@@ -681,16 +681,30 @@ func (p *interp) setFile(filename string, argIndex int) {
 // Setup for a new input line (but don't parse it into fields till we
 // need to)
 func (p *interp) setLine(line string, isTrueStr bool) {
-	p.line = line
-	p.lineIsTrueStr = isTrueStr
+	p.assignLine(line, isTrueStr)
 	p.haveFields = false
 	p.reparseCSV = true
 
 	// POSIX says that fields should be evaluated as if they were split using
-	// the value of FS at the time that record's value was read. Because we
-	// split fields lazily, we need to save FS here.
+	// the field-splitting configuration at the time that record's value was
+	// read. Because we split fields lazily, we need to save that state here.
+	p.savedFieldSplitMode = p.fieldSplitMode
 	p.savedFieldSep = p.fieldSep
 	p.savedFieldSepRegex = p.fieldSepRegex
+	p.savedFieldPatternRegex = p.fieldPatternRegex
+	p.savedFieldWidths = append(p.savedFieldWidths[:0], p.fieldWidths...)
+}
+
+func (p *interp) assignLine(line string, isTrueStr bool) {
+	p.line = line
+	p.lineIsTrueStr = isTrueStr
+	p.notifyCurrentRecord()
+}
+
+func (p *interp) notifyCurrentRecord() {
+	if p.currentRecordHook != nil {
+		p.currentRecordHook(p.line)
+	}
 }
 
 // Splits on FS as a regex, appending each field to fields and returning the
@@ -757,10 +771,10 @@ func (p *interp) ensureFields() {
 				p.fields = nil
 			}
 		}
-	case p.inputMode == DefaultMode && len(p.fieldWidths) > 0:
-		p.fields = splitByFieldWidths(p.line, p.fieldWidths)
-	case p.inputMode == DefaultMode && p.fieldPatternRegex != nil:
-		p.fields = p.fieldPatternRegex.FindAllString(p.line, -1)
+	case p.inputMode == DefaultMode && p.savedFieldSplitMode == fieldSplitFieldWidths:
+		p.fields = splitByFieldWidths(p.line, p.savedFieldWidths)
+	case p.inputMode == DefaultMode && p.savedFieldSplitMode == fieldSplitPattern:
+		p.fields = p.savedFieldPatternRegex.FindAllString(p.line, -1)
 	case p.savedFieldSep == " ":
 		// FS space (default) means split fields on any whitespace
 		p.fields = strings.Fields(p.line)

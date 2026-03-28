@@ -193,6 +193,21 @@ func TestAWKGNUVarFIELDWIDTHS(t *testing.T) {
 	}
 }
 
+func TestAWKGNUVarFSRestoresSplittingAfterFIELDWIDTHS(t *testing.T) {
+	t.Parallel()
+
+	result := runAWKCommand(t, &awkCommandOptions{
+		Args:  []string{`BEGIN { FIELDWIDTHS = "2 2"; FS = "," } { print NF ":" $1 ":" $2 }`},
+		Stdin: "ab,cd\n",
+	})
+	if result.Err != nil {
+		t.Fatalf("Run() error = %v; stderr=%q", result.Err, result.Stderr)
+	}
+	if got, want := result.Stdout, "2:ab:cd\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestAWKGNUVarFPAT(t *testing.T) {
 	t.Parallel()
 
@@ -204,6 +219,21 @@ func TestAWKGNUVarFPAT(t *testing.T) {
 		t.Fatalf("Run() error = %v; stderr=%q", result.Err, result.Stderr)
 	}
 	if got, want := result.Stdout, "4:a:1:b:22\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestAWKGNUVarFSRestoresSplittingAfterFPAT(t *testing.T) {
+	t.Parallel()
+
+	result := runAWKCommand(t, &awkCommandOptions{
+		Args:  []string{`BEGIN { FPAT = "[[:alpha:]]"; FS = "," } { print NF ":" $1 ":" $2 }`},
+		Stdin: "ab,cd\n",
+	})
+	if result.Err != nil {
+		t.Fatalf("Run() error = %v; stderr=%q", result.Err, result.Stderr)
+	}
+	if got, want := result.Stdout, "2:ab:cd\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
@@ -226,6 +256,48 @@ func TestAWKSupportsGNUTimeFunctions(t *testing.T) {
 	}
 }
 
+func TestAWKMktimeHonorsDSTDatespec(t *testing.T) {
+	t.Parallel()
+
+	if _, err := time.LoadLocation("America/New_York"); err != nil {
+		t.Skipf("America/New_York timezone unavailable: %v", err)
+	}
+
+	result := runAWKCommand(t, &awkCommandOptions{
+		Args: []string{`BEGIN {
+			print mktime("2024 07 01 12 00 00 0") - mktime("2024 07 01 12 00 00 1")
+		}`},
+		Env: map[string]string{"TZ": "America/New_York"},
+	})
+	if result.Err != nil {
+		t.Fatalf("Run() error = %v; stderr=%q", result.Err, result.Stderr)
+	}
+	if got, want := result.Stdout, "3600\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestAWKMktimeUsesRequestedDateForOffsetSelection(t *testing.T) {
+	t.Parallel()
+
+	if _, err := time.LoadLocation("Europe/Moscow"); err != nil {
+		t.Skipf("Europe/Moscow timezone unavailable: %v", err)
+	}
+
+	result := runAWKCommand(t, &awkCommandOptions{
+		Args: []string{`BEGIN {
+			print mktime("2014 11 01 12 00 00 0") - mktime("2014 11 01 12 00 00", 1)
+		}`},
+		Env: map[string]string{"TZ": "Europe/Moscow"},
+	})
+	if result.Err != nil {
+		t.Fatalf("Run() error = %v; stderr=%q", result.Err, result.Stderr)
+	}
+	if got, want := result.Stdout, "-10800\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestAWKSupportsGNUStringAndBitwiseFunctions(t *testing.T) {
 	t.Parallel()
 
@@ -241,6 +313,21 @@ func TestAWKSupportsGNUStringAndBitwiseFunctions(t *testing.T) {
 	}
 	want := "item<42> batch<7>\n16 8 1.5\n2 7 5 9007199254740991 12 2\n"
 	if got := result.Stdout; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestAWKGensubDefaultsTargetToCurrentRecord(t *testing.T) {
+	t.Parallel()
+
+	result := runAWKCommand(t, &awkCommandOptions{
+		Args:  []string{`{ print gensub("([0-9]+)", "<\\1>", "g") }`},
+		Stdin: "item42\n",
+	})
+	if result.Err != nil {
+		t.Fatalf("Run() error = %v; stderr=%q", result.Err, result.Stderr)
+	}
+	if got, want := result.Stdout, "item<42>\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }

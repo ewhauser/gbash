@@ -36,6 +36,17 @@ type awkProgramPart struct {
 	value    string
 }
 
+type awkNativeState struct {
+	currentRecord string
+}
+
+func (s *awkNativeState) setCurrentRecord(record string) {
+	if s == nil {
+		return
+	}
+	s.currentRecord = record
+}
+
 func NewAWK() *AWK {
 	return &AWK{}
 }
@@ -72,7 +83,8 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 		return exitCodef(inv, 2, "awk: %v", err)
 	}
 
-	funcs := newAWKFuncs(inv)
+	nativeState := &awkNativeState{}
+	funcs := newAWKFuncs(inv, nativeState)
 	compiled, err := parser.ParseProgram([]byte(programSource), &parser.ParserConfig{
 		Funcs: funcs,
 	})
@@ -83,21 +95,22 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 	stdin := newLazyAWKStdin(ctx, inv)
 
 	config := &interp.Config{
-		Stdin:       stdin,
-		Output:      inv.Stdout,
-		Error:       inv.Stderr,
-		Argv0:       "awk",
-		Args:        inputs,
-		NoArgVars:   opts.noArgVars,
-		Vars:        buildAWKVars(&opts),
-		Environ:     awkEnviron(inv.Env),
-		InputMode:   opts.inputMode,
-		FileOpener:  newAWKFileOpener(ctx, inv, stdin),
-		FileWriter:  newAWKFileWriter(ctx, inv),
-		ShellRunner: newAWKShellRunner(ctx, inv),
-		PipeReader:  newAWKPipeReader(ctx, inv),
-		PipeWriter:  newAWKPipeWriter(ctx, inv),
-		Funcs:       funcs,
+		Stdin:             stdin,
+		Output:            inv.Stdout,
+		Error:             inv.Stderr,
+		Argv0:             "awk",
+		Args:              inputs,
+		NoArgVars:         opts.noArgVars,
+		Vars:              buildAWKVars(&opts),
+		Environ:           awkEnviron(inv.Env),
+		InputMode:         opts.inputMode,
+		FileOpener:        newAWKFileOpener(ctx, inv, stdin),
+		FileWriter:        newAWKFileWriter(ctx, inv),
+		ShellRunner:       newAWKShellRunner(ctx, inv),
+		PipeReader:        newAWKPipeReader(ctx, inv),
+		PipeWriter:        newAWKPipeWriter(ctx, inv),
+		CurrentRecordHook: nativeState.setCurrentRecord,
+		Funcs:             funcs,
 	}
 	status, err := interp.ExecProgram(compiled, config)
 	if err != nil {
@@ -517,7 +530,7 @@ func newAWKPipeWriter(ctx context.Context, inv *commands.Invocation) func(string
 	}
 }
 
-func newAWKFuncs(inv *commands.Invocation) map[string]any {
+func newAWKFuncs(inv *commands.Invocation, state *awkNativeState) map[string]any {
 	location := awkTimeLocation(inv)
 	return map[string]any{
 		"and": func(a, b float64) float64 {
@@ -526,7 +539,16 @@ func newAWKFuncs(inv *commands.Invocation) map[string]any {
 		"compl": func(v float64) float64 {
 			return float64((^awkBitValue(v)) & awkBitMask)
 		},
-		"gensub": awkGensub,
+		"gensub": func(regex, replacement, how string, rest ...string) (string, error) {
+			target := ""
+			if state != nil {
+				target = state.currentRecord
+			}
+			if len(rest) > 0 {
+				target = rest[0]
+			}
+			return awkGensub(regex, replacement, how, target)
+		},
 		"lshift": func(v, shift float64) float64 {
 			return float64((awkBitValue(v) << uint(int64(shift))) & awkBitMask)
 		},
@@ -631,9 +653,37 @@ func awkMktime(location *time.Location, spec string, rest ...float64) float64 {
 	loc := location
 	if len(rest) > 0 && rest[0] != 0 {
 		loc = time.UTC
+	} else if values[6] >= 0 {
+		requested := time.Date(values[0], time.Month(values[1]), values[2], values[3], values[4], values[5], 0, location)
+		if offset, ok := awkTimeZoneOffset(requested, values[6] > 0); ok {
+			loc = time.FixedZone(location.String(), offset)
+		}
 	}
 	t := time.Date(values[0], time.Month(values[1]), values[2], values[3], values[4], values[5], 0, loc)
 	return float64(t.Unix())
+}
+
+func awkTimeZoneOffset(when time.Time, wantDST bool) (int, bool) {
+	if when.Location() == nil {
+		return 0, false
+	}
+	if when.IsDST() == wantDST {
+		_, offset := when.Zone()
+		return offset, true
+	}
+	for days := 1; days <= 370; days++ {
+		before := when.Add(-time.Duration(days) * 24 * time.Hour)
+		if before.IsDST() == wantDST {
+			_, offset := before.Zone()
+			return offset, true
+		}
+		after := when.Add(time.Duration(days) * 24 * time.Hour)
+		if after.IsDST() == wantDST {
+			_, offset := after.Zone()
+			return offset, true
+		}
+	}
+	return 0, false
 }
 
 func awkStrftime(inv *commands.Invocation, location *time.Location, format string, rest ...float64) string {
@@ -726,11 +776,7 @@ func awkStrftimeFormat(layout string, when time.Time) string {
 	return b.String()
 }
 
-func awkGensub(regex, replacement, how string, rest ...string) (string, error) {
-	target := ""
-	if len(rest) > 0 {
-		target = rest[0]
-	}
+func awkGensub(regex, replacement, how, target string) (string, error) {
 	re, err := regexp.Compile(regex)
 	if err != nil {
 		return "", err

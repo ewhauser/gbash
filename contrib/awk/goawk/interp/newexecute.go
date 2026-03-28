@@ -102,14 +102,19 @@ func (p *interp) resetCore() {
 	p.callDepth = 0
 
 	p.filename = null()
-	p.line = ""
-	p.lineIsTrueStr = false
+	p.currentRecordHook = nil
+	p.assignLine("", false)
 	p.lineNum = 0
 	p.fileLineNum = 0
 	p.fields = nil
 	p.fieldsIsTrueStr = nil
 	p.numFields = 0
 	p.haveFields = false
+	p.savedFieldSplitMode = fieldSplitFS
+	p.savedFieldSep = " "
+	p.savedFieldSepRegex = nil
+	p.savedFieldPatternRegex = nil
+	p.savedFieldWidths = nil
 
 	p.exitStatus = 0
 }
@@ -132,8 +137,12 @@ func (p *interp) resetVars() {
 	p.outputFormat = "%.6g"
 	p.fieldSep = " "
 	p.fieldSepRegex = nil
+	p.fieldSplitMode = fieldSplitFS
 	p.savedFieldSep = " "
 	p.savedFieldSepRegex = nil
+	p.savedFieldSplitMode = fieldSplitFS
+	p.savedFieldPatternRegex = nil
+	p.savedFieldWidths = nil
 	p.recordSep = "\n"
 	p.recordSepRegex = nil
 	p.recordTerminator = ""
@@ -142,6 +151,9 @@ func (p *interp) resetVars() {
 	p.subscriptSep = "\x1c"
 	p.matchLength = 0
 	p.matchStart = 0
+	p.fieldPattern = ""
+	p.fieldPatternRegex = nil
+	p.fieldWidths = nil
 }
 
 // ResetVars resets this interpreter's variables, setting scalar variables to
