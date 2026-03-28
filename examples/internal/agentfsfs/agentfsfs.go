@@ -36,6 +36,8 @@ type FileSystem struct {
 }
 
 func NewRuntime(ctx context.Context, dbPath, workDir string) (*gbash.Runtime, error) {
+	_ = ctx
+	//nolint:contextcheck // gbash.New does not accept a context; the filesystem factory receives ctx when sessions start.
 	return gbash.New(gbash.WithFileSystem(
 		gbash.CustomFileSystem(Factory{DBPath: dbPath}, workDir),
 	))
@@ -93,7 +95,7 @@ func (f *FileSystem) OpenFile(ctx context.Context, name string, flag int, perm s
 			return nil, pathError("open", abs, stdfs.ErrInvalid)
 		}
 		if stats.IsFIFO() {
-			return f.openFIFO(ctx, abs, stats.Ino, flag)
+			return f.openFIFO(abs, stats.Ino, flag)
 		}
 	}
 
@@ -224,7 +226,7 @@ func (f *FileSystem) MkdirAll(ctx context.Context, name string, perm stdfs.FileM
 
 func (f *FileSystem) Mkfifo(ctx context.Context, name string, perm stdfs.FileMode) error {
 	abs := f.resolve(name)
-	mode := int64(agentfs.S_IFIFO | int64(perm.Perm()))
+	mode := agentfs.S_IFIFO | int64(perm.Perm())
 	if err := f.afs.FS.MkdirAll(ctx, path.Dir(abs), 0o755); err != nil {
 		return wrapError("mkfifo", abs, err)
 	}
@@ -361,7 +363,7 @@ func (f *FileSystem) removeTree(ctx context.Context, abs string) error {
 	return f.afs.FS.Rmdir(ctx, abs)
 }
 
-func (f *FileSystem) openFIFO(ctx context.Context, abs string, ino int64, flag int) (gbfs.File, error) {
+func (f *FileSystem) openFIFO(abs string, ino int64, flag int) (gbfs.File, error) {
 	f.mu.Lock()
 	fifo := f.fifo[ino]
 	if fifo == nil {
@@ -374,11 +376,12 @@ func (f *FileSystem) openFIFO(ctx context.Context, abs string, ino int64, flag i
 
 func openFlags(flag int) int {
 	var out int
-	if canRead(flag) && canWrite(flag) {
+	switch {
+	case canRead(flag) && canWrite(flag):
 		out |= agentfs.O_RDWR
-	} else if canWrite(flag) {
+	case canWrite(flag):
 		out |= agentfs.O_WRONLY
-	} else {
+	default:
 		out |= agentfs.O_RDONLY
 	}
 	if flag&os.O_APPEND != 0 {
@@ -408,7 +411,7 @@ func isNotExist(err error) bool {
 	return agentfs.IsNotExist(err) || errors.Is(err, stdfs.ErrNotExist)
 }
 
-func wrapError(op, path string, err error) error {
+func wrapError(op, pathValue string, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -420,28 +423,28 @@ func wrapError(op, path string, err error) error {
 	if errors.As(err, &fsErr) {
 		switch fsErr.Code {
 		case agentfs.ENOENT:
-			return pathError(op, path, stdfs.ErrNotExist)
+			return pathError(op, pathValue, stdfs.ErrNotExist)
 		case agentfs.EEXIST:
-			return pathError(op, path, stdfs.ErrExist)
+			return pathError(op, pathValue, stdfs.ErrExist)
 		case agentfs.EPERM, agentfs.EACCES:
-			return pathError(op, path, stdfs.ErrPermission)
+			return pathError(op, pathValue, stdfs.ErrPermission)
 		case agentfs.ENOTDIR, agentfs.EISDIR, agentfs.EINVAL, agentfs.ENOTEMPTY:
-			return pathError(op, path, stdfs.ErrInvalid)
+			return pathError(op, pathValue, stdfs.ErrInvalid)
 		case agentfs.ELOOP:
-			return pathError(op, path, fmt.Errorf("too many levels of symbolic links"))
+			return pathError(op, pathValue, fmt.Errorf("too many levels of symbolic links"))
 		}
 	}
 
 	var pathErr *os.PathError
 	if errors.As(err, &pathErr) {
-		return &os.PathError{Op: op, Path: path, Err: pathErr.Err}
+		return &os.PathError{Op: op, Path: pathValue, Err: pathErr.Err}
 	}
 
-	return &os.PathError{Op: op, Path: path, Err: err}
+	return &os.PathError{Op: op, Path: pathValue, Err: err}
 }
 
-func pathError(op, path string, err error) error {
-	return &os.PathError{Op: op, Path: path, Err: err}
+func pathError(op, pathValue string, err error) error {
+	return &os.PathError{Op: op, Path: pathValue, Err: err}
 }
 
 type regularFile struct {
