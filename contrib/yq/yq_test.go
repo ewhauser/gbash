@@ -180,6 +180,60 @@ func TestYQExitStatusWhenNoMatchesFound(t *testing.T) {
 	}
 }
 
+func TestYQInvalidExpressionReportsParseError(t *testing.T) {
+	t.Parallel()
+
+	rt := newYQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: "yq '.foo[' </dev/null\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "bad expression") {
+		t.Fatalf("Stderr = %q, want parse error", result.Stderr)
+	}
+}
+
+func TestYQMissingInputFileReportsDiagnostic(t *testing.T) {
+	t.Parallel()
+
+	rt := newYQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: "yq '.name' missing.yml\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "missing.yml") {
+		t.Fatalf("Stderr = %q, want missing input path", result.Stderr)
+	}
+}
+
+func TestYQMissingExpressionFileReportsDiagnostic(t *testing.T) {
+	t.Parallel()
+
+	rt := newYQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: "yq --from-file missing.yq\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "missing.yq") {
+		t.Fatalf("Stderr = %q, want missing expression path", result.Stderr)
+	}
+}
+
 func TestYQDisablesLoadOperators(t *testing.T) {
 	t.Parallel()
 

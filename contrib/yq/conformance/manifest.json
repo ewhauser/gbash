@@ -1,0 +1,28 @@
+{
+  "suites": {
+    "yq": {
+      "entries": {
+        "conformance/yq.test.sh::load operator denied by sandbox": {
+          "mode": "xfail",
+          "reason": "gbash yq disables file operations such as load()"
+        },
+        "conformance/yq.test.sh::load str operator denied by sandbox": {
+          "mode": "xfail",
+          "reason": "gbash yq disables file operations such as load_str()"
+        },
+        "conformance/yq.test.sh::env operator denied by sandbox": {
+          "mode": "xfail",
+          "reason": "gbash yq disables env() access inside the sandbox"
+        },
+        "conformance/yq.test.sh::strenv operator denied by sandbox": {
+          "mode": "xfail",
+          "reason": "gbash yq disables strenv() access inside the sandbox"
+        },
+        "conformance/yq.test.sh::envsubst operator denied by sandbox": {
+          "mode": "xfail",
+          "reason": "gbash yq disables envsubst() inside the sandbox"
+        }
+      }
+    }
+  }
+}
