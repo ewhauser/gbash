@@ -33,6 +33,38 @@ func TestParseBackquoteInDoubleQuotesPreservesDBracketCloseToken(t *testing.T) {
 	}
 }
 
+func TestParseConditionalWordStartingWithCloseTokenPrefix(t *testing.T) {
+	t.Parallel()
+
+	src := "x=sfx\n[[ ]]$x == ']]sfx' ]]\n"
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+	if err != nil {
+		t.Fatalf("Parse error = %v", err)
+	}
+	testClause, ok := file.Stmts[1].Cmd.(*TestClause)
+	if !ok {
+		t.Fatalf("stmt[1].Cmd = %T, want *TestClause", file.Stmts[1].Cmd)
+	}
+	bin, ok := testClause.X.(*CondBinary)
+	if !ok {
+		t.Fatalf("test clause expr = %T, want *CondBinary", testClause.X)
+	}
+	left, ok := bin.X.(*CondWord)
+	if !ok {
+		t.Fatalf("left expr = %T, want *CondWord", bin.X)
+	}
+	if got := len(left.Word.Parts); got != 2 {
+		t.Fatalf("len(left word parts) = %d, want 2", got)
+	}
+	lit, ok := left.Word.Parts[0].(*Lit)
+	if !ok || lit.Value != "]]" {
+		t.Fatalf("left word part[0] = %#v, want literal %q", left.Word.Parts[0], "]]")
+	}
+	if _, ok := left.Word.Parts[1].(*ParamExp); !ok {
+		t.Fatalf("left word part[1] = %T, want *ParamExp", left.Word.Parts[1])
+	}
+}
+
 func TestParseMalformedBackquoteRecoversOuterScript(t *testing.T) {
 	t.Parallel()
 
@@ -92,5 +124,33 @@ func TestParseMalformedBackquoteRecoversOuterScript(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseMalformedBackquoteRecoversAtScriptStartWhenScriptContinues(t *testing.T) {
+	t.Parallel()
+
+	src := "`echo \"`\necho after\n"
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+	if err != nil {
+		t.Fatalf("Parse(%q) error = %v", src, err)
+	}
+	if got := len(file.Stmts); got != 2 {
+		t.Fatalf("len(Stmts) = %d, want 2", got)
+	}
+	first := file.Stmts[0].Cmd.(*CallExpr)
+	if got := len(first.Args); got != 1 {
+		t.Fatalf("len(first.Args) = %d, want 1", got)
+	}
+	cs, ok := first.Args[0].Parts[0].(*CmdSubst)
+	if !ok {
+		t.Fatalf("first arg part = %T, want *CmdSubst", first.Args[0].Parts[0])
+	}
+	if !cs.Backquotes {
+		t.Fatalf("CmdSubst.Backquotes = false, want true")
+	}
+	next := file.Stmts[1].Cmd.(*CallExpr)
+	if got := next.Args[1].Lit(); got != "after" {
+		t.Fatalf("second stmt arg = %q, want %q", got, "after")
 	}
 }

@@ -2293,10 +2293,22 @@ func findClosingBackquote(src []byte) int {
 	return -1
 }
 
-func (p *Parser) recoverableBackquoteSource(left Pos) ([]byte, error) {
-	if left.Offset() == 0 {
-		return nil, nil
+func hasContinuedScriptAfterRecoveredBackquote(src []byte) bool {
+	src = bytes.TrimLeft(src, " \t\r")
+	if len(src) == 0 {
+		return false
 	}
+	switch src[0] {
+	case '\n', ';', '&', '|':
+		// Only recover a leading malformed backquote when there is later script
+		// for bash to keep parsing after the recovered command substitution.
+		return len(bytes.TrimSpace(src[1:])) > 0
+	default:
+		return false
+	}
+}
+
+func (p *Parser) recoverableBackquoteSource(left Pos) ([]byte, error) {
 	if src := p.sourceFromPos(left); src != "" {
 		return []byte(src), nil
 	}
@@ -2322,6 +2334,9 @@ func (p *Parser) recoverBackquoteCmdSubst(cs *CmdSubst, old saveState, src []byt
 	}
 	closeIndex := findClosingBackquote(src)
 	if closeIndex < 0 {
+		return false
+	}
+	if cs.Left.Offset() == 0 && !hasContinuedScriptAfterRecoveredBackquote(src[closeIndex+1:]) {
 		return false
 	}
 
@@ -5470,7 +5485,10 @@ func (p *Parser) testClause(s *Stmt) {
 }
 
 func (p *Parser) isCondClosingTok() bool {
-	return p.val == "]]" && (p.tok == _LitWord || p.tok == _Lit)
+	if p.val != "]]" {
+		return false
+	}
+	return p.tok == _LitWord || (p.tok == _Lit && p.r == '`')
 }
 
 func (p *Parser) gotCondClosingTok() (Pos, bool) {
