@@ -82,3 +82,65 @@ case "$stderr" in
   *"missing.json"*) printf 'missing-file\n' ;;
   *) printf 'missing-filename\n' ;;
 esac
+
+#### default output preserves object key order
+printf '%s\n' '{"z":0,"a":1}' | jq -c '.'
+
+#### ascii output escapes unicode
+printf '%s\n' '{"x":"Ω"}' | jq --ascii-output -c '.'
+
+#### version short flag
+set +e
+out="$(jq -V)"
+rc=$?
+set -e
+printf 'rc=%s\n' "$rc"
+case "$out" in
+  "") printf 'empty\n' ;;
+  *) printf 'non-empty\n' ;;
+esac
+
+#### inputs builtin with null input
+printf '%s\n' '1' '2' | jq -n '[inputs]'
+
+#### input filename builtin
+printf '%s\n' '1' >a.json
+jq 'input_filename' a.json
+
+#### unbuffered output flag
+jq --unbuffered -n '1'
+
+#### stream mode
+printf '%s\n' '[1,[2]]' | jq --stream '.'
+
+#### stream errors mode
+printf '%s' '{' | jq --stream-errors '.'
+
+#### json seq mode
+printf '%s\n' '1' | jq --seq '.'
+
+#### library path include
+mkdir -p lib
+printf '%s\n' 'def f: 42;' >lib/mod.jq
+jq -L lib -n 'include "mod"; f'
+
+#### color output long flag
+out="$(printf '%s\n' '{"x":1}' | jq --color-output -c '.')"
+case "$out" in
+  *$'\033'*) printf 'ansi\n' ;;
+  *) printf 'plain\n' ;;
+esac
+
+#### monochrome output long flag
+printf '%s\n' '{"x":1}' | jq --monochrome-output -c '.'
+
+#### build configuration flag
+set +e
+out="$(jq --build-configuration)"
+rc=$?
+set -e
+printf 'rc=%s\n' "$rc"
+case "$out" in
+  "") printf 'empty\n' ;;
+  *) printf 'non-empty\n' ;;
+esac

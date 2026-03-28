@@ -1,7 +1,12 @@
 {
   "suites": {
     "jq": {
-      "entries": {}
+      "entries": {
+        "conformance/jq.test.sh::default output preserves object key order": {
+          "mode": "xfail",
+          "reason": "gbash jq marshals objects with sorted keys instead of preserving jq's default key order"
+        }
+      }
     }
   }
 }

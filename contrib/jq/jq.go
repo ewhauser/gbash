@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	stdfs "io/fs"
 	"slices"
@@ -19,26 +18,35 @@ import (
 type JQ struct{}
 
 type jqOptions struct {
-	compact     bool
-	exitStatus  bool
-	fromFile    bool
-	help        bool
-	indent      *int
-	join        bool
-	nullInput   bool
-	raw         bool
-	rawInput    bool
-	rawOutput0  bool
-	slurp       bool
-	sortKeys    bool
-	tab         bool
-	version     bool
-	arg         map[string]string
-	argJSON     map[string]string
-	rawFile     map[string]string
-	slurpFile   map[string]string
-	stringArgs  []string
-	jsonArgsRaw []string
+	asciiOutput        bool
+	buildConfiguration bool
+	colorOutput        bool
+	compact            bool
+	exitStatus         bool
+	fromFile           bool
+	help               bool
+	indent             *int
+	join               bool
+	modulePaths        []string
+	monoOutput         bool
+	nullInput          bool
+	raw                bool
+	rawInput           bool
+	rawOutput0         bool
+	seq                bool
+	slurp              bool
+	sortKeys           bool
+	stream             bool
+	streamErrors       bool
+	tab                bool
+	unbuffered         bool
+	version            bool
+	arg                map[string]string
+	argJSON            map[string]string
+	rawFile            map[string]string
+	slurpFile          map[string]string
+	stringArgs         []string
+	jsonArgsRaw        []string
 }
 
 type jqSources struct {
@@ -74,6 +82,10 @@ func (c *JQ) Run(ctx context.Context, inv *commands.Invocation) error {
 		_, _ = io.WriteString(inv.Stdout, jqVersionText)
 		return nil
 	}
+	if opts.buildConfiguration {
+		_, _ = io.WriteString(inv.Stdout, jqBuildConfigurationText)
+		return nil
+	}
 
 	filter, err = loadJQFilter(ctx, inv, &opts, filter)
 	if err != nil {
@@ -89,49 +101,41 @@ func (c *JQ) Run(ctx context.Context, inv *commands.Invocation) error {
 	if err != nil {
 		return exitf(inv, 3, "jq: invalid query: %v", err)
 	}
-	code, err := gojq.Compile(
-		query,
+
+	compileIter, err := newJQInputIter(ctx, inv, &opts, inputs)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = compileIter.Close() }()
+
+	compileOptions := []gojq.CompilerOption{
 		gojq.WithEnvironLoader(func() []string { return jqEnviron(inv.Env) }),
 		gojq.WithVariables(variableNames),
+		gojq.WithFunction("input_filename", 0, 0, func(any, []any) any {
+			name := compileIter.Name()
+			if name != "" && (len(inputs) > 0 || !opts.nullInput) {
+				return name
+			}
+			return nil
+		}),
+		gojq.WithInputIter(compileIter),
+	}
+	if len(opts.modulePaths) > 0 {
+		compileOptions = append(compileOptions, gojq.WithModuleLoader(newSandboxJQModuleLoader(ctx, inv, opts.modulePaths)))
+	}
+	code, err := gojq.Compile(
+		query,
+		compileOptions...,
 	)
 	if err != nil {
 		return exitf(inv, 3, "jq: compile error: %v", err)
 	}
 
-	if canStreamJQInputs(&opts) {
-		return runJQInputStream(ctx, inv, code, &opts, inputs, variableValues)
+	processIter := jqIter(compileIter)
+	if opts.nullInput {
+		processIter = newJQNullInputIter()
 	}
-
-	values, err := collectJQInputs(ctx, inv, &opts, inputs)
-	if err != nil {
-		return err
-	}
-
-	hadOutput := false
-	var lastValue any
-	for _, value := range values {
-		stopped, err := runJQQuery(ctx, inv, code, value, variableValues, &opts, &hadOutput, &lastValue)
-		if err != nil {
-			return err
-		}
-		if stopped {
-			break
-		}
-	}
-
-	if opts.exitStatus {
-		switch {
-		case !hadOutput:
-			return &commands.ExitError{Code: 4}
-		case lastValue == nil || lastValue == false:
-			return &commands.ExitError{Code: 1}
-		}
-	}
-	return nil
-}
-
-func canStreamJQInputs(opts *jqOptions) bool {
-	return opts != nil && !opts.nullInput && !opts.rawInput && !opts.slurp
+	return processJQInputs(ctx, inv, code, processIter, variableValues, &opts)
 }
 
 func parseJQArgs(inv *commands.Invocation) (opts jqOptions, filter string, inputs []string, err error) {
@@ -160,7 +164,7 @@ func parseJQArgs(inv *commands.Invocation) (opts jqOptions, filter string, input
 	}
 
 	opts.normalize()
-	if opts.help || opts.version {
+	if opts.help || opts.version || opts.buildConfiguration {
 		return opts, "", nil, nil
 	}
 	if len(args) == 0 {
@@ -191,9 +195,15 @@ func parseJQLongFlag(inv *commands.Invocation, opts *jqOptions, args []string) (
 
 	switch name {
 	case "ascii":
-		// Accepted for compatibility with upstream; output remains UTF-8.
+		opts.asciiOutput = true
+	case "ascii-output":
+		opts.asciiOutput = true
+	case "build-configuration":
+		opts.buildConfiguration = true
 	case "color":
-		// Accepted for compatibility with upstream; color output is ignored.
+		opts.colorOutput = true
+	case "color-output":
+		opts.colorOutput = true
 	case "compact":
 		opts.compact = true
 	case "compact-output":
@@ -206,8 +216,17 @@ func parseJQLongFlag(inv *commands.Invocation, opts *jqOptions, args []string) (
 		opts.help = true
 	case "join-output":
 		opts.join = true
+	case "library-path":
+		pathValue, rest, err := parseJQStringValue(inv, arg, value, hasValue, args[1:])
+		if err != nil {
+			return nil, err
+		}
+		opts.modulePaths = append(opts.modulePaths, pathValue)
+		return rest, nil
 	case "monochrome":
-		// Accepted for compatibility with upstream; output is already monochrome.
+		opts.monoOutput = true
+	case "monochrome-output":
+		opts.monoOutput = true
 	case "null-input":
 		opts.nullInput = true
 	case "raw-input":
@@ -216,12 +235,20 @@ func parseJQLongFlag(inv *commands.Invocation, opts *jqOptions, args []string) (
 		opts.raw = true
 	case "raw-output0":
 		opts.rawOutput0 = true
+	case "seq":
+		opts.seq = true
 	case "slurp":
 		opts.slurp = true
 	case "sort-keys":
 		opts.sortKeys = true
+	case "stream":
+		opts.stream = true
+	case "stream-errors":
+		opts.streamErrors = true
 	case "tab":
 		opts.tab = true
+	case "unbuffered":
+		opts.unbuffered = true
 	case "version":
 		opts.version = true
 	case "indent":
@@ -292,11 +319,21 @@ func parseJQShortFlags(inv *commands.Invocation, opts *jqOptions, args []string)
 		shorts = shorts[1:]
 		switch flag {
 		case 'C':
-			// Accepted for compatibility with upstream; color output is ignored.
+			opts.colorOutput = true
+		case 'L':
+			if shorts != "" {
+				opts.modulePaths = append(opts.modulePaths, shorts)
+				return args[1:], nil
+			}
+			if len(args) < 2 {
+				return nil, exitf(inv, 1, "jq: expected argument for -L")
+			}
+			opts.modulePaths = append(opts.modulePaths, args[1])
+			return args[2:], nil
 		case 'M':
-			// Accepted for compatibility with upstream; output is already monochrome.
+			opts.monoOutput = true
 		case 'a':
-			// Accepted for compatibility with upstream; output remains UTF-8.
+			opts.asciiOutput = true
 		case 'c':
 			opts.compact = true
 		case 'e':
@@ -320,6 +357,8 @@ func parseJQShortFlags(inv *commands.Invocation, opts *jqOptions, args []string)
 			opts.slurp = true
 		case 'S':
 			opts.sortKeys = true
+		case 'V':
+			opts.version = true
 		case 'v':
 			opts.version = true
 		default:
@@ -338,6 +377,9 @@ func (opts *jqOptions) normalize() {
 	}
 	if opts.join {
 		opts.raw = true
+	}
+	if opts.streamErrors {
+		opts.stream = true
 	}
 }
 
@@ -369,6 +411,18 @@ func parseJQIntValue(inv *commands.Invocation, arg, inlineValue string, hasValue
 		return 0, nil, exitf(inv, 1, "jq: too many indentation count: %d", parsed)
 	}
 	return parsed, rest, nil
+}
+
+func parseJQStringValue(inv *commands.Invocation, arg, inlineValue string, hasValue bool, rest []string) (parsed string, remaining []string, err error) {
+	value := inlineValue
+	if !hasValue {
+		if len(rest) == 0 {
+			return "", nil, exitf(inv, 1, "jq: expected argument for %s", arg)
+		}
+		value = rest[0]
+		rest = rest[1:]
+	}
+	return value, rest, nil
 }
 
 func parseJQPairValue(inv *commands.Invocation, arg string, rest []string) (name, value string, remaining []string, err error) {
@@ -452,21 +506,6 @@ func buildJQVariables(ctx context.Context, inv *commands.Invocation, opts *jqOpt
 	return names, values, nil
 }
 
-func collectJQInputs(ctx context.Context, inv *commands.Invocation, opts *jqOptions, inputs []string) ([]any, error) {
-	if opts.nullInput {
-		return []any{nil}, nil
-	}
-
-	sources, err := readJQInputSources(ctx, inv, inputs)
-	if err != nil {
-		return nil, err
-	}
-	if opts.rawInput {
-		return collectRawJQInputs(sources, opts), nil
-	}
-	return collectJSONJQInputs(inv, sources, opts)
-}
-
 func readJQInputSources(ctx context.Context, inv *commands.Invocation, inputs []string) (*jqSources, error) {
 	if len(inputs) == 0 {
 		data, err := readAllStdin(ctx, inv)
@@ -511,111 +550,6 @@ func readJQInputSources(ctx context.Context, inv *commands.Invocation, inputs []
 	return sources, nil
 }
 
-func runJQInputStream(ctx context.Context, inv *commands.Invocation, code *gojq.Code, opts *jqOptions, inputs []string, variableValues []any) error {
-	hadOutput := false
-	var lastValue any
-
-	stopped, err := streamJQJSONInputs(ctx, inv, inputs, func(value any) (bool, error) {
-		return runJQQuery(ctx, inv, code, value, variableValues, opts, &hadOutput, &lastValue)
-	})
-	if err != nil {
-		return err
-	}
-	if stopped {
-		return nil
-	}
-
-	if opts.exitStatus {
-		switch {
-		case !hadOutput:
-			return &commands.ExitError{Code: 4}
-		case lastValue == nil || lastValue == false:
-			return &commands.ExitError{Code: 1}
-		}
-	}
-	return nil
-}
-
-func streamJQJSONInputs(ctx context.Context, inv *commands.Invocation, inputs []string, visit func(value any) (bool, error)) (bool, error) {
-	if len(inputs) == 0 {
-		return decodeJQStream(inv, "<stdin>", jqStdinReader(inv), visit)
-	}
-
-	stdinUsed := false
-	for _, input := range inputs {
-		switch input {
-		case "-":
-			if stdinUsed {
-				continue
-			}
-			stdinUsed = true
-			stopped, err := decodeJQStream(inv, "<stdin>", jqStdinReader(inv), visit)
-			if stopped || err != nil {
-				return stopped, err
-			}
-		default:
-			file, err := openJQRead(ctx, inv, input)
-			if err != nil {
-				return false, err
-			}
-			stopped, decodeErr := decodeJQStream(inv, input, file, visit)
-			closeErr := file.Close()
-			if decodeErr != nil {
-				return false, decodeErr
-			}
-			if closeErr != nil {
-				return false, &commands.ExitError{Code: 1, Err: closeErr}
-			}
-			if stopped {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
-}
-
-func decodeJQStream(inv *commands.Invocation, name string, reader io.Reader, visit func(value any) (bool, error)) (bool, error) {
-	decoder := json.NewDecoder(reader)
-	decoder.UseNumber()
-
-	for {
-		var value any
-		err := decoder.Decode(&value)
-		if errors.Is(err, io.EOF) {
-			return false, nil
-		}
-		if err != nil {
-			return false, exitf(inv, 5, "jq: parse error in %s: %v", name, err)
-		}
-		stopped, visitErr := visit(value)
-		if stopped || visitErr != nil {
-			return stopped, visitErr
-		}
-	}
-}
-
-func collectRawJQInputs(sources *jqSources, opts *jqOptions) []any {
-	if sources == nil {
-		if opts.slurp {
-			return []any{""}
-		}
-		return nil
-	}
-	if opts.slurp {
-		var builder strings.Builder
-		for _, data := range sources.data {
-			builder.Write(data)
-		}
-		return []any{builder.String()}
-	}
-
-	values := make([]any, 0)
-	for _, data := range sources.data {
-		values = append(values, rawLines(data)...)
-	}
-	return values
-}
-
 func rawLines(data []byte) []any {
 	if len(data) == 0 {
 		return nil
@@ -632,28 +566,6 @@ func rawLines(data []byte) []any {
 		start += idx + 1
 	}
 	return lines
-}
-
-func collectJSONJQInputs(inv *commands.Invocation, sources *jqSources, opts *jqOptions) ([]any, error) {
-	if sources == nil {
-		if opts.slurp {
-			return []any{[]any{}}, nil
-		}
-		return nil, nil
-	}
-
-	values := make([]any, 0)
-	for i, data := range sources.data {
-		decoded, err := decodeJQJSON(data)
-		if err != nil {
-			return nil, exitf(inv, 5, "jq: parse error in %s: %v", sources.names[i], err)
-		}
-		values = append(values, decoded...)
-	}
-	if opts.slurp {
-		return []any{values}, nil
-	}
-	return values, nil
 }
 
 func readJQFile(ctx context.Context, inv *commands.Invocation, name string) ([]byte, error) {
@@ -727,7 +639,37 @@ func decodeSingleJQJSON(data []byte) (any, error) {
 	return values[0], nil
 }
 
-func runJQQuery(ctx context.Context, inv *commands.Invocation, code *gojq.Code, input any, variableValues []any, opts *jqOptions, hadOutput *bool, lastValue *any) (bool, error) {
+func processJQInputs(ctx context.Context, inv *commands.Invocation, code *gojq.Code, iter jqIter, variableValues []any, opts *jqOptions) error {
+	formatter := newJQFormatter(inv, opts)
+	hadOutput := false
+	var lastValue any
+
+	for {
+		value, ok := iter.Next()
+		if !ok {
+			break
+		}
+		stopped, err := runJQQuery(ctx, inv, code, value, variableValues, formatter, &hadOutput, &lastValue)
+		if err != nil {
+			return err
+		}
+		if stopped {
+			break
+		}
+	}
+
+	if opts.exitStatus {
+		switch {
+		case !hadOutput:
+			return &commands.ExitError{Code: 4}
+		case lastValue == nil || lastValue == false:
+			return &commands.ExitError{Code: 1}
+		}
+	}
+	return nil
+}
+
+func runJQQuery(ctx context.Context, inv *commands.Invocation, code *gojq.Code, input any, variableValues []any, formatter *jqFormatter, hadOutput *bool, lastValue *any) (bool, error) {
 	iter := code.RunWithContext(ctx, input, variableValues...)
 	for {
 		value, ok := iter.Next()
@@ -745,62 +687,12 @@ func runJQQuery(ctx context.Context, inv *commands.Invocation, code *gojq.Code, 
 		*hadOutput = true
 		*lastValue = value
 
-		formatted, err := formatJQValue(value, opts)
-		if err != nil {
+		if err := formatter.WriteValue(value); err != nil {
+			if _, ok := commands.ExitCode(err); ok {
+				return false, err
+			}
 			return false, &commands.ExitError{Code: 5, Err: err}
 		}
-		if _, err := inv.Stdout.Write(formatted); err != nil {
-			return false, &commands.ExitError{Code: 1, Err: err}
-		}
-		switch {
-		case opts.rawOutput0:
-			if _, err := inv.Stdout.Write([]byte{0x00}); err != nil {
-				return false, &commands.ExitError{Code: 1, Err: err}
-			}
-		case !opts.join:
-			if _, err := io.WriteString(inv.Stdout, "\n"); err != nil {
-				return false, &commands.ExitError{Code: 1, Err: err}
-			}
-		}
-	}
-}
-
-func formatJQValue(value any, opts *jqOptions) ([]byte, error) {
-	if opts.raw {
-		if s, ok := value.(string); ok {
-			if opts.rawOutput0 && strings.ContainsRune(s, '\x00') {
-				return nil, fmt.Errorf("cannot output a string containing NUL character")
-			}
-			return []byte(s), nil
-		}
-	}
-
-	data, err := gojq.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	if opts.compact {
-		return data, nil
-	}
-	if len(data) == 0 {
-		return data, nil
-	}
-
-	switch data[0] {
-	case '{', '[':
-		var buf bytes.Buffer
-		indent := "  "
-		if opts.tab {
-			indent = "\t"
-		} else if opts.indent != nil {
-			indent = strings.Repeat(" ", *opts.indent)
-		}
-		if err := json.Indent(&buf, data, "", indent); err != nil {
-			return nil, err
-		}
-		return buf.Bytes(), nil
-	default:
-		return data, nil
 	}
 }
 
@@ -839,34 +731,54 @@ Usage:
   jq [options] <filter> [file ...]
 
 Supported options:
-  -a, --ascii            accept upstream ASCII mode flag (output remains UTF-8)
+  -a, --ascii-output     escape non-ASCII code points in JSON strings
   -c, --compact, --compact-output
                          produce compact JSON output
-  -C, --color            accept upstream color mode flag (ignored)
+  -C, --color-output     force ANSI color in JSON output
   -e, --exit-status      set exit status based on the last output value
   -f, --from-file        read the jq filter from a file
   -h, --help             show this help text
   -j, --join-output      do not print a trailing newline after each result
-  -M, --monochrome       accept upstream monochrome mode flag (ignored)
+  -L, --library-path dir search jq modules from dir inside the sandbox
+  -M, --monochrome-output
+                         disable ANSI color in JSON output
   -n, --null-input       run the filter once with null as input
   -r, --raw-output       print string results without JSON quotes
   -R, --raw-input        read input as raw strings
   -s, --slurp            read all inputs into an array and run once
   -S, --sort-keys        accepted for compatibility
-  -v, --version          show version information
+      --build-configuration
+                         show gbash jq build metadata
+      --seq              parse input and frame output as JSON text sequences
+      --stream           parse input in stream fashion
+      --stream-errors    imply --stream and surface parse errors as tuples
+      --unbuffered       flush after each output value when supported
+  -V, --version          show version information
   --arg name value       bind a string variable
   --argjson name value   bind a JSON variable
   --args                 treat remaining arguments as string positional values
   --from-file            read the jq filter from a file
   --indent number        set indentation width
+  --ascii                legacy alias for --ascii-output
+  --color                legacy alias for --color-output
   --jsonargs             treat remaining arguments as JSON positional values
+  --monochrome           legacy alias for --monochrome-output
   --raw-output0          write NUL delimiters instead of newlines
   --rawfile name file    bind a file's raw contents to a variable
   --slurpfile name file  bind a file's JSON values as an array
   --tab                  use tabs for indentation
+  -v                     legacy alias for --version
 `
 
-const jqVersionText = "jq (gbash) backed by gojq v0.12.18\n"
+const gojqVersion = "0.12.18"
+
+const jqVersionText = "jq (gbash) backed by gojq v" + gojqVersion + "\n"
+
+const jqBuildConfigurationText = "" +
+	"implementation: jq (gbash)\n" +
+	"engine: gojq v" + gojqVersion + "\n" +
+	"module_loader: sandbox-fs\n" +
+	"features: ascii-output,color-output,monochrome-output,unbuffered,stream,stream-errors,seq,library-path\n"
 
 func exitf(inv *commands.Invocation, code int, format string, args ...any) error {
 	return commands.Exitf(inv, code, format, args...)
@@ -878,13 +790,6 @@ func readAllStdin(ctx context.Context, inv *commands.Invocation) ([]byte, error)
 		return nil, err
 	}
 	return data, nil
-}
-
-func jqStdinReader(inv *commands.Invocation) io.Reader {
-	if inv == nil || inv.Stdin == nil {
-		return strings.NewReader("")
-	}
-	return inv.Stdin
 }
 
 func readAllFile(ctx context.Context, inv *commands.Invocation, name string) (data []byte, abs string, err error) {
