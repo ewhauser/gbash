@@ -97,6 +97,10 @@ type Runner struct {
 	// Params are the current shell parameters, e.g. from running a shell
 	// file or calling a function. Accessible via the $@/$* family of vars.
 	Params []string
+	// Arg0 is the shell-visible $0 for the lifetime of this shell execution.
+	// Unlike filename, it must not change while sourced files run.
+	// When empty, the first top-level reader name becomes $0.
+	Arg0 string
 
 	// Separate maps - note that bash allows a name to be both a var and a
 	// func simultaneously.
@@ -275,6 +279,7 @@ type Runner struct {
 
 	origDir     string
 	origParams  []string
+	origArg0    string
 	origOpts    runnerOpts
 	origStdin   StdinReader
 	origStdout  io.Writer
@@ -563,6 +568,7 @@ type RunnerConfig struct {
 	Stdout io.Writer
 	Stderr io.Writer
 	Params []string
+	Arg0   string
 	Now    func() time.Time
 	// ShellStartTime is the shell-visible wall clock used for printf %T -2.
 	ShellStartTime time.Time
@@ -708,6 +714,7 @@ func NewRunner(cfg *RunnerConfig) (*Runner, error) {
 	r.legacyBashCompat = cfg.LegacyBashCompat
 	r.commandString = cfg.CommandString
 	r.commandStringValue = cfg.CommandStringValue
+	r.Arg0 = cfg.Arg0
 	if err := r.setStdIO(cfg.Stdin, cfg.Stdout, cfg.Stderr); err != nil {
 		return nil, err
 	}
@@ -1165,6 +1172,7 @@ func (r *Runner) Reset() {
 	if !r.didReset {
 		r.origDir = r.Dir
 		r.origParams = r.Params
+		r.origArg0 = r.Arg0
 		r.origOpts = r.opts
 		r.origStdin = r.stdin
 		r.origStdout = r.stdout
@@ -1214,6 +1222,7 @@ func (r *Runner) Reset() {
 		// constructor set up.
 		Dir:                r.origDir,
 		Params:             r.origParams,
+		Arg0:               r.origArg0,
 		opts:               r.origOpts,
 		stdin:              r.origStdin,
 		stdout:             r.origStdout,
@@ -1227,6 +1236,7 @@ func (r *Runner) Reset() {
 
 		origDir:        r.origDir,
 		origParams:     r.origParams,
+		origArg0:       r.origArg0,
 		origOpts:       r.origOpts,
 		origStdin:      r.origStdin,
 		origStdout:     r.origStdout,
@@ -1415,6 +1425,9 @@ func (r *Runner) run(ctx context.Context, node syntax.Node, runExitTrap, manageM
 	r.filename = ""
 	switch node := node.(type) {
 	case *syntax.File:
+		if r.Arg0 == "" && strings.TrimSpace(node.Name) != "" {
+			r.Arg0 = node.Name
+		}
 		r.filename = node.Name
 		if manageMainFrame && !r.internalRun && r.topLevelScriptPath != "" && node.Name == r.topLevelScriptPath {
 			restoreFrame := r.pushFrame(execFrame{
@@ -1472,6 +1485,7 @@ func (r *Runner) subshell(_ bool) *Runner {
 		platform:                  r.platform,
 		pipeFactory:               r.pipeFactory,
 		Params:                    r.Params,
+		Arg0:                      r.Arg0,
 		callHandler:               r.callHandler,
 		execHandler:               r.execHandler,
 		openHandler:               r.openHandler,
@@ -1524,6 +1538,7 @@ func (r *Runner) subshell(_ bool) *Runner {
 		startupHome:               r.startupHome,
 		origStart:                 r.origStart,
 		origShellStart:            r.origShellStart,
+		origArg0:                  r.origArg0,
 		startTime:                 r.startTime,
 		shellStartTime:            r.shellStartTime,
 		analysis:                  r.cloneAnalysisState(),

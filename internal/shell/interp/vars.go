@@ -942,10 +942,9 @@ func (r *Runner) lookupVar(name string) expand.Variable {
 		switch {
 		case i == 0:
 			vr.Kind = expand.String
-			if r.filename != "" && r.filename != "stdin" {
-				vr.Str = r.filename
-			} else {
-				vr.Str = "gbash"
+			vr.Str = r.Arg0
+			if vr.Str == "" {
+				vr.Str = defaultVirtualShell
 			}
 			vr.Set = true
 			return vr

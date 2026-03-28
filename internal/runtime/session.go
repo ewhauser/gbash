@@ -150,7 +150,7 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 		return result, err
 	}
 	execReq := &shell.Execution{
-		Name:             baseLogEvent.Name,
+		Name:             req.Name,
 		Interpreter:      req.Interpreter,
 		ShellVariant:     req.ShellVariant,
 		PassthroughArgs:  cloneStrings(req.PassthroughArgs),
@@ -343,7 +343,7 @@ func (s *Session) interact(ctx context.Context, req *InteractiveRequest) (*Inter
 	terminalStdin := bufio.NewReader(stdinOrEmpty(req.Stdin))
 	ctx = forceExecutionTTY(ctx, terminalStdin, writerOrDiscard(req.Stdout))
 	result, err := shell.Interact(ctx, &shell.Execution{
-		Name:             defaultName(req.Name),
+		Name:             req.Name,
 		ShellVariant:     req.ShellVariant,
 		Args:             req.Args,
 		StartupOptions:   req.StartupOptions,

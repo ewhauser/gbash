@@ -163,6 +163,22 @@ func TestExecNameOnlyLeavesBashSourceUnset(t *testing.T) {
 	}
 }
 
+func TestExecUnnamedScriptDefaultsArg0ToShellPath(t *testing.T) {
+	t.Parallel()
+
+	session := newSession(t, &Config{})
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		Script: "printf 'ZERO:%s\\n' \"$0\"\n",
+	})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+
+	if got, want := result.Stdout, "ZERO:/bin/sh\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestExecInlineCommandStringSetsBashExecutionString(t *testing.T) {
 	t.Parallel()
 
@@ -267,6 +283,86 @@ func TestExecInlineSourceTracksCallLinesWithoutPseudoFrames(t *testing.T) {
 		"LINE:1",
 		"",
 	}, "\n"); got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestExecInlineSourcePreservesArg0WhileUpdatingBashSource(t *testing.T) {
+	t.Parallel()
+
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/lib.sh", []byte(strings.Join([]string{
+		`printf 'ZERO:%s\n' "$0"`,
+		`printf 'SRC:%s\n' "${BASH_SOURCE[0]}"`,
+		"",
+	}, "\n")))
+
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		Name:   "inline.sh",
+		Script: "source /lib.sh\n",
+	})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+
+	if got, want := result.Stdout, strings.Join([]string{
+		"ZERO:inline.sh",
+		"SRC:/lib.sh",
+		"",
+	}, "\n"); got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestExecScriptPathSourcePreservesTopLevelArg0(t *testing.T) {
+	t.Parallel()
+
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/home/agent/main.sh", []byte("source /lib.sh\n"))
+	writeSessionFile(t, session, "/lib.sh", []byte(strings.Join([]string{
+		`printf 'ZERO:%s\n' "$0"`,
+		`printf 'SRC:%s\n' "${BASH_SOURCE[0]}"`,
+		"",
+	}, "\n")))
+
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		ScriptPath: "main.sh",
+	})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+
+	if got, want := result.Stdout, strings.Join([]string{
+		"ZERO:main.sh",
+		"SRC:/lib.sh",
+		"",
+	}, "\n"); got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestExecInlineSourceGuardReportsSourced(t *testing.T) {
+	t.Parallel()
+
+	session := newSession(t, &Config{})
+	writeSessionFile(t, session, "/guard.sh", []byte(strings.Join([]string{
+		`if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then`,
+		`  echo executed`,
+		`else`,
+		`  echo sourced`,
+		`fi`,
+		"",
+	}, "\n")))
+
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		Name:   "inline.sh",
+		Script: "source /guard.sh\n",
+	})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+
+	if got, want := result.Stdout, "sourced\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }

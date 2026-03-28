@@ -512,7 +512,7 @@ func TestLINENOInForLoopUsesStatementLine(t *testing.T) {
 	}
 }
 
-func TestPositionalZeroDefaultsToGBash(t *testing.T) {
+func TestPositionalZeroUsesTopLevelExecutionName(t *testing.T) {
 	t.Parallel()
 
 	stdout, stderr, err := runSpecialVarScript(t, nil, ""+
@@ -528,5 +528,37 @@ func TestPositionalZeroDefaultsToGBash(t *testing.T) {
 	}
 	if got, want := stdout, "sh\na b\n"; got != want {
 		t.Fatalf("stdout = %q, want %q; stderr=%q", got, want, stderr)
+	}
+}
+
+func TestRunParsedFileUsesFileNameForArg0(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr strings.Builder
+	runner, err := NewRunner(&RunnerConfig{
+		Dir:    "/tmp",
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+
+	file, err := syntax.NewParser().Parse(strings.NewReader(strings.Join([]string{
+		`printf 'ZERO:%s\n' "$0"`,
+		"",
+	}, "\n")), "parsed-entry.sh")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if err := runner.Run(context.Background(), file); err != nil {
+		t.Fatalf("Run() error = %v; stderr=%q", err, stderr.String())
+	}
+	if got, want := stdout.String(), "ZERO:parsed-entry.sh\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
 	}
 }
