@@ -321,6 +321,235 @@ func TestJQHandlesInvalidQuery(t *testing.T) {
 	}
 }
 
+func TestJQSupportsVersionAliases(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: "jq -V\njq -v\njq --version\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, jqVersionText+jqVersionText+jqVersionText; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestJQSupportsASCIIOutput(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: `printf '%s\n' '{"Ω":"λ"}' | jq --ascii-output -c '.'` + "\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "{\"\\u03a9\":\"\\u03bb\"}\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestJQSupportsInputsAndInputFilename(t *testing.T) {
+	t.Parallel()
+
+	session := newJQSession(t)
+	result := mustExecSession(t, session, strings.Join([]string{
+		"printf '%s\\n' '1' '2' | jq -n -c '[inputs]'",
+		"printf '%s\\n' '1' > a.json",
+		"jq 'input_filename' a.json",
+		"",
+	}, "\n"))
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "[1,2]\n\"a.json\"\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestJQSupportsColorAndMonochromeOutput(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+
+	colorResult, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: `printf '%s\n' '{"x":1}' | jq -C -c '.'` + "\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if colorResult.ExitCode != 0 {
+		t.Fatalf("color ExitCode = %d, want 0; stderr=%q", colorResult.ExitCode, colorResult.Stderr)
+	}
+	if !strings.Contains(colorResult.Stdout, "\x1b[") {
+		t.Fatalf("Stdout = %q, want ANSI color output", colorResult.Stdout)
+	}
+
+	monoResult, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: `printf '%s\n' '{"x":1}' | jq -CM -c '.'` + "\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if monoResult.ExitCode != 0 {
+		t.Fatalf("mono ExitCode = %d, want 0; stderr=%q", monoResult.ExitCode, monoResult.Stderr)
+	}
+	if strings.Contains(monoResult.Stdout, "\x1b[") {
+		t.Fatalf("Stdout = %q, want monochrome output", monoResult.Stdout)
+	}
+	if got, want := monoResult.Stdout, "{\"x\":1}\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestJQSupportsUnbufferedOutput(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: "jq --unbuffered -n '1'\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "1\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestJQSupportsStreamMode(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: `printf '%s\n' '[1,[2]]' | jq --stream -c '.'` + "\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "[[0],1]\n[[1,0],2]\n[[1,0]]\n[[1]]\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestJQSupportsStreamErrorsMode(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: strings.Join([]string{
+			`printf '%s' '{' | jq --stream-errors -c '.'`,
+			`printf '%s' '{"a":[1,' | jq --stream-errors -c '.'`,
+			"",
+		}, "\n"),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty stderr", result.Stderr)
+	}
+	if got, want := result.Stdout, "[\"Unfinished JSON term at EOF at line 1, column 1\",[null]]\n[[\"a\",0],1]\n[\"Unfinished JSON term at EOF at line 1, column 8\",[\"a\",1]]\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestJQSupportsSeqMode(t *testing.T) {
+	t.Parallel()
+
+	session := newJQSession(t)
+	result := mustExecSession(t, session, strings.Join([]string{
+		`printf '\0361\n' | jq --seq '.' | od -An -t x1 | tr -d ' \n'`,
+		"printf '\\n'",
+		`jq -n --seq '1,2' | od -An -t x1 | tr -d ' \n'`,
+		"printf '\\n'",
+		`jq -n --seq -r '"a","b"' | od -An -t x1 | tr -d ' \n'`,
+		"",
+	}, "\n"))
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "1e310a\n1e310a1e320a\n610a620a"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestJQWarnsOnNonSequenceInput(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: `printf '%s\n' '1' | jq --seq '.'` + "\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if result.Stdout != "" {
+		t.Fatalf("Stdout = %q, want empty stdout", result.Stdout)
+	}
+	if got, want := result.Stderr, "jq: ignoring parse error: Unfinished abandoned text at EOF at line 2, column 0\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
+func TestJQSupportsModuleLoading(t *testing.T) {
+	t.Parallel()
+
+	session := newJQSession(t)
+	writeSessionFile(t, session, "/lib/mod.jq", []byte("def f: 42;\n"))
+	writeSessionFile(t, session, "/lib/data.json", []byte("{\"v\":7}\n"))
+
+	result := mustExecSession(t, session, strings.Join([]string{
+		`jq -L /lib -n 'include "mod"; f'`,
+		`jq -L /lib -n 'import "data" as $d; $d[0].v'`,
+		"",
+	}, "\n"))
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "42\n7\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestJQSupportsBuildConfiguration(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: "jq --build-configuration\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, jqBuildConfigurationText; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestJQSupportsCompatibilityAliasesIsolated(t *testing.T) {
 	t.Parallel()
 	rt := newJQRuntime(t)
@@ -336,7 +565,7 @@ func TestJQSupportsCompatibilityAliasesIsolated(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "[1,{\"x\":\"Ω\"}]\n[1,{\"x\":\"Ω\"}]\n"; got != want {
+	if got, want := result.Stdout, "[1,{\"x\":\"\\u03a9\"}]\n[1,{\"x\":\"\\u03a9\"}]\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
