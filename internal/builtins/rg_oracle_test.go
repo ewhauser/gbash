@@ -2,6 +2,8 @@ package builtins_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -20,6 +22,7 @@ func TestRGMatchesRipgrep(t *testing.T) {
 		stdinTTY   bool
 		sortStdout bool
 		setup      func(t *testing.T, workDir string)
+		runDir     func(workDir string) string
 		buildArgs  func(workDir string) (gbashArgs, ripgrepArgs []string)
 	}{
 		{
@@ -74,8 +77,46 @@ func TestRGMatchesRipgrep(t *testing.T) {
 				writeHostFile(t, workDir, "sub/nested-ignored.txt", "hit\n")
 				writeHostFile(t, workDir, "sub/visible.txt", "hit\n")
 			},
+			runDir: func(workDir string) string {
+				return workDir + "/sub"
+			},
 			buildArgs: func(string) ([]string, []string) {
 				return []string{"hit", "."}, []string{"hit", "."}
+			},
+		},
+		{
+			name: "git-file-boundary",
+			setup: func(t *testing.T, workDir string) {
+				writeHostFile(t, workDir, ".git", "gitdir: /tmp/gitdir\n")
+				writeHostFile(t, workDir, ".gitignore", "sub/ignored.txt\n")
+				writeHostFile(t, workDir, "sub/ignored.txt", "hit\n")
+				writeHostFile(t, workDir, "sub/visible.txt", "hit\n")
+			},
+			runDir: func(workDir string) string {
+				return workDir + "/sub"
+			},
+			buildArgs: func(string) ([]string, []string) {
+				return []string{"hit", "."}, []string{"hit", "."}
+			},
+		},
+		{
+			name: "follow-link-ignore",
+			setup: func(t *testing.T, workDir string) {
+				writeHostFile(t, workDir, ".git/HEAD", "ref: refs/heads/main\n")
+				writeHostFile(t, workDir, ".gitignore", "link/ignored.txt\n")
+
+				targetDir := filepath.Join(filepath.Dir(workDir), "target")
+				if err := os.MkdirAll(targetDir, 0o755); err != nil {
+					t.Fatalf("MkdirAll(%q) error = %v", targetDir, err)
+				}
+				writeHostFile(t, filepath.Dir(workDir), "target/ignored.txt", "hit\n")
+				writeHostFile(t, filepath.Dir(workDir), "target/visible.txt", "hit\n")
+				if err := os.Symlink("../target", filepath.Join(workDir, "link")); err != nil {
+					t.Fatalf("Symlink(link) error = %v", err)
+				}
+			},
+			buildArgs: func(string) ([]string, []string) {
+				return []string{"-L", "hit", "."}, []string{"-L", "hit", "."}
 			},
 		},
 		{
@@ -112,8 +153,8 @@ func TestRGMatchesRipgrep(t *testing.T) {
 
 			gbashArgs, ripgrepArgs := tc.buildArgs(workDir)
 			runDir := workDir
-			if tc.name == "subdir-gitignore" {
-				runDir = workDir + "/sub"
+			if tc.runDir != nil {
+				runDir = tc.runDir(workDir)
 			}
 			gbash := runGBashRG(t, root, runDir, tc.stdin, tc.stdinTTY, gbashArgs...)
 			ripgrep := runRipgrep(t, ripgrepPath, runDir, tc.stdin, ripgrepArgs...)

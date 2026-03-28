@@ -417,6 +417,7 @@ func (c *RG) enumerateTarget(ctx context.Context, inv *Invocation, opts *rgOptio
 	}
 
 	info := linfo
+	logicalAbs := abs
 	if linfo.Mode()&stdfs.ModeSymlink != 0 {
 		info, abs, err = rgFollowSymlink(ctx, inv, abs)
 		if err != nil {
@@ -432,8 +433,8 @@ func (c *RG) enumerateTarget(ctx context.Context, inv *Invocation, opts *rgOptio
 		initialRules := []rgIgnoreRule(nil)
 		gitRoot := ""
 		if !opts.noIgnore && !opts.noIgnoreVCS {
-			gitRoot = rgFindGitRoot(ctx, inv, abs)
-			initialRules, err = rgLoadAncestorGitIgnoreRules(ctx, inv, abs, gitRoot)
+			gitRoot = rgFindGitRoot(ctx, inv, logicalAbs)
+			initialRules, err = rgLoadAncestorGitIgnoreRules(ctx, inv, logicalAbs, gitRoot)
 			if err != nil {
 				if grepShouldPropagateError(err) {
 					return err
@@ -442,7 +443,7 @@ func (c *RG) enumerateTarget(ctx context.Context, inv *Invocation, opts *rgOptio
 				return nil
 			}
 		}
-		return c.walkRecursive(ctx, inv, opts, state, abs, target.displayBase, true, visitedDirs, initialRules, gitRoot, records)
+		return c.walkRecursive(ctx, inv, opts, state, abs, logicalAbs, target.displayBase, true, visitedDirs, initialRules, gitRoot, records)
 	}
 
 	*records = append(*records, rgFileRecord{
@@ -455,7 +456,7 @@ func (c *RG) enumerateTarget(ctx context.Context, inv *Invocation, opts *rgOptio
 	return nil
 }
 
-func (c *RG) walkRecursive(ctx context.Context, inv *Invocation, opts *rgOptions, state *grepRunState, currentAbs, currentDisplay string, explicitRoot bool, visitedDirs map[string]string, parentRules []rgIgnoreRule, gitRoot string, records *[]rgFileRecord) error {
+func (c *RG) walkRecursive(ctx context.Context, inv *Invocation, opts *rgOptions, state *grepRunState, currentAbs, currentLogicalAbs, currentDisplay string, explicitRoot bool, visitedDirs map[string]string, parentRules []rgIgnoreRule, gitRoot string, records *[]rgFileRecord) error {
 	linfo, _, err := lstatPath(ctx, inv, currentAbs)
 	if err != nil {
 		if grepShouldPropagateError(err) {
@@ -510,7 +511,7 @@ func (c *RG) walkRecursive(ctx context.Context, inv *Invocation, opts *rgOptions
 
 	currentRules := parentRules
 	if !opts.noIgnore {
-		nextRules, err := c.loadAutoIgnoreRules(ctx, inv, opts, currentAbs, currentRules, gitRoot)
+		nextRules, err := c.loadAutoIgnoreRules(ctx, inv, opts, currentAbs, currentLogicalAbs, currentRules, gitRoot)
 		if err != nil {
 			if grepShouldPropagateError(err) {
 				return err
@@ -536,6 +537,7 @@ func (c *RG) walkRecursive(ctx context.Context, inv *Invocation, opts *rgOptions
 		}
 
 		childAbs := path.Join(currentAbs, childName)
+		childLogicalAbs := path.Join(currentLogicalAbs, childName)
 		childDisplay := rgJoinDisplay(currentDisplay, childName)
 
 		childLinfo, _, err := lstatPath(ctx, inv, childAbs)
@@ -563,7 +565,7 @@ func (c *RG) walkRecursive(ctx context.Context, inv *Invocation, opts *rgOptions
 		}
 
 		if !opts.noIgnore {
-			ignored, err := rgShouldIgnorePath(append(currentRules, opts.manualIgnore...), childAbs, childIsDir)
+			ignored, err := rgShouldIgnorePath(append(currentRules, opts.manualIgnore...), childLogicalAbs, childIsDir)
 			if err != nil {
 				return exitf(inv, 2, "rg: invalid ignore pattern: %v", err)
 			}
@@ -571,7 +573,7 @@ func (c *RG) walkRecursive(ctx context.Context, inv *Invocation, opts *rgOptions
 				continue
 			}
 		} else {
-			ignored, err := rgShouldIgnorePath(opts.manualIgnore, childAbs, childIsDir)
+			ignored, err := rgShouldIgnorePath(opts.manualIgnore, childLogicalAbs, childIsDir)
 			if err != nil {
 				return exitf(inv, 2, "rg: invalid ignore pattern: %v", err)
 			}
@@ -581,7 +583,7 @@ func (c *RG) walkRecursive(ctx context.Context, inv *Invocation, opts *rgOptions
 		}
 
 		if childIsDir {
-			if err := c.walkRecursive(ctx, inv, opts, state, childResolvedAbs, childDisplay, false, visitedDirs, currentRules, gitRoot, records); err != nil {
+			if err := c.walkRecursive(ctx, inv, opts, state, childResolvedAbs, childLogicalAbs, childDisplay, false, visitedDirs, currentRules, gitRoot, records); err != nil {
 				return err
 			}
 			continue
@@ -609,15 +611,15 @@ func (c *RG) walkRecursive(ctx context.Context, inv *Invocation, opts *rgOptions
 	return nil
 }
 
-func (c *RG) loadAutoIgnoreRules(ctx context.Context, inv *Invocation, opts *rgOptions, currentAbs string, inherited []rgIgnoreRule, gitRoot string) ([]rgIgnoreRule, error) {
+func (c *RG) loadAutoIgnoreRules(ctx context.Context, inv *Invocation, opts *rgOptions, currentAbs, currentLogicalAbs string, inherited []rgIgnoreRule, gitRoot string) ([]rgIgnoreRule, error) {
 	rules := append([]rgIgnoreRule(nil), inherited...)
-	baseDir := currentAbs
+	baseDir := currentLogicalAbs
 
 	for _, candidate := range []struct {
 		name  string
 		allow bool
 	}{
-		{name: ".gitignore", allow: !opts.noIgnoreVCS && gitRoot != "" && rgPathWithin(gitRoot, currentAbs)},
+		{name: ".gitignore", allow: !opts.noIgnoreVCS && gitRoot != "" && rgPathWithin(gitRoot, currentLogicalAbs)},
 		{name: ".ignore", allow: true},
 		{name: ".rgignore", allow: true},
 	} {
@@ -714,7 +716,7 @@ func rgHasGitBoundary(ctx context.Context, inv *Invocation, dir string) bool {
 		statInfo, _, err := statPath(ctx, inv, path.Join(dir, ".git"))
 		return err == nil && statInfo != nil && statInfo.IsDir()
 	}
-	return false
+	return true
 }
 
 func rgFollowSymlink(ctx context.Context, inv *Invocation, abs string) (stdfs.FileInfo, string, error) {

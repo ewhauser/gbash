@@ -262,6 +262,61 @@ func TestRGLoadsGitIgnoreRulesFromRepoAncestorsAndSubdirs(t *testing.T) {
 	}
 }
 
+func TestRGTreatsDotGitFileAsGitBoundary(t *testing.T) {
+	t.Parallel()
+
+	rt := newRuntime(t, &Config{})
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkdir -p /tmp/repo/sub\n" +
+			"printf 'gitdir: /tmp/gitdir\\n' > /tmp/repo/.git\n" +
+			"printf 'sub/ignored.txt\\n' > /tmp/repo/.gitignore\n" +
+			"printf 'hit\\n' > /tmp/repo/sub/ignored.txt\n" +
+			"printf 'hit\\n' > /tmp/repo/sub/visible.txt\n" +
+			"cd /tmp/repo/sub\n" +
+			"rg hit .\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "./visible.txt:hit\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+}
+
+func TestRGFollowsSymlinkDirsUsingLogicalIgnorePaths(t *testing.T) {
+	t.Parallel()
+
+	rt := newRuntime(t, &Config{})
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkdir -p /tmp/repo/.git /tmp/target\n" +
+			"printf 'ref: refs/heads/main\\n' > /tmp/repo/.git/HEAD\n" +
+			"printf 'link/ignored.txt\\n' > /tmp/repo/.gitignore\n" +
+			"printf 'hit\\n' > /tmp/target/ignored.txt\n" +
+			"printf 'hit\\n' > /tmp/target/visible.txt\n" +
+			"ln -s ../target /tmp/repo/link\n" +
+			"cd /tmp/repo\n" +
+			"rg -L hit . | sort\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "./link/visible.txt:hit\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+}
+
 func TestRGSupportsOutputModesAndContext(t *testing.T) {
 	t.Parallel()
 
