@@ -944,7 +944,7 @@ func (r *Runner) lookupVar(name string) expand.Variable {
 			vr.Kind = expand.String
 			vr.Str = r.Arg0
 			if vr.Str == "" {
-				vr.Str = "gbash"
+				vr.Str = defaultVirtualShell
 			}
 			vr.Set = true
 			return vr

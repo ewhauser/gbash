@@ -512,7 +512,7 @@ func TestLINENOInForLoopUsesStatementLine(t *testing.T) {
 	}
 }
 
-func TestPositionalZeroDefaultsToGBash(t *testing.T) {
+func TestPositionalZeroUsesTopLevelExecutionName(t *testing.T) {
 	t.Parallel()
 
 	stdout, stderr, err := runSpecialVarScript(t, nil, ""+

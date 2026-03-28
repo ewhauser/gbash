@@ -99,6 +99,7 @@ type Runner struct {
 	Params []string
 	// Arg0 is the shell-visible $0 for the lifetime of this shell execution.
 	// Unlike filename, it must not change while sourced files run.
+	// When empty, the first top-level reader name becomes $0.
 	Arg0 string
 
 	// Separate maps - note that bash allows a name to be both a var and a
@@ -632,9 +633,6 @@ func (r *Runner) applyConstructorDefaults() error {
 		return fmt.Errorf("temporary directory must be an absolute path: %q", r.tempDir)
 	} else {
 		r.tempDir = path.Clean(r.tempDir)
-	}
-	if r.Arg0 == "" {
-		r.Arg0 = "gbash"
 	}
 	if r.openHandler == nil {
 		r.openHandler = closedOpenHandler()

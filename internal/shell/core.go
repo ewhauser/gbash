@@ -407,15 +407,15 @@ func executionSourceName(exec *Execution) string {
 
 func executionArg0(exec *Execution) string {
 	if exec == nil {
-		return "gbash"
+		return "/bin/sh"
 	}
-	if scriptPath := strings.TrimSpace(exec.ScriptPath); scriptPath != "" {
-		return scriptPath
+	if strings.TrimSpace(exec.ScriptPath) != "" {
+		return exec.ScriptPath
 	}
-	if name := strings.TrimSpace(exec.Name); name != "" {
-		return name
+	if strings.TrimSpace(exec.Name) != "" {
+		return exec.Name
 	}
-	return "gbash"
+	return "/bin/sh"
 }
 
 func executionUsesCommandString(exec *Execution) bool {

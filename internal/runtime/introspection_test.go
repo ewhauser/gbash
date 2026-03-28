@@ -163,6 +163,25 @@ func TestExecNameOnlyLeavesBashSourceUnset(t *testing.T) {
 	}
 }
 
+func TestExecUnnamedScriptDefaultsArg0ToShellPath(t *testing.T) {
+	t.Parallel()
+
+	session := newSession(t, &Config{})
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		Script: strings.Join([]string{
+			`printf 'ZERO:%s\n' "$0"`,
+			"",
+		}, "\n"),
+	})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+
+	if got, want := result.Stdout, "ZERO:/bin/sh\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestExecInlineCommandStringSetsBashExecutionString(t *testing.T) {
 	t.Parallel()
 
