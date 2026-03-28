@@ -168,10 +168,7 @@ func TestExecUnnamedScriptDefaultsArg0ToShellPath(t *testing.T) {
 
 	session := newSession(t, &Config{})
 	result, err := session.Exec(context.Background(), &ExecutionRequest{
-		Script: strings.Join([]string{
-			`printf 'ZERO:%s\n' "$0"`,
-			"",
-		}, "\n"),
+		Script: "printf 'ZERO:%s\\n' \"$0\"\n",
 	})
 	if err != nil {
 		t.Fatalf("Exec() error = %v", err)
