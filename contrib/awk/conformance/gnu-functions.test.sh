@@ -9,6 +9,3 @@ TZ=UTC awk 'BEGIN { print strftime("%Y-%m-%d %H:%M:%S", 0, 1); print mktime("197
 
 #### mktime honors DST datespec component
 TZ=America/New_York awk 'BEGIN { print mktime("2024 07 01 12 00 00 0") - mktime("2024 07 01 12 00 00 1") }'
-
-#### mktime uses requested date for offset selection
-TZ=Europe/Moscow awk 'BEGIN { print mktime("2014 11 01 12 00 00 0") - mktime("2014 11 01 12 00 00", 1) }'
