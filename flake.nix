@@ -17,57 +17,74 @@
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in {
-      packages = forAllSystems (pkgs: {
-        awk = pkgs.gawk;
-        bash = pkgs.bash;
-        bats = pkgs.bats;
-        curl = pkgs.curl;
-        diffutils = pkgs.diffutils;
-        jq = pkgs.jq;
+      packages = forAllSystems (pkgs:
+        let
+          yqVersion = "4.52.4";
+        in rec {
+          awk = pkgs.gawk;
+          bash = pkgs.bash;
+          bats = pkgs.bats;
+          curl = pkgs.curl;
+          diffutils = pkgs.diffutils;
+          jq = pkgs.jq;
+          yq = pkgs.buildGoModule {
+            pname = "yq";
+            version = yqVersion;
 
-        # Full coreutils build tree including test suite (matches Dockerfile)
-        coreutils-test-suite = pkgs.stdenv.mkDerivation rec {
-          pname = "coreutils-test-suite";
-          version = "9.10";
+            src = pkgs.fetchFromGitHub {
+              owner = "mikefarah";
+              repo = "yq";
+              rev = "v${yqVersion}";
+              hash = "sha256-vbvqjcov0ceFeQ81tIaXHbAFjrJ2dCkRfkw/MA0qCr4=";
+            };
 
-          src = pkgs.fetchurl {
-            url = "https://ftp.gnu.org/gnu/coreutils/coreutils-${version}.tar.gz";
-            sha256 = "e0bde1fb68509447fc723cf2517e8a8c7fa46769919bb7490ed350a2e9238562";
+            vendorHash = "sha256-WQDuMVBlmomxdaMQ/nVNki8o++dPdwDSj6jQqbsQNQw=";
+            subPackages = [ "." ];
           };
 
-          nativeBuildInputs = with pkgs; [
-            perl
-            gawk
-          ];
+          # Full coreutils build tree including test suite (matches Dockerfile)
+          coreutils-test-suite = pkgs.stdenv.mkDerivation rec {
+            pname = "coreutils-test-suite";
+            version = "9.10";
 
-          buildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux (with pkgs; [
-            acl
-            libselinux
-          ]);
+            src = pkgs.fetchurl {
+              url = "https://ftp.gnu.org/gnu/coreutils/coreutils-${version}.tar.gz";
+              sha256 = "e0bde1fb68509447fc723cf2517e8a8c7fa46769919bb7490ed350a2e9238562";
+            };
 
-          configureFlags = [
-            "--disable-nls"
-            "--disable-dependency-tracking"
-          ];
+            nativeBuildInputs = with pkgs; [
+              perl
+              gawk
+            ];
 
-          # Disable format-security warning treated as error (clang is stricter than GCC)
-          env.NIX_CFLAGS_COMPILE = "-Wno-format-security";
+            buildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux (with pkgs; [
+              acl
+              libselinux
+            ]);
 
-          # Build but don't install - keep the full source tree with build artifacts
-          buildPhase = ''
-            make -j$NIX_BUILD_CORES
-          '';
+            configureFlags = [
+              "--disable-nls"
+              "--disable-dependency-tracking"
+            ];
 
-          # Copy entire build tree to output
-          installPhase = ''
-            mkdir -p $out
-            cp -r . $out/
-          '';
+            # Disable format-security warning treated as error (clang is stricter than GCC)
+            env.NIX_CFLAGS_COMPILE = "-Wno-format-security";
 
-          # Skip fixup to preserve the build tree structure
-          dontFixup = true;
-        };
-      });
+            # Build but don't install - keep the full source tree with build artifacts
+            buildPhase = ''
+              make -j$NIX_BUILD_CORES
+            '';
+
+            # Copy entire build tree to output
+            installPhase = ''
+              mkdir -p $out
+              cp -r . $out/
+            '';
+
+            # Skip fixup to preserve the build tree structure
+            dontFixup = true;
+          };
+        });
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
@@ -78,6 +95,7 @@
             pkgs.curl
             pkgs.diffutils
             pkgs.jq
+            self.packages.${pkgs.system}.yq
           ];
         };
       });

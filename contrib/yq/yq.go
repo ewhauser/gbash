@@ -99,7 +99,7 @@ func (c *YQ) Run(ctx context.Context, inv *commands.Invocation) error {
 
 	expression, err = loadYQExpression(ctx, inv, &opts, expression)
 	if err != nil {
-		return err
+		return exitYQErr(inv, err)
 	}
 	expression = processYQExpression(expression, opts.prettyPrint)
 
@@ -117,7 +117,7 @@ func (c *YQ) Run(ctx context.Context, inv *commands.Invocation) error {
 
 	namedInputs, err := readNamedInputs(ctx, inv, inputs, !opts.nullInput)
 	if err != nil {
-		return err
+		return exitYQErr(inv, err)
 	}
 
 	var output bytes.Buffer
@@ -136,10 +136,10 @@ func (c *YQ) Run(ctx context.Context, inv *commands.Invocation) error {
 	if opts.inPlace {
 		info, err := inv.FS.Stat(ctx, namedInputs[0].Abs)
 		if err != nil {
-			return &commands.ExitError{Code: 1, Err: err}
+			return exitYQErr(inv, err)
 		}
 		if err := writeFileContents(ctx, inv, namedInputs[0].Abs, output.Bytes(), info.Mode().Perm()); err != nil { //nolint:nilaway // inPlace requires inputs; namedInputs is non-empty
-			return err
+			return exitYQErr(inv, err)
 		}
 	}
 	return nil
@@ -599,6 +599,16 @@ func normalizeYQError(inv *commands.Invocation, err error) error {
 	}
 	if _, ok := commands.ExitCode(err); ok {
 		return err
+	}
+	return exitf(inv, "yq: %v", err)
+}
+
+func exitYQErr(inv *commands.Invocation, err error) error {
+	if err == nil {
+		return nil
+	}
+	if code, ok := commands.ExitCode(err); ok {
+		return commands.Exitf(inv, code, "yq: %v", err)
 	}
 	return exitf(inv, "yq: %v", err)
 }
