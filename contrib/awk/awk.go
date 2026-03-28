@@ -654,7 +654,8 @@ func awkMktime(location *time.Location, spec string, rest ...float64) float64 {
 	if len(rest) > 0 && rest[0] != 0 {
 		loc = time.UTC
 	} else if values[6] >= 0 {
-		if offset, ok := awkTimeZoneOffset(location, values[0], values[6] > 0); ok {
+		requested := time.Date(values[0], time.Month(values[1]), values[2], values[3], values[4], values[5], 0, location)
+		if offset, ok := awkTimeZoneOffset(requested, values[6] > 0); ok {
 			loc = time.FixedZone(location.String(), offset)
 		}
 	}
@@ -662,18 +663,25 @@ func awkMktime(location *time.Location, spec string, rest ...float64) float64 {
 	return float64(t.Unix())
 }
 
-func awkTimeZoneOffset(location *time.Location, year int, wantDST bool) (int, bool) {
-	if location == nil {
+func awkTimeZoneOffset(when time.Time, wantDST bool) (int, bool) {
+	if when.Location() == nil {
 		return 0, false
 	}
-	start := time.Date(year, time.January, 1, 12, 0, 0, 0, location)
-	end := time.Date(year+1, time.January, 1, 12, 0, 0, 0, location)
-	for current := start; current.Before(end); current = current.Add(14 * 24 * time.Hour) {
-		if current.IsDST() != wantDST {
-			continue
-		}
-		_, offset := current.Zone()
+	if when.IsDST() == wantDST {
+		_, offset := when.Zone()
 		return offset, true
+	}
+	for days := 1; days <= 370; days++ {
+		before := when.Add(-time.Duration(days) * 24 * time.Hour)
+		if before.IsDST() == wantDST {
+			_, offset := before.Zone()
+			return offset, true
+		}
+		after := when.Add(time.Duration(days) * 24 * time.Hour)
+		if after.IsDST() == wantDST {
+			_, offset := after.Zone()
+			return offset, true
+		}
 	}
 	return 0, false
 }

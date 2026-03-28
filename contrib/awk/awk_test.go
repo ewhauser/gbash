@@ -277,6 +277,27 @@ func TestAWKMktimeHonorsDSTDatespec(t *testing.T) {
 	}
 }
 
+func TestAWKMktimeUsesRequestedDateForOffsetSelection(t *testing.T) {
+	t.Parallel()
+
+	if _, err := time.LoadLocation("Europe/Moscow"); err != nil {
+		t.Skipf("Europe/Moscow timezone unavailable: %v", err)
+	}
+
+	result := runAWKCommand(t, &awkCommandOptions{
+		Args: []string{`BEGIN {
+			print mktime("2014 11 01 12 00 00 0") - mktime("2014 11 01 12 00 00", 1)
+		}`},
+		Env: map[string]string{"TZ": "Europe/Moscow"},
+	})
+	if result.Err != nil {
+		t.Fatalf("Run() error = %v; stderr=%q", result.Err, result.Stderr)
+	}
+	if got, want := result.Stdout, "-10800\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
 func TestAWKSupportsGNUStringAndBitwiseFunctions(t *testing.T) {
 	t.Parallel()
 
