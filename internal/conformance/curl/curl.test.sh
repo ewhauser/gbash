@@ -46,8 +46,8 @@ Content-Type: text/plain
 X-Test: include
 
 included-body'
-[ "$normalized" = "$expected" ]
 printf '%s\n' "$normalized"
+[ "$normalized" = "$expected" ]
 
 #### head request
 response="$(curl -s -I "${GBASH_CONFORMANCE_CURL_BASE_URL}/head")"
@@ -55,8 +55,8 @@ normalized="$(printf '%s\n' "$response" | sed 's/\r$//' | grep -Ev '^(Date: |Con
 expected='HTTP/1.1 200 OK
 Content-Type: text/plain
 X-Test: head-only'
-[ "$normalized" = "$expected" ]
 printf '%s\n' "$normalized"
+[ "$normalized" = "$expected" ]
 
 #### fail with silent show-error
 set +e
