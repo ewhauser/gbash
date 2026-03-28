@@ -39,10 +39,12 @@ func TestRGMatchesRipgrep(t *testing.T) {
 			},
 		},
 		{
-			name: "glob-filter",
+			name:       "glob-filter",
+			sortStdout: true,
 			setup: func(t *testing.T, workDir string) {
 				writeHostFile(t, workDir, "want.txt", "hit\n")
 				writeHostFile(t, workDir, "skip.log", "hit\n")
+				writeHostFile(t, workDir, "sub/deep.txt", "hit\n")
 			},
 			buildArgs: func(string) ([]string, []string) {
 				return []string{"-g", "*.txt", "hit", "."}, []string{"-g", "*.txt", "hit", "."}
@@ -60,6 +62,20 @@ func TestRGMatchesRipgrep(t *testing.T) {
 			},
 			buildArgs: func(string) ([]string, []string) {
 				return []string{"--hidden", "hit", "."}, []string{"--hidden", "hit", "."}
+			},
+		},
+		{
+			name: "subdir-gitignore",
+			setup: func(t *testing.T, workDir string) {
+				writeHostFile(t, workDir, ".git/HEAD", "ref: refs/heads/main\n")
+				writeHostFile(t, workDir, ".gitignore", "sub/root-ignored.txt\n")
+				writeHostFile(t, workDir, "sub/.gitignore", "nested-ignored.txt\n")
+				writeHostFile(t, workDir, "sub/root-ignored.txt", "hit\n")
+				writeHostFile(t, workDir, "sub/nested-ignored.txt", "hit\n")
+				writeHostFile(t, workDir, "sub/visible.txt", "hit\n")
+			},
+			buildArgs: func(string) ([]string, []string) {
+				return []string{"hit", "."}, []string{"hit", "."}
 			},
 		},
 		{
@@ -95,8 +111,12 @@ func TestRGMatchesRipgrep(t *testing.T) {
 			}
 
 			gbashArgs, ripgrepArgs := tc.buildArgs(workDir)
-			gbash := runGBashRG(t, root, tc.stdin, tc.stdinTTY, gbashArgs...)
-			ripgrep := runRipgrep(t, ripgrepPath, workDir, tc.stdin, ripgrepArgs...)
+			runDir := workDir
+			if tc.name == "subdir-gitignore" {
+				runDir = workDir + "/sub"
+			}
+			gbash := runGBashRG(t, root, runDir, tc.stdin, tc.stdinTTY, gbashArgs...)
+			ripgrep := runRipgrep(t, ripgrepPath, runDir, tc.stdin, ripgrepArgs...)
 			if tc.sortStdout {
 				gbash.Stdout = sortOracleLines(gbash.Stdout)
 				ripgrep.Stdout = sortOracleLines(ripgrep.Stdout)
@@ -109,7 +129,7 @@ func TestRGMatchesRipgrep(t *testing.T) {
 	}
 }
 
-func runGBashRG(t testing.TB, root, stdin string, stdinTTY bool, args ...string) grepOracleResult {
+func runGBashRG(t testing.TB, root, workDir, stdin string, stdinTTY bool, args ...string) grepOracleResult {
 	t.Helper()
 
 	env := defaultBaseEnv()
@@ -132,7 +152,7 @@ func runGBashRG(t testing.TB, root, stdin string, stdinTTY bool, args ...string)
 	script.WriteByte('\n')
 
 	req := &ExecutionRequest{
-		WorkDir: "/work",
+		WorkDir: strings.TrimPrefix(workDir, root),
 		Script:  script.String(),
 		Stdin:   strings.NewReader(stdin),
 	}

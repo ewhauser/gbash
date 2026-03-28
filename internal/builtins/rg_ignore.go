@@ -169,3 +169,8 @@ func rgRelativePath(baseDir, target string) (string, bool) {
 	}
 	return strings.TrimPrefix(target, prefix), true
 }
+
+func rgPathWithin(baseDir, target string) bool {
+	_, ok := rgRelativePath(baseDir, target)
+	return ok
+}

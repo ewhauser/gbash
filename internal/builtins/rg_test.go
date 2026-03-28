@@ -192,9 +192,10 @@ func TestRGSupportsGlobsAndFilesMode(t *testing.T) {
 
 	rt := newRuntime(t, &Config{})
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "mkdir -p /tmp/work\n" +
+		Script: "mkdir -p /tmp/work/sub\n" +
 			"printf 'hit\\n' > /tmp/work/want.txt\n" +
 			"printf 'hit\\n' > /tmp/work/skip.txt\n" +
+			"printf 'hit\\n' > /tmp/work/sub/deep.txt\n" +
 			"printf 'hit\\n' > /tmp/work/CAPS.LOG\n" +
 			"printf 'xx\\0hit\\n' > /tmp/work/bin.dat\n" +
 			"cd /tmp/work\n" +
@@ -212,6 +213,7 @@ func TestRGSupportsGlobsAndFilesMode(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
+		"./sub/deep.txt:hit",
 		"./want.txt:hit",
 		"---",
 		"./CAPS.LOG:hit",
@@ -219,10 +221,40 @@ func TestRGSupportsGlobsAndFilesMode(t *testing.T) {
 		"./CAPS.LOG",
 		"./bin.dat",
 		"./skip.txt",
+		"./sub/deep.txt",
 		"./want.txt",
 		"",
 	}, "\n")
 	if got := result.Stdout; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+}
+
+func TestRGLoadsGitIgnoreRulesFromRepoAncestorsAndSubdirs(t *testing.T) {
+	t.Parallel()
+
+	rt := newRuntime(t, &Config{})
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkdir -p /tmp/repo/.git /tmp/repo/sub\n" +
+			"printf 'ref: refs/heads/main\\n' > /tmp/repo/.git/HEAD\n" +
+			"printf 'sub/root-ignored.txt\\n' > /tmp/repo/.gitignore\n" +
+			"printf 'nested-ignored.txt\\n' > /tmp/repo/sub/.gitignore\n" +
+			"printf 'hit\\n' > /tmp/repo/sub/root-ignored.txt\n" +
+			"printf 'hit\\n' > /tmp/repo/sub/nested-ignored.txt\n" +
+			"printf 'hit\\n' > /tmp/repo/sub/visible.txt\n" +
+			"cd /tmp/repo/sub\n" +
+			"rg hit .\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "./visible.txt:hit\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 	if result.Stderr != "" {
