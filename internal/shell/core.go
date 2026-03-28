@@ -290,6 +290,7 @@ func (m *core) runnerConfig(exec *Execution, budget *executionBudget) *interp.Ru
 	cfg.NewPipe = exec.NewPipe
 	cfg.ShellVariant = executionShellVariant(exec)
 	cfg.LegacyBashCompat = path.Base(strings.TrimSpace(exec.Interpreter)) == "bash"
+	cfg.Arg0 = executionArg0(exec)
 	cfg.CommandString = executionUsesCommandString(exec)
 	if exec.ScriptPath == "" && exec.Script != "" {
 		cfg.CommandStringValue = exec.Script
@@ -402,6 +403,19 @@ func executionSourceName(exec *Execution) string {
 	default:
 		return "stdin"
 	}
+}
+
+func executionArg0(exec *Execution) string {
+	if exec == nil {
+		return "gbash"
+	}
+	if scriptPath := strings.TrimSpace(exec.ScriptPath); scriptPath != "" {
+		return scriptPath
+	}
+	if name := strings.TrimSpace(exec.Name); name != "" {
+		return name
+	}
+	return "gbash"
 }
 
 func executionUsesCommandString(exec *Execution) bool {

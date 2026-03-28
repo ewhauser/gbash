@@ -97,6 +97,9 @@ type Runner struct {
 	// Params are the current shell parameters, e.g. from running a shell
 	// file or calling a function. Accessible via the $@/$* family of vars.
 	Params []string
+	// Arg0 is the shell-visible $0 for the lifetime of this shell execution.
+	// Unlike filename, it must not change while sourced files run.
+	Arg0 string
 
 	// Separate maps - note that bash allows a name to be both a var and a
 	// func simultaneously.
@@ -275,6 +278,7 @@ type Runner struct {
 
 	origDir     string
 	origParams  []string
+	origArg0    string
 	origOpts    runnerOpts
 	origStdin   StdinReader
 	origStdout  io.Writer
@@ -563,6 +567,7 @@ type RunnerConfig struct {
 	Stdout io.Writer
 	Stderr io.Writer
 	Params []string
+	Arg0   string
 	Now    func() time.Time
 	// ShellStartTime is the shell-visible wall clock used for printf %T -2.
 	ShellStartTime time.Time
@@ -627,6 +632,9 @@ func (r *Runner) applyConstructorDefaults() error {
 		return fmt.Errorf("temporary directory must be an absolute path: %q", r.tempDir)
 	} else {
 		r.tempDir = path.Clean(r.tempDir)
+	}
+	if r.Arg0 == "" {
+		r.Arg0 = "gbash"
 	}
 	if r.openHandler == nil {
 		r.openHandler = closedOpenHandler()
@@ -708,6 +716,7 @@ func NewRunner(cfg *RunnerConfig) (*Runner, error) {
 	r.legacyBashCompat = cfg.LegacyBashCompat
 	r.commandString = cfg.CommandString
 	r.commandStringValue = cfg.CommandStringValue
+	r.Arg0 = cfg.Arg0
 	if err := r.setStdIO(cfg.Stdin, cfg.Stdout, cfg.Stderr); err != nil {
 		return nil, err
 	}
@@ -1165,6 +1174,7 @@ func (r *Runner) Reset() {
 	if !r.didReset {
 		r.origDir = r.Dir
 		r.origParams = r.Params
+		r.origArg0 = r.Arg0
 		r.origOpts = r.opts
 		r.origStdin = r.stdin
 		r.origStdout = r.stdout
@@ -1214,6 +1224,7 @@ func (r *Runner) Reset() {
 		// constructor set up.
 		Dir:                r.origDir,
 		Params:             r.origParams,
+		Arg0:               r.origArg0,
 		opts:               r.origOpts,
 		stdin:              r.origStdin,
 		stdout:             r.origStdout,
@@ -1227,6 +1238,7 @@ func (r *Runner) Reset() {
 
 		origDir:        r.origDir,
 		origParams:     r.origParams,
+		origArg0:       r.origArg0,
 		origOpts:       r.origOpts,
 		origStdin:      r.origStdin,
 		origStdout:     r.origStdout,
@@ -1472,6 +1484,7 @@ func (r *Runner) subshell(_ bool) *Runner {
 		platform:                  r.platform,
 		pipeFactory:               r.pipeFactory,
 		Params:                    r.Params,
+		Arg0:                      r.Arg0,
 		callHandler:               r.callHandler,
 		execHandler:               r.execHandler,
 		openHandler:               r.openHandler,
@@ -1524,6 +1537,7 @@ func (r *Runner) subshell(_ bool) *Runner {
 		startupHome:               r.startupHome,
 		origStart:                 r.origStart,
 		origShellStart:            r.origShellStart,
+		origArg0:                  r.origArg0,
 		startTime:                 r.startTime,
 		shellStartTime:            r.shellStartTime,
 		analysis:                  r.cloneAnalysisState(),
