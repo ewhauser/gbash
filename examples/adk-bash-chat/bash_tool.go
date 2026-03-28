@@ -12,9 +12,12 @@ import (
 	goruntime "runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ewhauser/gbash"
-	contribsqlite3 "github.com/ewhauser/gbash/contrib/sqlite3"
+	"github.com/ewhauser/gbash/commands"
+	"github.com/ewhauser/gbash/contrib/bashtool"
+	"github.com/ewhauser/gbash/contrib/extras"
 	gbfs "github.com/ewhauser/gbash/fs"
 	"google.golang.org/adk/tool"
 )
@@ -24,19 +27,6 @@ const (
 	workDir        = "/home/agent/work"
 	defaultToolDir = labDir
 )
-
-type bashToolInput struct {
-	Script string `json:"script"`
-}
-
-type bashToolResult struct {
-	ExitCode        int    `json:"exit_code"`
-	Stdout          string `json:"stdout"`
-	Stderr          string `json:"stderr"`
-	PWD             string `json:"pwd"`
-	StdoutTruncated bool   `json:"stdout_truncated"`
-	StderrTruncated bool   `json:"stderr_truncated"`
-}
 
 type persistentBashTool struct {
 	gb         *gbash.Runtime
@@ -66,12 +56,26 @@ var labFixtures = []fixtureSpec{
 	{Source: "handoff.md", Target: labDir + "/handoff.md"},
 }
 
-func newPersistentBashTool(ctx context.Context) (*persistentBashTool, error) {
-	registry := gbash.DefaultRegistry()
-	if err := contribsqlite3.Register(registry); err != nil {
-		return nil, fmt.Errorf("register sqlite3 command: %w", err)
-	}
+func newBashRegistry() (commands.CommandRegistry, error) {
+	return extras.FullRegistry(), nil
+}
 
+func newChatBashToolContract(registry commands.CommandRegistry) *bashtool.Tool {
+	return bashtool.New(bashtool.Config{
+		Profile:  bashtool.CommandProfileExtras,
+		Registry: registry,
+		CommandNotes: []string{
+			"Files, the working directory, and exported environment variables persist across calls within the current chat session",
+			"The seeded dataset lives in /home/agent/lab and reusable artifacts belong in /home/agent/work",
+		},
+		SystemPromptAppend: strings.Join([]string{
+			"This sandbox is persistent across tool calls: files, the current working directory, and exported environment variables carry forward within the current chat session.",
+			"The seeded dataset lives in /home/agent/lab and reusable artifacts belong in /home/agent/work.",
+		}, " "),
+	})
+}
+
+func newPersistentBashTool(ctx context.Context, registry commands.CommandRegistry) (*persistentBashTool, error) {
 	gb, err := gbash.New(gbash.WithRegistry(registry)) //nolint:contextcheck // constructor does not accept context
 	if err != nil {
 		return nil, fmt.Errorf("create runtime: %w", err)
@@ -87,13 +91,19 @@ func newPersistentBashTool(ctx context.Context) (*persistentBashTool, error) {
 	return bt, nil
 }
 
-func (t *persistentBashTool) Run(ctx tool.Context, input bashToolInput) (bashToolResult, error) {
-	return t.runScript(ctx, input)
+func (t *persistentBashTool) Run(ctx tool.Context, input bashtool.Request) (bashtool.Response, error) {
+	return t.runScript(ctx, input), nil
 }
 
-func (t *persistentBashTool) runScript(ctx context.Context, input bashToolInput) (bashToolResult, error) {
-	if strings.TrimSpace(input.Script) == "" {
-		return bashToolResult{}, errors.New("bash tool requires a non-empty script")
+func (t *persistentBashTool) runScript(ctx context.Context, input bashtool.Request) bashtool.Response {
+	commandsText := input.ResolvedCommands()
+	if strings.TrimSpace(commandsText) == "" {
+		return bashtool.Response{
+			Stdout:   "",
+			Stderr:   "`commands` or `script` is required",
+			ExitCode: 1,
+			Error:    "parse_error",
+		}
 	}
 
 	t.mu.Lock()
@@ -101,25 +111,26 @@ func (t *persistentBashTool) runScript(ctx context.Context, input bashToolInput)
 
 	result, err := t.session.Exec(ctx, &gbash.ExecutionRequest{
 		Name:       "adk-bash",
-		Script:     input.Script,
+		Script:     commandsText,
 		Env:        cloneMap(t.state.env),
 		WorkDir:    t.state.workDir,
+		Timeout:    input.Timeout(),
 		ReplaceEnv: t.state.env != nil,
 	})
 	if err != nil {
-		return bashToolResult{}, fmt.Errorf("run bash script: %w", err)
+		return bashToolErrorResponse(ctx, err, input.Timeout())
 	}
 
 	t.state = nextBashState(t.state, result)
 
-	return bashToolResult{
+	return bashtool.Response{
 		ExitCode:        result.ExitCode,
 		Stdout:          result.Stdout,
 		Stderr:          result.Stderr,
-		PWD:             t.state.workDir,
 		StdoutTruncated: result.StdoutTruncated,
 		StderrTruncated: result.StderrTruncated,
-	}, nil
+		FinalEnv:        cloneMap(t.state.env),
+	}
 }
 
 func (t *persistentBashTool) Reset(ctx context.Context) error {
@@ -229,4 +240,56 @@ func mustFixtureDir() string {
 		panic("resolve fixture dir: runtime.Caller failed")
 	}
 	return filepath.Join(filepath.Dir(file), "fixtures")
+}
+
+func bashToolErrorResponse(ctx context.Context, err error, requestTimeout time.Duration) bashtool.Response {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		if ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return bashToolTimeoutResponse(contextTimeout(ctx))
+		}
+		return bashToolTimeoutResponse(requestTimeout)
+	case errors.Is(err, context.Canceled):
+		return bashtool.Response{
+			Stdout:   "",
+			Stderr:   err.Error(),
+			ExitCode: 1,
+			Error:    "canceled",
+		}
+	default:
+		return bashtool.Response{
+			Stdout:   "",
+			Stderr:   err.Error(),
+			ExitCode: 1,
+			Error:    "execution_error",
+		}
+	}
+}
+
+func bashToolTimeoutResponse(timeout time.Duration) bashtool.Response {
+	seconds := timeout.Seconds()
+	if seconds <= 0 {
+		seconds = 0
+	}
+	return bashtool.Response{
+		Stdout:   "",
+		Stderr:   fmt.Sprintf("bash: execution timed out after %.1fs\n", seconds),
+		ExitCode: 124,
+		Error:    "timeout",
+	}
+}
+
+func contextTimeout(ctx context.Context) time.Duration {
+	if ctx == nil {
+		return 0
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return 0
+	}
+	timeout := time.Until(deadline)
+	if timeout < 0 {
+		return 0
+	}
+	return timeout
 }
