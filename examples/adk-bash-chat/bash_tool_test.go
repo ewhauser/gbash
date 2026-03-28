@@ -4,64 +4,77 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/ewhauser/gbash/contrib/bashtool"
 )
 
-func TestSeedLabCreatesFixturesAndSQLiteDatabase(t *testing.T) {
+func TestSeedLabCreatesFixturesAndExtrasRegistryTools(t *testing.T) {
 	t.Parallel()
 
-	tool, err := newPersistentBashTool(context.Background())
+	registry := newBashRegistry()
+	tool, err := newPersistentBashTool(context.Background(), registry)
 	if err != nil {
 		t.Fatalf("newPersistentBashTool() error = %v", err)
 	}
 
-	first, err := tool.runScript(context.Background(), bashToolInput{
-		Script: "test -f /home/agent/lab/README.md && test -f /home/agent/lab/incidents.db && sqlite3 /home/agent/lab/incidents.db 'select count(*) from incidents;'",
+	first := tool.runScript(context.Background(), bashtool.Request{
+		Commands: "test -f /home/agent/lab/README.md && test -f /home/agent/lab/incidents.db && sqlite3 /home/agent/lab/incidents.db 'select count(*) from incidents;' && printf 'a,b\\n' | awk -F, 'NR==1 {print $2}' && printf '{\"name\":\"alice\"}\\n' | jq -r '.name'",
 	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
 	if first.ExitCode != 0 {
 		t.Fatalf("exit = %d, stderr = %q", first.ExitCode, first.Stderr)
 	}
-	if strings.TrimSpace(first.Stdout) != "4" {
-		t.Fatalf("stdout = %q, want %q", first.Stdout, "4\n")
+	if got, want := strings.TrimSpace(first.Stdout), "4\nb\nalice"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
 	}
 }
 
 func TestPersistentBashToolCarriesWorkDirAndEnv(t *testing.T) {
 	t.Parallel()
 
-	tool, err := newPersistentBashTool(context.Background())
+	registry := newBashRegistry()
+	tool, err := newPersistentBashTool(context.Background(), registry)
 	if err != nil {
 		t.Fatalf("newPersistentBashTool() error = %v", err)
 	}
 
-	first, err := tool.runScript(context.Background(), bashToolInput{
+	first := tool.runScript(context.Background(), bashtool.Request{
 		Script: "cd /home/agent/work\nexport REPORT_NAME=summary.md\npwd\n",
 	})
-	if err != nil {
-		t.Fatalf("Run(first) error = %v", err)
-	}
 	if first.ExitCode != 0 {
 		t.Fatalf("first exit = %d, stderr = %q", first.ExitCode, first.Stderr)
 	}
 	if strings.TrimSpace(first.Stdout) != "/home/agent/work" {
 		t.Fatalf("first stdout = %q", first.Stdout)
 	}
-	if first.PWD != "/home/agent/work" {
-		t.Fatalf("first pwd = %q, want %q", first.PWD, "/home/agent/work")
+	if first.FinalEnv["PWD"] != "/home/agent/work" {
+		t.Fatalf("first pwd = %q, want %q", first.FinalEnv["PWD"], "/home/agent/work")
 	}
 
-	second, err := tool.runScript(context.Background(), bashToolInput{
-		Script: "printf '%s %s\\n' \"$PWD\" \"$REPORT_NAME\"",
+	second := tool.runScript(context.Background(), bashtool.Request{
+		Commands: "printf '%s %s\\n' \"$PWD\" \"$REPORT_NAME\"",
 	})
-	if err != nil {
-		t.Fatalf("Run(second) error = %v", err)
-	}
 	if second.ExitCode != 0 {
 		t.Fatalf("second exit = %d, stderr = %q", second.ExitCode, second.Stderr)
 	}
 	if got, want := strings.TrimSpace(second.Stdout), "/home/agent/work summary.md"; got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestPersistentBashToolRejectsEmptyRequest(t *testing.T) {
+	t.Parallel()
+
+	registry := newBashRegistry()
+	tool, err := newPersistentBashTool(context.Background(), registry)
+	if err != nil {
+		t.Fatalf("newPersistentBashTool() error = %v", err)
+	}
+
+	resp := tool.runScript(context.Background(), bashtool.Request{})
+	if resp.ExitCode != 1 {
+		t.Fatalf("exit = %d, want 1", resp.ExitCode)
+	}
+	if resp.Error != "parse_error" {
+		t.Fatalf("error = %q, want %q", resp.Error, "parse_error")
 	}
 }

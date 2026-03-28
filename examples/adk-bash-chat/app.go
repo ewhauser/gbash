@@ -9,6 +9,8 @@ import (
 	"io"
 	"strings"
 
+	"github.com/ewhauser/gbash/contrib/bashtool"
+	"github.com/google/jsonschema-go/jsonschema"
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/model"
@@ -36,20 +38,36 @@ type chatApp struct {
 }
 
 func newChatApp(ctx context.Context, llm model.LLM, modelName string, backend resolvedBackend) (*chatApp, error) {
-	bashToolRunner, err := newPersistentBashTool(ctx)
+	registry := newBashRegistry()
+
+	bashToolContract := newChatBashToolContract(registry)
+
+	bashToolRunner, err := newPersistentBashTool(ctx, registry)
 	if err != nil {
 		return nil, err
 	}
 
+	inputSchema, err := jsonSchemaFromMap(bashToolContract.InputSchema())
+	if err != nil {
+		return nil, fmt.Errorf("build bash tool input schema: %w", err)
+	}
+	outputSchema, err := jsonSchemaFromMap(bashToolContract.OutputSchema())
+	if err != nil {
+		return nil, fmt.Errorf("build bash tool output schema: %w", err)
+	}
+
 	bashFunctionTool, err := functiontool.New(functiontool.Config{
-		Name:        bashToolName,
-		Description: "Run a bash script inside a persistent gbash sandbox session. Files, working directory, and exported environment variables persist across calls.",
+		Name:         bashToolContract.Name(),
+		Description:  bashToolContract.Description() + ". Files, the working directory, and exported environment variables persist across calls within the current chat session.",
+		InputSchema:  inputSchema,
+		OutputSchema: outputSchema,
 	}, bashToolRunner.Run)
 	if err != nil {
 		return nil, fmt.Errorf("create bash function tool: %w", err)
 	}
 
 	agentInstruction := strings.Join([]string{
+		bashToolContract.SystemPrompt(),
 		"You are an operations data lab assistant working inside a persistent sandbox.",
 		"Use the bash tool for any inspection, filtering, or report generation.",
 		"The seeded dataset lives in /home/agent/lab and reusable artifacts belong in /home/agent/work.",
@@ -195,11 +213,18 @@ func printEvent(w io.Writer, event *adksession.Event) {
 		switch {
 		case part.FunctionCall != nil && part.FunctionCall.Name == bashToolName:
 			_, _ = fmt.Fprintln(w, "\n[bash script]")
-			_, _ = fmt.Fprintln(w, strings.TrimSpace(fmt.Sprint(part.FunctionCall.Args["script"])))
+			_, _ = fmt.Fprintln(w, strings.TrimSpace(bashToolCommands(part.FunctionCall.Args)))
 		case part.FunctionResponse != nil && part.FunctionResponse.Name == bashToolName:
 			_, _ = fmt.Fprintln(w, "\n[bash result]")
 			if parsed, ok := decodeBashToolResponse(part.FunctionResponse.Response); ok {
-				_, _ = fmt.Fprintf(w, "exit=%d pwd=%s\n", parsed.ExitCode, parsed.PWD)
+				_, _ = fmt.Fprintf(w, "exit=%d", parsed.ExitCode)
+				if pwd := strings.TrimSpace(parsed.FinalEnv["PWD"]); pwd != "" {
+					_, _ = fmt.Fprintf(w, " pwd=%s", pwd)
+				}
+				if parsed.Error != "" {
+					_, _ = fmt.Fprintf(w, " error=%s", parsed.Error)
+				}
+				_, _ = fmt.Fprintln(w)
 				if parsed.Stdout != "" {
 					_, _ = fmt.Fprintln(w, "stdout:")
 					_, _ = fmt.Fprint(w, parsed.Stdout)
@@ -228,15 +253,25 @@ func printEvent(w io.Writer, event *adksession.Event) {
 	}
 }
 
-func decodeBashToolResponse(response any) (bashToolResult, bool) {
+func bashToolCommands(args map[string]any) string {
+	if text := strings.TrimSpace(fmt.Sprint(args["commands"])); text != "" && text != "<nil>" {
+		return text
+	}
+	if text := strings.TrimSpace(fmt.Sprint(args["script"])); text != "" && text != "<nil>" {
+		return text
+	}
+	return ""
+}
+
+func decodeBashToolResponse(response any) (bashtool.Response, bool) {
 	bytes, err := json.Marshal(response)
 	if err != nil {
-		return bashToolResult{}, false
+		return bashtool.Response{}, false
 	}
 
-	var parsed bashToolResult
+	var parsed bashtool.Response
 	if err := json.Unmarshal(bytes, &parsed); err != nil {
-		return bashToolResult{}, false
+		return bashtool.Response{}, false
 	}
 	return parsed, true
 }
@@ -247,4 +282,19 @@ func thinkingDisabledConfig() *genai.GenerateContentConfig {
 			ThinkingBudget: new(int32),
 		},
 	}
+}
+
+func jsonSchemaFromMap(raw map[string]any) (*jsonschema.Schema, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	bytes, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(bytes, &schema); err != nil {
+		return nil, err
+	}
+	return &schema, nil
 }

@@ -1,8 +1,10 @@
 # ADK Bash Chat
 
-This example builds a local CLI chatbot with `adk-go` and a persistent `gbash` `bash` tool.
+This example builds a local CLI chatbot with `adk-go` and a persistent `gbash` `bash` tool backed by [`contrib/bashtool`](../../contrib/bashtool).
 
-The chat starts with a seeded ops analytics lab in `/home/agent/lab` and a writable scratch area in `/home/agent/work`. The agent can inspect CSV, JSONL, Markdown, and SQLite data with multiple bash tool calls that share the same sandbox session, working directory, and exported shell environment.
+The chat starts with a seeded ops analytics lab in `/home/agent/lab` and a writable scratch area in `/home/agent/work`. The agent uses the shared bashtool `bash` contract (`commands`, plus the compatible `script` alias) while the example keeps a persistent sandbox session, working directory, and exported shell environment across tool calls.
+
+The sandbox runs with the extras registry, so the chat can use `awk`, `jq`, `sqlite3`, `yq`, `python`, and `html-to-markdown` in addition to the default gbash commands.
 
 ## Run
 
