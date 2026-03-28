@@ -973,12 +973,9 @@ func commandVirtualWorkDir(args []string, hc *interp.HandlerContext) string {
 	if hc == nil {
 		return "/"
 	}
-	if len(args) > 0 {
-		switch path.Base(args[0]) {
-		case "sh", "bash":
-			if strings.TrimSpace(hc.Dir) != "" {
-				return hc.Dir
-			}
+	if len(args) > 0 && shellvariant.FromInterpreter(args[0]).Resolved() {
+		if strings.TrimSpace(hc.Dir) != "" {
+			return hc.Dir
 		}
 	}
 	if strings.TrimSpace(hc.VisibleDir) != "" {
