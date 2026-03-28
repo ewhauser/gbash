@@ -129,6 +129,65 @@ func TestAWKParseErrorsUseUpstreamExitCode(t *testing.T) {
 	}
 }
 
+func TestAWKPreservesPolicyExitCodesForLoadFailures(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		args  []string
+		setup func(t *testing.T, fsys gbfs.FileSystem)
+	}{
+		{
+			name: "program file",
+			args: []string{"-f", "/blocked/prog.awk"},
+			setup: func(t *testing.T, fsys gbfs.FileSystem) {
+				t.Helper()
+				writeAWKTestFile(t, fsys, "/blocked/prog.awk", "{ print }\n")
+			},
+		},
+		{
+			name: "input file",
+			args: []string{"{ print }", "/blocked/input.txt"},
+			setup: func(t *testing.T, fsys gbfs.FileSystem) {
+				t.Helper()
+				writeAWKTestFile(t, fsys, "/blocked/input.txt", "hello\n")
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			mem := gbfs.NewMemory()
+			tc.setup(t, mem)
+
+			var stderr strings.Builder
+			inv := commands.NewInvocation(&commands.InvocationOptions{
+				Args:       tc.args,
+				Cwd:        "/",
+				Stdout:     io.Discard,
+				Stderr:     &stderr,
+				FileSystem: mem,
+				Policy: policy.NewStatic(&policy.Config{
+					ReadRoots: []string{"/safe"},
+				}),
+			})
+
+			err := NewAWK().Run(context.Background(), inv)
+			if err == nil {
+				t.Fatal("Run() error = nil, want denied read failure")
+			}
+			if code, ok := commands.ExitCode(err); !ok || code != 126 {
+				t.Fatalf("ExitCode(err) = (%d, %v), want (126, true); err=%v", code, ok, err)
+			}
+			if !strings.Contains(stderr.String(), "awk:") {
+				t.Fatalf("stderr = %q, want awk-prefixed diagnostic", stderr.String())
+			}
+		})
+	}
+}
+
 func TestLoadAWKInputsSkipsStdinWhenNamedFilesProvided(t *testing.T) {
 	t.Parallel()
 
@@ -236,4 +295,20 @@ type trackingStdinReader struct {
 func (r *trackingStdinReader) Read(p []byte) (int, error) {
 	r.reads++
 	return r.reader.Read(p)
+}
+
+func writeAWKTestFile(t *testing.T, fsys gbfs.FileSystem, name, contents string) {
+	t.Helper()
+
+	file, err := fsys.OpenFile(context.Background(), name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatalf("OpenFile(%q) error = %v", name, err)
+	}
+	if _, err := file.Write([]byte(contents)); err != nil {
+		_ = file.Close()
+		t.Fatalf("Write(%q) error = %v", name, err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close(%q) error = %v", name, err)
+	}
 }

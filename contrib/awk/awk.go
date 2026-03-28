@@ -13,6 +13,7 @@ import (
 	"github.com/ewhauser/gbash/contrib/awk/goawk/parser"
 
 	"github.com/ewhauser/gbash/commands"
+	"github.com/ewhauser/gbash/policy"
 )
 
 type AWK struct{}
@@ -45,7 +46,7 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 	}
 	programSource, err := loadAWKProgram(ctx, inv, opts, programText)
 	if err != nil {
-		return exitCodef(inv, 2, "awk: %v", err)
+		return exitAWKErr(inv, err)
 	}
 
 	compiled, err := parser.ParseProgram([]byte(programSource), nil)
@@ -55,7 +56,7 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 
 	loadedInputs, err := loadAWKInputs(ctx, inv, inputs)
 	if err != nil {
-		return exitCodef(inv, 2, "awk: %v", err)
+		return exitAWKErr(inv, err)
 	}
 	stdin := newLazyAWKStdin(ctx, inv)
 
@@ -266,6 +267,16 @@ func readAllFile(ctx context.Context, inv *commands.Invocation, name string) ([]
 
 func exitf(inv *commands.Invocation, format string, args ...any) error {
 	return exitCodef(inv, 2, format, args...)
+}
+
+func exitAWKErr(inv *commands.Invocation, err error) error {
+	if err == nil {
+		return nil
+	}
+	if code, ok := commands.ExitCode(err); ok && policy.IsDenied(err) {
+		return commands.Exitf(inv, code, "awk: %v", err)
+	}
+	return exitf(inv, "awk: %v", err)
 }
 
 func exitCodef(inv *commands.Invocation, code int, format string, args ...any) error {
