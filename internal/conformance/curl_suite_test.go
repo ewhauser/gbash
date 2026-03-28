@@ -78,7 +78,7 @@ func newCurlConformanceServer(t testing.TB) *httptest.Server {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		_, _ = w.Write(body)
+		_, _ = fmt.Fprintf(w, "method=%s\nbody=%s\n", r.Method, string(body))
 	})
 	mux.HandleFunc("/inspect/form", func(w http.ResponseWriter, r *http.Request) {
 		defer func() { _ = r.Body.Close() }()

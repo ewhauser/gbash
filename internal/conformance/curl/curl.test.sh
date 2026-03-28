@@ -14,33 +14,49 @@ curl -s -d 'hello world' "${GBASH_CONFORMANCE_CURL_BASE_URL}/echo/body"
 curl -s --data-urlencode 'message=hello world' "${GBASH_CONFORMANCE_CURL_BASE_URL}/echo/body"
 
 #### multipart form
-printf '%s' 'upload payload' >/tmp/upload.txt
-curl -s -F 'file=@/tmp/upload.txt;type=text/plain' "${GBASH_CONFORMANCE_CURL_BASE_URL}/inspect/form"
+upload_file=/tmp/gbash-curl-multipart-upload.txt
+printf '%s' 'upload payload' >"$upload_file"
+curl -s -F "file=@${upload_file};type=text/plain" "${GBASH_CONFORMANCE_CURL_BASE_URL}/inspect/form"
 
 #### upload file
-printf '%s' 'upload payload' >/tmp/upload.txt
-curl -s -T /tmp/upload.txt "${GBASH_CONFORMANCE_CURL_BASE_URL}/echo/body"
+upload_file=/tmp/gbash-curl-put-upload.txt
+printf '%s' 'upload payload' >"$upload_file"
+curl -s -T "$upload_file" "${GBASH_CONFORMANCE_CURL_BASE_URL}/echo/body"
 
 #### output file
-curl -s -o /tmp/out.txt "${GBASH_CONFORMANCE_CURL_BASE_URL}/files/report.txt"
-cat /tmp/out.txt
+output_file=/tmp/gbash-curl-output-file.txt
+curl -s -o "$output_file" "${GBASH_CONFORMANCE_CURL_BASE_URL}/files/report.txt"
+cat "$output_file"
 
 #### remote name
 curl -s -O "${GBASH_CONFORMANCE_CURL_BASE_URL}/files/report.txt"
 cat report.txt
 
 #### write out with output file
-curl -s -o /tmp/out.txt -w '%{http_code} %{content_type} %{url_effective} %{size_download}' "${GBASH_CONFORMANCE_CURL_BASE_URL}/files/report.txt"
+output_file=/tmp/gbash-curl-write-out-file.txt
+curl -s -o "$output_file" -w '%{http_code} %{content_type} %{url_effective} %{size_download}' "${GBASH_CONFORMANCE_CURL_BASE_URL}/files/report.txt"
 printf '\n'
-cat /tmp/out.txt
+cat "$output_file"
 
 #### include headers
 response="$(curl -s -i "${GBASH_CONFORMANCE_CURL_BASE_URL}/include")"
-printf '%s\n' "$response" | sed 's/\r$//' | grep -E '^(HTTP/1.1 200 OK|Content-Type: text/plain|X-Test: include|included-body)$'
+normalized="$(printf '%s\n' "$response" | sed 's/\r$//' | grep -Ev '^(Date: |Content-Length: )')"
+expected='HTTP/1.1 200 OK
+Content-Type: text/plain
+X-Test: include
+
+included-body'
+printf '%s\n' "$normalized"
+[ "$normalized" = "$expected" ]
 
 #### head request
 response="$(curl -s -I "${GBASH_CONFORMANCE_CURL_BASE_URL}/head")"
-printf '%s\n' "$response" | sed 's/\r$//' | grep -E '^(HTTP/1.1 200 OK|Content-Type: text/plain|X-Test: head-only)$'
+normalized="$(printf '%s\n' "$response" | sed 's/\r$//' | grep -Ev '^(Date: |Content-Length: )')"
+expected='HTTP/1.1 200 OK
+Content-Type: text/plain
+X-Test: head-only'
+printf '%s\n' "$normalized"
+[ "$normalized" = "$expected" ]
 
 #### fail with silent show-error
 set +e
