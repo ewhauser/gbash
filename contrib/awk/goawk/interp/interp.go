@@ -69,29 +69,30 @@ func (r returnValue) Error() string {
 
 type interp struct {
 	// Input/output
-	output        io.Writer
-	errorOutput   io.Writer
-	scanner       *bufio.Scanner
-	scanners      map[string]*bufio.Scanner
-	stdin         io.Reader
-	fileOpener    func(string) (io.ReadCloser, error)
-	fileWriter    func(string, bool) (io.WriteCloser, error)
-	shellRunner   func(string, io.Reader, io.Writer, io.Writer) (int, error)
-	pipeReader    func(string, io.Reader, io.Writer) (io.ReadCloser, func() (int, error), error)
-	pipeWriter    func(string, io.Writer, io.Writer) (io.WriteCloser, func() (int, error), error)
-	filenameIndex int
-	hadFiles      bool
-	input         io.Reader
-	inputBuffer   []byte
-	inputStreams  map[string]inputStream
-	outputStreams map[string]outputStream
-	noExec        bool
-	noFileWrites  bool
-	noFileReads   bool
-	shellCommand  []string
-	csvOutput     *bufio.Writer
-	noArgVars     bool
-	splitBuffer   []byte
+	output            io.Writer
+	errorOutput       io.Writer
+	scanner           *bufio.Scanner
+	scanners          map[string]*bufio.Scanner
+	stdin             io.Reader
+	fileOpener        func(string) (io.ReadCloser, error)
+	fileWriter        func(string, bool) (io.WriteCloser, error)
+	shellRunner       func(string, io.Reader, io.Writer, io.Writer) (int, error)
+	pipeReader        func(string, io.Reader, io.Writer) (io.ReadCloser, func() (int, error), error)
+	pipeWriter        func(string, io.Writer, io.Writer) (io.WriteCloser, func() (int, error), error)
+	filenameIndex     int
+	hadFiles          bool
+	input             io.Reader
+	inputBuffer       []byte
+	inputStreams      map[string]inputStream
+	outputStreams     map[string]outputStream
+	noExec            bool
+	noFileWrites      bool
+	noFileReads       bool
+	shellCommand      []string
+	currentRecordHook func(string)
+	csvOutput         *bufio.Writer
+	noArgVars         bool
+	splitBuffer       []byte
 
 	// Scalars, arrays, and function state
 	globals       []value
@@ -139,11 +140,15 @@ type interp struct {
 	outputMode       IOMode
 	csvOutputConfig  CSVOutputConfig
 
-	savedFieldSep      string
-	savedFieldSepRegex *regexp.Regexp
-	fieldPattern       string
-	fieldPatternRegex  *regexp.Regexp
-	fieldWidths        []int
+	savedFieldSep          string
+	savedFieldSepRegex     *regexp.Regexp
+	savedFieldSplitMode    fieldSplitMode
+	savedFieldPatternRegex *regexp.Regexp
+	savedFieldWidths       []int
+	fieldPattern           string
+	fieldPatternRegex      *regexp.Regexp
+	fieldWidths            []int
+	fieldSplitMode         fieldSplitMode
 
 	// Parsed program, compiled functions and constants
 	program   *parser.Program
@@ -181,6 +186,14 @@ const (
 	initialStackSize = 100
 	outputBufSize    = 64 * 1024
 	inputBufSize     = 64 * 1024
+)
+
+type fieldSplitMode uint8
+
+const (
+	fieldSplitFS fieldSplitMode = iota
+	fieldSplitFieldWidths
+	fieldSplitPattern
 )
 
 // NewlineMode specifies how newline characters are handled when reading or
@@ -255,6 +268,9 @@ type Config struct {
 	// Functions defined with the "function" keyword in AWK code
 	// take precedence over functions in Funcs.
 	Funcs map[string]any
+
+	// Optional hook invoked whenever the current record ($0) changes.
+	CurrentRecordHook func(string)
 
 	// Set one or more of these to true to prevent unsafe behaviours,
 	// useful when executing untrusted scripts:
@@ -511,6 +527,8 @@ func (p *interp) setExecuteConfig(config *Config) error {
 		p.setArrayValue(resolver.Global, argvIndex, strconv.Itoa(i+1), numStr(arg))
 	}
 	p.noArgVars = config.NoArgVars
+	p.currentRecordHook = config.CurrentRecordHook
+	p.notifyCurrentRecord()
 	p.filenameIndex = 1
 	p.hadFiles = false
 	for i := 0; i < len(config.Vars); i += 2 {
@@ -841,8 +859,7 @@ func (p *interp) setSpecial(index int, v value) error {
 			p.fields = append(p.fields, "")
 			p.fieldsIsTrueStr = append(p.fieldsIsTrueStr, false)
 		}
-		p.line = p.joinFields(p.fields)
-		p.lineIsTrueStr = true
+		p.assignLine(p.joinFields(p.fields), true)
 	case ast.V_NR:
 		p.lineNum = int(v.num())
 	case ast.V_RLENGTH:
@@ -862,14 +879,21 @@ func (p *interp) setSpecial(index int, v value) error {
 	case ast.V_FILENAME:
 		p.filename = v
 	case ast.V_FS:
-		p.fieldSep = p.toString(v)
-		if utf8.RuneCountInString(p.fieldSep) > 1 { // compare to interp.ensureFields
-			re, err := p.compileRegex(p.fieldSep)
+		fieldSep := p.toString(v)
+		var fieldSepRegex *regexp.Regexp
+		if utf8.RuneCountInString(fieldSep) > 1 { // compare to interp.ensureFields
+			re, err := p.compileRegex(fieldSep)
 			if err != nil {
 				return err
 			}
-			p.fieldSepRegex = re
+			fieldSepRegex = re
 		}
+		p.fieldSep = fieldSep
+		p.fieldSepRegex = fieldSepRegex
+		p.fieldSplitMode = fieldSplitFS
+		p.fieldPattern = ""
+		p.fieldPatternRegex = nil
+		p.fieldWidths = nil
 	case ast.V_OFMT:
 		p.outputFormat = p.toString(v)
 	case ast.V_OFS:
@@ -968,6 +992,13 @@ func (p *interp) updateGlobalSideEffects(name string, v value) error {
 			return err
 		}
 		p.fieldWidths = fieldWidths
+		p.fieldPattern = ""
+		p.fieldPatternRegex = nil
+		if len(fieldWidths) > 0 {
+			p.fieldSplitMode = fieldSplitFieldWidths
+		} else {
+			p.fieldSplitMode = fieldSplitFS
+		}
 	case "FPAT":
 		p.fieldPattern = p.toString(v)
 		p.fieldPatternRegex = nil
@@ -977,7 +1008,11 @@ func (p *interp) updateGlobalSideEffects(name string, v value) error {
 				return err
 			}
 			p.fieldPatternRegex = re
+			p.fieldSplitMode = fieldSplitPattern
+		} else {
+			p.fieldSplitMode = fieldSplitFS
 		}
+		p.fieldWidths = nil
 	case "IGNORECASE":
 		p.regexCache = make(map[string]*regexp.Regexp, 10)
 		if utf8.RuneCountInString(p.fieldSep) > 1 {
@@ -1101,8 +1136,7 @@ func (p *interp) setField(index int, value string) error {
 	p.fields[index-1] = value
 	p.fieldsIsTrueStr[index-1] = true
 	p.numFields = len(p.fields)
-	p.line = p.joinFields(p.fields)
-	p.lineIsTrueStr = true
+	p.assignLine(p.joinFields(p.fields), true)
 	return nil
 }
 
