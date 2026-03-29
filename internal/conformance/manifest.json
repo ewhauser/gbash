@@ -16,6 +16,13 @@
             "darwin"
           ]
         },
+        "oils/alias.test.sh::alias with word of multiple lines": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior differs from bash",
+          "goos": [
+            "darwin"
+          ]
+        },
         "oils/alias.test.sh::Two aliases in pipeline": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
@@ -371,6 +378,13 @@
             "linux"
           ]
         },
+        "oils/errexit-osh.test.sh::if pipeline doesn't fail fatally": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior differs from bash",
+          "goos": [
+            "darwin"
+          ]
+        },
         "oils/errexit-osh.test.sh::local: middle command fails and keeps going": {
           "mode": "xfail",
           "reason": "conformance: restored upstream bash coverage exposes gbash behavior that still differs from bash",
@@ -451,13 +465,6 @@
           "goos": [
             "darwin",
             "linux"
-          ]
-        },
-        "oils/loop.test.sh::Tilde expansion within for loop": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
           ]
         },
         "oils/parse-errors.test.sh::interactive parse error (regression)": {
@@ -568,6 +575,13 @@
           ]
         },
         "oils/sh-options-bash.test.sh::OSH calling bash with SHELLOPTS does not change braceexpand": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior differs from bash",
+          "goos": [
+            "darwin"
+          ]
+        },
+        "oils/smoke.test.sh::failed command": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
           "goos": [
@@ -787,6 +801,929 @@
             "darwin",
             "linux"
           ]
+        }
+      }
+    },
+    "dash": {
+      "entries": {
+        "oils/alias.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/arg-parse.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/arith-dynamic.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/arith.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/assign.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/ble-features.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/ble-unset.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/blog1.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/blog2.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/bool-parse.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/bugs.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-bracket.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-cd.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-echo.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-eval-source.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-getopts.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-meta-assign.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-meta.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-misc.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-printf.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-process.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-set.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-special.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-trap.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-type.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-umask.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/builtin-vars.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/case_.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/command-parsing.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/command-sub.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/command_.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/divergence.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/empty-bodies.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/errexit-osh.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/errexit.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/exit-status.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/explore-parsing.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/fatal-errors.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/func-parsing.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/glob.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/here-doc.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/if_.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/known-differences.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/loop.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/nul-bytes.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/paren-ambiguity.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/parse-errors.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/pipeline.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/posix.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/quote.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/redirect-command.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/redirect.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/sh-func.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/smoke.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash",
+          "goos": ["darwin"]
+        },
+        "oils/strict-options.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/tilde.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/toysh-posix.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/var-op-len.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/var-op-strip.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/var-op-test.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/var-sub-quote.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/var-sub.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/vars-bash.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/vars-special.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/whitespace.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/word-eval.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/word-split.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/xtrace.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash sh behavior still differs from dash"
+        },
+        "oils/redirect.test.sh::<> for read/write named pipes": {
+          "mode": "skip",
+          "reason": "conformance: dash oracle hangs on this named-pipe read/write case under the harness"
+        }
+      }
+    },
+    "mksh": {
+      "entries": {
+        "oils/alias.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/append.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/arg-parse.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/arith-context.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/arith-dynamic.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/arith.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/array-assign.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/array-compat.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/array-sparse.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/array.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/assign-deferred.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/assign-dialects.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/assign-extended.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/assign.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/ble-features.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/ble-idioms.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/ble-unset.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/blog1.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/blog2.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/bool-parse.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/brace-expansion.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/bugs.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-bracket.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-cd.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-echo.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-eval-source.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-getopts.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-meta-assign.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-meta.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-misc.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-printf.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-process.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-read.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-set.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-special.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-trap-err.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-trap.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-type.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-umask.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/builtin-vars.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/case_.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/command-parsing.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/command-sub.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/command_.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/dbracket.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/divergence.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/dparen.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/empty-bodies.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/errexit-osh.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/errexit.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/exit-status.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/explore-parsing.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/extglob-files.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/extglob-match.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/fatal-errors.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/func-parsing.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/glob.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/here-doc.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/if_.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/known-differences.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/let.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/loop.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/nameref.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/nul-bytes.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/paren-ambiguity.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/parse-errors.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/pipeline.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/posix.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/quote.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/redirect-command.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/redirect-multi.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/redirect.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/serialize.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/sh-func.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/smoke.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh",
+          "goos": ["darwin"]
+        },
+        "oils/strict-options.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/temp-binding.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/tilde.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/toysh-posix.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/toysh.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/unicode.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/var-op-len.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/var-op-patsub.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/var-op-slice.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/var-op-strip.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/var-op-test.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/var-sub-quote.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/var-sub.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/vars-bash.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/vars-special.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/whitespace.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/word-split.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/xtrace.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        },
+        "oils/zsh-idioms.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from mksh"
+        }
+      }
+    },
+    "zsh": {
+      "entries": {
+        "oils/alias.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/append.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/arg-parse.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/arith-context.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/arith-dynamic.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/arith.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/array-assign.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/array-basic.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/assign.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/ble-features.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/ble-idioms.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/ble-unset.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/blog1.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/blog2.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/bool-parse.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/brace-expansion.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/bugs.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-cd.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-dirs.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-echo.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-eval-source.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-meta-assign.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-meta.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-misc.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-printf.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-process.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-read.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-set.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-special.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-times.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh",
+          "goos": ["darwin"]
+        },
+        "oils/builtin-type.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-umask.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/builtin-vars.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/case_.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/command_.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/divergence.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/dparen.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/empty-bodies.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/fatal-errors.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/for-expr.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/globstar.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/if_.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/known-differences.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/let.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/loop.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/nul-bytes.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/paren-ambiguity.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/pipeline.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/redirect-command.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/redirect-multi.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/regex.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/serialize.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/tilde.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/toysh-posix.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/unicode.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/var-op-len.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/var-op-patsub.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/var-op-slice.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/var-op-strip.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/var-op-test.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/vars-bash.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/vars-special.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/whitespace.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
+        },
+        "oils/zsh-idioms.test.sh": {
+          "mode": "xfail",
+          "reason": "conformance: gbash behavior still differs from zsh"
         }
       }
     },

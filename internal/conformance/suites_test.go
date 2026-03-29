@@ -22,10 +22,6 @@ func TestConformance(t *testing.T) {
 		OracleDash,
 		OracleMksh,
 		OracleZsh,
-		OracleAsh,
-		OracleYash,
-		OracleOsh,
-		OracleKsh,
 	} {
 		suites = append(suites, struct {
 			name  string

@@ -27,6 +27,10 @@ func NewSh() *Bash {
 	return newShellCommand("sh")
 }
 
+func NewDash() *Bash {
+	return newShellCommand("dash")
+}
+
 func NewMksh() *Bash {
 	return newShellCommand("mksh")
 }
