@@ -162,6 +162,27 @@ func TestJQNullInputTryCatchKeepsMissingFilesFatal(t *testing.T) {
 	}
 }
 
+func TestJQNullInputStickyErrorsOverrideExitStatus(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: `jq -ne 'try input catch empty' missing.json` + "\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 2 {
+		t.Fatalf("ExitCode = %d, want 2; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if result.Stdout != "" {
+		t.Fatalf("Stdout = %q, want empty", result.Stdout)
+	}
+	if !strings.Contains(result.Stderr, "jq: missing.json: No such file or directory") {
+		t.Fatalf("Stderr = %q, want missing-file diagnostic", result.Stderr)
+	}
+}
+
 func TestJQSupportsStdinMarkerWithFiles(t *testing.T) {
 	t.Parallel()
 

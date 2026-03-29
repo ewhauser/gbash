@@ -134,13 +134,11 @@ func (c *JQ) Run(ctx context.Context, inv *commands.Invocation) error {
 	} else if err := compileIter.Load(); err != nil {
 		return err
 	}
-	if err := processJQInputs(ctx, inv, code, processIter, variableValues, &opts); err != nil {
-		return err
-	}
+	processErr := processJQInputs(ctx, inv, code, processIter, variableValues, &opts)
 	if err := compileIter.StickyError(); err != nil {
 		return err
 	}
-	return nil
+	return processErr
 }
 
 func parseJQArgs(inv *commands.Invocation) (opts jqOptions, filter string, inputs []string, err error) {
