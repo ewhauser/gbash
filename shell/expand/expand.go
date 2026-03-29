@@ -57,6 +57,10 @@ type Config struct {
 
 	// TildeEnv is used for ~ and ~user lookup. If nil, Env is used.
 	TildeEnv Environ
+	// PreferStartupHomeForAssignmentTilde makes assignment-like tilde
+	// expansion (e.g. `~:~/src`) prefer StartupHome over the live HOME
+	// variable for the current user.
+	PreferStartupHomeForAssignmentTilde bool
 	// CmdSubst expands a command substitution node, writing its standard
 	// output to the provided [io.Writer].
 	//
@@ -258,6 +262,7 @@ func (cfg *Config) ResetRuntimeState() {
 	cfg.StartupHome = ""
 	cfg.LangVariant = 0
 	cfg.TildeEnv = nil
+	cfg.PreferStartupHomeForAssignmentTilde = false
 	cfg.CmdSubst = nil
 	cfg.ProcSubst = nil
 	cfg.ReportError = nil
@@ -1601,7 +1606,7 @@ func RedirectFields(cfg *Config, word *syntax.Word) ([]string, error) {
 		return nil, nil
 	}
 	var fields []string
-	for s, err := range fieldsSeq(cfg, false, word) {
+	for s, err := range fieldsSeq(cfg, false, false, word) {
 		if err != nil {
 			return nil, err
 		}
@@ -1636,10 +1641,10 @@ func DupFields(cfg *Config, word *syntax.Word) ([]string, error) {
 // globbing. Assignment-like tilde expansion is intentionally disabled here, so
 // words like x=~ stay literal unless they are parsed in an assignment context.
 func FieldsSeq(cfg *Config, words ...*syntax.Word) iter.Seq2[string, error] {
-	return fieldsSeq(cfg, false, words...)
+	return fieldsSeq(cfg, false, true, words...)
 }
 
-func fieldsSeq(cfg *Config, allowAssignLike bool, words ...*syntax.Word) iter.Seq2[string, error] {
+func fieldsSeq(cfg *Config, allowAssignLike, preferStartupHome bool, words ...*syntax.Word) iter.Seq2[string, error] {
 	cfg = prepareConfig(cfg)
 	dir := cfg.envGet("PWD")
 	return func(yield func(string, error) bool) {
@@ -1668,7 +1673,7 @@ func fieldsSeq(cfg *Config, allowAssignLike bool, words ...*syntax.Word) iter.Se
 					}
 					word2 = reparsed
 				}
-				wfields, err := cfg.wordFieldsOpt(word2.Parts, allowAssignLike)
+				wfields, err := cfg.wordFieldsOpt(word2.Parts, allowAssignLike, preferStartupHome)
 				if err != nil {
 					yield("", err)
 					return
@@ -1889,7 +1894,7 @@ func (cfg *Config) cmdSubst(cs *syntax.CmdSubst) (string, error) {
 }
 
 func (cfg *Config) wordFields(wps []syntax.WordPart) ([][]fieldPart, error) {
-	return cfg.wordFieldsOpt(wps, true)
+	return cfg.wordFieldsOpt(wps, true, false)
 }
 
 // wordFieldsNoAssign is like wordFields but does not enable assignment-like
@@ -1897,10 +1902,10 @@ func (cfg *Config) wordFields(wps []syntax.WordPart) ([][]fieldPart, error) {
 // where bash would not treat the word as a potential assignment, such as
 // redirect targets.
 func (cfg *Config) wordFieldsNoAssign(wps []syntax.WordPart) ([][]fieldPart, error) {
-	return cfg.wordFieldsOpt(wps, false)
+	return cfg.wordFieldsOpt(wps, false, false)
 }
 
-func (cfg *Config) wordFieldsOpt(wps []syntax.WordPart, allowAssignLike bool) ([][]fieldPart, error) {
+func (cfg *Config) wordFieldsOpt(wps []syntax.WordPart, allowAssignLike, preferStartupHome bool) ([][]fieldPart, error) {
 	splitter := newFieldSplitter(cfg)
 	assignmentLike := false
 	assignmentPrefix := ""
@@ -1930,6 +1935,9 @@ func (cfg *Config) wordFieldsOpt(wps []syntax.WordPart, allowAssignLike bool) ([
 				}
 			} else if i == 0 {
 				prefix, rest, expanded := cfg.expandUser(s, len(wps) > 1)
+				if preferStartupHome {
+					prefix, rest, expanded = cfg.expandUserPreferStartup(s, len(wps) > 1)
+				}
 				if expanded && (prefix != "" || rest == "") {
 					splitter.appendPart(fieldPart{
 						quote: quoteSingle,
@@ -2443,14 +2451,18 @@ func (cfg *Config) sliceElems(pe *syntax.ParamExp, elems []string, indices []int
 }
 
 func (cfg *Config) expandUser(field string, moreFields bool) (prefix, rest string, expanded bool) {
-	return cfg.expandUserWithHome(field, moreFields, cfg.StartupHome)
+	return cfg.expandUserWithHome(field, moreFields, cfg.StartupHome, false)
+}
+
+func (cfg *Config) expandUserPreferStartup(field string, moreFields bool) (prefix, rest string, expanded bool) {
+	return cfg.expandUserWithHome(field, moreFields, cfg.StartupHome, true)
 }
 
 func (cfg *Config) expandAssignmentUser(field string, moreFields bool) (prefix, rest string, expanded bool) {
-	return cfg.expandUserWithHome(field, moreFields, "")
+	return cfg.expandUserWithHome(field, moreFields, cfg.StartupHome, cfg.PreferStartupHomeForAssignmentTilde)
 }
 
-func (cfg *Config) expandUserWithHome(field string, moreFields bool, startupHome string) (prefix, rest string, expanded bool) {
+func (cfg *Config) expandUserWithHome(field string, moreFields bool, startupHome string, preferStartupHome bool) (prefix, rest string, expanded bool) {
 	name, ok := strings.CutPrefix(field, "~")
 	if !ok {
 		// No tilde prefix to expand, e.g. "foo".
@@ -2467,16 +2479,19 @@ func (cfg *Config) expandUserWithHome(field string, moreFields bool, startupHome
 		name = name[:i]
 	}
 	if name == "" {
-		// Current user; try via "HOME" first (bash-compatible), then
-		// fall back to StartupHome, then the system's appropriate home
-		// dir env var. Don't use os/user, as that's overkill. We can't
-		// use [os.UserHomeDir], because we want to use cfg.Env, and we
-		// always want to check "HOME" first.
+		// Current user; some bash-compatible paths prefer the shell's startup
+		// home over a later HOME assignment, while other assignment-like paths
+		// intentionally continue to use the live HOME variable. Callers choose
+		// via preferStartupHome.
+		if preferStartupHome && startupHome != "" {
+			prefix, rest := joinTildeHome(startupHome, rest)
+			return prefix, rest, true
+		}
 		if vr := cfg.TildeEnv.Get("HOME"); vr.IsSet() {
 			prefix, rest := joinTildeHome(vr.String(), rest)
 			return prefix, rest, true
 		}
-		if startupHome != "" {
+		if !preferStartupHome && startupHome != "" {
 			prefix, rest := joinTildeHome(startupHome, rest)
 			return prefix, rest, true
 		}

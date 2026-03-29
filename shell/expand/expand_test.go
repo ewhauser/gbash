@@ -2014,12 +2014,12 @@ func TestFieldsReparseBraceExpandedWords(t *testing.T) {
 		{
 			name: "TildeExpandsAfterBraceSplit",
 			src:  `{foo~,~}/bar`,
-			want: []string{"foo~/bar", "/home/bob/bar"},
+			want: []string{"foo~/bar", "/startup/bar"},
 		},
 		{
 			name: "NamedUserTildeExpandsAfterBraceSplit",
 			src:  `~{/src,root}`,
-			want: []string{"/home/bob/src", "/root"},
+			want: []string{"/startup/src", "/root"},
 		},
 		{
 			name: "QuotedBraceElementsStillQuoteAfterReparse",

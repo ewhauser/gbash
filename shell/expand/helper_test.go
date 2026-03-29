@@ -90,6 +90,38 @@ func TestFieldsParsesLikeRemovedShellHelper(t *testing.T) {
 	}
 }
 
+func TestFieldsPreferStartupHomeForLeadingTilde(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `~/src`)
+	got, err := Fields(&Config{
+		StartupHome: "/startup",
+		Env:         testFuncEnviron(strEnviron("HOME=/live")),
+	}, word)
+	if err != nil {
+		t.Fatalf("Fields() error = %v", err)
+	}
+	if want := []string{"/startup/src"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Fields() = %#v, want %#v", got, want)
+	}
+}
+
+func TestRedirectFieldsKeepLiveHomeForLeadingTilde(t *testing.T) {
+	t.Parallel()
+
+	word := parseCommandWord(t, `~/redirect`)
+	got, err := RedirectFields(&Config{
+		StartupHome: "/startup",
+		Env:         testFuncEnviron(strEnviron("HOME=/live")),
+	}, word)
+	if err != nil {
+		t.Fatalf("RedirectFields() error = %v", err)
+	}
+	if want := []string{"/live/redirect"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("RedirectFields() = %#v, want %#v", got, want)
+	}
+}
+
 func TestRemovedShellHelperUnexpectedCmdSubstStillErrors(t *testing.T) {
 	t.Parallel()
 
