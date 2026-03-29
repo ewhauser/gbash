@@ -875,7 +875,7 @@ func arrayExpansionNull(pe *syntax.ParamExp, fields, elems []string) bool {
 }
 
 func nounsetAllowsDeclaredEmptyArray(pe *syntax.ParamExp, vr Variable) bool {
-	if pe == nil || vr.IsSet() || !vr.Declared() {
+	if pe == nil || pe.Length || vr.IsSet() || !vr.Declared() {
 		return false
 	}
 	switch vr.Kind {
