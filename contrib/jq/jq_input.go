@@ -55,14 +55,13 @@ func (i *jqSliceIter) Name() string {
 }
 
 type jqLazyIter struct {
-	ctx      context.Context
-	inv      *commands.Invocation
-	opts     jqOptions
-	inputs   []string
-	loaded   *jqSliceIter
-	loadErr  error
-	errSent  bool
-	isClosed bool
+	readSources func() (*jqSources, error)
+	inv         *commands.Invocation
+	opts        jqOptions
+	loaded      *jqSliceIter
+	loadErr     error
+	errSent     bool
+	isClosed    bool
 }
 
 func (i *jqLazyIter) Load() error {
@@ -73,7 +72,7 @@ func (i *jqLazyIter) Load() error {
 		return i.loadErr
 	}
 
-	sources, err := readJQInputSources(i.ctx, i.inv, i.inputs)
+	sources, err := i.readSources()
 	if err != nil {
 		i.loadErr = err
 		return err
@@ -159,10 +158,11 @@ func newJQInputIter(ctx context.Context, inv *commands.Invocation, opts *jqOptio
 	}
 
 	return &jqLazyIter{
-		ctx:    ctx,
-		inv:    inv,
-		opts:   clonedOpts,
-		inputs: clonedInputs,
+		readSources: func() (*jqSources, error) {
+			return readJQInputSources(ctx, inv, clonedInputs)
+		},
+		inv:  inv,
+		opts: clonedOpts,
 	}
 }
 
