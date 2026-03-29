@@ -1020,7 +1020,8 @@
         },
         "oils/smoke.test.sh": {
           "mode": "xfail",
-          "reason": "conformance: gbash sh behavior still differs from dash"
+          "reason": "conformance: gbash sh behavior still differs from dash",
+          "goos": ["darwin"]
         },
         "oils/strict-options.test.sh": {
           "mode": "xfail",
@@ -1384,7 +1385,8 @@
         },
         "oils/smoke.test.sh": {
           "mode": "xfail",
-          "reason": "conformance: gbash behavior still differs from mksh"
+          "reason": "conformance: gbash behavior still differs from mksh",
+          "goos": ["darwin"]
         },
         "oils/strict-options.test.sh": {
           "mode": "xfail",
@@ -1584,7 +1586,8 @@
         },
         "oils/builtin-times.test.sh": {
           "mode": "xfail",
-          "reason": "conformance: gbash behavior still differs from zsh"
+          "reason": "conformance: gbash behavior still differs from zsh",
+          "goos": ["darwin"]
         },
         "oils/builtin-type.test.sh": {
           "mode": "xfail",
