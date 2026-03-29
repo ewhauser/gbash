@@ -28,7 +28,7 @@ Run the package-local jq, awk, and yq parity suites:
 make contrib-conformance-test
 ```
 
-These commands fetch the pinned bash, curl, jq, awk, and yq oracles from the Nix binary cache automatically (a few seconds on first run; instant on subsequent runs).
+These commands fetch the pinned bash, dash, mksh, zsh, curl, jq, awk, and yq oracles from the Nix binary cache automatically (a few seconds on first run; instant on subsequent runs).
 
 Nix installation:
 
@@ -37,10 +37,13 @@ Nix installation:
 
 After installing, restart your shell or run `. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh`.
 
-To skip Nix entirely, point `GBASH_CONFORMANCE_BASH`, `GBASH_CONFORMANCE_CURL`, `GBASH_CONFORMANCE_JQ`, `GBASH_CONFORMANCE_AWK`, and `GBASH_CONFORMANCE_YQ` at the corresponding binaries:
+To skip Nix entirely, point `GBASH_CONFORMANCE_BASH`, `GBASH_CONFORMANCE_DASH`, `GBASH_CONFORMANCE_MKSH`, `GBASH_CONFORMANCE_ZSH`, `GBASH_CONFORMANCE_CURL`, `GBASH_CONFORMANCE_JQ`, `GBASH_CONFORMANCE_AWK`, and `GBASH_CONFORMANCE_YQ` at the corresponding binaries:
 
 ```bash
 export GBASH_CONFORMANCE_BASH=/path/to/bash
+export GBASH_CONFORMANCE_DASH=/path/to/dash
+export GBASH_CONFORMANCE_MKSH=/path/to/mksh
+export GBASH_CONFORMANCE_ZSH=/path/to/zsh
 export GBASH_CONFORMANCE_CURL=/path/to/curl
 export GBASH_CONFORMANCE_JQ=/path/to/jq
 export GBASH_CONFORMANCE_AWK=/path/to/awk

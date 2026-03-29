@@ -25,9 +25,12 @@
           bash = pkgs.bash;
           bats = pkgs.bats;
           curl = pkgs.curl;
+          dash = pkgs.dash;
           diffutils = pkgs.diffutils;
           jq = pkgs.jq;
+          mksh = pkgs.mksh;
           ripgrep = pkgs.ripgrep;
+          zsh = pkgs.zsh;
           yq = pkgs.buildGoModule {
             pname = "yq";
             version = yqVersion;
@@ -94,9 +97,12 @@
             pkgs.bash
             pkgs.bats
             pkgs.curl
+            pkgs.dash
             pkgs.diffutils
             pkgs.jq
+            pkgs.mksh
             pkgs.ripgrep
+            pkgs.zsh
             self.packages.${pkgs.system}.yq
           ];
         };

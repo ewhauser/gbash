@@ -125,6 +125,9 @@ func (inv *BashInvocation) DefaultShellVariant() ShellVariant {
 }
 
 func defaultShellVariantForName(name string) ShellVariant {
+	if strings.ToLower(strings.TrimSpace(name)) == "dash" {
+		return shellvariant.SH
+	}
 	if variant := shellvariant.FromInterpreter(name); variant.Resolved() {
 		return variant
 	}

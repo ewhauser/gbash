@@ -17,10 +17,10 @@ Before submitting or updating a PR, run `make lint` from the repo root and fix a
 
 ## Conformance & Bats Tests
 
-Conformance tests compare gbash behavior against pinned bash and curl oracles. Bats tests validate shell scripts in `scripts/`. The `diff` and `ripgrep` oracle tests and these suites require Nix installed to fetch pinned binaries unless you provide the corresponding override env vars.
+Conformance tests compare gbash behavior against pinned bash, dash, mksh, zsh, and curl oracles. `dash` stands in for the supported `sh` variant. Bats tests validate shell scripts in `scripts/`. The `diff` and `ripgrep` oracle tests and these suites require Nix installed to fetch pinned binaries unless you provide the corresponding override env vars.
 
 ```sh
-make conformance-test   # compares gbash vs pinned bash/curl oracles
+make conformance-test   # compares gbash vs pinned bash/dash/mksh/zsh/curl oracles
 make bats-test          # scripts/ test suite
 
 # Run a single conformance test file

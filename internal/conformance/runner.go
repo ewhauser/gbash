@@ -21,11 +21,14 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/ewhauser/gbash/commands"
 	gbfs "github.com/ewhauser/gbash/fs"
+	"github.com/ewhauser/gbash/internal/builtins"
 	gbruntime "github.com/ewhauser/gbash/internal/runtime"
 	"github.com/ewhauser/gbash/internal/testutil"
 	"github.com/ewhauser/gbash/policy"
 	"github.com/ewhauser/gbash/shell/syntax"
+	"github.com/ewhauser/gbash/shellvariant"
 )
 
 var bashLinePrefixPattern = regexp.MustCompile(`(?m)^(?:[^:\n]+/)?\w+:(?:[^:\n]+:)* line \d+: `)
@@ -398,7 +401,10 @@ func runGBash(ctx context.Context, cfg *SuiteConfig, oraclePath, specPath, works
 	if useScopedGlobWorkspace(specPath) {
 		opts = append(opts, gbruntime.WithBaseEnv(env))
 	}
-	opts = append(opts, gbruntime.WithFileSystem(virtualWorkspaceFileSystem(specPath, workspace, gbashWorkspaceRoot(specPath))))
+	opts = append(opts,
+		gbruntime.WithFileSystem(virtualWorkspaceFileSystem(specPath, workspace, gbashWorkspaceRoot(specPath))),
+		gbruntime.WithRegistry(gbashRegistry(cfg)),
+	)
 	if cfg := gbashPolicyConfig(specPath); cfg != nil {
 		opts = append(opts, gbruntime.WithPolicy(policy.NewStatic(cfg)))
 	}
@@ -412,11 +418,13 @@ func runGBash(ctx context.Context, cfg *SuiteConfig, oraclePath, specPath, works
 		return ExecutionResult{}, err
 	}
 	result, err := session.Exec(ctx, &gbruntime.ExecutionRequest{
-		Script:     script,
-		Name:       gbashExecutionName(specPath, oraclePath),
-		WorkDir:    gbashWorkspaceRoot(specPath),
-		ReplaceEnv: true,
-		Env:        env,
+		Interpreter:  gbashInterpreter(cfg.OracleMode),
+		ShellVariant: gbashShellVariant(cfg.OracleMode),
+		Script:       script,
+		Name:         gbashExecutionName(specPath, oraclePath),
+		WorkDir:      gbashWorkspaceRoot(specPath),
+		ReplaceEnv:   true,
+		Env:          env,
 	})
 	if err != nil {
 		errMsg := err.Error()
@@ -591,6 +599,53 @@ func OracleCommandArgs(mode OracleMode, script string) []string {
 		return []string{"-f", "-c", script}
 	default:
 		return []string{"-c", script}
+	}
+}
+
+func gbashInterpreter(mode OracleMode) string {
+	return oracleBinaryName(mode)
+}
+
+func gbashRegistry(cfg *SuiteConfig) commands.CommandRegistry {
+	var base commands.CommandRegistry
+	if cfg != nil && cfg.GBashConfig != nil {
+		base = cfg.GBashConfig.Registry
+	}
+	if base == nil {
+		base = builtins.DefaultRegistry()
+	}
+	registry := cloneRegistry(base)
+	_ = registry.Register(builtins.NewDash())
+	return registry
+}
+
+func cloneRegistry(base commands.CommandRegistry) *commands.Registry {
+	registry := commands.NewRegistry()
+	if base == nil {
+		return registry
+	}
+	for _, name := range base.Names() {
+		cmd, ok := base.Lookup(name)
+		if !ok {
+			continue
+		}
+		_ = registry.Register(cmd)
+	}
+	return registry
+}
+
+func gbashShellVariant(mode OracleMode) shellvariant.ShellVariant {
+	switch mode {
+	case OracleDash:
+		return shellvariant.SH
+	case OracleMksh:
+		return shellvariant.Mksh
+	case OracleZsh:
+		return shellvariant.Zsh
+	case OracleBash:
+		return shellvariant.Bash
+	default:
+		return shellvariant.Bash
 	}
 }
 
