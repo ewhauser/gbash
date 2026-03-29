@@ -1013,6 +1013,7 @@ func (r *Runner) stmt(ctx context.Context, st *syntax.Stmt) {
 	r.currentStmtLine = line
 	r.redirectErrLine = 0
 	r.stmtDepth++
+	hadPipeStatus := r.pipeStatusSet
 	r.pipeStatusSet = false
 	defer func() {
 		r.stmtDepth--
@@ -1038,7 +1039,7 @@ func (r *Runner) stmt(ctx context.Context, st *syntax.Stmt) {
 		}()
 		r.setPipeStatuses(0)
 	} else {
-		r.stmtSync(ctx, st)
+		r.stmtSync(ctx, st, hadPipeStatus)
 	}
 	r.runPendingSignalTraps(ctx)
 	r.lastStmtLine = line
@@ -1093,7 +1094,7 @@ func (r *Runner) printVerbose(st *syntax.Stmt) {
 	io.WriteString(r.stderr, src)
 }
 
-func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
+func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt, hadPipeStatus bool) {
 	if r.currentChunkSource == "" {
 		r.printVerbose(st)
 	}
@@ -1157,7 +1158,7 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 			r.cmd(ctx, st.Cmd)
 		}
 	}
-	if !r.pipeStatusSet && stmtShouldMaterializePipeStatus(st) {
+	if !r.pipeStatusSet && stmtShouldMaterializePipeStatus(st, hadPipeStatus) {
 		r.setPipeStatuses(r.exit.code)
 	}
 	keepRedirs := r.keepRedirs
@@ -1239,7 +1240,7 @@ func (r *Runner) stmtErrTrapLine(st *syntax.Stmt, ranCmd bool) uint {
 	return st.Pos().Line()
 }
 
-func stmtShouldMaterializePipeStatus(st *syntax.Stmt) bool {
+func stmtShouldMaterializePipeStatus(st *syntax.Stmt, hadPipeStatus bool) bool {
 	if st == nil {
 		return false
 	}
@@ -1248,7 +1249,7 @@ func stmtShouldMaterializePipeStatus(st *syntax.Stmt) bool {
 	}
 	switch st.Cmd.(type) {
 	case *syntax.ForClause, *syntax.WhileClause, *syntax.IfClause, *syntax.CaseClause, *syntax.FuncDecl:
-		return false
+		return hadPipeStatus
 	default:
 		return true
 	}
