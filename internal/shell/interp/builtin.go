@@ -427,8 +427,8 @@ func (r *Runner) shiftBuiltin(args []string) (exit exitStatus) {
 		return exit
 	}
 	if n < 0 || n > len(r.Params) {
-		if r.legacyBashCompat && r.posixMode() {
-			return r.builtinFailf(1, "shift: %s: shift count out of range\n", label)
+		if r.posixMode() {
+			r.errf("shift: %s: shift count out of range\n", label)
 		}
 		exit.code = 1
 		return exit

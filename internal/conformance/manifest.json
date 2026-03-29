@@ -590,8 +590,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
           "goos": [
-            "darwin",
-            "linux"
+            "darwin"
           ]
         },
         "oils/regex.test.sh::Unquoted { is a regex parse error": {
