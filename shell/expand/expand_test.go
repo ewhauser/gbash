@@ -1438,6 +1438,22 @@ func TestFieldsIndirectUnsetArrayNounset(t *testing.T) {
 		}
 	})
 
+	t.Run("ScalarDefaultStillEvaluatesSubscript", func(t *testing.T) {
+		word := parseCommandWord(t, "${!name:-fallback}")
+		_, err := Fields(&Config{
+			NoUnset: true,
+			Env: testEnv{
+				"name": {Set: true, Kind: String, Str: "arr[$((1/0))]"},
+			},
+		}, word)
+		if err == nil {
+			t.Fatal("expected indexed subscript error, got nil")
+		}
+		if !strings.Contains(err.Error(), "division by 0") {
+			t.Fatalf("expected division-by-zero error, got %v", err)
+		}
+	})
+
 	// Indirect ref to undefined array[@] is treated as empty (no error) even
 	// under nounset, matching bash behavior.
 	t.Run("AtSubscriptSilentUnderNounset", func(t *testing.T) {

@@ -727,6 +727,22 @@ func indirectOuterOpHandlesUnset(pe *syntax.ParamExp) bool {
 	return false
 }
 
+func (cfg *Config) validateIndirectTargetSubscript(target *syntax.ParamExp) error {
+	if target == nil || target.Index == nil || target.Index.AllElements() {
+		return nil
+	}
+	if target.Index.Mode == syntax.SubscriptAssociative {
+		if _, err := cfg.associativeSubscriptKey(target.Index); err != nil {
+			return err
+		}
+		return nil
+	}
+	if _, err := Arithm(cfg, target.Index.Expr); err != nil {
+		return normalizeIndexedSubscriptError(target.Index, err)
+	}
+	return nil
+}
+
 type paramExpState struct {
 	name             string
 	orig             Variable
@@ -865,6 +881,9 @@ func (cfg *Config) resolveIndirectTargetState(pe *syntax.ParamExp, state paramEx
 				return targetState, target, nil
 			}
 			if indirectOuterOpHandlesUnset(pe) {
+				if err := cfg.validateIndirectTargetSubscript(target); err != nil {
+					return targetState, target, err
+				}
 				return targetState, target, nil
 			}
 		}
