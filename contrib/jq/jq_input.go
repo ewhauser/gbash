@@ -54,6 +54,84 @@ func (i *jqSliceIter) Name() string {
 	return i.name
 }
 
+type jqLazyIter struct {
+	readSources    func() (*jqSources, error)
+	inv            *commands.Invocation
+	opts           jqOptions
+	loaded         *jqSliceIter
+	loadErr        error
+	sourceSetupErr error
+	errSent        bool
+	isClosed       bool
+}
+
+func (i *jqLazyIter) Load() error {
+	if i == nil || i.isClosed {
+		return nil
+	}
+	if i.loaded != nil || i.loadErr != nil {
+		return i.loadErr
+	}
+
+	sources, err := i.readSources()
+	if err != nil {
+		i.loadErr = err
+		if code, ok := commands.ExitCode(err); ok && code == 2 {
+			i.sourceSetupErr = err
+		}
+		return err
+	}
+
+	values, err := buildJQInputValues(i.inv, &i.opts, sources)
+	if err != nil {
+		i.loadErr = err
+		return err
+	}
+
+	i.loaded = &jqSliceIter{items: values}
+	return nil
+}
+
+func (i *jqLazyIter) StickyError() error {
+	if i == nil {
+		return nil
+	}
+	return i.sourceSetupErr
+}
+
+func (i *jqLazyIter) Next() (any, bool) {
+	if i == nil || i.isClosed {
+		return nil, false
+	}
+	if err := i.Load(); err != nil {
+		if i.errSent {
+			return nil, false
+		}
+		i.errSent = true
+		return err, true
+	}
+	return i.loaded.Next()
+}
+
+func (i *jqLazyIter) Close() error {
+	if i == nil {
+		return nil
+	}
+	i.isClosed = true
+	i.errSent = true
+	if i.loaded != nil {
+		return i.loaded.Close()
+	}
+	return nil
+}
+
+func (i *jqLazyIter) Name() string {
+	if i == nil || i.loaded == nil {
+		return ""
+	}
+	return i.loaded.Name()
+}
+
 type jqNullIter struct {
 	done bool
 }
@@ -81,17 +159,22 @@ func (*jqNullIter) Name() string {
 	return ""
 }
 
-func newJQInputIter(ctx context.Context, inv *commands.Invocation, opts *jqOptions, inputs []string) (*jqSliceIter, error) {
-	sources, err := readJQInputSources(ctx, inv, inputs)
-	if err != nil {
-		return nil, err
+func newJQInputIter(ctx context.Context, inv *commands.Invocation, opts *jqOptions, inputs []string) *jqLazyIter {
+	clonedInputs := make([]string, len(inputs))
+	copy(clonedInputs, inputs)
+
+	var clonedOpts jqOptions
+	if opts != nil {
+		clonedOpts = *opts
 	}
 
-	values, err := buildJQInputValues(inv, opts, sources)
-	if err != nil {
-		return nil, err
+	return &jqLazyIter{
+		readSources: func() (*jqSources, error) {
+			return readJQInputSources(ctx, inv, clonedInputs)
+		},
+		inv:  inv,
+		opts: clonedOpts,
 	}
-	return &jqSliceIter{items: values}, nil
 }
 
 func buildJQInputValues(inv *commands.Invocation, opts *jqOptions, sources *jqSources) ([]jqInputValue, error) {

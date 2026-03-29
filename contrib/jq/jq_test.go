@@ -80,6 +80,109 @@ func TestJQSupportsNullInput(t *testing.T) {
 	}
 }
 
+func TestJQNullInputDoesNotConsumeShellLoopInput(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: `while IFS= read -r line; do
+  x=$(jq -nc --arg c "$line" '{role: $c}')
+  y=$(printf '[]' | jq -c --argjson m "$x" '. + [$m]')
+  printf 'line=%s y=%s\n' "$line" "$y"
+done < <(printf '%s\n' alpha beta)` + "\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if got, want := result.Stdout, "line=alpha y=[{\"role\":\"alpha\"}]\nline=beta y=[{\"role\":\"beta\"}]\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestJQNullInputStillSupportsDeferredInputBuiltin(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: `printf '%s\n' 1 2 | jq -nc '[input, input]'` + "\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "[1,2]\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}
+
+func TestJQNullInputIgnoresUnusedMissingFiles(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: `jq -n '.' missing.json` + "\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if got, want := result.Stdout, "null\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+}
+
+func TestJQNullInputTryCatchKeepsMissingFilesFatal(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: `jq -n 'try input catch "ok"' missing.json` + "\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 2 {
+		t.Fatalf("ExitCode = %d, want 2; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if got, want := result.Stdout, "\"ok\"\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if !strings.Contains(result.Stderr, "jq: missing.json: No such file or directory") {
+		t.Fatalf("Stderr = %q, want missing-file diagnostic", result.Stderr)
+	}
+}
+
+func TestJQNullInputStickyErrorsOverrideExitStatus(t *testing.T) {
+	t.Parallel()
+
+	rt := newJQRuntime(t)
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: `jq -ne 'try input catch empty' missing.json` + "\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 2 {
+		t.Fatalf("ExitCode = %d, want 2; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if result.Stdout != "" {
+		t.Fatalf("Stdout = %q, want empty", result.Stdout)
+	}
+	if !strings.Contains(result.Stderr, "jq: missing.json: No such file or directory") {
+		t.Fatalf("Stderr = %q, want missing-file diagnostic", result.Stderr)
+	}
+}
+
 func TestJQSupportsStdinMarkerWithFiles(t *testing.T) {
 	t.Parallel()
 

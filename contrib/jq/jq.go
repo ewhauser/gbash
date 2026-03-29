@@ -102,10 +102,7 @@ func (c *JQ) Run(ctx context.Context, inv *commands.Invocation) error {
 		return exitf(inv, 3, "jq: invalid query: %v", err)
 	}
 
-	compileIter, err := newJQInputIter(ctx, inv, &opts, inputs)
-	if err != nil {
-		return err
-	}
+	compileIter := newJQInputIter(ctx, inv, &opts, inputs)
 	defer func() { _ = compileIter.Close() }()
 
 	compileOptions := []gojq.CompilerOption{
@@ -134,8 +131,14 @@ func (c *JQ) Run(ctx context.Context, inv *commands.Invocation) error {
 	processIter := jqIter(compileIter)
 	if opts.nullInput {
 		processIter = newJQNullInputIter()
+	} else if err := compileIter.Load(); err != nil {
+		return err
 	}
-	return processJQInputs(ctx, inv, code, processIter, variableValues, &opts)
+	processErr := processJQInputs(ctx, inv, code, processIter, variableValues, &opts)
+	if err := compileIter.StickyError(); err != nil {
+		return err
+	}
+	return processErr
 }
 
 func parseJQArgs(inv *commands.Invocation) (opts jqOptions, filter string, inputs []string, err error) {
@@ -660,6 +663,9 @@ func runJQQuery(ctx context.Context, inv *commands.Invocation, code *gojq.Code, 
 			var haltErr *gojq.HaltError
 			if errors.As(err, &haltErr) && haltErr.Value() == nil {
 				return true, nil
+			}
+			if _, ok := commands.ExitCode(err); ok {
+				return false, err
 			}
 			return false, exitf(inv, 5, "jq: %v", err)
 		}
