@@ -20,8 +20,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
           "goos": [
-            "darwin",
-            "linux"
+            "darwin"
           ]
         },
         "oils/alias.test.sh::Two aliases in pipeline": {
@@ -383,8 +382,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
           "goos": [
-            "darwin",
-            "linux"
+            "darwin"
           ]
         },
         "oils/errexit-osh.test.sh::local: middle command fails and keeps going": {
@@ -566,8 +564,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
           "goos": [
-            "darwin",
-            "linux"
+            "darwin"
           ]
         },
         "oils/regex.test.sh::Unquoted { is a regex parse error": {
@@ -588,8 +585,7 @@
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
           "goos": [
-            "darwin",
-            "linux"
+            "darwin"
           ]
         },
         "oils/smoke.test.sh::Here doc with redirect": {
