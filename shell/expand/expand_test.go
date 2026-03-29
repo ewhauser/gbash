@@ -1497,53 +1497,52 @@ func TestDeclaredEmptyArrayNounset(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			t.Run("Length", func(t *testing.T) {
-				word := parseCommandWord(t, `"${#arr[@]}"`)
-				got, err := Fields(&Config{
-					NoUnset: true,
-					Env: testEnv{
-						"arr": tc.vr,
-					},
-				}, word)
-				if err != nil {
-					t.Fatalf("did not want error for declared empty array length under nounset, got %v", err)
-				}
-				if !reflect.DeepEqual(got, []string{"0"}) {
-					t.Fatalf("wanted [\"0\"], got %q", got)
-				}
-			})
-
-			t.Run("Values", func(t *testing.T) {
-				word := parseCommandWord(t, `"${arr[@]}"`)
-				got, err := Fields(&Config{
-					NoUnset: true,
-					Env: testEnv{
-						"arr": tc.vr,
-					},
-				}, word)
-				if err != nil {
-					t.Fatalf("did not want error for declared empty array values under nounset, got %v", err)
-				}
-				if len(got) != 0 {
-					t.Fatalf("wanted [], got %q", got)
-				}
-			})
-
-			t.Run("Keys", func(t *testing.T) {
-				word := parseCommandWord(t, `"${!arr[@]}"`)
-				got, err := Fields(&Config{
-					NoUnset: true,
-					Env: testEnv{
-						"arr": tc.vr,
-					},
-				}, word)
-				if err != nil {
-					t.Fatalf("did not want error for declared empty array keys under nounset, got %v", err)
-				}
-				if len(got) != 0 {
-					t.Fatalf("wanted [], got %q", got)
-				}
-			})
+			for _, expTC := range []struct {
+				name         string
+				expr         string
+				wantError    bool
+				wantZeroArgs bool
+				want         []string
+			}{
+				{name: "LengthAt", expr: `"${#arr[@]}"`, wantError: true},
+				{name: "LengthStar", expr: `"${#arr[*]}"`, wantError: true},
+				{name: "ValuesAt", expr: `"${arr[@]}"`, wantZeroArgs: true},
+				{name: "ValuesStar", expr: `"${arr[*]}"`, want: []string{""}},
+				{name: "KeysAt", expr: `"${!arr[@]}"`, wantZeroArgs: true},
+				{name: "KeysStar", expr: `"${!arr[*]}"`, want: []string{""}},
+			} {
+				t.Run(expTC.name, func(t *testing.T) {
+					word := parseCommandWord(t, expTC.expr)
+					got, err := Fields(&Config{
+						NoUnset: true,
+						Env: testEnv{
+							"arr": tc.vr,
+						},
+					}, word)
+					if expTC.wantError {
+						if err == nil {
+							t.Fatalf("expected unbound variable error for %s under nounset, got nil", expTC.expr)
+						}
+						var unsetErr UnsetParameterError
+						if !errors.As(err, &unsetErr) {
+							t.Fatalf("expected UnsetParameterError for %s, got %T: %v", expTC.expr, err, err)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatalf("did not want error for %s under nounset, got %v", expTC.expr, err)
+					}
+					if expTC.wantZeroArgs {
+						if len(got) != 0 {
+							t.Fatalf("wanted [] for %s, got %q", expTC.expr, got)
+						}
+						return
+					}
+					if !reflect.DeepEqual(got, expTC.want) {
+						t.Fatalf("wanted %q for %s, got %q", expTC.want, expTC.expr, got)
+					}
+				})
+			}
 		})
 	}
 }
