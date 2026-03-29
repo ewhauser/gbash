@@ -376,3 +376,23 @@ echo x=$x
 		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }
+
+func TestIndexedTempAssignmentDoesNotAbortCommand(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+a=old
+a[1]=x printf 'ran\n'
+echo status=$?
+echo a=$a
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	if got, want := stdout, "ran\nstatus=0\na=old\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if got, want := stderr, "`a[1]': not a valid identifier\n"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
+	}
+}

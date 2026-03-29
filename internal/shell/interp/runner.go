@@ -1453,8 +1453,7 @@ func (r *Runner) runTempCallAssigns(assigns []*syntax.Assign) []restoreVar {
 		prev := r.lookupVar(name)
 		if as.Ref.Index != nil {
 			r.errf("`%s': not a valid identifier\n", printVarRef(as.Ref))
-			r.exit.code = 1
-			return restores
+			continue
 		}
 		if as.Array != nil {
 			vr := expand.Variable{
