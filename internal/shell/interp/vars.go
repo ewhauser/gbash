@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -1519,7 +1520,7 @@ func (r *Runner) expandCompoundArrayElems(elems []*syntax.ArrayElem) []expandedA
 		default:
 			if elem.Value != nil {
 				cfg := r.ecfg
-				cfg.PreferStartupHomeForAssignmentTilde = true
+				cfg.PreferStartupHomeForAssignmentTilde = runtime.GOOS == "darwin"
 				str, err := expand.AssignmentLiteral(&cfg, elem.Value)
 				r.expandErr(err)
 				item.value = str

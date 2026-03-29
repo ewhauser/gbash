@@ -3,6 +3,7 @@ package expand
 import (
 	"fmt"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -101,7 +102,11 @@ func TestFieldsPreferStartupHomeForLeadingTilde(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fields() error = %v", err)
 	}
-	if want := []string{"/startup/src"}; !reflect.DeepEqual(got, want) {
+	want := []string{"/live/src"}
+	if runtime.GOOS == "darwin" {
+		want = []string{"/startup/src"}
+	}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Fields() = %#v, want %#v", got, want)
 	}
 }

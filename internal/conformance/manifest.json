@@ -446,13 +446,6 @@
             "linux"
           ]
         },
-        "oils/glob.test.sh::no glob after ~ expansion": {
-          "mode": "xfail",
-          "reason": "conformance: gbash behavior differs from bash",
-          "goos": [
-            "darwin"
-          ]
-        },
         "oils/globignore.test.sh::Ignore globs with char patterns like [!ab]": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",

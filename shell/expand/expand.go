@@ -1641,7 +1641,7 @@ func DupFields(cfg *Config, word *syntax.Word) ([]string, error) {
 // globbing. Assignment-like tilde expansion is intentionally disabled here, so
 // words like x=~ stay literal unless they are parsed in an assignment context.
 func FieldsSeq(cfg *Config, words ...*syntax.Word) iter.Seq2[string, error] {
-	return fieldsSeq(cfg, false, true, words...)
+	return fieldsSeq(cfg, false, runtime.GOOS == "darwin", words...)
 }
 
 func fieldsSeq(cfg *Config, allowAssignLike, preferStartupHome bool, words ...*syntax.Word) iter.Seq2[string, error] {

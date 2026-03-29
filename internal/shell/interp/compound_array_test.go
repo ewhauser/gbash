@@ -1,6 +1,7 @@
 package interp
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/ewhauser/gbash/shell/expand"
@@ -189,7 +190,10 @@ printf '%s\n%s\n' "${assoc[home]}" "${assoc[hello]}"
 	if err != nil {
 		t.Fatalf("Run error = %v, stdout=%q stderr=%q", err, stdout, stderr)
 	}
-	const want = "/startup\n/startup:/startup:/startup\n/startup\n/startup:/startup:/startup\n"
+	want := "/home/user\n/home/user:/home/user:/home/user\n/home/user\n/home/user:/home/user:/home/user\n"
+	if runtime.GOOS == "darwin" {
+		want = "/startup\n/startup:/startup:/startup\n/startup\n/startup:/startup:/startup\n"
+	}
 	if stdout != want {
 		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
