@@ -274,6 +274,39 @@ func cloneFDTable(src map[int]*shellFD) map[int]*shellFD {
 	return dst
 }
 
+func forkFDTableForExec(src map[int]*shellFD) map[int]*shellFD {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[int]*shellFD, len(src))
+	clones := make(map[*shellFD]*shellFD, len(src))
+	for n, fd := range src {
+		if fd == nil {
+			dst[n] = nil
+			continue
+		}
+		if clone, ok := clones[fd]; ok {
+			dst[n] = clone
+			continue
+		}
+		clone := &shellFD{
+			reader:     fd.reader,
+			writer:     fd.writer,
+			closer:     fd.closer,
+			deadline:   fd.deadline,
+			owned:      false,
+			buffered:   fd.buffered,
+			bufferByte: fd.bufferByte,
+			closed:     false,
+			writeErr:   nil,
+			writeErrMu: sync.Mutex{},
+		}
+		clones[fd] = clone
+		dst[n] = clone
+	}
+	return dst
+}
+
 func initialFDTable(stdin StdinReader, stdout, stderr io.Writer) map[int]*shellFD {
 	return map[int]*shellFD{
 		0: newShellInputFD(stdin),

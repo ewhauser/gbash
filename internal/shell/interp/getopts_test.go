@@ -127,6 +127,27 @@ printf 'normal-missing status=%s opt=%s OPTARG=%s\n' "$?" "$opt" "$OPTARG"
 	}
 }
 
+func TestGetoptsLeavesEmptyOPTARGSetForNoArgOptionUnderNounset(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runInterpScript(t, `
+set -u
+set -- -a
+getopts "a" opt
+printf 'opt=%s OPTARG=<%s>\n' "$opt" "$OPTARG"
+`)
+	if err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	const wantStdout = "opt=a OPTARG=<>\n"
+	if stdout != wantStdout {
+		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestGetoptsInvalidNameKeepsParseSideEffects(t *testing.T) {
 	t.Parallel()
 
@@ -200,13 +221,16 @@ echo OPTIND=$OPTIND
 		"OPTIND=2\n" +
 		"+\n" +
 		"+\n" +
+		"+\n" +
 		"OPTIND=5\n" +
+		"_\n" +
 		"OPTIND=2\n"
 	if stdout != wantStdout {
 		t.Fatalf("stdout = %q, want %q", stdout, wantStdout)
 	}
-	if stderr != "" {
-		t.Fatalf("stderr = %q, want empty", stderr)
+	const wantStderr = "varref-test.sh: option requires an argument -- f\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr = %q, want %q", stderr, wantStderr)
 	}
 }
 

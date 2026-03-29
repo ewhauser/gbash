@@ -1011,6 +1011,7 @@ func (r *Runner) stmt(ctx context.Context, st *syntax.Stmt) {
 	}
 	r.exit = exitStatus{}
 	r.currentStmtLine = line
+	r.redirectErrLine = 0
 	r.stmtDepth++
 	r.pipeStatusSet = false
 	defer func() {
@@ -1127,6 +1128,7 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 	for _, rd := range st.Redirs {
 		result, err := r.redir(ctx, rd)
 		if err != nil {
+			r.redirectErrLine = rd.Pos().Line()
 			r.exit.code = 1
 			break
 		}
@@ -1155,7 +1157,7 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt) {
 			r.cmd(ctx, st.Cmd)
 		}
 	}
-	if !r.pipeStatusSet {
+	if !r.pipeStatusSet && stmtShouldMaterializePipeStatus(st) {
 		r.setPipeStatuses(r.exit.code)
 	}
 	keepRedirs := r.keepRedirs
@@ -1228,10 +1230,28 @@ func (r *Runner) shouldRunStmtErrTrap(st *syntax.Stmt, ranCmd bool) bool {
 }
 
 func (r *Runner) stmtErrTrapLine(st *syntax.Stmt, ranCmd bool) uint {
-	if !ranCmd && len(st.Redirs) > 0 && r.lastStmtLine != 0 {
-		return r.lastStmtLine
+	if !ranCmd && len(st.Redirs) > 0 {
+		if r.redirectErrLine != 0 {
+			return r.redirectErrLine
+		}
+		return st.Redirs[0].Pos().Line()
 	}
 	return st.Pos().Line()
+}
+
+func stmtShouldMaterializePipeStatus(st *syntax.Stmt) bool {
+	if st == nil {
+		return false
+	}
+	if st.Cmd == nil {
+		return len(st.Redirs) > 0
+	}
+	switch st.Cmd.(type) {
+	case *syntax.ForClause, *syntax.WhileClause, *syntax.IfClause, *syntax.CaseClause, *syntax.FuncDecl:
+		return false
+	default:
+		return true
+	}
 }
 
 func usesPreRedirectExpandFDs(cmd syntax.Command) bool {

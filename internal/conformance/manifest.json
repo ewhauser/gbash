@@ -95,22 +95,6 @@
             "darwin"
           ]
         },
-        "oils/builtin-getopts.test.sh::OPTARG is empty (not unset) after parsing a flag doesn't take an arg": {
-          "mode": "xfail",
-          "reason": "conformance: restored upstream bash coverage exposes gbash behavior that still differs from bash",
-          "goos": [
-            "darwin",
-            "linux"
-          ]
-        },
-        "oils/builtin-getopts.test.sh::OPTIND narrowed down": {
-          "mode": "xfail",
-          "reason": "conformance: restored upstream bash coverage exposes gbash behavior that still differs from bash",
-          "goos": [
-            "darwin",
-            "linux"
-          ]
-        },
         "oils/builtin-meta.test.sh::command -v doesn't find executable dir": {
           "mode": "xfail",
           "reason": "conformance: gbash behavior differs from bash",
@@ -243,22 +227,6 @@
           "reason": "conformance: gbash behavior differs from bash",
           "goos": [
             "darwin"
-          ]
-        },
-        "oils/builtin-trap-bash.test.sh::trap RETURN": {
-          "mode": "xfail",
-          "reason": "conformance: restored upstream bash coverage exposes gbash behavior that still differs from bash",
-          "goos": [
-            "darwin",
-            "linux"
-          ]
-        },
-        "oils/builtin-trap-err.test.sh::trap ERR with redirect": {
-          "mode": "xfail",
-          "reason": "conformance: restored upstream bash coverage exposes gbash behavior that still differs from bash",
-          "goos": [
-            "darwin",
-            "linux"
           ]
         },
         "oils/builtin-trap-err.test.sh::trap ERR with YSH proc": {
@@ -469,20 +437,11 @@
             "linux"
           ]
         },
-        "oils/here-doc.test.sh::Multiple here docs in pipeline": {
+        "oils/loop.test.sh::Tilde expansion within for loop": {
           "mode": "xfail",
-          "reason": "conformance: restored upstream bash coverage exposes gbash behavior that still differs from bash",
+          "reason": "conformance: gbash behavior differs from bash",
           "goos": [
-            "darwin",
-            "linux"
-          ]
-        },
-        "oils/here-doc.test.sh::Multiple here docs in pipeline on multiple lines": {
-          "mode": "xfail",
-          "reason": "conformance: restored upstream bash coverage exposes gbash behavior that still differs from bash",
-          "goos": [
-            "darwin",
-            "linux"
+            "darwin"
           ]
         },
         "oils/parse-errors.test.sh::interactive parse error (regression)": {
@@ -511,14 +470,6 @@
           "reason": "conformance: gbash behavior differs from bash",
           "goos": [
             "darwin"
-          ]
-        },
-        "oils/pipeline.test.sh::Initial value of PIPESTATUS is empty string": {
-          "mode": "xfail",
-          "reason": "conformance: restored upstream bash coverage exposes gbash behavior that still differs from bash",
-          "goos": [
-            "darwin",
-            "linux"
           ]
         },
         "oils/pipeline.test.sh::Nested pipelines": {
@@ -635,30 +586,6 @@
           "reason": "conformance: gbash behavior differs from bash",
           "goos": [
             "darwin"
-          ]
-        },
-        "oils/strict-options.test.sh::errexit and top-level control flow": {
-          "mode": "xfail",
-          "reason": "conformance: restored upstream bash coverage exposes gbash behavior that still differs from bash",
-          "goos": [
-            "darwin",
-            "linux"
-          ]
-        },
-        "oils/strict-options.test.sh::Sourcing a script that returns at the top level": {
-          "mode": "xfail",
-          "reason": "conformance: restored upstream bash coverage exposes gbash behavior that still differs from bash",
-          "goos": [
-            "darwin",
-            "linux"
-          ]
-        },
-        "oils/strict-options.test.sh::top level control flow": {
-          "mode": "xfail",
-          "reason": "conformance: restored upstream bash coverage exposes gbash behavior that still differs from bash",
-          "goos": [
-            "darwin",
-            "linux"
           ]
         },
         "oils/tilde.test.sh::~ expansion in readonly assignment": {

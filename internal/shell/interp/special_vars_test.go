@@ -136,6 +136,25 @@ func TestPIPESTATUSStartsEmpty(t *testing.T) {
 	}
 }
 
+func TestPIPESTATUSStaysEmptyAfterLeadingCompoundStatement(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, err := runSpecialVarScript(t, nil, ""+
+		"case bash in\n"+
+		"  dash|zsh) exit ;;\n"+
+		"esac\n"+
+		"echo pipestatus ${PIPESTATUS[@]}\n")
+	if err != nil {
+		t.Fatalf("Run() error = %v; stderr=%q", err, stderr)
+	}
+	if got, want := stdout, "pipestatus\n"; got != want {
+		t.Fatalf("stdout = %q, want %q; stderr=%q", got, want, stderr)
+	}
+	if got := stderr; got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
 func TestPIPESTATUSResetsAfterRedirectionOnlyStatement(t *testing.T) {
 	t.Parallel()
 
