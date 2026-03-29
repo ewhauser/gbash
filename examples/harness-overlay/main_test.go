@@ -14,6 +14,8 @@ import (
 )
 
 func TestRunScriptHarnessHelp(t *testing.T) {
+	t.Parallel()
+
 	workspaceDir := copyTreeToTemp(t, mustWorkspaceDir())
 
 	var stdout bytes.Buffer
@@ -42,9 +44,11 @@ func TestRunScriptHarnessHelp(t *testing.T) {
 }
 
 func TestPersistentHarnessBashTool(t *testing.T) {
+	t.Parallel()
+
 	workspaceDir := copyTreeToTemp(t, mustWorkspaceDir())
 
-	rt, err := newRuntime(workspaceDir)
+	rt, err := newRuntime(context.Background(), workspaceDir)
 	if err != nil {
 		t.Fatalf("newRuntime() error = %v", err)
 	}
@@ -90,15 +94,15 @@ jq -cn --arg command 'printf "%s %s\n" "$PWD" "$FOO"' '{command: $command}' \
 }
 
 func TestOfflineHarnessLoopWithMockProvider(t *testing.T) {
+	t.Parallel()
+
 	workspaceDir := copyTreeToTemp(t, mustWorkspaceDir())
 	writeMockProvider(t, workspaceDir)
-
-	t.Setenv("HARNESS_PROVIDER", "mock")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode, err := runWithWorkspace(context.Background(), workspaceDir, strings.NewReader(""), &stdout, &stderr, []string{
-		"--script", `./bin/harness "test"`,
+		"--script", `HARNESS_PROVIDER=mock ./bin/harness "test"`,
 	})
 	if err != nil {
 		t.Fatalf("runWithWorkspace() error = %v", err)
@@ -112,6 +116,8 @@ func TestOfflineHarnessLoopWithMockProvider(t *testing.T) {
 }
 
 func TestUpdateHarnessScriptReproducesVendoredTree(t *testing.T) {
+	t.Parallel()
+
 	exampleDir := copyTreeToTemp(t, filepath.Dir(mustWorkspaceDir()))
 	upstreamDir := filepath.Join(t.TempDir(), "upstream")
 	if err := os.MkdirAll(filepath.Join(upstreamDir, "bin"), 0o755); err != nil {
@@ -138,19 +144,19 @@ func TestUpdateHarnessScriptReproducesVendoredTree(t *testing.T) {
 		t.Fatalf("WriteFile(LICENSE) error = %v", err)
 	}
 
-	runCommand(t, upstreamDir, "git", "init")
-	runCommand(t, upstreamDir, "git", "config", "user.name", "Test User")
-	runCommand(t, upstreamDir, "git", "config", "user.email", "test@example.com")
-	runCommand(t, upstreamDir, "git", "add", ".")
-	runCommand(t, upstreamDir, "git", "commit", "-m", "initial")
-	ref := strings.TrimSpace(runCommand(t, upstreamDir, "git", "rev-parse", "HEAD"))
+	runGitCommand(t, upstreamDir, "init")
+	runGitCommand(t, upstreamDir, "config", "user.name", "Test User")
+	runGitCommand(t, upstreamDir, "config", "user.email", "test@example.com")
+	runGitCommand(t, upstreamDir, "add", ".")
+	runGitCommand(t, upstreamDir, "commit", "-m", "initial")
+	ref := strings.TrimSpace(runGitCommand(t, upstreamDir, "rev-parse", "HEAD"))
 
 	targetFile := filepath.Join(exampleDir, "workspace", "bin", "harness")
 	if err := os.Remove(targetFile); err != nil {
 		t.Fatalf("Remove(%q) error = %v", targetFile, err)
 	}
 
-	cmd := osexec.Command(filepath.Join(exampleDir, "update-harness.sh"), "--ref", ref)
+	cmd := osexec.CommandContext(t.Context(), filepath.Join(exampleDir, "update-harness.sh"), "--ref", ref)
 	cmd.Dir = exampleDir
 	cmd.Env = append(os.Environ(), "HARNESS_UPSTREAM_REPO="+upstreamDir)
 	output, err := cmd.CombinedOutput()
@@ -240,14 +246,14 @@ func copyTree(src, dst string) error {
 	})
 }
 
-func runCommand(t *testing.T, dir, name string, args ...string) string {
+func runGitCommand(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 
-	cmd := osexec.Command(name, args...)
+	cmd := osexec.CommandContext(t.Context(), "git", args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("%s %s error = %v\n%s", name, strings.Join(args, " "), err, output)
+		t.Fatalf("git %s error = %v\n%s", strings.Join(args, " "), err, output)
 	}
 	return string(output)
 }

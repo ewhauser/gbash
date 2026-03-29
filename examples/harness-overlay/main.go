@@ -69,7 +69,7 @@ func runWithWorkspace(ctx context.Context, workspaceDir string, stdin io.Reader,
 		return 1, err
 	}
 
-	rt, err := newRuntime(workspaceDir)
+	rt, err := newRuntime(ctx, workspaceDir)
 	if err != nil {
 		return 1, fmt.Errorf("create runtime: %w", err)
 	}
@@ -142,7 +142,11 @@ func parseCLIOptions(stderr io.Writer, args []string) (cliOptions, error) {
 	return opts, nil
 }
 
-func newRuntime(workspaceDir string) (*gbash.Runtime, error) {
+func newRuntime(ctx context.Context, workspaceDir string) (*gbash.Runtime, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	opts := []gbash.Option{
 		gbash.WithWorkspace(workspaceDir),
 		gbash.WithRegistry(extras.FullRegistry()),
@@ -162,7 +166,7 @@ func newRuntime(workspaceDir string) (*gbash.Runtime, error) {
 		opts = append(opts, gbash.WithBaseEnv(env))
 	}
 
-	return gbash.New(opts...)
+	return gbash.New(opts...) //nolint:contextcheck // constructor does not accept context
 }
 
 func forwardedBaseEnv() map[string]string {
