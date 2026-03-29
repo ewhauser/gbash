@@ -1422,6 +1422,54 @@ func TestFieldsQuotedIndirectAllElementsTargets(t *testing.T) {
 func TestFieldsIndirectUnsetArrayNounset(t *testing.T) {
 	t.Parallel()
 
+	t.Run("ScalarDefaultOpSilentUnderNounset", func(t *testing.T) {
+		word := parseCommandWord(t, "${!name:-fallback}")
+		got, err := Fields(&Config{
+			NoUnset: true,
+			Env: testEnv{
+				"name": {Set: true, Kind: String, Str: "FOO"},
+			},
+		}, word)
+		if err != nil {
+			t.Fatalf("did not want error for ${!name:-fallback} with unset FOO, got %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{"fallback"}) {
+			t.Fatalf("wanted [\"fallback\"], got %q", got)
+		}
+	})
+
+	t.Run("ScalarDefaultStillEvaluatesSubscript", func(t *testing.T) {
+		word := parseCommandWord(t, "${!name:-fallback}")
+		_, err := Fields(&Config{
+			NoUnset: true,
+			Env: testEnv{
+				"name": {Set: true, Kind: String, Str: "arr[$((1/0))]"},
+			},
+		}, word)
+		if err == nil {
+			t.Fatal("expected indexed subscript error, got nil")
+		}
+		if !strings.Contains(err.Error(), "division by 0") {
+			t.Fatalf("expected division-by-zero error, got %v", err)
+		}
+	})
+
+	t.Run("ScalarDefaultNegativeIndexStillErrors", func(t *testing.T) {
+		word := parseCommandWord(t, "${!name:-fallback}")
+		_, err := Fields(&Config{
+			NoUnset: true,
+			Env: testEnv{
+				"name": {Set: true, Kind: String, Str: "arr[-1]"},
+			},
+		}, word)
+		if err == nil {
+			t.Fatal("expected bad array subscript error, got nil")
+		}
+		if !strings.Contains(err.Error(), "bad array subscript") {
+			t.Fatalf("expected bad array subscript error, got %v", err)
+		}
+	})
+
 	// Indirect ref to undefined array[@] is treated as empty (no error) even
 	// under nounset, matching bash behavior.
 	t.Run("AtSubscriptSilentUnderNounset", func(t *testing.T) {
