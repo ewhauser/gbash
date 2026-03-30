@@ -270,6 +270,27 @@ func TestPublicWordLeadingEscapeMetadata(t *testing.T) {
 	}
 }
 
+func TestPublicWordLeadingEscapeMetadataPastLexerWindow(t *testing.T) {
+	t.Parallel()
+
+	src := "echo \\" + strings.Repeat("x", 2048) + "\n"
+	file := parseFileVariant(t, syntax.LangBash, src)
+	call, ok := file.Stmts[0].Cmd.(*syntax.CallExpr)
+	if !ok {
+		t.Fatalf("Cmd = %T, want *syntax.CallExpr", file.Stmts[0].Cmd)
+	}
+	word := call.Args[1]
+	if got := word.RawText(); got != "" {
+		t.Fatalf("arg[1].RawText() = %q, want empty for long word", got)
+	}
+	if word.LeadingEscape == nil {
+		t.Fatal("arg[1].LeadingEscape = nil, want metadata")
+	}
+	if got := sourceSpan(src, word.LeadingEscape.Pos, word.LeadingEscape.End); got != `\` {
+		t.Fatalf("arg[1] leading escape span = %q, want %q", got, `\`)
+	}
+}
+
 func TestPublicAssignSurfaceMetadata(t *testing.T) {
 	t.Parallel()
 

@@ -96,11 +96,13 @@ retry:
 			if p.r == '\\' {
 			} else if p.peek() == '\n' {
 				p.bsp++
+				p.rawBackslashRun = 0
 				p.w, p.r = 1, escNewl
 				return escNewl
 			} else if p1, p2 := p.peekTwo(); p1 == '\r' && p2 == '\n' { // \\\r\n turns into \\\n
 				p.col++
 				p.bsp += 2
+				p.rawBackslashRun = 0
 				p.w, p.r = 2, escNewl
 				return escNewl
 			}

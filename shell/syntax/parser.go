@@ -2809,22 +2809,26 @@ func advancePosBytes(pos Pos, src []byte) Pos {
 	return pos
 }
 
-func findClosingBackquoteTrivia(src []byte) (closeIndex int, backslashCount int) {
-	for i := 1; i < len(src); i++ {
-		switch src[i] {
-		case '\\':
-			if i+1 < len(src) {
-				i++
-			}
-		case '`':
-			count := 0
-			for j := i - 1; j >= 0 && src[j] == '\\'; j-- {
-				count++
-			}
-			return i, count
+func findClosingBackquoteTrivia(src []byte, inDoubleQuotes bool) (closeIndex int, backslashCount int) {
+	if len(src) == 0 || src[0] != '`' {
+		return -1, 0
+	}
+	var scan Parser
+	scan.reset()
+	scan.loadReplay(Pos{}, src, io.EOF)
+	scan.openBquotes = 1
+	if inDoubleQuotes {
+		scan.openBquoteDquotes = 1
+	}
+	for {
+		r := scan.rune()
+		if r == utf8.RuneSelf {
+			return -1, 0
+		}
+		if r == '`' {
+			return int(scan.bsp) - scan.w, scan.lastBquoteRawBackslashes
 		}
 	}
-	return -1, 0
 }
 
 func newBackquoteCloseTrivia(close Pos, backslashCount int) *BackquoteCloseTrivia {
@@ -2842,8 +2846,8 @@ func newBackquoteCloseTrivia(close Pos, backslashCount int) *BackquoteCloseTrivi
 	return trivia
 }
 
-func backquoteCloseTriviaFromSource(left Pos, src []byte) (*BackquoteCloseTrivia, int) {
-	closeIndex, backslashCount := findClosingBackquoteTrivia(src)
+func backquoteCloseTriviaFromSource(left Pos, src []byte, inDoubleQuotes bool) (*BackquoteCloseTrivia, int) {
+	closeIndex, backslashCount := findClosingBackquoteTrivia(src, inDoubleQuotes)
 	if closeIndex < 0 {
 		return nil, -1
 	}
@@ -2894,7 +2898,7 @@ func (p *Parser) recoverBackquoteCmdSubst(cs *CmdSubst, old saveState, src []byt
 		copy(full[1:], src)
 		src = full
 	}
-	trivia, closeIndex := backquoteCloseTriviaFromSource(cs.Left, src)
+	trivia, closeIndex := backquoteCloseTriviaFromSource(cs.Left, src, old.quote == dblQuotes)
 	if closeIndex < 0 {
 		return false
 	}
@@ -3184,21 +3188,26 @@ func (p *Parser) finishWord(w *Word) *Word {
 	if w.raw == "" {
 		w.raw = p.sourceRange(w.Pos(), w.End())
 	}
-	w.LeadingEscape = leadingWordEscape(w.raw, w.Pos())
+	w.LeadingEscape = leadingWordEscape(w)
 	if p.braceWordPartsAllowed() {
 		w.Parts = splitBraceWordParts(w.Parts)
 	}
 	return w
 }
 
-func leadingWordEscape(raw string, pos Pos) *WordLeadingEscape {
-	if raw == "" || !pos.IsValid() || raw[0] != '\\' || len(raw) < 2 {
+func leadingWordEscape(w *Word) *WordLeadingEscape {
+	if w == nil || len(w.Parts) == 0 {
 		return nil
 	}
-	switch raw[1] {
+	lit, ok := w.Parts[0].(*Lit)
+	if !ok || lit == nil || !lit.ValuePos.IsValid() || lit.Value == "" || lit.Value[0] != '\\' || len(lit.Value) < 2 {
+		return nil
+	}
+	switch lit.Value[1] {
 	case '\n', '\r':
 		return nil
 	default:
+		pos := lit.ValuePos
 		return &WordLeadingEscape{Pos: pos, End: posAddCol(pos, 1)}
 	}
 }
