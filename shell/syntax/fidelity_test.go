@@ -381,6 +381,31 @@ func TestWordTestLikeSplitPreservesRawOperatorOffsets(t *testing.T) {
 	}
 }
 
+func TestWordTestLikeSplitAlignsRightRawFragment(t *testing.T) {
+	t.Parallel()
+
+	word := parseFirstRecoveredTestWord(t, "[[ \"foo=\"$(bar) ]]\n")
+	split := word.TestLikeSplit()
+	if split == nil {
+		t.Fatal("TestLikeSplit() = nil, want split")
+	}
+	if got, want := split.Left.RawText(), "\"foo"; got != want {
+		t.Fatalf("Left.RawText() = %q, want %q", got, want)
+	}
+	if got, want := split.Left.UnquotedText(), "foo"; got != want {
+		t.Fatalf("Left.UnquotedText() = %q, want %q", got, want)
+	}
+	if got, want := split.Right.RawText(), "$(bar)"; got != want {
+		t.Fatalf("Right.RawText() = %q, want %q", got, want)
+	}
+	if got, want := split.Right.UnquotedText(), "$(bar)"; got != want {
+		t.Fatalf("Right.UnquotedText() = %q, want %q", got, want)
+	}
+	if got := split.Right.WasQuoted(); got {
+		t.Fatalf("Right.WasQuoted() = %v, want false", got)
+	}
+}
+
 func parseFirstRecoveredTestWord(t *testing.T, src string) *Word {
 	t.Helper()
 

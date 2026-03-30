@@ -78,11 +78,11 @@ func buildTestLikeSplit(w *Word, op string, opPos, opEnd Pos) *TestLikeSplit {
 		return nil
 	}
 	split := &TestLikeSplit{
-		Left:        newSyntheticWord(leftParts, sliceWordRaw(w, w.Pos(), opPos)),
+		Left:        newSyntheticWord(leftParts, sliceWordRaw(w, leftParts[0].Pos(), opPos)),
 		Operator:    op,
 		OperatorPos: opPos,
 		OperatorEnd: opEnd,
-		Right:       newSyntheticWord(rightParts, sliceWordRaw(w, opEnd, w.End())),
+		Right:       newSyntheticWord(rightParts, sliceWordRaw(w, rightParts[0].Pos(), w.End())),
 	}
 	if split.Left == nil || split.Right == nil {
 		return nil
