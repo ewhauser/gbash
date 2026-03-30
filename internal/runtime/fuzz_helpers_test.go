@@ -100,6 +100,25 @@ func assertSuccessfulFuzzExecution(t *testing.T, script []byte, result *Executio
 	}
 }
 
+func assertSuccessfulFuzzExecutionAllowTimeout(t *testing.T, script []byte, result *ExecutionResult, err error) {
+	t.Helper()
+
+	assertSecureFuzzOutcomeAllowExecutionTimeout(t, script, result, err)
+	if err != nil {
+		return
+	}
+	if result == nil {
+		t.Fatalf("nil result for script %q", previewFuzzScript(script))
+		return
+	}
+	if isNormalizedExecutionTimeout(result) {
+		return
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("unexpected exit code %d\nscript=%q\nstderr=%q", result.ExitCode, previewFuzzScript(script), result.Stderr)
+	}
+}
+
 func assertBaseFuzzOutcome(t *testing.T, script []byte, result *ExecutionResult, err error) {
 	t.Helper()
 

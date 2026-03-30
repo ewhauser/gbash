@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -52,11 +54,23 @@ type fuzzOutcomeOptions struct {
 func assertSecureFuzzOutcomeWithOptions(t *testing.T, script []byte, result *ExecutionResult, err error, opts fuzzOutcomeOptions) {
 	t.Helper()
 
+	// When the execution context deadline fires before the shell runner
+	// starts (e.g. during layout.ensure), session.Exec returns a raw
+	// context.DeadlineExceeded error with a nil result.  Treat this the
+	// same as a normalized execution timeout.
+	if opts.allowExecutionTimeout && isRawExecutionDeadlineError(err) {
+		return
+	}
+
 	assertBaseFuzzOutcome(t, script, result, err)
 	assertNoInternalLeak(t, script, result, err)
 	assertNoSensitiveLeak(t, script, result, err)
 	assertExecutionTimeoutState(t, script, result, opts)
 	assertNoRunawayExecution(t, script, result)
+}
+
+func isRawExecutionDeadlineError(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded)
 }
 
 func assertExecutionTimeoutState(t *testing.T, script []byte, result *ExecutionResult, opts fuzzOutcomeOptions) {

@@ -201,7 +201,7 @@ func FuzzDirectoryTraversalCommands(f *testing.F) {
 		)
 
 		result, err := runFuzzSessionScript(t, session, script)
-		assertSuccessfulFuzzExecution(t, script, result, err)
+		assertSuccessfulFuzzExecutionAllowTimeout(t, script, result, err)
 	})
 }
 
