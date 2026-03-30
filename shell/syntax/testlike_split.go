@@ -275,12 +275,10 @@ func literalValueSourceMap(w *Word, part WordPart, text string) literalSourceMap
 		offsets, ok := shellLiteralSourceOffsets(raw, text)
 		return literalSourceMap{offsets: offsets, raw: raw, ok: ok}
 	case *SglQuoted:
-		if part.Dollar {
-			return literalSourceMap{offsets: identitySourceOffsets(text)}
-		}
 		raw, ok := sglQuotedContentRawBytes(w, part)
 		if !ok {
-			return literalSourceMap{offsets: identitySourceOffsets(text)}
+			raw = []byte(text)
+			ok = true
 		}
 		return literalSourceMap{offsets: identitySourceOffsets(text), raw: raw, ok: true}
 	default:
