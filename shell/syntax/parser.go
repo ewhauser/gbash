@@ -5575,11 +5575,17 @@ func (p *Parser) ifMissingThenSplit(stmts []*Stmt) int {
 		return -1
 	}
 	for i := 1; i < len(stmts); i++ {
-		if strings.ContainsRune(p.sourceBetween(stmts[i-1].End(), stmts[i].Pos()), '\n') {
+		if ifMissingThenBoundary(p.sourceBetween(stmts[i-1].End(), stmts[i].Pos())) {
 			return i
 		}
 	}
 	return -1
+}
+
+func ifMissingThenBoundary(src string) bool {
+	src = strings.ReplaceAll(src, "\\\r\n", "")
+	src = strings.ReplaceAll(src, "\\\n", "")
+	return strings.ContainsRune(src, '\n')
 }
 
 func (p *Parser) ifClause(s *Stmt) {

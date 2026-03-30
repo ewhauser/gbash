@@ -4220,6 +4220,12 @@ func TestParseRecoverErrorsIfClauseMissingThenBodies(t *testing.T) {
 			wantCond: []string{"foo", "bar"},
 			wantThen: []string{""},
 		},
+		{
+			name:     "line continuation keeps condition together",
+			src:      "if foo;\\\nbar; fi\n",
+			wantCond: []string{"foo", "bar"},
+			wantThen: []string{""},
+		},
 	}
 
 	for _, tc := range tests {
