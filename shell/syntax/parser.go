@@ -262,6 +262,13 @@ func ParseExtGlob(enabled bool) ParserOption {
 	return func(p *Parser) { p.parseExtGlob = enabled }
 }
 
+// ConditionalPatternExtGlob controls whether conditional patterns on the RHS
+// of `[[ ... == pattern ]]` should recognize Bash extglob operators even when
+// general extglob parsing is otherwise disabled.
+func ConditionalPatternExtGlob(enabled bool) ParserOption {
+	return func(p *Parser) { p.condPatternExtGlob = enabled }
+}
+
 // NewParser allocates a new [Parser] and applies any number of options.
 func NewParser(options ...ParserOption) *Parser {
 	p := &Parser{
@@ -604,8 +611,9 @@ type Parser struct {
 	lang         LangVariant
 	// legacyBashCompat switches a handful of [[ =~ ]] diagnostics to match
 	// the older bash behavior observed through the bash builtin conformance path.
-	legacyBashCompat bool
-	parseExtGlob     bool
+	legacyBashCompat   bool
+	parseExtGlob       bool
+	condPatternExtGlob bool
 
 	stopAt []byte
 
@@ -3541,8 +3549,17 @@ func (p *Parser) newRawPatternParser() rawPatternParser {
 	return rawPatternParser{lang: p.lang, allowExtGlob: p.parseExtGlob}
 }
 
+func (p *Parser) newCondPatternParser() rawPatternParser {
+	return rawPatternParser{lang: p.lang, allowExtGlob: p.condPatternExtGlobEnabled()}
+}
+
 func (p *Parser) extGlobEnabled() bool {
 	return patternExtGlobEnabled(p.lang, p.parseExtGlob)
+}
+
+func (p *Parser) condPatternExtGlobEnabled() bool {
+	return patternExtGlobEnabled(p.lang, p.parseExtGlob) ||
+		(p.condPatternExtGlob && p.lang.in(LangBash|LangBats))
 }
 
 func (r rawPatternParser) extGlobEnabled() bool {
@@ -6450,6 +6467,10 @@ func (p *Parser) scanPatternRaw(start Pos, mode patternScanMode, scanned *scanne
 	extglobDepth := 0
 	hardParenDepth := 0
 	softParenDepth := 0
+	allowExtGlob := p.extGlobEnabled()
+	if mode == patternScanConditional {
+		allowExtGlob = p.condPatternExtGlobEnabled()
+	}
 	for {
 		if p.patternScanBoundary(mode, hardParenDepth, softParenDepth) {
 			return true
@@ -6466,7 +6487,7 @@ func (p *Parser) scanPatternRaw(start Pos, mode patternScanMode, scanned *scanne
 			}
 			p.rune()
 		case '?', '*', '+', '@', '!':
-			if p.extGlobEnabled() && p.peek() == '(' {
+			if allowExtGlob && p.peek() == '(' {
 				p.rune()
 				parenStack = append(parenStack, 'e')
 				extglobDepth++
@@ -7048,7 +7069,7 @@ func (p *Parser) followCondPattern(tok token, pos Pos) *CondPattern {
 		p.followErr(pos, tok, noQuote("a word"))
 		return nil
 	}
-	pat := p.newRawPatternParser().parse(scanned.raw, scanned.start)
+	pat := p.newCondPatternParser().parse(scanned.raw, scanned.start)
 	if group := firstPatternGroup(pat); group != nil && !p.patternAllowsBareGroups() {
 		if !p.recoverError() {
 			p.invalidCondPatternParen(group.Pos(), scanned.raw, scanned.start)
