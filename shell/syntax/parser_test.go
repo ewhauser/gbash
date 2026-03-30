@@ -4623,6 +4623,96 @@ func TestParseRecoverErrorsPatternGroupPreservesCaseClause(t *testing.T) {
 		t.Fatalf("second case pattern = %q, want %q", got, "baz")
 	}
 }
+
+func TestParseExtGlobArmKeepsLiteralParensInWords(t *testing.T) {
+	t.Parallel()
+
+	src := "echo @(x|(a|b))\n"
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.HasLen(file.Stmts, 1))
+
+	call, ok := file.Stmts[0].Cmd.(*CallExpr)
+	if !ok {
+		t.Fatalf("Cmd = %T, want *CallExpr", file.Stmts[0].Cmd)
+	}
+	qt.Assert(t, qt.HasLen(call.Args, 2))
+	qt.Assert(t, qt.HasLen(call.Args[1].Parts, 1))
+
+	extglob, ok := call.Args[1].Parts[0].(*ExtGlob)
+	if !ok {
+		t.Fatalf("call.Args[1].Parts[0] = %T, want *ExtGlob", call.Args[1].Parts[0])
+	}
+	qt.Assert(t, qt.HasLen(extglob.Patterns, 2))
+	if got := extglob.Patterns[1].RawText(); got != "(a|b)" {
+		t.Fatalf("extglob.Patterns[1].RawText() = %q, want %q", got, "(a|b)")
+	}
+	if group := firstPatternGroup(extglob.Patterns[1]); group != nil {
+		t.Fatalf("extglob.Patterns[1] contains unexpected PatternGroup at %v", group.Pos())
+	}
+}
+
+func TestParseCondPatternExtGlobArmKeepsLiteralParens(t *testing.T) {
+	t.Parallel()
+
+	src := "[[ \"(a|b)\" == @(x|(a|b)) ]]\n"
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.HasLen(file.Stmts, 1))
+
+	testClause, ok := file.Stmts[0].Cmd.(*TestClause)
+	if !ok {
+		t.Fatalf("Cmd = %T, want *TestClause", file.Stmts[0].Cmd)
+	}
+	bin, ok := testClause.X.(*CondBinary)
+	if !ok {
+		t.Fatalf("testClause.X = %T, want *CondBinary", testClause.X)
+	}
+	pat := bin.Y.(*CondPattern).Pattern
+	qt.Assert(t, qt.HasLen(pat.Parts, 1))
+
+	extglob, ok := pat.Parts[0].(*ExtGlob)
+	if !ok {
+		t.Fatalf("pat.Parts[0] = %T, want *ExtGlob", pat.Parts[0])
+	}
+	qt.Assert(t, qt.HasLen(extglob.Patterns, 2))
+	if got := extglob.Patterns[1].RawText(); got != "(a|b)" {
+		t.Fatalf("extglob.Patterns[1].RawText() = %q, want %q", got, "(a|b)")
+	}
+	if group := firstPatternGroup(extglob.Patterns[1]); group != nil {
+		t.Fatalf("extglob.Patterns[1] contains unexpected PatternGroup at %v", group.Pos())
+	}
+}
+
+func TestParseCasePatternExtGlobArmKeepsLiteralParens(t *testing.T) {
+	t.Parallel()
+
+	src := "case $x in @(x|(a|b))) echo one ;; esac\n"
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.HasLen(file.Stmts, 1))
+
+	caseClause, ok := file.Stmts[0].Cmd.(*CaseClause)
+	if !ok {
+		t.Fatalf("Cmd = %T, want *CaseClause", file.Stmts[0].Cmd)
+	}
+	qt.Assert(t, qt.HasLen(caseClause.Items, 1))
+	qt.Assert(t, qt.HasLen(caseClause.Items[0].Patterns, 1))
+	qt.Assert(t, qt.HasLen(caseClause.Items[0].Patterns[0].Parts, 1))
+
+	extglob, ok := caseClause.Items[0].Patterns[0].Parts[0].(*ExtGlob)
+	if !ok {
+		t.Fatalf("caseClause.Items[0].Patterns[0].Parts[0] = %T, want *ExtGlob", caseClause.Items[0].Patterns[0].Parts[0])
+	}
+	qt.Assert(t, qt.HasLen(extglob.Patterns, 2))
+	if got := extglob.Patterns[1].RawText(); got != "(a|b)" {
+		t.Fatalf("extglob.Patterns[1].RawText() = %q, want %q", got, "(a|b)")
+	}
+	if group := firstPatternGroup(extglob.Patterns[1]); group != nil {
+		t.Fatalf("extglob.Patterns[1] contains unexpected PatternGroup at %v", group.Pos())
+	}
+}
+
 func countRecoveredPositions(x reflect.Value) int {
 	switch x.Kind() {
 	case reflect.Interface:
