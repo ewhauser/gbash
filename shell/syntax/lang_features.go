@@ -48,6 +48,21 @@ func (c FeatureCategory) String() string {
 	return "unknown"
 }
 
+// FeatureSubtype identifies a stable surface form within a variant-gated
+// syntax family.
+//
+// The zero value means "no known subtype".
+type FeatureSubtype string
+
+const (
+	FeatureSubtypeUnknown FeatureSubtype = ""
+
+	FeatureSubtypeParameterExpansionNested      FeatureSubtype = "parameter_expansion_nested"
+	FeatureSubtypeParameterExpansionFlag        FeatureSubtype = "parameter_expansion_flag"
+	FeatureSubtypeParameterExpansionQuotedIndex FeatureSubtype = "parameter_expansion_quoted_index"
+	FeatureSubtypeParameterExpansionTildeFlag   FeatureSubtype = "parameter_expansion_tilde_flag"
+)
+
 // FeatureID identifies a stable family of variant-gated syntax rejections.
 type FeatureID uint16
 
@@ -83,6 +98,7 @@ const (
 	FeatureLoopCStyleFor
 	FeatureCaseKornForm
 	FeatureConditionalRegexTest
+	FeatureParameterExpansionGlobSubstPrefix
 )
 
 func (id FeatureID) String() string {
@@ -111,6 +127,8 @@ func (id FeatureID) String() string {
 		return "parameter_expansion_indirect_prefix"
 	case FeatureParameterExpansionIsSetPrefix:
 		return "parameter_expansion_is_set_prefix"
+	case FeatureParameterExpansionGlobSubstPrefix:
+		return "parameter_expansion_glob_subst_prefix"
 	case FeatureParameterExpansionSearchReplace:
 		return "parameter_expansion_search_replace"
 	case FeatureParameterExpansionSlice:
@@ -173,6 +191,7 @@ func (id FeatureID) Category() FeatureCategory {
 		FeatureParameterExpansionWidthPrefix,
 		FeatureParameterExpansionIndirectPrefix,
 		FeatureParameterExpansionIsSetPrefix,
+		FeatureParameterExpansionGlobSubstPrefix,
 		FeatureParameterExpansionSearchReplace,
 		FeatureParameterExpansionSlice,
 		FeatureParameterExpansionCaseOperator,
@@ -224,6 +243,8 @@ func (id FeatureID) Format(detail string) string {
 		return "`${!foo}`"
 	case FeatureParameterExpansionIsSetPrefix:
 		return "`${+foo}`"
+	case FeatureParameterExpansionGlobSubstPrefix:
+		return "`${~foo}`"
 	case FeatureParameterExpansionSearchReplace:
 		return "search and replace"
 	case FeatureParameterExpansionSlice:

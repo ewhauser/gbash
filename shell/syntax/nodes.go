@@ -964,10 +964,11 @@ type ParamExp struct {
 	// TODO(v4): perhaps use an Operator token here,
 	// given how we've grown the number of booleans
 	// TODO(v4): rename Excl to reflect its purpose
-	Excl   bool // ${!a}
-	Length bool // ${#a}
-	Width  bool // mksh's ${%a}
-	IsSet  bool // ${+a} with [LangZsh]
+	Excl      bool // ${!a}
+	Length    bool // ${#a}
+	Width     bool // mksh's ${%a}
+	IsSet     bool // ${+a} with [LangZsh]
+	GlobSubst bool // ${~a} with [LangZsh]
 
 	// Only one of these is set at a time.
 	// TODO(v4): consider joining Param and NestedParam into a single field,
@@ -998,7 +999,7 @@ type ParamExp struct {
 // only expanding a name without any further logic.
 func (p *ParamExp) simple() bool {
 	return p.Flags == nil &&
-		!p.Excl && !p.Length && !p.Width && !p.IsSet &&
+		!p.Excl && !p.Length && !p.Width && !p.IsSet && !p.GlobSubst &&
 		p.NestedParam == nil && p.Index == nil &&
 		len(p.Modifiers) == 0 && p.Slice == nil &&
 		p.Repl == nil && p.Names == 0 && p.Exp == nil

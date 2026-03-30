@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ewhauser/gbash/shell/syntax"
 )
 
 func literalExpand(t *testing.T, env testEnv, src string) (string, error) {
@@ -14,6 +16,26 @@ func literalExpand(t *testing.T, env testEnv, src string) (string, error) {
 func fieldsExpand(t *testing.T, env testEnv, src string) ([]string, error) {
 	t.Helper()
 	return Fields(&Config{Env: env}, parseCommandWord(t, src))
+}
+
+func literalExpandVariant(t *testing.T, env testEnv, lang syntax.LangVariant, src string) (string, error) {
+	t.Helper()
+	word, err := syntax.NewParser(syntax.Variant(lang)).Document(strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Literal(&Config{Env: env}, word)
+}
+
+func TestZshGlobSubstParamExpansionRemainsExplicitlyUnsupported(t *testing.T) {
+	t.Parallel()
+
+	_, err := literalExpandVariant(t, testEnv{
+		"foo": {Set: true, Kind: String, Str: "*.go"},
+	}, syntax.LangZsh, `${~foo}`)
+	if err == nil || err.Error() != "unsupported" {
+		t.Fatalf("Literal(${~foo}) error = %v, want unsupported", err)
+	}
 }
 
 func TestParamReplacementAnchorsAndSlashForms(t *testing.T) {
