@@ -65,6 +65,9 @@ func invalidParamExpansion(pe *syntax.ParamExp) error {
 	if pe.Slice != nil && pe.Slice.MissingOffset {
 		return badSubstitution(pe)
 	}
+	if pe.GlobSubst {
+		return fmt.Errorf("unsupported")
+	}
 	if (pe.Length || pe.Width || pe.IsSet) &&
 		(len(pe.Modifiers) > 0 || pe.Slice != nil || pe.Repl != nil || pe.Names != 0 || pe.Exp != nil) {
 		return badSubstitution(pe)

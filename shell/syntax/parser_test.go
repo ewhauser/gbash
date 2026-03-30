@@ -123,6 +123,16 @@ func TestParseLangErrorFeatureMetadata(t *testing.T) {
 			wantErrorText: "1:6: parameter expansion flags are a zsh feature; tried parsing as bash",
 		},
 		{
+			name:          "parameter expansion glob substitution prefix",
+			lang:          LangBash,
+			src:           "echo ${~foo}",
+			wantID:        FeatureParameterExpansionGlobSubstPrefix,
+			wantIDString:  "parameter_expansion_glob_subst_prefix",
+			wantCategory:  FeatureCategoryParameterExpansion,
+			wantFeature:   "`${~foo}`",
+			wantErrorText: "1:6: `${~foo}` is a zsh feature; tried parsing as bash",
+		},
+		{
 			name:          "nested parameter expansion",
 			lang:          LangBash,
 			src:           "echo ${${nested}}",
@@ -2889,6 +2899,10 @@ var errorCases = []errorCase{
 		"echo ${+",
 		langErr("1:6: `${+foo}` is a zsh feature; tried parsing as LANG"),
 		langErr("1:9: invalid parameter name", LangZsh),
+	),
+	errCase(
+		"echo ${~foo}",
+		langErr("1:6: `${~foo}` is a zsh feature; tried parsing as LANG", LangPOSIX|LangBash|LangMirBSDKorn|LangBats),
 	),
 	errCase(
 		"echo ${#${",

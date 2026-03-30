@@ -5471,6 +5471,14 @@ var fileTests = []fileTestCase{
 		}, LangZsh),
 	),
 	fileTest(
+		[]string{"${~foo}"},
+		langFile(&ParamExp{
+			GlobSubst: true,
+			Param:     lit("foo"),
+		}, LangZsh),
+		langErr2("1:1: `${~foo}` is a zsh feature; tried parsing as LANG", LangPOSIX|LangBash|LangMirBSDKorn|LangBats),
+	),
+	fileTest(
 		[]string{"$+foo $#bar"},
 		langFile(call(
 			word(&ParamExp{

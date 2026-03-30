@@ -4296,6 +4296,12 @@ func (p *Parser) paramExp() *ParamExp {
 				pe.IsSet = true
 				p.rune()
 			}
+		case '~':
+			if r := p.peek(); r == utf8.RuneSelf || singleRuneParam(r) || paramNameRune(r) || r == '"' {
+				p.checkLang(pe.Pos(), LangZsh, FeatureParameterExpansionGlobSubstPrefix)
+				pe.GlobSubst = true
+				p.rune()
+			}
 		}
 	}
 	if pe = p.paramExpParameter(pe); pe == nil {

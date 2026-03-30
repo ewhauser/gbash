@@ -871,6 +871,8 @@ func (p *Printer) paramExp(pe *ParamExp) {
 		p.w.WriteByte('%')
 	case pe.IsSet:
 		p.w.WriteByte('+')
+	case pe.GlobSubst:
+		p.w.WriteByte('~')
 	case pe.Excl:
 		p.w.WriteByte('!')
 	}

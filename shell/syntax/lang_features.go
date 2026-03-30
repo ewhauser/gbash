@@ -64,6 +64,7 @@ const (
 	FeatureParameterExpansionWidthPrefix
 	FeatureParameterExpansionIndirectPrefix
 	FeatureParameterExpansionIsSetPrefix
+	FeatureParameterExpansionGlobSubstPrefix
 	FeatureParameterExpansionSearchReplace
 	FeatureParameterExpansionSlice
 	FeatureParameterExpansionCaseOperator
@@ -111,6 +112,8 @@ func (id FeatureID) String() string {
 		return "parameter_expansion_indirect_prefix"
 	case FeatureParameterExpansionIsSetPrefix:
 		return "parameter_expansion_is_set_prefix"
+	case FeatureParameterExpansionGlobSubstPrefix:
+		return "parameter_expansion_glob_subst_prefix"
 	case FeatureParameterExpansionSearchReplace:
 		return "parameter_expansion_search_replace"
 	case FeatureParameterExpansionSlice:
@@ -173,6 +176,7 @@ func (id FeatureID) Category() FeatureCategory {
 		FeatureParameterExpansionWidthPrefix,
 		FeatureParameterExpansionIndirectPrefix,
 		FeatureParameterExpansionIsSetPrefix,
+		FeatureParameterExpansionGlobSubstPrefix,
 		FeatureParameterExpansionSearchReplace,
 		FeatureParameterExpansionSlice,
 		FeatureParameterExpansionCaseOperator,
@@ -224,6 +228,8 @@ func (id FeatureID) Format(detail string) string {
 		return "`${!foo}`"
 	case FeatureParameterExpansionIsSetPrefix:
 		return "`${+foo}`"
+	case FeatureParameterExpansionGlobSubstPrefix:
+		return "`${~foo}`"
 	case FeatureParameterExpansionSearchReplace:
 		return "search and replace"
 	case FeatureParameterExpansionSlice:
