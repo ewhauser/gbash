@@ -634,6 +634,34 @@ func TestParseErrorRecoverableNestedArrayLiteral(t *testing.T) {
 	}
 }
 
+func TestParseErrorBashCompatFunctionNameUnexpectedQuotedWord(t *testing.T) {
+	t.Parallel()
+
+	parser := NewParser(Variant(LangBash))
+	src := "foo$identity('z')\n"
+	_, err := parser.Parse(strings.NewReader(src), "stdin")
+	if err == nil {
+		t.Fatal("Parse() error = nil, want parse error")
+	}
+	var parseErr ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("Parse() error = %T, want ParseError", err)
+	}
+	if got, want := parseErr.Kind, ParseErrorKindUnexpected; got != want {
+		t.Fatalf("Kind = %q, want %q", got, want)
+	}
+	if got, want := parseErr.Unexpected, ParseErrorSymbolSingleQuote; got != want {
+		t.Fatalf("Unexpected = %q, want %q", got, want)
+	}
+	if parseErr.SourceLine == "" {
+		parseErr.SourceLine = sourceLineForTest(src, parseErr.Pos.Line())
+	}
+	const want = "stdin: line 1: syntax error near unexpected token `'z''\nstdin: line 1: `foo$identity('z')'"
+	if got := parseErr.BashError(); got != want {
+		t.Fatalf("BashError() = %q, want %q", got, want)
+	}
+}
+
 func TestParseErrorBashCompatEmptyThenAndDoBodies(t *testing.T) {
 	t.Parallel()
 

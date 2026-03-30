@@ -2045,7 +2045,8 @@ func (p *Parser) currentUnexpectedTokenQuote() string {
 }
 
 func (p *Parser) posCurrentUnexpectedErr(pos Pos) {
-	unexpected, quoted := p.currentUnexpectedTokenDiagnostic()
+	unexpected := p.currentUnexpectedTokenSymbol()
+	quoted := p.currentUnexpectedTokenQuote()
 	p.unexpectedTokenErr(pos, unexpected, quoted)
 }
 
