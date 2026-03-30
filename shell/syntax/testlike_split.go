@@ -270,19 +270,26 @@ func literalValueSourceMap(w *Word, part WordPart, text string) literalSourceMap
 	case *Lit:
 		raw, ok := wordPartRawBytes(w, part)
 		if !ok {
-			return literalSourceMap{offsets: identitySourceOffsets(text)}
+			return identityLiteralSourceMap(text)
 		}
 		offsets, ok := shellLiteralSourceOffsets(raw, text)
 		return literalSourceMap{offsets: offsets, raw: raw, ok: ok}
 	case *SglQuoted:
 		raw, ok := sglQuotedContentRawBytes(w, part)
 		if !ok {
-			raw = []byte(text)
-			ok = true
+			return identityLiteralSourceMap(text)
 		}
 		return literalSourceMap{offsets: identitySourceOffsets(text), raw: raw, ok: true}
 	default:
 		return literalSourceMap{offsets: identitySourceOffsets(text)}
+	}
+}
+
+func identityLiteralSourceMap(text string) literalSourceMap {
+	return literalSourceMap{
+		offsets: identitySourceOffsets(text),
+		raw:     []byte(text),
+		ok:      true,
 	}
 }
 

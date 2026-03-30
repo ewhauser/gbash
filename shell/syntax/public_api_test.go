@@ -377,6 +377,40 @@ func TestPublicTypedJSONDecodedTestLikeSplit(t *testing.T) {
 	}
 }
 
+func TestPublicTypedJSONDecodedTestLikeSplitPreservesMultilineDollarQuoteOffsets(t *testing.T) {
+	t.Parallel()
+
+	decoded := encodeDecodeFile(t, parseFileVariant(t, syntax.LangBash, "[[ $'foo\n=bar' ]]\n"))
+
+	testClause := decoded.Stmts[0].Cmd.(*syntax.TestClause)
+	condWord := testClause.X.(*syntax.CondWord)
+	split := condWord.Word.TestLikeSplit()
+	if split == nil {
+		t.Fatal("decoded stmt[0] TestLikeSplit() = nil, want split")
+	}
+	if got := split.Left.RawText(); got != "" {
+		t.Fatalf("decoded stmt[0] Left.RawText() = %q, want empty", got)
+	}
+	if got, want := split.Left.UnquotedText(), "foo\n"; got != want {
+		t.Fatalf("decoded stmt[0] Left.UnquotedText() = %q, want %q", got, want)
+	}
+	if got, want := split.OperatorPos.Line(), uint(2); got != want {
+		t.Fatalf("decoded stmt[0] OperatorPos.Line() = %d, want %d", got, want)
+	}
+	if got, want := split.OperatorPos.Col(), uint(1); got != want {
+		t.Fatalf("decoded stmt[0] OperatorPos.Col() = %d, want %d", got, want)
+	}
+	if got, want := split.OperatorEnd.Line(), uint(2); got != want {
+		t.Fatalf("decoded stmt[0] OperatorEnd.Line() = %d, want %d", got, want)
+	}
+	if got, want := split.OperatorEnd.Col(), uint(2); got != want {
+		t.Fatalf("decoded stmt[0] OperatorEnd.Col() = %d, want %d", got, want)
+	}
+	if got, want := split.Right.UnquotedText(), "bar"; got != want {
+		t.Fatalf("decoded stmt[0] Right.UnquotedText() = %q, want %q", got, want)
+	}
+}
+
 func TestPublicPatternGroupRoundTrip(t *testing.T) {
 	t.Parallel()
 
