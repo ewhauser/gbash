@@ -658,6 +658,11 @@ func TestParseErrorBashErrorParseCompatibility(t *testing.T) {
 			want: "stdin: line 1: syntax error near unexpected token `bar'\nstdin: line 1: `foo(bar'",
 		},
 		{
+			name: "dynamic function-like open paren keeps parser token",
+			src:  "$(echo x)(\n",
+			want: "stdin: line 1: syntax error near unexpected token `newline'\nstdin: line 1: `$(echo x)('",
+		},
+		{
 			name: "incomplete if",
 			src:  "echo hi; if\n",
 			want: "stdin: line 1: syntax error: unexpected end of file from `if' command on line 1",
@@ -772,19 +777,28 @@ func TestParseErrorTypedContext(t *testing.T) {
 		wantToken string
 	}{
 		{
-			name:     "foo open at eof",
-			src:      "foo(",
-			wantKind: parseErrorContextFuncOpen,
+			name:      "foo open at eof",
+			src:       "foo(",
+			wantKind:  parseErrorContextFuncOpen,
+			wantToken: "newline",
 		},
 		{
-			name:     "foo open with literal token",
-			src:      "foo(bar",
-			wantKind: parseErrorContextFuncOpen,
+			name:      "foo open with literal token",
+			src:       "foo(bar",
+			wantKind:  parseErrorContextFuncOpen,
+			wantToken: "bar",
 		},
 		{
-			name:     "function foo open at eof",
-			src:      "function foo(",
-			wantKind: parseErrorContextFuncOpen,
+			name:      "function foo open at eof",
+			src:       "function foo(",
+			wantKind:  parseErrorContextFuncOpen,
+			wantToken: "newline",
+		},
+		{
+			name:      "dynamic func name preserves parser token",
+			src:       "$(echo x)(",
+			wantKind:  parseErrorContextFuncOpen,
+			wantToken: "newline",
 		},
 		{
 			name:      "stray test closer",

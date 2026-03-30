@@ -1371,6 +1371,7 @@ func (p *Parser) followErr(pos Pos, left, right any) {
 		expected:   parseErrorSymbols(right),
 	}
 	if ctx, ok := parseErrorFollowContext(left, right); ok {
+		ctx = withFuncOpenBashToken(ctx, p.currentUnexpectedFuncOpenToken())
 		p.posErrWithMetadataContext(pos, meta, ctx, "%#q must be followed by %#q", left, right)
 		return
 	}
@@ -1743,6 +1744,9 @@ func bashCompatUnexpectedEOFText(e ParseError) (string, bool) {
 func bashCompatTypedContextText(e ParseError, sourceLine string) (string, bool) {
 	switch e.typedContext.kind {
 	case parseErrorContextFuncOpen:
+		if e.typedContext.token != "" {
+			return bashCompatUnexpectedTokenText(e.typedContext.token), true
+		}
 		token, ok := bashCompatFuncOpenToken(sourceLine)
 		if !ok {
 			return "", false
@@ -1768,6 +1772,17 @@ func bashCompatUnexpectedTokenText(token string) string {
 		return "syntax error near unexpected token `newline'"
 	}
 	return fmt.Sprintf("syntax error near unexpected token %s", bashQuoteString(token))
+}
+
+func withFuncOpenBashToken(ctx parseErrorContext, token string) parseErrorContext {
+	if ctx.kind != parseErrorContextFuncOpen || ctx.token != "" {
+		return ctx
+	}
+	if token == "" {
+		token = "newline"
+	}
+	ctx.token = token
+	return ctx
 }
 
 func bashCompatFuncOpenError(text string) bool {
@@ -2139,6 +2154,21 @@ func (p *Parser) currentUnexpectedTokenQuote() string {
 	return p.tok.bashQuote()
 }
 
+func (p *Parser) currentUnexpectedFuncOpenToken() string {
+	switch p.tok {
+	case _EOF, _Newl:
+		return "newline"
+	case _Lit, _LitWord:
+		return p.val
+	case sglQuote, dollSglQuote, dblQuote, dollDblQuote, bckQuote, dollar, dollBrace,
+		dollDblParen, dollParen, dollBrack, cmdIn, assgnParen, cmdOut:
+		if _, raw := p.getWordRaw(); raw != "" {
+			return raw
+		}
+	}
+	return p.tok.String()
+}
+
 func (p *Parser) posCurrentUnexpectedErr(pos Pos) {
 	unexpected, quoted := p.currentUnexpectedTokenDiagnostic()
 	p.unexpectedTokenErr(pos, unexpected, quoted)
@@ -2146,6 +2176,7 @@ func (p *Parser) posCurrentUnexpectedErr(pos Pos) {
 
 func (p *Parser) posCurrentUnexpectedErrContext(pos Pos, ctx parseErrorContext) {
 	unexpected, quoted := p.currentUnexpectedTokenDiagnostic()
+	ctx = withFuncOpenBashToken(ctx, p.currentUnexpectedFuncOpenToken())
 	p.posErrWithMetadataContext(pos, parseErrorMetadata{
 		kind:       ParseErrorKindUnexpected,
 		unexpected: unexpected,
