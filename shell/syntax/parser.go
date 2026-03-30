@@ -12,8 +12,10 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
+	"unsafe"
 )
 
 // ParserOption is a function which can be passed to NewParser
@@ -654,11 +656,12 @@ type Parser struct {
 	accComs []Comment
 	curComs *[]Comment
 
-	litBatch  []Lit
-	wordBatch []wordAlloc
+	litBatch           []Lit
+	wordBatch          []wordAlloc
+	litBatchAllocSize  int
+	wordBatchAllocSize int
 
-	readBuf        [bufSize]byte
-	litBuf         [bufSize]byte
+	scratch        *parserScratch
 	litBs          []byte
 	wordRawBs      []byte
 	captureWordRaw bool
@@ -750,6 +753,77 @@ func (p *Parser) Incomplete() bool {
 
 const bufSize = 1 << 10
 
+const (
+	litBatchSize  = 256
+	wordBatchSize = 128
+
+	rawWordPartLitBatchSize  = 32
+	rawWordPartWordBatchSize = 16
+	parenProbeLitBatchSize   = 32
+	parenProbeWordBatchSize  = 16
+)
+
+type parserScratch struct {
+	readBuf [bufSize]byte
+	litBuf  [bufSize]byte
+}
+
+type lenReader interface {
+	Len() int
+}
+
+type prependReader struct {
+	prefix *bytes.Reader
+	tail   io.Reader
+}
+
+func newPrependReader(prefix []byte, tail io.Reader) io.Reader {
+	if len(prefix) == 0 {
+		return tail
+	}
+	return &prependReader{
+		prefix: bytes.NewReader(prefix),
+		tail:   tail,
+	}
+}
+
+func (r *prependReader) Len() int {
+	n := 0
+	if r.prefix != nil {
+		n += r.prefix.Len()
+	}
+	if tail, ok := r.tail.(lenReader); ok {
+		n += tail.Len()
+	}
+	return n
+}
+
+func (r *prependReader) Read(p []byte) (int, error) {
+	if r.prefix != nil {
+		n, err := r.prefix.Read(p)
+		if err == io.EOF {
+			r.prefix = nil
+			if n > 0 {
+				return n, nil
+			}
+		} else {
+			return n, err
+		}
+	}
+	if r.tail == nil {
+		return 0, io.EOF
+	}
+	return r.tail.Read(p)
+}
+
+var parserScratchPool = sync.Pool{
+	New: func() any { return &parserScratch{} },
+}
+
+var tempParserPool = sync.Pool{
+	New: func() any { return &Parser{} },
+}
+
 func (p *Parser) reset() {
 	p.tok, p.val = illegalTok, ""
 	p.eqlOffs = 0
@@ -808,9 +882,30 @@ func (p *Parser) nextPos() Pos {
 	return NewPos(uint(offset), line, col)
 }
 
+func (p *Parser) ensureScratch() *parserScratch {
+	if p.scratch == nil {
+		p.scratch = &parserScratch{}
+	}
+	return p.scratch
+}
+
+func (p *Parser) litBatchCap() int {
+	if p.litBatchAllocSize > 0 {
+		return p.litBatchAllocSize
+	}
+	return litBatchSize
+}
+
+func (p *Parser) wordBatchCap() int {
+	if p.wordBatchAllocSize > 0 {
+		return p.wordBatchAllocSize
+	}
+	return wordBatchSize
+}
+
 func (p *Parser) lit(pos Pos, val string) *Lit {
 	if len(p.litBatch) == 0 {
-		p.litBatch = make([]Lit, 32)
+		p.litBatch = make([]Lit, p.litBatchCap())
 	}
 	l := &p.litBatch[0]
 	p.litBatch = p.litBatch[1:]
@@ -822,7 +917,7 @@ func (p *Parser) lit(pos Pos, val string) *Lit {
 
 func (p *Parser) rawLit(start, end Pos, val string) *Lit {
 	if len(p.litBatch) == 0 {
-		p.litBatch = make([]Lit, 32)
+		p.litBatch = make([]Lit, p.litBatchCap())
 	}
 	l := &p.litBatch[0]
 	p.litBatch = p.litBatch[1:]
@@ -843,7 +938,7 @@ type wordAlloc struct {
 
 func (p *Parser) wordAnyNumber() *Word {
 	if len(p.wordBatch) == 0 {
-		p.wordBatch = make([]wordAlloc, 32)
+		p.wordBatch = make([]wordAlloc, p.wordBatchCap())
 	}
 	alloc := &p.wordBatch[0]
 	p.wordBatch = p.wordBatch[1:]
@@ -855,7 +950,7 @@ func (p *Parser) wordAnyNumber() *Word {
 
 func (p *Parser) wordOne(part WordPart) *Word {
 	if len(p.wordBatch) == 0 {
-		p.wordBatch = make([]wordAlloc, 32)
+		p.wordBatch = make([]wordAlloc, p.wordBatchCap())
 	}
 	alloc := &p.wordBatch[0]
 	p.wordBatch = p.wordBatch[1:]
@@ -2505,7 +2600,7 @@ func (p *Parser) stopWordCapture() string {
 
 func (p *Parser) startCandidateCapture() {
 	p.wordRawBs = append(p.wordRawBs[:0], p.currentTokenSource()...)
-	p.wordRawBs = append(p.wordRawBs, p.currentRuneSource()...)
+	p.wordRawBs = append(p.wordRawBs, p.currentRuneBytes()...)
 	p.captureWordRaw = true
 }
 
@@ -2539,21 +2634,58 @@ func (p *Parser) currentTokenSource() string {
 	}
 }
 
-func (p *Parser) currentRuneSource() string {
+func (p *Parser) currentRuneBytes() []byte {
 	if p.r == utf8.RuneSelf || p.w <= 0 {
-		return ""
+		return nil
 	}
 	start := int(p.bsp) - p.w
 	if start < 0 || start > len(p.bs) || int(p.bsp) > len(p.bs) {
-		return ""
+		return nil
 	}
-	return string(p.bs[start:p.bsp])
+	return p.bs[start:p.bsp]
+}
+
+func (p *Parser) currentRuneSource() string {
+	if src := p.currentRuneBytes(); len(src) > 0 {
+		return string(src)
+	}
+	return ""
+}
+
+func (p *Parser) currentSourceTailPrefixed(prefix []byte) ([]byte, error) {
+	tail := make([]byte, 0, len(prefix)+len(p.bs)+p.unreadSourceTailHint())
+	tail = append(tail, prefix...)
+	if src := p.currentRuneBytes(); len(src) > 0 {
+		tail = append(tail, src...)
+	}
+	if idx := int(p.bsp); idx >= 0 && idx <= len(p.bs) {
+		tail = append(tail, p.bs[idx:]...)
+	}
+	return p.unreadSourceTailAppend(tail)
+}
+
+func sourceTailSuffix(src []byte, prefixLen int) []byte {
+	if prefixLen < 0 || len(src) < prefixLen {
+		return nil
+	}
+	return src[prefixLen:]
+}
+
+func (p *Parser) currentSourceTail() ([]byte, error) {
+	tail := make([]byte, 0, len(p.bs)+p.unreadSourceTailHint())
+	if src := p.currentRuneBytes(); len(src) > 0 {
+		tail = append(tail, src...)
+	}
+	if idx := int(p.bsp); idx >= 0 && idx <= len(p.bs) {
+		tail = append(tail, p.bs[idx:]...)
+	}
+	return p.unreadSourceTailAppend(tail)
 }
 
 func (p *Parser) bufferedSourceTail() string {
 	var b strings.Builder
-	if src := p.currentRuneSource(); src != "" {
-		b.WriteString(src)
+	if src := p.currentRuneBytes(); len(src) > 0 {
+		b.Write(src)
 	}
 	if idx := int(p.bsp); idx >= 0 && idx <= len(p.bs) {
 		b.Write(p.bs[idx:])
@@ -2568,6 +2700,26 @@ func (p *Parser) sourceFromPos(pos Pos) string {
 	}
 	buf, _ := p.sourceBuffer()
 	return string(buf[start:])
+}
+
+func (p *Parser) sourceBytesFromPos(pos Pos) []byte {
+	start, ok := p.bufferIndex(pos.Offset())
+	if !ok {
+		return nil
+	}
+	buf, _ := p.sourceBuffer()
+	return buf[start:]
+}
+
+// bytesToStringView returns a non-owning string view over src.
+//
+// Callers must treat the result as ephemeral and must not retain it after src
+// may be mutated or discarded.
+func bytesToStringView(src []byte) string {
+	if len(src) == 0 {
+		return ""
+	}
+	return unsafe.String(unsafe.SliceData(src), len(src))
 }
 
 func (p *Parser) sourceBetween(left, right Pos) string {
@@ -2672,22 +2824,9 @@ func (p *Parser) bufferRange(start, end Pos) (int, int, bool) {
 	return from, to, true
 }
 
-func (p *Parser) currentSourceTail() ([]byte, error) {
-	var tail []byte
-	if src := p.currentRuneSource(); src != "" {
-		tail = append(tail, src...)
-	}
-	if idx := int(p.bsp); idx >= 0 && idx <= len(p.bs) {
-		tail = append(tail, p.bs[idx:]...)
-	}
-	rest, err := p.unreadSourceTail()
-	tail = append(tail, rest...)
-	return tail, err
-}
-
 func (p *Parser) lookaheadSourceTail(limit int, done func([]byte) bool) string {
 	tail := make([]byte, 0, limit)
-	if src := p.currentRuneSource(); src != "" {
+	if src := p.currentRuneBytes(); len(src) > 0 {
 		tail = append(tail, src...)
 	}
 	if idx := int(p.bsp); idx >= 0 && idx <= len(p.bs) {
@@ -2711,7 +2850,7 @@ func (p *Parser) lookaheadSourceTail(limit int, done func([]byte) bool) string {
 		}
 	}
 	if len(extra) > 0 {
-		p.src = io.MultiReader(bytes.NewReader(extra), reader)
+		p.src = newPrependReader(extra, reader)
 	}
 	return string(tail)
 }
@@ -2739,28 +2878,68 @@ func paramExpIndexMetadataTailDone(tail []byte) bool {
 }
 
 func (p *Parser) unreadSourceTail() ([]byte, error) {
+	return p.unreadSourceTailAppend(nil)
+}
+
+func (p *Parser) unreadSourceTailHint() int {
+	if p.readEOF || p.src == nil {
+		return 0
+	}
+	if src, ok := p.src.(lenReader); ok {
+		return src.Len()
+	}
+	return 0
+}
+
+func (p *Parser) unreadSourceTailAppend(dst []byte) ([]byte, error) {
 	switch p.readErr {
 	case nil:
 	case io.EOF:
-		return nil, nil
+		return dst, nil
 	default:
-		return nil, p.readErr
+		return dst, p.readErr
 	}
 	if p.readEOF || p.src == nil {
-		return nil, nil
+		return dst, nil
 	}
-	var buf bytes.Buffer
+	if extra := p.unreadSourceTailHint(); extra > 0 && cap(dst)-len(dst) < extra {
+		grown := make([]byte, len(dst), len(dst)+extra)
+		copy(grown, dst)
+		dst = grown
+	}
+	buf := bytes.NewBuffer(dst)
 	_, err := buf.ReadFrom(p.src)
-	rest := buf.Bytes()
+	dst = buf.Bytes()
 	if err != nil && err != io.EOF {
-		return rest, err
+		return dst, err
 	}
-	return rest, nil
+	return dst, nil
 }
 
 func (p *Parser) loadReplay(pos Pos, src []byte, readErr error) {
 	p.src = bytes.NewReader(nil)
 	p.bs = append(p.bs[:0], src...)
+	p.offs = int64(pos.Offset())
+	p.line = int64(pos.Line())
+	p.col = int64(pos.Col())
+	p.err = nil
+	p.readErr = readErr
+	p.readEOF = false
+	if len(p.bs) == 0 {
+		p.r = utf8.RuneSelf
+		p.w = 1
+		p.bsp = 1
+		return
+	}
+	r, w := utf8.DecodeRune(p.bs)
+	p.r = r
+	p.w = w
+	p.bsp = uint(w)
+}
+
+func (p *Parser) loadReplayView(pos Pos, src []byte, readErr error) {
+	p.src = bytes.NewReader(nil)
+	p.bs = src
 	p.offs = int64(pos.Offset())
 	p.line = int64(pos.Line())
 	p.col = int64(pos.Col())
@@ -2872,11 +3051,9 @@ func hasContinuedScriptAfterRecoveredBackquote(src []byte) bool {
 
 func (p *Parser) recoverableBackquoteSource(left Pos) ([]byte, error) {
 	if src := p.sourceFromPos(left); src != "" {
-		rest, err := p.unreadSourceTail()
-		full := make([]byte, 0, len(src)+len(rest))
+		full := make([]byte, 0, len(src)+p.unreadSourceTailHint())
 		full = append(full, src...)
-		full = append(full, rest...)
-		return full, err
+		return p.unreadSourceTailAppend(full)
 	}
 	tail, err := p.currentSourceTail()
 	if len(tail) == 0 {
@@ -2928,6 +3105,11 @@ func (p *Parser) setSourceBuffer(pos Pos, src []byte) {
 	p.sourceOffs = int64(pos.Offset())
 }
 
+func (p *Parser) setSourceBufferView(pos Pos, src []byte) {
+	p.sourceBs = src
+	p.sourceOffs = int64(pos.Offset())
+}
+
 func cloneHeredocStops(src []heredocStop) []heredocStop {
 	if len(src) == 0 {
 		return nil
@@ -2973,6 +3155,8 @@ func (p *Parser) parenAmbiguityClone() *Parser {
 	clone.pendingArrayWordPos = Pos{}
 	clone.keepComments = false
 	clone.recoveredErrors = 0
+	clone.litBatchAllocSize = parenProbeLitBatchSize
+	clone.wordBatchAllocSize = parenProbeWordBatchSize
 	clone.heredocs = append([]*Redirect(nil), p.heredocs...)
 	clone.hdocStops = cloneHeredocStops(p.hdocStops)
 	clone.aliasChain = append([]*AliasExpansion(nil), p.aliasChain...)
@@ -3293,15 +3477,16 @@ func (p *Parser) parenAmbiguityWordPart() WordPart {
 	p.parenAmbiguityProbeDepth++
 	defer func() { p.parenAmbiguityProbeDepth-- }()
 
-	afterToken, err := p.currentSourceTail()
+	prefix := []byte(dollDblParen.String())
+	fullSrc, err := p.currentSourceTailPrefixed(prefix)
 	start := p.pos
-	fullSrc := append([]byte(dollDblParen.String()), afterToken...)
-	arithPos := posAddCol(start, len(dollDblParen.String()))
+	afterToken := sourceTailSuffix(fullSrc, len(prefix))
+	arithPos := posAddCol(start, len(prefix))
 	arith := p.parenAmbiguityClone()
 	arith.tok = dollDblParen
 	arith.pos = start
-	arith.loadReplay(arithPos, afterToken, err)
-	arith.setSourceBuffer(start, fullSrc)
+	arith.loadReplayView(arithPos, afterToken, err)
+	arith.setSourceBufferView(start, fullSrc)
 	part := arith.arithmWordPart(false)
 	arithOK := arith.err == nil
 	arithRight := Pos{}
@@ -3309,28 +3494,28 @@ func (p *Parser) parenAmbiguityWordPart() WordPart {
 		arithRight = part.Right
 	}
 
-	fallbackSrc := append([]byte{'('}, afterToken...)
+	fallbackSrc := sourceTailSuffix(fullSrc, len(prefix)-1)
 	fallbackPos := posAddCol(start, len(dollParen.String()))
 	cmd := p.parenAmbiguityClone()
 	cmd.tok = dollParen
 	cmd.pos = start
-	cmd.loadReplay(fallbackPos, fallbackSrc, err)
-	cmd.setSourceBuffer(start, fullSrc)
+	cmd.loadReplayView(fallbackPos, fallbackSrc, err)
+	cmd.setSourceBufferView(start, fullSrc)
 	cs := cmd.cmdSubst()
 	fallbackIncomplete := cmd.err != nil && IsIncomplete(cmd.err) && hasInternalNewline(afterToken)
 	if fallbackIncomplete {
 		p.tok = dollParen
 		p.pos = start
-		p.loadReplay(fallbackPos, fallbackSrc, err)
-		p.setSourceBuffer(start, fullSrc)
+		p.loadReplayView(fallbackPos, fallbackSrc, err)
+		p.setSourceBufferView(start, fullSrc)
 		return p.cmdSubst()
 	}
 	fallbackOK := cmd.err == nil && cmd.allowParenAmbiguityFallback(cs.Stmts, cs.Last, cs.Right)
 	if fallbackOK {
 		p.tok = dollParen
 		p.pos = start
-		p.loadReplay(fallbackPos, fallbackSrc, err)
-		p.setSourceBuffer(start, fullSrc)
+		p.loadReplayView(fallbackPos, fallbackSrc, err)
+		p.setSourceBufferView(start, fullSrc)
 		return p.cmdSubst()
 	}
 	arithEndedEarly := false
@@ -3346,8 +3531,8 @@ func (p *Parser) parenAmbiguityWordPart() WordPart {
 
 	p.tok = dollDblParen
 	p.pos = start
-	p.loadReplay(arithPos, afterToken, err)
-	p.setSourceBuffer(start, fullSrc)
+	p.loadReplayView(arithPos, afterToken, err)
+	p.setSourceBufferView(start, fullSrc)
 	if arithOK && !arithEndedEarly {
 		return p.arithmWordPart(true)
 	}
@@ -4204,10 +4389,29 @@ func (r rawPatternParser) parseShellPart(raw string, base Pos) (PatternPart, int
 }
 
 func parseRawWordPart(raw string, base Pos, lang LangVariant) (WordPart, int, bool) {
-	sub := NewParser(Variant(lang))
+	sub := tempParserPool.Get().(*Parser)
+	scratch := parserScratchPool.Get().(*parserScratch)
+	*sub = Parser{
+		lang:               lang,
+		parseExtGlob:       true,
+		litBatchAllocSize:  rawWordPartLitBatchSize,
+		wordBatchAllocSize: rawWordPartWordBatchSize,
+		scratch:            scratch,
+	}
+	defer func() {
+		sub.litBatch = nil
+		sub.wordBatch = nil
+		sub.scratch = nil
+		*sub = Parser{}
+		tempParserPool.Put(sub)
+		parserScratchPool.Put(scratch)
+	}()
 	sub.reset()
-	sub.f = &File{}
-	sub.src = strings.NewReader(raw)
+	var file File
+	sub.f = &file
+	var reader strings.Reader
+	reader.Reset(raw)
+	sub.src = &reader
 	sub.offs = int64(base.Offset())
 	sub.line = int64(base.Line())
 	sub.col = int64(base.Col())
@@ -5168,17 +5372,66 @@ func (p *Parser) hasValidIdent() bool {
 	if p.tok != _Lit && p.tok != _LitWord {
 		return false
 	}
-	if end := p.validEqlOffs(); end > 0 {
-		if p.val[end-1] == '+' && p.lang.in(langBashLike|LangMirBSDKorn|LangZsh) {
-			end-- // a+=x
-		}
-		if ValidName(p.val[:end]) {
-			return true
-		}
-	} else if !ValidName(p.val) {
+	if p.scalarAssignEqIndex() > 0 {
+		return true
+	}
+	if !ValidName(p.val) {
 		return false // *[i]=x
 	}
 	return p.r == '[' // a[i]=x
+}
+
+func (p *Parser) scalarAssignNameEnd(eqIndex int) int {
+	if eqIndex <= 0 || eqIndex > len(p.val) {
+		return -1
+	}
+	nameEnd := eqIndex
+	if p.val[nameEnd-1] == '+' && p.lang.in(langBashLike|LangMirBSDKorn|LangZsh) {
+		nameEnd-- // a+=x
+	}
+	return nameEnd
+}
+
+func (p *Parser) scalarAssignEqIndex() int {
+	if p.tok != _Lit && p.tok != _LitWord {
+		return -1
+	}
+	eqIndex := p.validEqlOffs()
+	if eqIndex <= 0 {
+		return -1
+	}
+	nameEnd := p.scalarAssignNameEnd(eqIndex)
+	if nameEnd > 0 && ValidName(p.val[:nameEnd]) {
+		return eqIndex
+	}
+	return -1
+}
+
+func (p *Parser) scalarAssignMode(eqIndex int, appendScalarWord bool) *Assign {
+	as := &Assign{}
+	nameEnd := p.scalarAssignNameEnd(eqIndex)
+	if nameEnd <= 0 {
+		return nil
+	}
+	operatorPos := posAddCol(p.pos, eqIndex)
+	operatorWidth := 1
+	if nameEnd != eqIndex {
+		// a+=b
+		as.Append = true
+		operatorPos = posAddCol(p.pos, nameEnd)
+		operatorWidth = 2
+	}
+	as.Ref = &VarRef{Name: p.lit(p.pos, p.val[:nameEnd])}
+	as.Surface = newAssignSurfaceForm(operatorPos, operatorWidth)
+	// since we're not using the entire p.val
+	as.Ref.Name.ValueEnd = posAddCol(as.Ref.Name.ValuePos, nameEnd)
+	left := p.lit(posAddCol(p.pos, 1), p.val[eqIndex+1:])
+	if left.Value != "" {
+		left.ValuePos = posAddCol(left.ValuePos, eqIndex)
+		as.Value = p.wordOne(left)
+	}
+	p.next()
+	return p.finishAssign(as, appendScalarWord)
 }
 
 func (p *Parser) validEqlOffs() int {
@@ -5558,8 +5811,8 @@ func (p *Parser) tryAssignAfterRef(ref *VarRef) (*Assign, bool) {
 }
 
 func (p *Parser) tryAssignCandidate(declMode bool) (*Assign, bool) {
-	if eqIndex := p.validEqlOffs(); eqIndex > 0 {
-		return p.getAssign(), true
+	if eqIndex := p.scalarAssignEqIndex(); eqIndex > 0 {
+		return p.scalarAssignMode(eqIndex, true), true
 	}
 	saved := *p
 	start := p.pos
@@ -5637,29 +5890,8 @@ func (p *Parser) getAssign() *Assign {
 }
 
 func (p *Parser) getAssignMode(appendScalarWord bool) *Assign {
-	as := &Assign{}
-	if eqIndex := p.validEqlOffs(); eqIndex > 0 { // foo=bar
-		nameEnd := eqIndex
-		operatorPos := posAddCol(p.pos, eqIndex)
-		operatorWidth := 1
-		if p.lang.in(langBashLike|LangMirBSDKorn|LangZsh) && p.val[eqIndex-1] == '+' {
-			// a+=b
-			as.Append = true
-			nameEnd--
-			operatorPos = posAddCol(p.pos, nameEnd)
-			operatorWidth = 2
-		}
-		as.Ref = &VarRef{Name: p.lit(p.pos, p.val[:nameEnd])}
-		as.Surface = newAssignSurfaceForm(operatorPos, operatorWidth)
-		// since we're not using the entire p.val
-		as.Ref.Name.ValueEnd = posAddCol(as.Ref.Name.ValuePos, nameEnd)
-		left := p.lit(posAddCol(p.pos, 1), p.val[eqIndex+1:])
-		if left.Value != "" {
-			left.ValuePos = posAddCol(left.ValuePos, eqIndex)
-			as.Value = p.wordOne(left)
-		}
-		p.next()
-		return p.finishAssign(as, appendScalarWord)
+	if eqIndex := p.scalarAssignEqIndex(); eqIndex > 0 { // foo=bar
+		return p.scalarAssignMode(eqIndex, appendScalarWord)
 	}
 	ref := p.varRef()
 	if ref == nil {
@@ -6252,15 +6484,16 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 	p.parenAmbiguityProbeDepth++
 	defer func() { p.parenAmbiguityProbeDepth-- }()
 
-	afterToken, err := p.currentSourceTail()
+	prefix := []byte(dblLeftParen.String())
+	fullSrc, err := p.currentSourceTailPrefixed(prefix)
 	start := p.pos
-	fullSrc := append([]byte(dblLeftParen.String()), afterToken...)
-	arithPos := posAddCol(start, len(dblLeftParen.String()))
+	afterToken := sourceTailSuffix(fullSrc, len(prefix))
+	arithPos := posAddCol(start, len(prefix))
 	arith := p.parenAmbiguityClone()
 	arith.tok = dblLeftParen
 	arith.pos = start
-	arith.loadReplay(arithPos, afterToken, err)
-	arith.setSourceBuffer(start, fullSrc)
+	arith.loadReplayView(arithPos, afterToken, err)
+	arith.setSourceBufferView(start, fullSrc)
 	probeStmt := &Stmt{Position: s.Position}
 	arith.arithmExpCmdWithTail(probeStmt, false)
 	arithOK := arith.err == nil
@@ -6269,13 +6502,13 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 		arithRight = arithCmd.Right
 	}
 
-	fallbackSrc := append([]byte{'('}, afterToken...)
+	fallbackSrc := sourceTailSuffix(fullSrc, len(prefix)-1)
 	fallbackPos := posAddCol(start, len(leftParen.String()))
 	sub := p.parenAmbiguityClone()
 	sub.tok = leftParen
 	sub.pos = start
-	sub.loadReplay(fallbackPos, fallbackSrc, err)
-	sub.setSourceBuffer(start, fullSrc)
+	sub.loadReplayView(fallbackPos, fallbackSrc, err)
+	sub.setSourceBufferView(start, fullSrc)
 	probeStmt = &Stmt{Position: s.Position}
 	sub.subshell(probeStmt)
 	fallbackIncomplete := false
@@ -6285,8 +6518,8 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 	if fallbackIncomplete {
 		p.tok = leftParen
 		p.pos = start
-		p.loadReplay(fallbackPos, fallbackSrc, err)
-		p.setSourceBuffer(start, fullSrc)
+		p.loadReplayView(fallbackPos, fallbackSrc, err)
+		p.setSourceBufferView(start, fullSrc)
 		p.subshell(s)
 		return
 	}
@@ -6296,8 +6529,8 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 			fallbackOK = true
 			p.tok = leftParen
 			p.pos = start
-			p.loadReplay(fallbackPos, fallbackSrc, err)
-			p.setSourceBuffer(start, fullSrc)
+			p.loadReplayView(fallbackPos, fallbackSrc, err)
+			p.setSourceBufferView(start, fullSrc)
 			p.subshell(s)
 			return
 		}
@@ -6320,8 +6553,8 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 
 	p.tok = dblLeftParen
 	p.pos = start
-	p.loadReplay(arithPos, afterToken, err)
-	p.setSourceBuffer(start, fullSrc)
+	p.loadReplayView(arithPos, afterToken, err)
+	p.setSourceBufferView(start, fullSrc)
 	if arithOK && !arithEndedEarly {
 		p.arithmExpCmdWithTail(s, true)
 		return
@@ -6936,12 +7169,16 @@ scan:
 }
 
 func (p *Parser) scanRawPatternSource(start Pos, mode patternScanMode) (*scannedRawPattern, bool) {
-	raw := p.sourceFromPos(start)
-	scanned, end := scanPatternText(raw, start, mode, p.lang, p.parseExtGlob)
+	raw := p.sourceBytesFromPos(start)
+	scanned, end := scanPatternText(bytesToStringView(raw), start, mode, p.lang, p.parseExtGlob)
 	if mode == patternScanCase && !p.readEOF && end == len(raw) {
 		return nil, false
 	}
-	scanned.raw = raw[int(scanned.start.Offset()-start.Offset()):end]
+	rawStart := int(scanned.start.Offset() - start.Offset())
+	if rawStart < 0 || rawStart > end || end > len(raw) {
+		return nil, false
+	}
+	scanned.raw = string(raw[rawStart:end])
 	boundaryPos := posAddCol(start, end)
 	for p.tok != _EOF && p.pos.Offset() < boundaryPos.Offset() {
 		p.next()
@@ -8440,7 +8677,9 @@ func (p *Parser) callExpr(s *Stmt, w *Word, assign bool) {
 	}
 	if assign {
 		sep := p.tokSeparator
-		if as, ok := p.tryAssignCandidate(false); ok {
+		if eqIndex := p.scalarAssignEqIndex(); eqIndex > 0 {
+			appendAssign(sep, p.scalarAssignMode(eqIndex, true))
+		} else if as, ok := p.tryAssignCandidate(false); ok {
 			appendAssign(sep, as)
 		} else if w := p.takePendingArrayWord(); w != nil {
 			appendArg(sep, w)
@@ -8459,6 +8698,10 @@ loop:
 		case _LitWord:
 			if len(ce.Args) == 0 && p.hasValidIdent() {
 				sep := p.tokSeparator
+				if eqIndex := p.scalarAssignEqIndex(); eqIndex > 0 {
+					appendAssign(sep, p.scalarAssignMode(eqIndex, true))
+					break
+				}
 				if as, ok := p.tryAssignCandidate(false); ok {
 					appendAssign(sep, as)
 					break
@@ -8499,6 +8742,10 @@ loop:
 		case _Lit:
 			if len(ce.Args) == 0 && p.hasValidIdent() {
 				sep := p.tokSeparator
+				if eqIndex := p.scalarAssignEqIndex(); eqIndex > 0 {
+					appendAssign(sep, p.scalarAssignMode(eqIndex, true))
+					break
+				}
 				if as, ok := p.tryAssignCandidate(false); ok {
 					appendAssign(sep, as)
 					break

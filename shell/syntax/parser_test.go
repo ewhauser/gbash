@@ -2217,7 +2217,7 @@ var cmpOpt = cmp.Options{
 	cmpopts.IgnoreFields(Assign{}, "Surface"),
 	cmpopts.IgnoreFields(CmdSubst{}, "BackquoteClose"),
 	cmpopts.IgnoreFields(Word{}, "LeadingEscape"),
-	cmpopts.IgnoreUnexported(Assign{}, Subscript{}, VarRef{}, Word{}, Pattern{}, ParseError{}),
+	cmpopts.IgnoreUnexported(Assign{}, CallExpr{}, Subscript{}, VarRef{}, Word{}, Pattern{}, ParseError{}),
 }
 
 func sourceLineForTest(src string, lineNum uint) string {
@@ -5151,8 +5151,11 @@ func countRecoveredPositions(x reflect.Value) int {
 			return 0
 		}
 		n := 0
-		for _, field := range x.Fields() {
-			n += countRecoveredPositions(field)
+		for i := range x.NumField() {
+			if !x.Type().Field(i).IsExported() {
+				continue
+			}
+			n += countRecoveredPositions(x.Field(i))
 		}
 		return n
 	}
