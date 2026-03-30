@@ -3531,7 +3531,11 @@ func (r rawWordPartParser) parse(raw string, base Pos) []WordPart {
 }
 
 func (r rawPatternParser) parse(raw string, base Pos) *Pattern {
-	parts, end, _ := r.parseParts(raw, base, 0, false)
+	return r.parseWithBareGroups(raw, base, true)
+}
+
+func (r rawPatternParser) parseWithBareGroups(raw string, base Pos, allowBareGroups bool) *Pattern {
+	parts, end, _ := r.parseParts(raw, base, 0, false, allowBareGroups)
 	return &Pattern{
 		Start:  base,
 		EndPos: posAddCol(base, end),
@@ -3545,7 +3549,7 @@ func (r rawPatternParser) parseList(raw string, base Pos) []*Pattern {
 	start := 0
 	for {
 		end, delim := r.findPatternListSplit(raw, base, start)
-		patterns = append(patterns, r.parse(raw[start:end], posAddCol(base, start)))
+		patterns = append(patterns, r.parseWithBareGroups(raw[start:end], posAddCol(base, start), false))
 		if delim != '|' {
 			return patterns
 		}
@@ -3553,7 +3557,7 @@ func (r rawPatternParser) parseList(raw string, base Pos) []*Pattern {
 	}
 }
 
-func (r rawPatternParser) parseParts(raw string, base Pos, start int, splitOnBar bool) ([]PatternPart, int, byte) {
+func (r rawPatternParser) parseParts(raw string, base Pos, start int, splitOnBar, allowBareGroups bool) ([]PatternPart, int, byte) {
 	var parts []PatternPart
 	flushLit := func(from, to int) {
 		if from >= to {
@@ -3603,15 +3607,17 @@ func (r rawPatternParser) parseParts(raw string, base Pos, start int, splitOnBar
 				}
 			}
 		case '(':
-			group, end, ok := r.parsePatternGroup(raw, base, i)
-			if end > i {
-				if ok {
-					flushLit(partStart, i)
-					parts = append(parts, group)
-					partStart = end
+			if allowBareGroups {
+				group, end, ok := r.parsePatternGroup(raw, base, i)
+				if end > i {
+					if ok {
+						flushLit(partStart, i)
+						parts = append(parts, group)
+						partStart = end
+					}
+					i = end
+					continue
 				}
-				i = end
-				continue
 			}
 		case '?', '*', '+', '@', '!':
 			if i+1 < len(raw) && raw[i+1] == '(' {
@@ -3838,7 +3844,7 @@ func (r rawPatternParser) parsePatternGroup(raw string, base Pos, start int) (*P
 	depth := 1
 	hasTopLevelBar := false
 	appendArm := func(end int) {
-		group.Patterns = append(group.Patterns, r.parse(raw[armStart:end], posAddCol(base, armStart)))
+		group.Patterns = append(group.Patterns, r.parseWithBareGroups(raw[armStart:end], posAddCol(base, armStart), true))
 	}
 	for i <= len(raw) {
 		if i >= len(raw) {
@@ -3911,7 +3917,7 @@ func (r rawPatternParser) parseExtGlob(raw string, base Pos, start int) (*ExtGlo
 	i := innerStart
 	armStart := innerStart
 	appendArm := func(end int) {
-		eg.Patterns = append(eg.Patterns, r.parse(raw[armStart:end], posAddCol(base, armStart)))
+		eg.Patterns = append(eg.Patterns, r.parseWithBareGroups(raw[armStart:end], posAddCol(base, armStart), false))
 	}
 	for i <= len(raw) {
 		if i >= len(raw) {
@@ -3944,6 +3950,12 @@ func (r rawPatternParser) parseExtGlob(raw string, base Pos, start int) (*ExtGlo
 		case '[':
 			i = patternCharClassEnd(raw, i)
 			continue
+		case '(':
+			_, end, _ := r.parsePatternGroup(raw, base, i)
+			if end > i {
+				i = end
+				continue
+			}
 		case '?', '*', '+', '@', '!':
 			if i+1 < len(raw) && raw[i+1] == '(' {
 				_, end := r.parseExtGlob(raw, base, i)
@@ -6232,9 +6244,10 @@ func (p *Parser) patternScanBoundary(mode patternScanMode, parenDepth int) bool 
 }
 
 func (p *Parser) scanPatternRaw(start Pos, mode patternScanMode, scanned *scannedRawPattern) bool {
-	parenDepth := 0
+	parenStack := make([]byte, 0, 8)
+	extglobDepth := 0
 	for {
-		if p.patternScanBoundary(mode, parenDepth) {
+		if p.patternScanBoundary(mode, len(parenStack)) {
 			return true
 		}
 		switch p.r {
@@ -6251,20 +6264,24 @@ func (p *Parser) scanPatternRaw(start Pos, mode patternScanMode, scanned *scanne
 		case '?', '*', '+', '@', '!':
 			if p.peek() == '(' {
 				p.rune()
-				parenDepth++
+				parenStack = append(parenStack, 'e')
+				extglobDepth++
 				p.rune()
 				continue
 			}
 			p.rune()
 		case '(':
-			if !scanned.firstBareParen.IsValid() {
+			if extglobDepth == 0 && !scanned.firstBareParen.IsValid() {
 				scanned.firstBareParen = p.nextPos()
 			}
-			parenDepth++
+			parenStack = append(parenStack, '(')
 			p.rune()
 		case ')':
-			if parenDepth > 0 {
-				parenDepth--
+			if n := len(parenStack); n > 0 {
+				if parenStack[n-1] == 'e' {
+					extglobDepth--
+				}
+				parenStack = parenStack[:n-1]
 				p.rune()
 				continue
 			}
@@ -6437,10 +6454,11 @@ func scanPatternText(raw string, base Pos, mode patternScanMode, lang LangVarian
 	}
 scan:
 	scanned := &scannedRawPattern{start: advancePosBytes(base, []byte(raw[:start]))}
-	parenDepth := 0
+	parenStack := make([]byte, 0, 8)
+	extglobDepth := 0
 	rawParser := rawPatternParser{lang: lang}
 	for i := start; ; {
-		if patternTextBoundary(raw, i, mode, parenDepth) {
+		if patternTextBoundary(raw, i, mode, len(parenStack)) {
 			return scanned, i
 		}
 		switch raw[i] {
@@ -6460,20 +6478,24 @@ scan:
 			i++
 		case '?', '*', '+', '@', '!':
 			if i+1 < len(raw) && raw[i+1] == '(' {
-				parenDepth++
+				parenStack = append(parenStack, 'e')
+				extglobDepth++
 				i += 2
 				continue
 			}
 			i++
 		case '(':
-			if !scanned.firstBareParen.IsValid() {
+			if extglobDepth == 0 && !scanned.firstBareParen.IsValid() {
 				scanned.firstBareParen = posAddCol(base, i)
 			}
-			parenDepth++
+			parenStack = append(parenStack, '(')
 			i++
 		case ')':
-			if parenDepth > 0 {
-				parenDepth--
+			if n := len(parenStack); n > 0 {
+				if parenStack[n-1] == 'e' {
+					extglobDepth--
+				}
+				parenStack = parenStack[:n-1]
 				i++
 				continue
 			}
