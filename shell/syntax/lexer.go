@@ -1225,14 +1225,18 @@ func (p *Parser) advanceLitHdoc(r rune) {
 
 	p.tok = _Lit
 	p.newLit(r)
+	lineRawStart := 0
+	lineRawPos := p.pos
+	lineIndentTabs := uint16(0)
 	for p.quote == hdocBodyTabs && r == '\t' {
+		lineIndentTabs++
 		r = p.rune()
 	}
 	lStart := len(p.litBs) - 1
-	var stop []byte
-	if !p.parsingDoc && len(p.hdocStops) > 0 {
-		stop = p.hdocStops[len(p.hdocStops)-1]
+	if r == '\n' || r == utf8.RuneSelf {
+		lStart = len(p.litBs)
 	}
+	stop := p.currentHeredocStop()
 	for ; ; r = p.rune() {
 		switch r {
 		case escNewl, '$':
@@ -1256,27 +1260,36 @@ func (p *Parser) advanceLitHdoc(r rune) {
 			} else if lStart == 0 && lastTok == _Lit {
 				// This line starts right after an escaped
 				// newline, so it should never end the heredoc.
-			} else if lStart >= 0 && len(p.hdocStops) > 0 {
-				// Compare the current line with the stop word.
-				line := p.litBs[lStart:]
-				if r != utf8.RuneSelf && len(line) > 0 {
-					line = line[:len(line)-1] // minus trailing character
+			} else if lStart >= 0 && stop != nil {
+				rawEnd := len(p.litBs)
+				closeEnd := p.nextPos()
+				if r != utf8.RuneSelf && rawEnd > lineRawStart {
+					rawEnd-- // minus trailing newline
 				}
-				if bytes.Equal(line, stop) {
+				matchStart := lStart
+				if matchStart > rawEnd {
+					matchStart = rawEnd
+				}
+				hasLine := r != utf8.RuneSelf || rawEnd > lineRawStart || lineIndentTabs > 0
+				p.updateHeredocStop(stop, lineRawPos, closeEnd, p.litBs[lineRawStart:rawEnd], p.litBs[matchStart:rawEnd], lineIndentTabs, r == utf8.RuneSelf, hasLine)
+				if stop.close.matched {
 					p.tok = _LitWord
-					p.val = p.endLit()[:lStart]
+					p.val = p.endLit()[:matchStart]
 					if p.val == "" {
 						p.tok = _Newl
 					}
-					p.hdocStops[len(p.hdocStops)-1] = nil
 					return
 				}
 			}
 			if r != '\n' {
 				return // hit an unexpected EOF or closing backquote
 			}
+			lineRawStart = len(p.litBs)
+			lineRawPos = NewPos(p.nextPos().Offset()+1, p.nextPos().Line()+1, 1)
+			lineIndentTabs = 0
 			for p.quote == hdocBodyTabs && p.peek() == '\t' {
 				p.rune()
+				lineIndentTabs++
 			}
 			lStart = len(p.litBs)
 		}
@@ -1287,19 +1300,35 @@ func (p *Parser) quotedHdocWord() *Word {
 	r := p.r
 	p.newLit(r)
 	pos := p.nextPos()
-	stop := p.hdocStops[len(p.hdocStops)-1]
-	for ; ; r = p.rune() {
+	lineRawStart := 0
+	lineRawPos := pos
+	lineIndentTabs := uint16(0)
+	for p.quote == hdocBodyTabs && r == '\t' {
+		lineIndentTabs++
+		r = p.rune()
+	}
+	lStart := len(p.litBs) - 1
+	if r == '\n' || r == utf8.RuneSelf {
+		lStart = len(p.litBs)
+	}
+	stop := p.currentHeredocStop()
+	for {
 		if r == utf8.RuneSelf {
+			if stop != nil {
+				rawEnd := len(p.litBs)
+				hasLine := rawEnd > lineRawStart || lineIndentTabs > 0
+				matchStart := lStart
+				if matchStart > rawEnd {
+					matchStart = rawEnd
+				}
+				p.updateHeredocStop(stop, lineRawPos, p.nextPos(), p.litBs[lineRawStart:rawEnd], p.litBs[matchStart:rawEnd], lineIndentTabs, true, hasLine)
+			}
 			val := p.endLit()
 			if val == "" {
 				return nil
 			}
 			return p.wordOne(p.lit(pos, val))
 		}
-		for p.quote == hdocBodyTabs && r == '\t' {
-			r = p.rune()
-		}
-		lStart := len(p.litBs) - 1
 	runeLoop:
 		for {
 			switch r {
@@ -1315,22 +1344,46 @@ func (p *Parser) quotedHdocWord() *Word {
 			}
 			r = p.rune()
 		}
-		if lStart < 0 {
-			continue
+		if lStart >= 0 && stop != nil {
+			rawEnd := len(p.litBs)
+			closeEnd := p.nextPos()
+			if r != utf8.RuneSelf && rawEnd > lineRawStart {
+				rawEnd-- // minus trailing newline
+			}
+			matchStart := lStart
+			if matchStart > rawEnd {
+				matchStart = rawEnd
+			}
+			hasLine := r != utf8.RuneSelf || rawEnd > lineRawStart || lineIndentTabs > 0
+			p.updateHeredocStop(stop, lineRawPos, closeEnd, p.litBs[lineRawStart:rawEnd], p.litBs[matchStart:rawEnd], lineIndentTabs, r == utf8.RuneSelf, hasLine)
+			if stop.close.matched {
+				val := p.endLit()[:matchStart]
+				if val == "" {
+					return nil
+				}
+				return p.wordOne(p.lit(pos, val))
+			}
 		}
-		// Compare the current line with the stop word.
-		line := p.litBs[lStart:]
-		if r != utf8.RuneSelf && len(line) > 0 {
-			line = line[:len(line)-1] // minus \n
-		}
-		if bytes.Equal(line, stop) {
-			p.hdocStops[len(p.hdocStops)-1] = nil
-			val := p.endLit()[:lStart]
+		if r == utf8.RuneSelf {
+			val := p.endLit()
 			if val == "" {
 				return nil
 			}
 			return p.wordOne(p.lit(pos, val))
 		}
+		lineRawStart = len(p.litBs)
+		lineBreakWidth := uint(1)
+		if r == escNewl {
+			lineBreakWidth += uint(p.w)
+		}
+		lineRawPos = NewPos(p.nextPos().Offset()+lineBreakWidth, p.nextPos().Line()+1, 1)
+		lineIndentTabs = 0
+		for p.quote == hdocBodyTabs && p.peek() == '\t' {
+			p.rune()
+			lineIndentTabs++
+		}
+		lStart = len(p.litBs)
+		r = p.rune()
 	}
 }
 

@@ -467,14 +467,30 @@ func (r *Redirect) End() Pos {
 	return posAddCol(r.OpPos, len(r.Op.String()))
 }
 
-// HeredocDelim represents a here-document delimiter and the parser metadata
-// derived from it.
+// HeredocIndentMode describes how a here-document closer is matched.
+type HeredocIndentMode uint8
+
+const (
+	HeredocIndentNone HeredocIndentMode = iota
+	HeredocIndentStripTabs
+)
+
+// HeredocDelim represents a here-document delimiter together with the parser
+// metadata derived from both the opener and the final closer candidate line.
 type HeredocDelim struct {
 	Parts []WordPart
 
 	Value       string // delimiter text after quote removal
 	Quoted      bool   // whether any quoting/escaping was present
 	BodyExpands bool   // whether the heredoc body allows shell expansion
+
+	ClosePos, CloseEnd Pos
+	CloseRaw           string
+	Matched            bool
+	EOFTerminated      bool
+	TrailingText       string
+	IndentMode         HeredocIndentMode
+	IndentTabs         uint16
 }
 
 func (d *HeredocDelim) Pos() Pos {

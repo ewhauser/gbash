@@ -1210,6 +1210,151 @@ func TestParseHeredocBackquoteDelimiterPreservesCmdSubstForm(t *testing.T) {
 	qt.Assert(t, qt.IsTrue(cmdSubst.Backquotes))
 }
 
+func singleHeredocDelimForTest(t *testing.T, prog *File) *HeredocDelim {
+	t.Helper()
+	qt.Assert(t, qt.IsTrue(prog != nil))
+	qt.Assert(t, qt.Equals(len(prog.Stmts), 1))
+	qt.Assert(t, qt.Equals(len(prog.Stmts[0].Redirs), 1))
+	delim := prog.Stmts[0].Redirs[0].HdocDelim
+	qt.Assert(t, qt.IsTrue(delim != nil))
+	return delim
+}
+
+func assertHeredocCloseSpan(t *testing.T, src string, delim *HeredocDelim, wantValid bool) {
+	t.Helper()
+	if !wantValid {
+		qt.Assert(t, qt.IsFalse(delim.ClosePos.IsValid()))
+		qt.Assert(t, qt.IsFalse(delim.CloseEnd.IsValid()))
+		return
+	}
+	qt.Assert(t, qt.IsTrue(delim.ClosePos.IsValid()))
+	qt.Assert(t, qt.IsTrue(delim.CloseEnd.IsValid()))
+	start, end := int(delim.ClosePos.Offset()), int(delim.CloseEnd.Offset())
+	qt.Assert(t, qt.IsTrue(start >= 0))
+	qt.Assert(t, qt.IsTrue(end >= start))
+	qt.Assert(t, qt.IsTrue(end <= len(src)))
+	qt.Assert(t, qt.Equals(src[start:end], delim.CloseRaw))
+}
+
+func TestParseHeredocCloserMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		src            string
+		wantRaw        string
+		wantIndentMode HeredocIndentMode
+		wantIndentTabs uint16
+	}{
+		{
+			name:           "plain closer",
+			src:            "cat <<EOF\nbody\nEOF\n",
+			wantRaw:        "EOF",
+			wantIndentMode: HeredocIndentNone,
+		},
+		{
+			name:           "quoted opener",
+			src:            "cat <<'EOF'\nbody\nEOF\n",
+			wantRaw:        "EOF",
+			wantIndentMode: HeredocIndentNone,
+		},
+		{
+			name:           "dash heredoc tab closer",
+			src:            "cat <<-EOF\nbody\n\tEOF\n",
+			wantRaw:        "\tEOF",
+			wantIndentMode: HeredocIndentStripTabs,
+			wantIndentTabs: 1,
+		},
+		{
+			name:           "closer at eof",
+			src:            "cat <<EOF\nbody\nEOF",
+			wantRaw:        "EOF",
+			wantIndentMode: HeredocIndentNone,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			prog, err := NewParser().Parse(strings.NewReader(tc.src), "")
+			qt.Assert(t, qt.IsNil(err))
+
+			delim := singleHeredocDelimForTest(t, prog)
+			qt.Assert(t, qt.Equals(delim.CloseRaw, tc.wantRaw))
+			qt.Assert(t, qt.Equals(delim.Matched, true))
+			qt.Assert(t, qt.Equals(delim.EOFTerminated, false))
+			qt.Assert(t, qt.Equals(delim.TrailingText, ""))
+			qt.Assert(t, qt.Equals(delim.IndentMode, tc.wantIndentMode))
+			qt.Assert(t, qt.Equals(delim.IndentTabs, tc.wantIndentTabs))
+			assertHeredocCloseSpan(t, tc.src, delim, true)
+		})
+	}
+}
+
+func TestParseHeredocCloserMetadataOnEOF(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		src            string
+		wantRaw        string
+		wantTrailing   string
+		wantSpan       bool
+		wantIndentMode HeredocIndentMode
+		wantIndentTabs uint16
+	}{
+		{
+			name:           "no final candidate line",
+			src:            "cat <<EOF\nbody\n",
+			wantIndentMode: HeredocIndentNone,
+		},
+		{
+			name:           "space near match",
+			src:            "cat <<EOF\nbody\nEOF ",
+			wantRaw:        "EOF ",
+			wantTrailing:   " ",
+			wantSpan:       true,
+			wantIndentMode: HeredocIndentNone,
+		},
+		{
+			name:           "space near match before trailing newline",
+			src:            "cat <<EOF\nbody\nEOF \n",
+			wantRaw:        "EOF ",
+			wantTrailing:   " ",
+			wantSpan:       true,
+			wantIndentMode: HeredocIndentNone,
+		},
+		{
+			name:           "tab indented hash near match",
+			src:            "cat <<-EOF\nbody\n\tEOF#",
+			wantRaw:        "\tEOF#",
+			wantTrailing:   "#",
+			wantSpan:       true,
+			wantIndentMode: HeredocIndentStripTabs,
+			wantIndentTabs: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			prog, err := NewParser().Parse(strings.NewReader(tc.src), "")
+			qt.Assert(t, qt.Not(qt.IsNil(err)))
+
+			delim := singleHeredocDelimForTest(t, prog)
+			qt.Assert(t, qt.Equals(delim.CloseRaw, tc.wantRaw))
+			qt.Assert(t, qt.Equals(delim.Matched, false))
+			qt.Assert(t, qt.Equals(delim.EOFTerminated, true))
+			qt.Assert(t, qt.Equals(delim.TrailingText, tc.wantTrailing))
+			qt.Assert(t, qt.Equals(delim.IndentMode, tc.wantIndentMode))
+			qt.Assert(t, qt.Equals(delim.IndentTabs, tc.wantIndentTabs))
+			assertHeredocCloseSpan(t, tc.src, delim, tc.wantSpan)
+		})
+	}
+}
+
 func TestParseConfirm(t *testing.T) {
 	if testing.Short() {
 		t.Skip("calling external shells is slow")
