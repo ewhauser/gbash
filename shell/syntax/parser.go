@@ -3525,11 +3525,28 @@ func trailingExtGlobOp(lit *Lit) (prefix *Lit, op GlobOperator, opPos Pos, ok bo
 }
 
 type rawPatternParser struct {
-	lang LangVariant
+	lang         LangVariant
+	allowExtGlob bool
 }
 
 type rawWordPartParser struct {
 	lang LangVariant
+}
+
+func patternExtGlobEnabled(lang LangVariant, parseExtGlob bool) bool {
+	return parseExtGlob && !lang.in(LangZsh)
+}
+
+func (p *Parser) newRawPatternParser() rawPatternParser {
+	return rawPatternParser{lang: p.lang, allowExtGlob: p.parseExtGlob}
+}
+
+func (p *Parser) extGlobEnabled() bool {
+	return patternExtGlobEnabled(p.lang, p.parseExtGlob)
+}
+
+func (r rawPatternParser) extGlobEnabled() bool {
+	return patternExtGlobEnabled(r.lang, r.allowExtGlob)
 }
 
 func (r rawWordPartParser) parse(raw string, base Pos) []WordPart {
@@ -3674,7 +3691,7 @@ func (r rawPatternParser) parseParts(raw string, base Pos, start int, splitOnBar
 				}
 			}
 		case '?', '*', '+', '@', '!':
-			if i+1 < len(raw) && raw[i+1] == '(' {
+			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
 				flushLit(partStart, i)
 				part, end := r.parseExtGlob(raw, base, i)
 				parts = append(parts, part)
@@ -3783,7 +3800,7 @@ func (r rawPatternParser) findInvalidCasePatternOperator(raw string, base Pos) (
 				continue
 			}
 		case '?', '*', '+', '@', '!':
-			if i+1 < len(raw) && raw[i+1] == '(' {
+			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
 				_, end := r.parseExtGlob(raw, base, i)
 				i = end
 				continue
@@ -3830,7 +3847,7 @@ func (r rawPatternParser) findPatternListSplit(raw string, base Pos, start int) 
 				continue
 			}
 		case '?', '*', '+', '@', '!':
-			if i+1 < len(raw) && raw[i+1] == '(' {
+			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
 				_, end := r.parseExtGlob(raw, base, i)
 				i = end
 				continue
@@ -3879,7 +3896,7 @@ func (r rawPatternParser) hasTopLevelWhitespace(raw string, base Pos) bool {
 				continue
 			}
 		case '?', '*', '+', '@', '!':
-			if i+1 < len(raw) && raw[i+1] == '(' {
+			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
 				_, end := r.parseExtGlob(raw, base, i)
 				i = end
 				continue
@@ -3930,7 +3947,7 @@ func (r rawPatternParser) parsePatternGroup(raw string, base Pos, start int) (*P
 			i = patternCharClassEnd(raw, i)
 			continue
 		case '?', '*', '+', '@', '!':
-			if i+1 < len(raw) && raw[i+1] == '(' {
+			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
 				_, end := r.parseExtGlob(raw, base, i)
 				i = end
 				continue
@@ -4011,7 +4028,7 @@ func (r rawPatternParser) parseExtGlob(raw string, base Pos, start int) (*ExtGlo
 				continue
 			}
 		case '?', '*', '+', '@', '!':
-			if i+1 < len(raw) && raw[i+1] == '(' {
+			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
 				_, end := r.parseExtGlob(raw, base, i)
 				i = end
 				continue
@@ -4137,7 +4154,7 @@ globLoop:
 		p.matchingErr(opPos, token(op), rightParen)
 	}
 	eg.Rparen = rparen
-	eg.Patterns = rawPatternParser{lang: p.lang}.parseList(raw, globStart)
+	eg.Patterns = p.newRawPatternParser().parseList(raw, globStart)
 	p.next()
 	return eg
 }
@@ -4195,7 +4212,7 @@ func (p *Parser) patternParts(pps []PatternPart, stops ...token) []PatternPart {
 		case _Lit, _LitWord, _LitRedir:
 			lit := p.lit(p.pos, p.val)
 			p.next()
-			if p.tok == leftParen {
+			if patternExtGlobEnabled(p.lang, p.parseExtGlob) && p.tok == leftParen {
 				if prefix, op, opPos, ok := trailingExtGlobOp(lit); ok {
 					pps = append(pps, splitPatternLit(prefix)...)
 					pps = append(pps, p.extGlob(op, opPos))
@@ -6394,7 +6411,7 @@ scanLeading:
 	}
 
 	start := p.nextPos()
-	if p.patternScanBoundary(mode, 0) {
+	if p.patternScanBoundary(mode, 0, 0) {
 		p.next()
 		return &scannedRawPattern{start: start}, true
 	}
@@ -6409,20 +6426,20 @@ scanLeading:
 	return scanned, true
 }
 
-func (p *Parser) patternScanBoundary(mode patternScanMode, parenDepth int) bool {
+func (p *Parser) patternScanBoundary(mode patternScanMode, hardParenDepth, softParenDepth int) bool {
 	switch p.r {
 	case utf8.RuneSelf:
 		return true
 	case ';', '&':
-		return mode == patternScanConditional && parenDepth == 0
+		return mode == patternScanConditional && hardParenDepth == 0
 	case '\n', ' ', '\t':
-		return mode == patternScanConditional && parenDepth == 0
+		return mode == patternScanConditional && hardParenDepth == 0
 	case ']':
-		return mode == patternScanConditional && parenDepth == 0 && p.peek() == ']'
+		return mode == patternScanConditional && hardParenDepth == 0 && p.peek() == ']'
 	case '|':
-		return mode == patternScanConditional && parenDepth == 0 && p.peek() == '|'
+		return mode == patternScanConditional && hardParenDepth == 0 && p.peek() == '|'
 	case ')':
-		return parenDepth == 0
+		return hardParenDepth == 0 && softParenDepth == 0
 	default:
 		return false
 	}
@@ -6431,8 +6448,10 @@ func (p *Parser) patternScanBoundary(mode patternScanMode, parenDepth int) bool 
 func (p *Parser) scanPatternRaw(start Pos, mode patternScanMode, scanned *scannedRawPattern) bool {
 	parenStack := make([]byte, 0, 8)
 	extglobDepth := 0
+	hardParenDepth := 0
+	softParenDepth := 0
 	for {
-		if p.patternScanBoundary(mode, len(parenStack)) {
+		if p.patternScanBoundary(mode, hardParenDepth, softParenDepth) {
 			return true
 		}
 		switch p.r {
@@ -6447,10 +6466,11 @@ func (p *Parser) scanPatternRaw(start Pos, mode patternScanMode, scanned *scanne
 			}
 			p.rune()
 		case '?', '*', '+', '@', '!':
-			if p.peek() == '(' {
+			if p.extGlobEnabled() && p.peek() == '(' {
 				p.rune()
 				parenStack = append(parenStack, 'e')
 				extglobDepth++
+				hardParenDepth++
 				p.rune()
 				continue
 			}
@@ -6459,12 +6479,24 @@ func (p *Parser) scanPatternRaw(start Pos, mode patternScanMode, scanned *scanne
 			if extglobDepth == 0 && !scanned.firstBareParen.IsValid() {
 				scanned.firstBareParen = p.nextPos()
 			}
-			parenStack = append(parenStack, '(')
+			if extglobDepth == 0 && !p.patternAllowsBareGroups() {
+				parenStack = append(parenStack, 's')
+				softParenDepth++
+			} else {
+				parenStack = append(parenStack, '(')
+				hardParenDepth++
+			}
 			p.rune()
 		case ')':
 			if n := len(parenStack); n > 0 {
-				if parenStack[n-1] == 'e' {
+				switch parenStack[n-1] {
+				case 'e':
 					extglobDepth--
+					hardParenDepth--
+				case 's':
+					softParenDepth--
+				default:
+					hardParenDepth--
 				}
 				parenStack = parenStack[:n-1]
 				p.rune()
@@ -6586,43 +6618,43 @@ func (p *Parser) casePatternUsesOptionalOpener() bool {
 	if tail == "" || tail[0] != '(' {
 		return true
 	}
-	_, groupEnd, grouped := (rawPatternParser{lang: p.lang}).parsePatternGroup(tail, p.pos, 0)
+	_, groupEnd, grouped := p.newRawPatternParser().parsePatternGroup(tail, p.pos, 0)
 	if !grouped {
 		return true
 	}
-	_, end := scanPatternText(tail, p.pos, patternScanCase, p.lang)
+	_, end := scanPatternText(tail, p.pos, patternScanCase, p.lang, p.parseExtGlob)
 	if !p.readEOF && end == len(tail) {
 		return true
 	}
 	return end <= groupEnd || end >= len(tail) || tail[end] != ')'
 }
 
-func patternTextBoundary(raw string, i int, mode patternScanMode, parenDepth int) bool {
+func patternTextBoundary(raw string, i int, mode patternScanMode, hardParenDepth, softParenDepth int) bool {
 	if i >= len(raw) {
 		return true
 	}
 	switch raw[i] {
 	case ';', '&':
-		if parenDepth != 0 {
+		if hardParenDepth != 0 {
 			return false
 		}
 		return mode == patternScanConditional || (mode == patternScanCase && raw[i] == ';')
 	case '\n', ' ', '\t':
-		return mode == patternScanConditional && parenDepth == 0
+		return mode == patternScanConditional && hardParenDepth == 0
 	case ']':
-		return mode == patternScanConditional && parenDepth == 0 &&
+		return mode == patternScanConditional && hardParenDepth == 0 &&
 			i+1 < len(raw) && raw[i+1] == ']'
 	case '|':
-		return mode == patternScanConditional && parenDepth == 0 &&
+		return mode == patternScanConditional && hardParenDepth == 0 &&
 			i+1 < len(raw) && raw[i+1] == '|'
 	case ')':
-		return parenDepth == 0
+		return hardParenDepth == 0 && softParenDepth == 0
 	default:
 		return false
 	}
 }
 
-func scanPatternText(raw string, base Pos, mode patternScanMode, lang LangVariant) (*scannedRawPattern, int) {
+func scanPatternText(raw string, base Pos, mode patternScanMode, lang LangVariant, parseExtGlob bool) (*scannedRawPattern, int) {
 	start := 0
 	for start < len(raw) {
 		switch raw[start] {
@@ -6641,9 +6673,11 @@ scan:
 	scanned := &scannedRawPattern{start: advancePosBytes(base, []byte(raw[:start]))}
 	parenStack := make([]byte, 0, 8)
 	extglobDepth := 0
-	rawParser := rawPatternParser{lang: lang}
+	hardParenDepth := 0
+	softParenDepth := 0
+	rawParser := rawPatternParser{lang: lang, allowExtGlob: parseExtGlob}
 	for i := start; ; {
-		if patternTextBoundary(raw, i, mode, len(parenStack)) {
+		if patternTextBoundary(raw, i, mode, hardParenDepth, softParenDepth) {
 			return scanned, i
 		}
 		switch raw[i] {
@@ -6662,9 +6696,10 @@ scan:
 			}
 			i++
 		case '?', '*', '+', '@', '!':
-			if i+1 < len(raw) && raw[i+1] == '(' {
+			if rawParser.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
 				parenStack = append(parenStack, 'e')
 				extglobDepth++
+				hardParenDepth++
 				i += 2
 				continue
 			}
@@ -6673,12 +6708,24 @@ scan:
 			if extglobDepth == 0 && !scanned.firstBareParen.IsValid() {
 				scanned.firstBareParen = posAddCol(base, i)
 			}
-			parenStack = append(parenStack, '(')
+			if extglobDepth == 0 && !lang.in(LangZsh) {
+				parenStack = append(parenStack, 's')
+				softParenDepth++
+			} else {
+				parenStack = append(parenStack, '(')
+				hardParenDepth++
+			}
 			i++
 		case ')':
 			if n := len(parenStack); n > 0 {
-				if parenStack[n-1] == 'e' {
+				switch parenStack[n-1] {
+				case 'e':
 					extglobDepth--
+					hardParenDepth--
+				case 's':
+					softParenDepth--
+				default:
+					hardParenDepth--
 				}
 				parenStack = parenStack[:n-1]
 				i++
@@ -6701,7 +6748,7 @@ scan:
 
 func (p *Parser) scanRawPatternSource(start Pos, mode patternScanMode) (*scannedRawPattern, bool) {
 	raw := p.sourceFromPos(start)
-	scanned, end := scanPatternText(raw, start, mode, p.lang)
+	scanned, end := scanPatternText(raw, start, mode, p.lang, p.parseExtGlob)
 	if mode == patternScanCase && !p.readEOF && end == len(raw) {
 		return nil, false
 	}
@@ -6754,7 +6801,7 @@ func (p *Parser) caseItems(stop reservedWord) (items []*CaseItem) {
 			p.next()
 		}
 		if scanned, ok := p.scanRawPatternSource(p.pos, patternScanCase); ok {
-			rawParser := rawPatternParser{lang: p.lang}
+			rawParser := p.newRawPatternParser()
 			if idx, op := rawParser.findInvalidCasePatternOperator(scanned.raw, scanned.start); op != 0 {
 				pos := posAddCol(scanned.start, idx)
 				if idx == 0 {
@@ -6790,8 +6837,10 @@ func (p *Parser) caseItems(stop reservedWord) (items []*CaseItem) {
 					return items
 				}
 			} else if group == nil && scanned.firstBareParen.IsValid() && !p.patternAllowsBareGroups() {
-				p.invalidCasePatternParen(scanned.firstBareParen)
-				return items
+				if !p.recoverError() {
+					p.invalidCasePatternParen(scanned.firstBareParen)
+					return items
+				}
 			}
 			if p.tok != rightParen && p.tok != _EOF {
 				p.curErr("syntax error near unexpected token %s", p.tok.bashQuote())
@@ -6999,15 +7048,17 @@ func (p *Parser) followCondPattern(tok token, pos Pos) *CondPattern {
 		p.followErr(pos, tok, noQuote("a word"))
 		return nil
 	}
-	pat := rawPatternParser{lang: p.lang}.parse(scanned.raw, scanned.start)
+	pat := p.newRawPatternParser().parse(scanned.raw, scanned.start)
 	if group := firstPatternGroup(pat); group != nil && !p.patternAllowsBareGroups() {
 		if !p.recoverError() {
 			p.invalidCondPatternParen(group.Pos(), scanned.raw, scanned.start)
 			return nil
 		}
 	} else if group == nil && scanned.firstBareParen.IsValid() && !p.patternAllowsBareGroups() {
-		p.invalidCondPatternParen(scanned.firstBareParen, scanned.raw, scanned.start)
-		return nil
+		if !p.recoverError() {
+			p.invalidCondPatternParen(scanned.firstBareParen, scanned.raw, scanned.start)
+			return nil
+		}
 	}
 	return &CondPattern{Pattern: pat}
 }
