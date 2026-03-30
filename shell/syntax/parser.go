@@ -3487,8 +3487,8 @@ func (p *Parser) wordPart() WordPart {
 			p.openBquoteDquotes--
 		}
 		p.openBquotes--
-		cs.Right = p.pos
-		cs.BackquoteClose = newBackquoteCloseTrivia(cs.Right, p.lastBquoteRawBackslashes)
+		closePos := p.pos
+		closeTrivia := newBackquoteCloseTrivia(closePos, p.lastBquoteRawBackslashes)
 
 		// Like above, the lexer didn't call p.rune for us.
 		p.rune()
@@ -3498,7 +3498,11 @@ func (p *Parser) wordPart() WordPart {
 			} else {
 				p.quoteErr(cs.Pos(), bckQuote)
 			}
+			cs.BackquoteClose = nil
+			return cs
 		}
+		cs.Right = closePos
+		cs.BackquoteClose = closeTrivia
 		return cs
 	case leftParen:
 		if p.lang.in(LangZsh) && p.r != ')' {

@@ -185,6 +185,27 @@ func TestParseBackquoteCloseTriviaPastLexerWindow(t *testing.T) {
 	}
 }
 
+func TestParseRecoverErrorsMissingBackquoteCloseClearsTrivia(t *testing.T) {
+	t.Parallel()
+
+	src := "echo `echo hi\n"
+	file, err := NewParser(Variant(LangBash), RecoverErrors(4)).Parse(strings.NewReader(src), "")
+	if err != nil {
+		t.Fatalf("Parse error = %v", err)
+	}
+	call := file.Stmts[0].Cmd.(*CallExpr)
+	cs, ok := call.Args[1].Parts[0].(*CmdSubst)
+	if !ok {
+		t.Fatalf("arg[1] part = %T, want *CmdSubst", call.Args[1].Parts[0])
+	}
+	if !cs.Right.IsRecovered() {
+		t.Fatalf("CmdSubst.Right = %v, want recovered position", cs.Right)
+	}
+	if cs.BackquoteClose != nil {
+		t.Fatalf("CmdSubst.BackquoteClose = %#v, want nil", cs.BackquoteClose)
+	}
+}
+
 func TestParseMalformedBackquoteRecoversAtScriptStartWhenScriptContinues(t *testing.T) {
 	t.Parallel()
 
