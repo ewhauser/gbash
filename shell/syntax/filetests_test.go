@@ -52,9 +52,23 @@ func heredocDelim(ps ...WordPart) *HeredocDelim {
 		Value:       string(value),
 		Quoted:      quoted,
 		BodyExpands: !quoted,
+		CloseRaw:    string(value),
+		Matched:     true,
 	}
 }
 func litHeredocDelim(s string) *HeredocDelim { return heredocDelim(lit(s)) }
+func dashHeredocDelim(ps ...WordPart) *HeredocDelim {
+	d := heredocDelim(ps...)
+	d.IndentMode = HeredocIndentStripTabs
+	return d
+}
+func dashHeredocDelimRaw(raw string, indentTabs uint16, ps ...WordPart) *HeredocDelim {
+	d := dashHeredocDelim(ps...)
+	d.CloseRaw = raw
+	d.IndentTabs = indentTabs
+	return d
+}
+func litDashHeredocDelim(s string) *HeredocDelim { return dashHeredocDelim(lit(s)) }
 func sub(expr ArithmExpr) *Subscript {
 	return &Subscript{Kind: SubscriptExpr, Expr: expr}
 }
@@ -1535,7 +1549,7 @@ var fileTests = []fileTestCase{
 				Cmd: litCall("foo"),
 				Redirs: []*Redirect{{
 					Op:        DashHdoc,
-					HdocDelim: litHeredocDelim("EOF"),
+					HdocDelim: dashHeredocDelimRaw("\tEOF", 1, lit("EOF")),
 					Hdoc:      litWord("\t\tbar\n\t"),
 				}},
 			}},
@@ -1549,7 +1563,7 @@ var fileTests = []fileTestCase{
 				Cmd: litCall("foo"),
 				Redirs: []*Redirect{{
 					Op:        DashHdoc,
-					HdocDelim: litHeredocDelim("EOF"),
+					HdocDelim: dashHeredocDelimRaw("\tEOF", 1, lit("EOF")),
 					Hdoc:      litWord("\t"),
 				}},
 			}},
@@ -1705,7 +1719,7 @@ var fileTests = []fileTestCase{
 			Cmd: litCall("foo"),
 			Redirs: []*Redirect{{
 				Op:        DashHdoc,
-				HdocDelim: litHeredocDelim("EOF"),
+				HdocDelim: litDashHeredocDelim("EOF"),
 				Hdoc:      litWord("\tbar\n"),
 			}},
 		}),
@@ -1726,7 +1740,7 @@ var fileTests = []fileTestCase{
 			Cmd: litCall("foo"),
 			Redirs: []*Redirect{{
 				Op:        DashHdoc,
-				HdocDelim: litHeredocDelim("EOF"),
+				HdocDelim: litDashHeredocDelim("EOF"),
 			}},
 		}),
 	),
@@ -1736,7 +1750,7 @@ var fileTests = []fileTestCase{
 			Cmd: litCall("foo"),
 			Redirs: []*Redirect{{
 				Op:        DashHdoc,
-				HdocDelim: litHeredocDelim("EOF"),
+				HdocDelim: litDashHeredocDelim("EOF"),
 				Hdoc:      litWord("\tbar\n"),
 			}},
 		}),
@@ -1747,7 +1761,7 @@ var fileTests = []fileTestCase{
 			Cmd: litCall("foo"),
 			Redirs: []*Redirect{{
 				Op:        DashHdoc,
-				HdocDelim: heredocDelim(sglQuoted("EOF")),
+				HdocDelim: dashHeredocDelim(sglQuoted("EOF")),
 				Hdoc:      litWord("\tbar\n"),
 			}},
 		}),

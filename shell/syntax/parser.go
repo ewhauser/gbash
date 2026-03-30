@@ -618,7 +618,7 @@ type Parser struct {
 	buriedHdocs int
 	heredocs    []*Redirect
 
-	hdocStops [][]byte // stack of end words for open heredocs
+	hdocStops []heredocStop // stack of open heredoc closer matchers
 
 	parsingDoc bool // true if using [Parser.Document]
 
@@ -666,6 +666,20 @@ type Parser struct {
 
 	pendingHeredocWarningPos    Pos
 	pendingHeredocWarningWanted string
+}
+
+type heredocStop struct {
+	word  []byte
+	close heredocCloseCapture
+}
+
+type heredocCloseCapture struct {
+	pos, end      Pos
+	raw           string
+	matched       bool
+	eofTerminated bool
+	trailingText  string
+	indentTabs    uint16
 }
 
 type aliasInputState struct {
@@ -1097,7 +1111,14 @@ func wordPartRawBytes(raw []byte, rawBase uint, wp WordPart) ([]byte, bool) {
 	return raw[start:end], true
 }
 
-func (p *Parser) heredocDelimFromWord(w *Word, raw string) *HeredocDelim {
+func heredocIndentMode(op RedirOperator) HeredocIndentMode {
+	if op == DashHdoc {
+		return HeredocIndentStripTabs
+	}
+	return HeredocIndentNone
+}
+
+func (p *Parser) heredocDelimFromWord(w *Word, raw string, op RedirOperator) *HeredocDelim {
 	if w == nil {
 		return nil
 	}
@@ -1107,6 +1128,63 @@ func (p *Parser) heredocDelimFromWord(w *Word, raw string) *HeredocDelim {
 		Value:       string(value),
 		Quoted:      quoted,
 		BodyExpands: !quoted,
+		IndentMode:  heredocIndentMode(op),
+	}
+}
+
+func (p *Parser) setHeredocCloseCapture(delim *HeredocDelim, capture heredocCloseCapture) {
+	if delim == nil {
+		return
+	}
+	delim.ClosePos = capture.pos
+	delim.CloseEnd = capture.end
+	delim.CloseRaw = capture.raw
+	delim.Matched = capture.matched
+	delim.EOFTerminated = capture.eofTerminated
+	delim.TrailingText = capture.trailingText
+	delim.IndentTabs = capture.indentTabs
+}
+
+func (p *Parser) currentHeredocStop() *heredocStop {
+	if len(p.hdocStops) == 0 {
+		return nil
+	}
+	return &p.hdocStops[len(p.hdocStops)-1]
+}
+
+func (p *Parser) updateHeredocStop(stop *heredocStop, rawPos, end Pos, rawLine, normalized []byte, indentTabs uint16, eof, hasLine bool) {
+	if stop == nil {
+		return
+	}
+	if !hasLine {
+		if eof {
+			stop.close = heredocCloseCapture{eofTerminated: true}
+		}
+		return
+	}
+	rawLineText := string(rawLine)
+	raw := p.sourceRange(rawPos, end)
+	if !eof && strings.HasSuffix(raw, "\r") {
+		raw = strings.TrimSuffix(raw, "\r")
+		end = posSubCol(end, 1)
+	}
+	if raw == "" || raw != rawLineText {
+		raw = rawLineText
+		rawPos = posSubCol(end, len(rawLineText))
+	}
+	trailing := ""
+	if bytes.HasPrefix(normalized, stop.word) {
+		trailing = string(normalized[len(stop.word):])
+	}
+	matched := bytes.Equal(normalized, stop.word)
+	stop.close = heredocCloseCapture{
+		pos:           rawPos,
+		end:           end,
+		raw:           raw,
+		matched:       matched,
+		eofTerminated: eof && !matched,
+		trailingText:  trailing,
+		indentTabs:    indentTabs,
 	}
 }
 
@@ -1131,7 +1209,7 @@ func (p *Parser) doHeredocs() {
 		if r.HdocDelim != nil {
 			stop = []byte(r.HdocDelim.Value)
 		}
-		p.hdocStops = append(p.hdocStops, stop)
+		p.hdocStops = append(p.hdocStops, heredocStop{word: stop})
 		if i > 0 && p.r == '\n' {
 			p.rune()
 		}
@@ -1160,8 +1238,11 @@ func (p *Parser) doHeredocs() {
 		if p.err == nil && raw != nil && r.Hdoc == nil {
 			r.Hdoc = raw
 		}
+		if len(p.hdocStops) > 0 {
+			p.setHeredocCloseCapture(r.HdocDelim, p.hdocStops[len(p.hdocStops)-1].close)
+		}
 		if p.err == nil {
-			if stop := p.hdocStops[len(p.hdocStops)-1]; stop != nil {
+			if stop := p.hdocStops[len(p.hdocStops)-1]; !stop.close.matched {
 				if p.lang.in(langBashLike) && heredocNeedsEOFWarning(r.HdocDelim) {
 					p.pendingHeredocWarningPos = r.Pos()
 					p.pendingHeredocWarningWanted = r.HdocDelim.Value
@@ -2525,13 +2606,14 @@ func (p *Parser) setSourceBuffer(pos Pos, src []byte) {
 	p.sourceOffs = int64(pos.Offset())
 }
 
-func cloneByteSlices(src [][]byte) [][]byte {
+func cloneHeredocStops(src []heredocStop) []heredocStop {
 	if len(src) == 0 {
 		return nil
 	}
-	dst := make([][]byte, len(src))
-	for i, b := range src {
-		dst[i] = append([]byte(nil), b...)
+	dst := make([]heredocStop, len(src))
+	for i, stop := range src {
+		dst[i] = stop
+		dst[i].word = append([]byte(nil), stop.word...)
 	}
 	return dst
 }
@@ -2570,7 +2652,7 @@ func (p *Parser) parenAmbiguityClone() *Parser {
 	clone.keepComments = false
 	clone.recoveredErrors = 0
 	clone.heredocs = append([]*Redirect(nil), p.heredocs...)
-	clone.hdocStops = cloneByteSlices(p.hdocStops)
+	clone.hdocStops = cloneHeredocStops(p.hdocStops)
 	clone.aliasChain = append([]*AliasExpansion(nil), p.aliasChain...)
 	clone.aliasInputStack = append([]aliasInputState(nil), p.aliasInputStack...)
 	clone.aliasActive = copyAliasActive(p.aliasActive)
@@ -4876,7 +4958,7 @@ func (p *Parser) doRedirect(s *Stmt) {
 		p.quote = hdocWord
 		p.heredocs = append(p.heredocs, r)
 		w, raw := p.followWordTokRaw(token(r.Op), r.OpPos)
-		r.HdocDelim = p.heredocDelimFromWord(w, raw)
+		r.HdocDelim = p.heredocDelimFromWord(w, raw, r.Op)
 		p.quote, p.forbidNested = oldQuote, oldForbidNested
 		if p.tok == _Newl {
 			if len(p.accComs) > 0 {
@@ -4920,7 +5002,10 @@ func (p *Parser) getStmt(readEnd, binCmd, fnBody bool) *Stmt {
 			p.posErr(s.Pos(), `cannot negate a command multiple times`)
 		}
 	}
-	if s = p.gotStmtPipe(s, false); s == nil || p.err != nil {
+	if s = p.gotStmtPipe(s, false); s == nil {
+		return nil
+	}
+	if p.err != nil && !stmtHasHeredocMetadata(s) {
 		return nil
 	}
 	// instead of using recursion, iterate manually
@@ -4977,6 +5062,25 @@ func (p *Parser) getStmt(readEnd, binCmd, fnBody bool) *Stmt {
 		}
 	}
 	return s
+}
+
+func stmtHasHeredocMetadata(s *Stmt) bool {
+	if s == nil {
+		return false
+	}
+	for _, r := range s.Redirs {
+		if d := r.HdocDelim; d != nil && (d.ClosePos.IsValid() ||
+			d.CloseEnd.IsValid() ||
+			d.CloseRaw != "" ||
+			d.Matched ||
+			d.EOFTerminated ||
+			d.TrailingText != "" ||
+			d.IndentMode != HeredocIndentNone ||
+			d.IndentTabs != 0) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Parser) gotStmtPipe(s *Stmt, binCmd bool) *Stmt {

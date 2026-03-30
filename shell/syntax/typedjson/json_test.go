@@ -143,9 +143,16 @@ func TestEncodeHeredocDelimiter(t *testing.T) {
 			}},
 			&syntax.Lit{Value: "2"},
 		},
-		Value:       "EOF2",
-		Quoted:      true,
-		BodyExpands: false,
+		Value:        "EOF2",
+		Quoted:       true,
+		BodyExpands:  false,
+		ClosePos:     syntax.NewPos(10, 3, 1),
+		CloseEnd:     syntax.NewPos(15, 3, 6),
+		CloseRaw:     "\tEOF2",
+		Matched:      true,
+		TrailingText: "",
+		IndentMode:   syntax.HeredocIndentStripTabs,
+		IndentTabs:   1,
 	}
 
 	var buf bytes.Buffer
@@ -161,6 +168,13 @@ func TestEncodeHeredocDelimiter(t *testing.T) {
 	qt.Assert(t, qt.Equals(delim.Value, "EOF2"))
 	qt.Assert(t, qt.Equals(delim.Quoted, true))
 	qt.Assert(t, qt.Equals(delim.BodyExpands, false))
+	qt.Assert(t, qt.Equals(delim.ClosePos, syntax.NewPos(10, 3, 1)))
+	qt.Assert(t, qt.Equals(delim.CloseEnd, syntax.NewPos(15, 3, 6)))
+	qt.Assert(t, qt.Equals(delim.CloseRaw, "\tEOF2"))
+	qt.Assert(t, qt.Equals(delim.Matched, true))
+	qt.Assert(t, qt.Equals(delim.EOFTerminated, false))
+	qt.Assert(t, qt.Equals(delim.IndentMode, syntax.HeredocIndentStripTabs))
+	qt.Assert(t, qt.Equals(delim.IndentTabs, uint16(1)))
 	qt.Assert(t, qt.Equals(len(delim.Parts), 2))
 }
 
