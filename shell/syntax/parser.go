@@ -590,7 +590,8 @@ type Parser struct {
 
 	f *File
 
-	spaced bool // whether [Parser.tok] has whitespace on its left
+	spaced       bool              // whether [Parser.tok] has whitespace on its left
+	tokSeparator CallExprSeparator // whitespace trivia on the left of [Parser.tok]
 
 	err     error // lexer/parser error
 	readErr error // got a read error, but bytes left
@@ -774,6 +775,7 @@ func (p *Parser) reset() {
 	p.aliasInputStack = p.aliasInputStack[:0]
 	p.aliasSource = nil
 	p.tokAliasChain = nil
+	p.tokSeparator = CallExprSeparator{}
 	p.pendingHeredocWarningPos = Pos{}
 	p.pendingHeredocWarningWanted = ""
 	p.parenAmbiguityProbeDepth = 0
@@ -8286,17 +8288,58 @@ func (p *Parser) funcBodyStmt() *Stmt {
 
 func (p *Parser) callExpr(s *Stmt, w *Word, assign bool) {
 	ce := p.call(w)
+	var separators []CallExprSeparator
+	lastOperand := w != nil
+	boundaryBroken := false
+	appendAssign := func(sep CallExprSeparator, as *Assign) {
+		if as == nil {
+			return
+		}
+		if lastOperand {
+			if boundaryBroken {
+				separators = append(separators, CallExprSeparator{})
+			} else {
+				separators = append(separators, sep)
+			}
+		}
+		ce.Assigns = append(ce.Assigns, as)
+		lastOperand = true
+		boundaryBroken = false
+	}
+	appendArg := func(sep CallExprSeparator, w *Word) {
+		if w == nil {
+			return
+		}
+		if lastOperand {
+			if boundaryBroken {
+				separators = append(separators, CallExprSeparator{})
+			} else {
+				separators = append(separators, sep)
+			}
+		}
+		ce.Args = append(ce.Args, w)
+		lastOperand = true
+		boundaryBroken = false
+	}
+	finish := func() {
+		if len(ce.Args) == 0 {
+			ce.Args = nil
+		}
+		setCallExprSeparators(ce, separators)
+		s.Cmd = ce
+	}
 	if w == nil {
 		ce.Args = ce.Args[:0]
 	}
 	if assign {
+		sep := p.tokSeparator
 		if as, ok := p.tryAssignCandidate(false); ok {
-			ce.Assigns = append(ce.Assigns, as)
+			appendAssign(sep, as)
 		} else if w := p.takePendingArrayWord(); w != nil {
-			ce.Args = append(ce.Args, w)
+			appendArg(sep, w)
 		} else if p.err != nil {
 			p.normalizeArrayLikeEOFError()
-			s.Cmd = ce
+			finish()
 			return
 		}
 	}
@@ -8308,12 +8351,13 @@ loop:
 			break loop
 		case _LitWord:
 			if len(ce.Args) == 0 && p.hasValidIdent() {
+				sep := p.tokSeparator
 				if as, ok := p.tryAssignCandidate(false); ok {
-					ce.Assigns = append(ce.Assigns, as)
+					appendAssign(sep, as)
 					break
 				}
 				if w := p.takePendingArrayWord(); w != nil {
-					ce.Args = append(ce.Args, w)
+					appendArg(sep, w)
 					break
 				}
 				if p.err != nil {
@@ -8337,21 +8381,23 @@ loop:
 			if p.lang.in(LangZsh) && p.atRsrv(rsrvRightBrace) {
 				break loop
 			}
+			sep := p.tokSeparator
 			w := p.wordOne(p.lit(p.pos, p.val))
 			p.next()
 			if p.lang.in(LangZsh) && !p.spaced {
 				w.Parts = append(w.Parts, p.wordParts(nil)...)
 				p.finishWord(w)
 			}
-			ce.Args = append(ce.Args, w)
+			appendArg(sep, w)
 		case _Lit:
 			if len(ce.Args) == 0 && p.hasValidIdent() {
+				sep := p.tokSeparator
 				if as, ok := p.tryAssignCandidate(false); ok {
-					ce.Assigns = append(ce.Assigns, as)
+					appendAssign(sep, as)
 					break
 				}
 				if w := p.takePendingArrayWord(); w != nil {
-					ce.Args = append(ce.Args, w)
+					appendArg(sep, w)
 					break
 				}
 				if p.err != nil {
@@ -8359,7 +8405,8 @@ loop:
 					break loop
 				}
 			}
-			ce.Args = append(ce.Args, p.wordAnyNumber())
+			sep := p.tokSeparator
+			appendArg(sep, p.wordAnyNumber())
 		case bckQuote:
 			if p.backquoteEnd() {
 				break loop
@@ -8368,7 +8415,8 @@ loop:
 		case dollBrace, dollDblParen, dollParen, dollar, cmdIn, assgnParen, cmdOut,
 			sglQuote, dollSglQuote, dblQuote, dollDblQuote, dollBrack,
 			globQuest, globStar, globPlus, globAt, globExcl:
-			ce.Args = append(ce.Args, p.wordAnyNumber())
+			sep := p.tokSeparator
+			appendArg(sep, p.wordAnyNumber())
 		case dblLeftParen:
 			p.curErr("%#q can only be used to open an arithmetic cmd", p.tok)
 		case rightParen:
@@ -8379,6 +8427,7 @@ loop:
 		default:
 			if p.peekRedir() {
 				p.doRedirect(s)
+				boundaryBroken = lastOperand
 				continue
 			}
 			// Note that we'll only keep the first error that happens.
@@ -8390,10 +8439,7 @@ loop:
 			p.curUnexpectedErr()
 		}
 	}
-	if len(ce.Args) == 0 {
-		ce.Args = nil
-	}
-	s.Cmd = ce
+	finish()
 }
 
 func (p *Parser) funcDecl(s *Stmt, pos Pos, long, withParens bool, names ...*Lit) {
