@@ -1132,6 +1132,31 @@ func TestParseErrorMetadataArithmeticExpressionExpected(t *testing.T) {
 	}
 }
 
+func TestParseErrorMetadataPatternUnexpectedLeftParen(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewParser(Variant(LangBash)).Parse(strings.NewReader("[[ x == (foo|bar)* ]]\n"), "stdin")
+	if err == nil {
+		t.Fatal("Parse() error = nil, want ParseError")
+	}
+	var parseErr ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("Parse() error = %T, want ParseError", err)
+	}
+	if got, want := parseErr.Kind, ParseErrorKindUnexpected; got != want {
+		t.Fatalf("Kind = %q, want %q", got, want)
+	}
+	if got, want := parseErr.Construct, ParseErrorSymbolPattern; got != want {
+		t.Fatalf("Construct = %q, want %q", got, want)
+	}
+	if got, want := parseErr.Unexpected, ParseErrorSymbolLeftParen; got != want {
+		t.Fatalf("Unexpected = %q, want %q", got, want)
+	}
+	if got := parseErr.Expected; len(got) != 0 {
+		t.Fatalf("Expected = %v, want nil", got)
+	}
+}
+
 func TestParseErrorBashCompatRequiresIncompleteForIfAndWhile(t *testing.T) {
 	t.Parallel()
 
@@ -2831,6 +2856,10 @@ var errorCases = []errorCase{
 		langErr("1:12: case patterns must consist of words"),
 	),
 	errCase(
+		"case x in a;) echo hi ;; esac",
+		langErr("1:12: syntax error near unexpected token `;'"),
+	),
+	errCase(
 		"case i {",
 		langErr("1:1: `case i {` is a mksh feature; tried parsing as LANG"),
 		langErr("1:1: `case` statement must end with `}`", LangMirBSDKorn),
@@ -3085,6 +3114,10 @@ var errorCases = []errorCase{
 	errCase(
 		"[[ '^(a b)$' == ^(a\\ b)$ ]]",
 		langErr("1:18: syntax error in conditional expression: unexpected token `('", LangBash),
+	),
+	errCase(
+		"case x in (a|b)*) echo hi ;; esac",
+		langErr("1:11: syntax error near unexpected token `('", LangBash|LangMirBSDKorn),
 	),
 	errCase(
 		"[[ a =~ [a b] ]]",
@@ -3537,6 +3570,51 @@ func TestParseStmtsSeq(t *testing.T) {
 	inWriter.Close()
 	<-recv
 	<-recv
+	if err := <-errc; err != nil {
+		t.Fatalf("Expected no error: %v", err)
+	}
+}
+
+func TestParseStmtsSeqLongCasePatternDoesNotBlock(t *testing.T) {
+	t.Parallel()
+
+	p := NewParser()
+	inReader, inWriter := io.Pipe()
+	stmtc := make(chan *Stmt, 1)
+	errc := make(chan error, 1)
+	go func() {
+		var firstErr error
+		for stmt, err := range p.StmtsSeq(inReader) {
+			if firstErr == nil && err != nil {
+				firstErr = err
+			}
+			if err == nil {
+				stmtc <- stmt
+			}
+		}
+		errc <- firstErr
+	}()
+
+	pattern := strings.Repeat("a", bufSize+32)
+	_, err := io.WriteString(inWriter, "case x in "+pattern+") echo hi ;; esac\n")
+	qt.Assert(t, qt.IsNil(err))
+
+	select {
+	case stmt := <-stmtc:
+		caseClause, ok := stmt.Cmd.(*CaseClause)
+		if !ok {
+			t.Fatalf("stmt.Cmd = %T, want *CaseClause", stmt.Cmd)
+		}
+		qt.Assert(t, qt.HasLen(caseClause.Items, 1))
+		qt.Assert(t, qt.HasLen(caseClause.Items[0].Patterns, 1))
+		if got := caseClause.Items[0].Patterns[0].UnquotedText(); got != pattern {
+			t.Fatalf("case pattern = %q, want %q", got, pattern)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("StmtsSeq blocked on a complete case clause until EOF")
+	}
+
+	qt.Assert(t, qt.IsNil(inWriter.Close()))
 	if err := <-errc; err != nil {
 		t.Fatalf("Expected no error: %v", err)
 	}
@@ -4381,6 +4459,74 @@ func TestParseRecoverErrorsIfClauseMissingThenBodies(t *testing.T) {
 	}
 }
 
+func TestParseRecoverErrorsPatternGroupPreservesIfClause(t *testing.T) {
+	t.Parallel()
+
+	src := "if [[ x == (foo|bar)* ]]; then echo one; elif [[ y == z ]]; then echo two; fi\n"
+	file, err := NewParser(Variant(LangBash), RecoverErrors(4)).Parse(strings.NewReader(src), "")
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.HasLen(file.Stmts, 1))
+
+	ifClause, ok := file.Stmts[0].Cmd.(*IfClause)
+	if !ok {
+		t.Fatalf("Cmd = %T, want *IfClause", file.Stmts[0].Cmd)
+	}
+	qt.Assert(t, qt.HasLen(ifClause.Cond, 1))
+	testClause, ok := ifClause.Cond[0].Cmd.(*TestClause)
+	if !ok {
+		t.Fatalf("if cond = %T, want *TestClause", ifClause.Cond[0].Cmd)
+	}
+	bin, ok := testClause.X.(*CondBinary)
+	if !ok {
+		t.Fatalf("if cond expr = %T, want *CondBinary", testClause.X)
+	}
+	pat := bin.Y.(*CondPattern).Pattern
+	group, ok := pat.Parts[0].(*PatternGroup)
+	if !ok {
+		t.Fatalf("pat.Parts[0] = %T, want *PatternGroup", pat.Parts[0])
+	}
+	qt.Assert(t, qt.HasLen(group.Patterns, 2))
+	if ifClause.Else == nil {
+		t.Fatal("ifClause.Else = nil, want elif clause")
+	}
+	qt.Assert(t, qt.HasLen(ifClause.Else.Cond, 1))
+	elifTest, ok := ifClause.Else.Cond[0].Cmd.(*TestClause)
+	if !ok {
+		t.Fatalf("elif cond = %T, want *TestClause", ifClause.Else.Cond[0].Cmd)
+	}
+	elifBin, ok := elifTest.X.(*CondBinary)
+	if !ok {
+		t.Fatalf("elif cond expr = %T, want *CondBinary", elifTest.X)
+	}
+	elifPat := elifBin.Y.(*CondPattern).Pattern
+	if got := elifPat.UnquotedText(); got != "z" {
+		t.Fatalf("elif pattern = %q, want %q", got, "z")
+	}
+}
+
+func TestParseRecoverErrorsPatternGroupPreservesCaseClause(t *testing.T) {
+	t.Parallel()
+
+	src := "case $x in (foo|bar)*) echo one ;; baz) echo two ;; esac\n"
+	file, err := NewParser(Variant(LangBash), RecoverErrors(4)).Parse(strings.NewReader(src), "")
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.HasLen(file.Stmts, 1))
+
+	caseClause, ok := file.Stmts[0].Cmd.(*CaseClause)
+	if !ok {
+		t.Fatalf("Cmd = %T, want *CaseClause", file.Stmts[0].Cmd)
+	}
+	qt.Assert(t, qt.HasLen(caseClause.Items, 2))
+	groupPat := caseClause.Items[0].Patterns[0]
+	group, ok := groupPat.Parts[0].(*PatternGroup)
+	if !ok {
+		t.Fatalf("first case pattern part = %T, want *PatternGroup", groupPat.Parts[0])
+	}
+	qt.Assert(t, qt.HasLen(group.Patterns, 2))
+	if got := caseClause.Items[1].Patterns[0].UnquotedText(); got != "baz" {
+		t.Fatalf("second case pattern = %q, want %q", got, "baz")
+	}
+}
 func countRecoveredPositions(x reflect.Value) int {
 	switch x.Kind() {
 	case reflect.Interface:
