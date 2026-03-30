@@ -350,6 +350,37 @@ func TestGluedComparisonWordsKeepParseShape(t *testing.T) {
 	})
 }
 
+func TestWordTestLikeSplitPreservesRawOperatorOffsets(t *testing.T) {
+	t.Parallel()
+
+	word := parseFirstRecoveredTestWord(t, "[[ foo\\\n=bar ]]\n")
+	split := word.TestLikeSplit()
+	if split == nil {
+		t.Fatal("TestLikeSplit() = nil, want split")
+	}
+	if got, want := split.Left.RawText(), "foo\\\n"; got != want {
+		t.Fatalf("Left.RawText() = %q, want %q", got, want)
+	}
+	if got, want := split.Left.UnquotedText(), "foo"; got != want {
+		t.Fatalf("Left.UnquotedText() = %q, want %q", got, want)
+	}
+	if got, want := split.OperatorPos.Line(), uint(2); got != want {
+		t.Fatalf("OperatorPos.Line() = %d, want %d", got, want)
+	}
+	if got, want := split.OperatorPos.Col(), uint(1); got != want {
+		t.Fatalf("OperatorPos.Col() = %d, want %d", got, want)
+	}
+	if got, want := split.OperatorEnd.Line(), uint(2); got != want {
+		t.Fatalf("OperatorEnd.Line() = %d, want %d", got, want)
+	}
+	if got, want := split.OperatorEnd.Col(), uint(2); got != want {
+		t.Fatalf("OperatorEnd.Col() = %d, want %d", got, want)
+	}
+	if got, want := split.Right.RawText(), "bar"; got != want {
+		t.Fatalf("Right.RawText() = %q, want %q", got, want)
+	}
+}
+
 func parseFirstRecoveredTestWord(t *testing.T, src string) *Word {
 	t.Helper()
 

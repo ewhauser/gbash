@@ -19,11 +19,11 @@ func wordTestLikeSplitParts(w *Word, parts []WordPart, literalPrefixOnly *bool) 
 		}
 		switch part := part.(type) {
 		case *Lit:
-			if split := wordTestLikeSplitLiteral(w, part.Pos(), part.Value); split != nil {
+			if split := wordTestLikeSplitLiteral(w, part, part.Pos(), part.Value); split != nil {
 				return split
 			}
 		case *SglQuoted:
-			if split := wordTestLikeSplitLiteral(w, quotedContentStart(part.Left, part.Dollar), part.Value); split != nil {
+			if split := wordTestLikeSplitLiteral(w, part, quotedContentStart(part.Left, part.Dollar), part.Value); split != nil {
 				return split
 			}
 		case *DblQuoted:
@@ -37,7 +37,8 @@ func wordTestLikeSplitParts(w *Word, parts []WordPart, literalPrefixOnly *bool) 
 	return nil
 }
 
-func wordTestLikeSplitLiteral(w *Word, start Pos, text string) *TestLikeSplit {
+func wordTestLikeSplitLiteral(w *Word, part WordPart, start Pos, text string) *TestLikeSplit {
+	sourceMap := literalValueSourceMap(w, part, text)
 	for i := 0; i < len(text); i++ {
 		op := matchTestLikeOperator(text[i:])
 		if op == "" {
@@ -45,6 +46,10 @@ func wordTestLikeSplitLiteral(w *Word, start Pos, text string) *TestLikeSplit {
 		}
 		opPos := posAddCol(start, i)
 		opEnd := posAddCol(opPos, len(op))
+		if sourceMap.ok {
+			opPos = posAtSourceOffset(start, sourceMap.raw, sourceMap.offsets[i])
+			opEnd = posAtSourceOffset(start, sourceMap.raw, sourceMap.offsets[i+len(op)])
+		}
 		if split := buildTestLikeSplit(w, op, opPos, opEnd); split != nil {
 			return split
 		}
@@ -68,7 +73,7 @@ func matchTestLikeOperator(text string) string {
 }
 
 func buildTestLikeSplit(w *Word, op string, opPos, opEnd Pos) *TestLikeSplit {
-	leftParts, rightParts, ok := splitWordPartsForSpan(w.Parts, opPos, opEnd)
+	leftParts, rightParts, ok := splitWordPartsForSpan(w, w.Parts, opPos, opEnd)
 	if !ok || len(leftParts) == 0 || len(rightParts) == 0 {
 		return nil
 	}
@@ -111,7 +116,7 @@ func sliceWordRaw(w *Word, start, end Pos) string {
 	return w.raw[lo:hi]
 }
 
-func splitWordPartsForSpan(parts []WordPart, start, end Pos) (left, right []WordPart, ok bool) {
+func splitWordPartsForSpan(w *Word, parts []WordPart, start, end Pos) (left, right []WordPart, ok bool) {
 	found := false
 	for _, part := range parts {
 		if found {
@@ -126,7 +131,7 @@ func splitWordPartsForSpan(parts []WordPart, start, end Pos) (left, right []Word
 			return nil, nil, false
 		}
 
-		leftPart, rightPart, partOK := splitWordPartForSpan(part, start, end)
+		leftPart, rightPart, partOK := splitWordPartForSpan(w, part, start, end)
 		if !partOK {
 			return nil, nil, false
 		}
@@ -141,14 +146,14 @@ func splitWordPartsForSpan(parts []WordPart, start, end Pos) (left, right []Word
 	return left, right, found
 }
 
-func splitWordPartForSpan(part WordPart, start, end Pos) (left, right WordPart, ok bool) {
+func splitWordPartForSpan(w *Word, part WordPart, start, end Pos) (left, right WordPart, ok bool) {
 	switch part := part.(type) {
 	case *Lit:
-		return splitLitForSpan(part, start, end)
+		return splitLitForSpan(w, part, start, end)
 	case *SglQuoted:
-		return splitSglQuotedForSpan(part, start, end)
+		return splitSglQuotedForSpan(w, part, start, end)
 	case *DblQuoted:
-		innerLeft, innerRight, ok := splitWordPartsForSpan(part.Parts, start, end)
+		innerLeft, innerRight, ok := splitWordPartsForSpan(w, part.Parts, start, end)
 		if !ok {
 			return nil, nil, false
 		}
@@ -174,9 +179,8 @@ func splitWordPartForSpan(part WordPart, start, end Pos) (left, right WordPart, 
 	}
 }
 
-func splitLitForSpan(lit *Lit, start, end Pos) (left, right WordPart, ok bool) {
-	startIdx := int(start.Offset() - lit.Pos().Offset())
-	endIdx := int(end.Offset() - lit.Pos().Offset())
+func splitLitForSpan(w *Word, lit *Lit, start, end Pos) (left, right WordPart, ok bool) {
+	startIdx, endIdx, ok := literalSplitIndexes(w, lit, lit.Value, start, end)
 	if startIdx < 0 || endIdx < startIdx || endIdx > len(lit.Value) {
 		return nil, nil, false
 	}
@@ -197,10 +201,8 @@ func splitLitForSpan(lit *Lit, start, end Pos) (left, right WordPart, ok bool) {
 	return left, right, true
 }
 
-func splitSglQuotedForSpan(part *SglQuoted, start, end Pos) (left, right WordPart, ok bool) {
-	contentStart := quotedContentStart(part.Left, part.Dollar)
-	startIdx := int(start.Offset() - contentStart.Offset())
-	endIdx := int(end.Offset() - contentStart.Offset())
+func splitSglQuotedForSpan(w *Word, part *SglQuoted, start, end Pos) (left, right WordPart, ok bool) {
+	startIdx, endIdx, ok := literalSplitIndexes(w, part, part.Value, start, end)
 	if startIdx < 0 || endIdx < startIdx || endIdx > len(part.Value) {
 		return nil, nil, false
 	}
@@ -228,4 +230,151 @@ func quotedContentStart(left Pos, dollar bool) Pos {
 		return posAddCol(left, 2)
 	}
 	return posAddCol(left, 1)
+}
+
+func literalSplitIndexes(w *Word, part WordPart, text string, start, end Pos) (startIdx, endIdx int, ok bool) {
+	valueStart := part.Pos()
+	if sgl, ok := part.(*SglQuoted); ok {
+		valueStart = quotedContentStart(sgl.Left, sgl.Dollar)
+	}
+
+	startIdx = int(start.Offset() - valueStart.Offset())
+	endIdx = int(end.Offset() - valueStart.Offset())
+
+	sourceMap := literalValueSourceMap(w, part, text)
+	if !sourceMap.ok {
+		return startIdx, endIdx, true
+	}
+
+	startRaw := int(start.Offset() - valueStart.Offset())
+	endRaw := int(end.Offset() - valueStart.Offset())
+	startIdx, ok = literalValueIndexForSourceOffset(sourceMap.offsets, startRaw)
+	if !ok {
+		return 0, 0, false
+	}
+	endIdx, ok = literalValueIndexForSourceOffset(sourceMap.offsets, endRaw)
+	if !ok {
+		return 0, 0, false
+	}
+	return startIdx, endIdx, true
+}
+
+type literalSourceMap struct {
+	offsets []int
+	raw     []byte
+	ok      bool
+}
+
+func literalValueSourceMap(w *Word, part WordPart, text string) literalSourceMap {
+	switch part := part.(type) {
+	case *Lit:
+		raw, ok := wordPartRawBytes(w, part)
+		if !ok {
+			return literalSourceMap{offsets: identitySourceOffsets(text)}
+		}
+		offsets, ok := shellLiteralSourceOffsets(raw, text)
+		return literalSourceMap{offsets: offsets, raw: raw, ok: ok}
+	case *SglQuoted:
+		if part.Dollar {
+			return literalSourceMap{offsets: identitySourceOffsets(text)}
+		}
+		raw, ok := sglQuotedContentRawBytes(w, part)
+		if !ok {
+			return literalSourceMap{offsets: identitySourceOffsets(text)}
+		}
+		return literalSourceMap{offsets: identitySourceOffsets(text), raw: raw, ok: true}
+	default:
+		return literalSourceMap{offsets: identitySourceOffsets(text)}
+	}
+}
+
+func wordPartRawBytes(w *Word, part WordPart) ([]byte, bool) {
+	if w == nil {
+		return nil, false
+	}
+	return nodeRawBytes([]byte(w.raw), nodeRawBase(w), part)
+}
+
+func sglQuotedContentRawBytes(w *Word, part *SglQuoted) ([]byte, bool) {
+	raw, ok := wordPartRawBytes(w, part)
+	if !ok {
+		return nil, false
+	}
+	if part.Dollar {
+		if len(raw) < 3 {
+			return nil, false
+		}
+		return raw[2 : len(raw)-1], true
+	}
+	if len(raw) < 2 {
+		return nil, false
+	}
+	return raw[1 : len(raw)-1], true
+}
+
+func shellLiteralSourceOffsets(raw []byte, text string) ([]int, bool) {
+	offsets := make([]int, 0, len(text)+1)
+	rawIdx := 0
+	for len(offsets) < len(text) {
+		rawIdx = skipShellLineContinuations(raw, rawIdx)
+		if rawIdx >= len(raw) {
+			return identitySourceOffsets(text), false
+		}
+		offsets = append(offsets, rawIdx)
+		rawIdx++
+	}
+	rawIdx = skipShellLineContinuations(raw, rawIdx)
+	offsets = append(offsets, rawIdx)
+	return offsets, len(offsets) == len(text)+1
+}
+
+func identitySourceOffsets(text string) []int {
+	offsets := make([]int, len(text)+1)
+	for i := range len(offsets) {
+		offsets[i] = i
+	}
+	return offsets
+}
+
+func literalValueIndexForSourceOffset(offsets []int, rawOffset int) (int, bool) {
+	for i, offset := range offsets {
+		if offset == rawOffset {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func skipShellLineContinuations(raw []byte, rawIdx int) int {
+	for rawIdx < len(raw) && raw[rawIdx] == '\\' {
+		if rawIdx+1 < len(raw) && raw[rawIdx+1] == '\n' {
+			rawIdx += 2
+			continue
+		}
+		if rawIdx+2 < len(raw) && raw[rawIdx+1] == '\r' && raw[rawIdx+2] == '\n' {
+			rawIdx += 3
+			continue
+		}
+		break
+	}
+	return rawIdx
+}
+
+func posAtSourceOffset(start Pos, raw []byte, rawOffset int) Pos {
+	if !start.IsValid() || rawOffset < 0 || rawOffset > len(raw) {
+		return start
+	}
+
+	offset := start.Offset() + uint(rawOffset)
+	line := start.Line()
+	col := start.Col()
+	for i := 0; i < rawOffset; i++ {
+		if raw[i] == '\n' {
+			line++
+			col = 1
+			continue
+		}
+		col++
+	}
+	return NewPos(offset, line, col)
 }
