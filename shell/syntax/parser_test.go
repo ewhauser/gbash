@@ -1318,6 +1318,14 @@ func TestParseHeredocCloserMetadataOnEOF(t *testing.T) {
 			wantIndentMode: HeredocIndentNone,
 		},
 		{
+			name:           "space near match before trailing newline",
+			src:            "cat <<EOF\nbody\nEOF \n",
+			wantRaw:        "EOF ",
+			wantTrailing:   " ",
+			wantSpan:       true,
+			wantIndentMode: HeredocIndentNone,
+		},
+		{
 			name:           "tab indented hash near match",
 			src:            "cat <<-EOF\nbody\n\tEOF#",
 			wantRaw:        "\tEOF#",

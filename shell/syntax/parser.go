@@ -1158,7 +1158,7 @@ func (p *Parser) updateHeredocStop(stop *heredocStop, rawPos, end Pos, rawLine, 
 	}
 	if !hasLine {
 		if eof {
-			stop.close = heredocCloseCapture{eofTerminated: true}
+			stop.close.eofTerminated = true
 		}
 		return
 	}
@@ -1172,11 +1172,13 @@ func (p *Parser) updateHeredocStop(stop *heredocStop, rawPos, end Pos, rawLine, 
 		raw = rawLineText
 		rawPos = posSubCol(end, len(rawLineText))
 	}
-	trailing := ""
-	if bytes.HasPrefix(normalized, stop.word) {
-		trailing = string(normalized[len(stop.word):])
-	}
+	prefix := bytes.HasPrefix(normalized, stop.word)
 	matched := bytes.Equal(normalized, stop.word)
+	if !prefix {
+		stop.close = heredocCloseCapture{eofTerminated: eof}
+		return
+	}
+	trailing := string(normalized[len(stop.word):])
 	stop.close = heredocCloseCapture{
 		pos:           rawPos,
 		end:           end,
