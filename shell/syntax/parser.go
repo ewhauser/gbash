@@ -2152,8 +2152,11 @@ type LangError struct {
 	Feature string
 	// FeatureID identifies the stable variant-gated syntax family.
 	FeatureID FeatureID
-	// FeatureDetail carries any operator or spelling-specific detail used when
-	// rendering Feature.
+	// FeatureSubtype identifies a more specific stable surface form within
+	// FeatureID when the parser can distinguish it.
+	FeatureSubtype FeatureSubtype
+	// FeatureDetail carries any operator, spelling-specific detail, or other
+	// stable raw fragment associated with FeatureSubtype when rendering Feature.
 	FeatureDetail string
 	// Langs lists some of the language variants which support the feature.
 	Langs []LangVariant
@@ -2270,6 +2273,18 @@ func (p *Parser) checkLang(pos Pos, langSet LangVariant, featureID FeatureID, de
 }
 
 func (p *Parser) checkLangSpan(pos, end Pos, langSet LangVariant, featureID FeatureID, detail ...string) {
+	featureDetail := ""
+	if len(detail) > 0 {
+		featureDetail = detail[0]
+	}
+	p.checkLangSpanDetailed(pos, end, langSet, featureID, FeatureSubtypeUnknown, featureDetail)
+}
+
+func (p *Parser) checkLangDetailed(pos Pos, langSet LangVariant, featureID FeatureID, featureSubtype FeatureSubtype, featureDetail string) {
+	p.checkLangSpanDetailed(pos, Pos{}, langSet, featureID, featureSubtype, featureDetail)
+}
+
+func (p *Parser) checkLangSpanDetailed(pos, end Pos, langSet LangVariant, featureID FeatureID, featureSubtype FeatureSubtype, featureDetail string) {
 	if p.lang.in(langSet) {
 		return
 	}
@@ -2278,19 +2293,16 @@ func (p *Parser) checkLangSpan(pos, end Pos, langSet LangVariant, featureID Feat
 		// just mention "bash" rather than "bash/bats" for the sake of clarity.
 		langSet &^= LangBats
 	}
-	featureDetail := ""
-	if len(detail) > 0 {
-		featureDetail = detail[0]
-	}
 	p.errPass(LangError{
-		Filename:      p.f.Name,
-		Pos:           pos,
-		End:           end,
-		Feature:       featureID.Format(featureDetail),
-		FeatureID:     featureID,
-		FeatureDetail: featureDetail,
-		Langs:         slices.Collect(langSet.bits()),
-		LangUsed:      p.lang,
+		Filename:       p.f.Name,
+		Pos:            pos,
+		End:            end,
+		Feature:        featureID.Format(featureDetail),
+		FeatureID:      featureID,
+		FeatureSubtype: featureSubtype,
+		FeatureDetail:  featureDetail,
+		Langs:          slices.Collect(langSet.bits()),
+		LangUsed:       p.lang,
 	})
 }
 
@@ -2517,6 +2529,17 @@ func (p *Parser) currentRuneSource() string {
 		return ""
 	}
 	return string(p.bs[start:p.bsp])
+}
+
+func (p *Parser) bufferedSourceTail() string {
+	var b strings.Builder
+	if src := p.currentRuneSource(); src != "" {
+		b.WriteString(src)
+	}
+	if idx := int(p.bsp); idx >= 0 && idx <= len(p.bs) {
+		b.Write(p.bs[idx:])
+	}
+	return b.String()
 }
 
 func (p *Parser) sourceFromPos(pos Pos) string {
@@ -4252,7 +4275,8 @@ func (p *Parser) paramExp() *ParamExp {
 		Short:  p.tok == dollar,
 	}
 	if !pe.Short && p.r == '(' {
-		p.checkLangSpan(pe.Pos(), posAddCol(p.nextPos(), 1), LangZsh, FeatureParameterExpansionFlags)
+		subtype, detail := p.paramExpFlagsFeatureMetadata()
+		p.checkLangSpanDetailed(pe.Pos(), posAddCol(p.nextPos(), 1), LangZsh, FeatureParameterExpansionFlags, subtype, detail)
 		// For now, for simplicity, we parse flags as just a literal.
 		// In the future, parsing as a word is better for cases like
 		// `${(ps.$sep.)val}`.
@@ -4328,7 +4352,8 @@ func (p *Parser) paramExp() *ParamExp {
 	// Index expressions like ${foo[1]}. Note that expansion suffixes can be combined,
 	// like ${foo[@]//replace/with}.
 	if p.r == '[' {
-		p.checkLang(p.nextPos(), langBashLike|LangMirBSDKorn|LangZsh, FeatureArraySyntax)
+		subtype, detail := p.paramExpIndexFeatureMetadata()
+		p.checkLangDetailed(p.nextPos(), langBashLike|LangMirBSDKorn|LangZsh, FeatureArraySyntax, subtype, detail)
 		if pe.Param != nil && !ValidName(pe.Param.Value) {
 			p.posErr(p.nextPos(), "cannot index a special parameter name")
 		}
@@ -4481,6 +4506,38 @@ func (p *Parser) paramExp() *ParamExp {
 	return pe
 }
 
+func (p *Parser) paramExpFlagsFeatureMetadata() (FeatureSubtype, string) {
+	tail := p.bufferedSourceTail()
+	if !strings.HasPrefix(tail, "(") {
+		return FeatureSubtypeParameterExpansionFlag, ""
+	}
+	flags := tail[1:]
+	if end := strings.IndexByte(flags, ')'); end >= 0 {
+		flags = flags[:end]
+	}
+	if strings.ContainsRune(flags, '~') {
+		return FeatureSubtypeParameterExpansionTildeFlag, flags
+	}
+	return FeatureSubtypeParameterExpansionFlag, flags
+}
+
+func (p *Parser) paramExpIndexFeatureMetadata() (FeatureSubtype, string) {
+	tail := p.bufferedSourceTail()
+	if !strings.HasPrefix(tail, "[") {
+		return FeatureSubtypeUnknown, ""
+	}
+	inner := strings.TrimLeft(tail[1:], " \t\r\n")
+	if inner == "" {
+		return FeatureSubtypeUnknown, ""
+	}
+	switch inner[0] {
+	case '\'', '"':
+		return FeatureSubtypeParameterExpansionQuotedIndex, inner[:1]
+	default:
+		return FeatureSubtypeUnknown, ""
+	}
+}
+
 func (p *Parser) invalidParamExp(pe *ParamExp, old quoteState) *ParamExp {
 	if pe == nil {
 		return nil
@@ -4524,7 +4581,7 @@ func (p *Parser) nestedParameterStart(pe *ParamExp) (left token, quotePos Pos) {
 		if quotePos.IsValid() {
 			spanEnd = posAddCol(quotePos, 1)
 		}
-		p.checkLangSpan(pe.Pos(), spanEnd, LangZsh, FeatureParameterExpansionNested)
+		p.checkLangSpanDetailed(pe.Pos(), spanEnd, LangZsh, FeatureParameterExpansionNested, FeatureSubtypeParameterExpansionNested, "")
 		if p.err != nil {
 			return illegalTok, Pos{} // xxx given that we overwrite p.tok below
 		}

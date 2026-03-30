@@ -98,6 +98,7 @@ func TestParseLangErrorFeatureMetadata(t *testing.T) {
 		wantID        FeatureID
 		wantIDString  string
 		wantCategory  FeatureCategory
+		wantSubtype   FeatureSubtype
 		wantDetail    string
 		wantFeature   string
 		wantErrorText string
@@ -109,6 +110,7 @@ func TestParseLangErrorFeatureMetadata(t *testing.T) {
 			wantID:        FeaturePatternExtendedGlob,
 			wantIDString:  "pattern_extended_glob",
 			wantCategory:  FeatureCategoryPattern,
+			wantSubtype:   FeatureSubtypeUnknown,
 			wantFeature:   "extended globs",
 			wantErrorText: "1:6: extended globs are a bash/mksh feature; tried parsing as posix",
 		},
@@ -119,6 +121,20 @@ func TestParseLangErrorFeatureMetadata(t *testing.T) {
 			wantID:        FeatureParameterExpansionFlags,
 			wantIDString:  "parameter_expansion_flags",
 			wantCategory:  FeatureCategoryParameterExpansion,
+			wantSubtype:   FeatureSubtypeParameterExpansionFlag,
+			wantDetail:    "f",
+			wantFeature:   "parameter expansion flags",
+			wantErrorText: "1:6: parameter expansion flags are a zsh feature; tried parsing as bash",
+		},
+		{
+			name:          "parameter expansion tilde flag",
+			lang:          LangBash,
+			src:           "echo ${(~)foo}",
+			wantID:        FeatureParameterExpansionFlags,
+			wantIDString:  "parameter_expansion_flags",
+			wantCategory:  FeatureCategoryParameterExpansion,
+			wantSubtype:   FeatureSubtypeParameterExpansionTildeFlag,
+			wantDetail:    "~",
 			wantFeature:   "parameter expansion flags",
 			wantErrorText: "1:6: parameter expansion flags are a zsh feature; tried parsing as bash",
 		},
@@ -139,6 +155,7 @@ func TestParseLangErrorFeatureMetadata(t *testing.T) {
 			wantID:        FeatureParameterExpansionNested,
 			wantIDString:  "parameter_expansion_nested",
 			wantCategory:  FeatureCategoryParameterExpansion,
+			wantSubtype:   FeatureSubtypeParameterExpansionNested,
 			wantFeature:   "nested parameter expansions",
 			wantErrorText: "1:6: nested parameter expansions are a zsh feature; tried parsing as bash",
 		},
@@ -149,6 +166,19 @@ func TestParseLangErrorFeatureMetadata(t *testing.T) {
 			wantID:        FeatureArraySyntax,
 			wantIDString:  "array_syntax",
 			wantCategory:  FeatureCategoryArray,
+			wantSubtype:   FeatureSubtypeUnknown,
+			wantFeature:   "arrays",
+			wantErrorText: "1:11: arrays are a bash/mksh/zsh feature; tried parsing as posix",
+		},
+		{
+			name:          "quoted index parameter expansion",
+			lang:          LangPOSIX,
+			src:           `echo ${foo["bar"]}`,
+			wantID:        FeatureArraySyntax,
+			wantIDString:  "array_syntax",
+			wantCategory:  FeatureCategoryArray,
+			wantSubtype:   FeatureSubtypeParameterExpansionQuotedIndex,
+			wantDetail:    "\"",
 			wantFeature:   "arrays",
 			wantErrorText: "1:11: arrays are a bash/mksh/zsh feature; tried parsing as posix",
 		},
@@ -159,6 +189,7 @@ func TestParseLangErrorFeatureMetadata(t *testing.T) {
 			wantID:        FeatureConditionalRegexTest,
 			wantIDString:  "conditional_regex_test",
 			wantCategory:  FeatureCategoryConditional,
+			wantSubtype:   FeatureSubtypeUnknown,
 			wantFeature:   "regex tests",
 			wantErrorText: "1:8: regex tests are a bash/zsh feature; tried parsing as mksh",
 		},
@@ -169,6 +200,7 @@ func TestParseLangErrorFeatureMetadata(t *testing.T) {
 			wantID:        FeatureRedirectionOperator,
 			wantIDString:  "redirection_operator",
 			wantCategory:  FeatureCategoryRedirection,
+			wantSubtype:   FeatureSubtypeUnknown,
 			wantDetail:    "`&>`",
 			wantFeature:   "`&>` redirects",
 			wantErrorText: "1:9: `&>` redirects are a bash/mksh/zsh feature; tried parsing as posix",
@@ -180,6 +212,7 @@ func TestParseLangErrorFeatureMetadata(t *testing.T) {
 			wantID:        FeatureSubstitutionProcess,
 			wantIDString:  "substitution_process",
 			wantCategory:  FeatureCategorySubstitution,
+			wantSubtype:   FeatureSubtypeUnknown,
 			wantDetail:    "`=(`",
 			wantFeature:   "`=(` process substitutions",
 			wantErrorText: "1:6: `=(` process substitutions are a zsh feature; tried parsing as bash",
@@ -191,6 +224,7 @@ func TestParseLangErrorFeatureMetadata(t *testing.T) {
 			wantID:        FeatureBuiltinKeywordLike,
 			wantIDString:  "builtin_keyword_like",
 			wantCategory:  FeatureCategoryBuiltin,
+			wantSubtype:   FeatureSubtypeUnknown,
 			wantDetail:    "`let`",
 			wantFeature:   "the `let` builtin",
 			wantErrorText: "1:5: the `let` builtin is a bash feature; tried parsing as posix",
@@ -202,6 +236,7 @@ func TestParseLangErrorFeatureMetadata(t *testing.T) {
 			wantID:        FeatureParameterExpansionNameOperator,
 			wantIDString:  "parameter_expansion_name_operator",
 			wantCategory:  FeatureCategoryParameterExpansion,
+			wantSubtype:   FeatureSubtypeUnknown,
 			wantDetail:    "@",
 			wantFeature:   "`${!foo@}`",
 			wantErrorText: "1:6: `${!foo@}` is a bash feature; tried parsing as mksh",
@@ -213,6 +248,7 @@ func TestParseLangErrorFeatureMetadata(t *testing.T) {
 			wantID:        FeatureParameterExpansionCaseOperator,
 			wantIDString:  "parameter_expansion_case_operator",
 			wantCategory:  FeatureCategoryParameterExpansion,
+			wantSubtype:   FeatureSubtypeUnknown,
 			wantFeature:   "this expansion operator",
 			wantErrorText: "1:11: this expansion operator is a bash feature; tried parsing as mksh",
 		},
@@ -240,6 +276,9 @@ func TestParseLangErrorFeatureMetadata(t *testing.T) {
 			}
 			if got := langErr.FeatureID.Category(); got != tt.wantCategory {
 				t.Fatalf("FeatureID.Category() = %v, want %v", got, tt.wantCategory)
+			}
+			if got := langErr.FeatureSubtype; got != tt.wantSubtype {
+				t.Fatalf("FeatureSubtype = %q, want %q", got, tt.wantSubtype)
 			}
 			if got := langErr.FeatureDetail; got != tt.wantDetail {
 				t.Fatalf("FeatureDetail = %q, want %q", got, tt.wantDetail)

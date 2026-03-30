@@ -48,6 +48,21 @@ func (c FeatureCategory) String() string {
 	return "unknown"
 }
 
+// FeatureSubtype identifies a stable surface form within a variant-gated
+// syntax family.
+//
+// The zero value means "no known subtype".
+type FeatureSubtype string
+
+const (
+	FeatureSubtypeUnknown FeatureSubtype = ""
+
+	FeatureSubtypeParameterExpansionNested      FeatureSubtype = "parameter_expansion_nested"
+	FeatureSubtypeParameterExpansionFlag        FeatureSubtype = "parameter_expansion_flag"
+	FeatureSubtypeParameterExpansionQuotedIndex FeatureSubtype = "parameter_expansion_quoted_index"
+	FeatureSubtypeParameterExpansionTildeFlag   FeatureSubtype = "parameter_expansion_tilde_flag"
+)
+
 // FeatureID identifies a stable family of variant-gated syntax rejections.
 type FeatureID uint16
 
