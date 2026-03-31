@@ -2256,7 +2256,7 @@ var cmpOpt = cmp.Options{
 	cmpopts.IgnoreFields(ArithmExp{}, "Source"),
 	cmpopts.IgnoreFields(ArithmCmd{}, "Source"),
 	cmpopts.IgnoreFields(Assign{}, "Surface"),
-	cmpopts.IgnoreFields(CmdSubst{}, "BackquoteClose"),
+	cmpopts.IgnoreFields(CmdSubst{}, "BackquoteClose", "DiagnosticEnd"),
 	cmpopts.IgnoreFields(Word{}, "LeadingEscape"),
 	cmpopts.IgnoreUnexported(Assign{}, CallExpr{}, Subscript{}, VarRef{}, Word{}, Pattern{}, ParseError{}),
 }
@@ -4680,7 +4680,7 @@ func TestPosEdgeCases(t *testing.T) {
 	qt.Check(t, qt.Equals(f.Stmts[1].End().String(), "2:9"))
 }
 
-func TestCmdSubstDollarParenEndKeepsExactOffsetAndShellCheckParityColumn(t *testing.T) {
+func TestCmdSubstDollarParenDiagnosticEndKeepsExactSyntaxEnd(t *testing.T) {
 	t.Parallel()
 
 	src := "#!/bin/bash\n[[ $(grep -i tcp <<<\"$is_new_protocol-$net\") ]] && :\n"
@@ -4694,11 +4694,13 @@ func TestCmdSubstDollarParenEndKeepsExactOffsetAndShellCheckParityColumn(t *test
 
 	qt.Check(t, qt.Equals(cmdSubst.Pos().String(), "2:4"))
 	qt.Check(t, qt.Equals(cmdSubst.Right.String(), "2:44"))
-	qt.Check(t, qt.Equals(cmdSubst.End().String(), "2:46"))
+	qt.Check(t, qt.Equals(cmdSubst.End().String(), "2:45"))
+	qt.Check(t, qt.Equals(cmdSubst.DiagnosticEnd.String(), "2:46"))
 
 	start := int(cmdSubst.Pos().Offset())
 	end := int(cmdSubst.End().Offset())
 	qt.Check(t, qt.Equals(src[start:end], "$(grep -i tcp <<<\"$is_new_protocol-$net\")"))
+	qt.Check(t, qt.Equals(src[start:int(cmdSubst.DiagnosticEnd.Offset())], "$(grep -i tcp <<<\"$is_new_protocol-$net\") "))
 }
 
 func TestBareCarriageReturnIsNotWhitespace(t *testing.T) {

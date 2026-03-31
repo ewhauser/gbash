@@ -2724,6 +2724,17 @@ func (p *Parser) sourceBytesFromPos(pos Pos) []byte {
 	return buf[start:]
 }
 
+func (p *Parser) nextBytePos(pos Pos) Pos {
+	if !pos.IsValid() {
+		return Pos{}
+	}
+	tail := p.sourceBytesFromPos(pos)
+	if len(tail) == 0 {
+		return Pos{}
+	}
+	return advancePosBytes(pos, tail[:1])
+}
+
 // bytesToStringView returns a non-owning string view over src.
 //
 // Callers must treat the result as ephemeral and must not retain it after src
@@ -4606,6 +4617,7 @@ func (p *Parser) cmdSubst() *CmdSubst {
 	cs.Stmts, cs.Last = p.stmtList()
 	p.postNested(old)
 	cs.Right = p.matched(cs.Left, dollParen, rightParen)
+	cs.DiagnosticEnd = p.nextBytePos(cs.End())
 	return cs
 }
 
