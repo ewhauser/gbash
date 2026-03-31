@@ -4,7 +4,10 @@
 package syntax
 
 import (
+	"bytes"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -33,6 +36,40 @@ func BenchmarkParse(b *testing.B) {
 			b.Fatal(err)
 		}
 		in.Reset(src)
+	}
+}
+
+func BenchmarkParseBenchmarkFiles(b *testing.B) {
+	cases := []struct {
+		name string
+		path string
+	}{
+		{
+			name: "nvm",
+			path: filepath.Join("testdata", "benchmarks", "files", "nvm.sh"),
+		},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			src, err := os.ReadFile(tc.path)
+			if err != nil {
+				b.Fatalf("ReadFile(%q) error = %v", tc.path, err)
+			}
+
+			parser := NewParser(KeepComments(true))
+			reader := bytes.NewReader(src)
+
+			b.SetBytes(int64(len(src)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				reader.Reset(src)
+				if _, err := parser.Parse(reader, filepath.Base(tc.path)); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 

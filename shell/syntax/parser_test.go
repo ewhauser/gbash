@@ -4,6 +4,7 @@
 package syntax
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -25,6 +26,46 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
+
+func TestParserBacktrackSnapshotClonesScratch(t *testing.T) {
+	p := &Parser{}
+	scratch := p.ensureScratch()
+	copy(scratch.readBuf[:], []byte("read"))
+	copy(scratch.litBuf[:], []byte("lit"))
+	p.bs = scratch.readBuf[:4]
+	p.sourceBs = scratch.readBuf[1:4]
+	p.litBs = scratch.litBuf[:3]
+	p.wordRawBs = []byte("word")
+
+	saved := p.backtrackSnapshot()
+	if saved.scratch == p.scratch {
+		t.Fatal("backtrack snapshot reused parser scratch")
+	}
+
+	p.bs[0] = 'R'
+	p.sourceBs[0] = 'S'
+	p.litBs[0] = 'L'
+	p.wordRawBs[0] = 'W'
+
+	if got := string(saved.bs); got != "read" {
+		t.Fatalf("snapshot bs = %q, want %q", got, "read")
+	}
+	if got := string(saved.sourceBs); got != "ead" {
+		t.Fatalf("snapshot sourceBs = %q, want %q", got, "ead")
+	}
+	if got := string(saved.litBs); got != "lit" {
+		t.Fatalf("snapshot litBs = %q, want %q", got, "lit")
+	}
+	if got := string(saved.wordRawBs); got != "word" {
+		t.Fatalf("snapshot wordRawBs = %q, want %q", got, "word")
+	}
+	if got := saved.scratch.readBuf[:4]; !bytes.Equal(got, []byte("read")) {
+		t.Fatalf("snapshot readBuf = %q, want %q", got, "read")
+	}
+	if got := saved.scratch.litBuf[:3]; !bytes.Equal(got, []byte("lit")) {
+		t.Fatalf("snapshot litBuf = %q, want %q", got, "lit")
+	}
+}
 
 func TestParseFiles(t *testing.T) {
 	t.Parallel()
@@ -2217,7 +2258,7 @@ var cmpOpt = cmp.Options{
 	cmpopts.IgnoreFields(Assign{}, "Surface"),
 	cmpopts.IgnoreFields(CmdSubst{}, "BackquoteClose"),
 	cmpopts.IgnoreFields(Word{}, "LeadingEscape"),
-	cmpopts.IgnoreUnexported(Assign{}, Subscript{}, VarRef{}, Word{}, Pattern{}, ParseError{}),
+	cmpopts.IgnoreUnexported(Assign{}, CallExpr{}, Subscript{}, VarRef{}, Word{}, Pattern{}, ParseError{}),
 }
 
 func sourceLineForTest(src string, lineNum uint) string {
@@ -5151,8 +5192,11 @@ func countRecoveredPositions(x reflect.Value) int {
 			return 0
 		}
 		n := 0
-		for _, field := range x.Fields() {
-			n += countRecoveredPositions(field)
+		for i := range x.NumField() {
+			if !x.Type().Field(i).IsExported() {
+				continue
+			}
+			n += countRecoveredPositions(x.Field(i))
 		}
 		return n
 	}

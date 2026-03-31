@@ -536,6 +536,8 @@ func (d *HeredocDelim) End() Pos {
 type CallExpr struct {
 	Assigns []*Assign // a=x b=y args
 	Args    []*Word
+
+	separators []CallExprSeparator
 }
 
 func (c *CallExpr) Pos() Pos {

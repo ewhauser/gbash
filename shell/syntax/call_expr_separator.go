@@ -1,12 +1,5 @@
 package syntax
 
-import (
-	"runtime"
-	"slices"
-	"sync"
-	"weak"
-)
-
 // CallExprSeparator describes the parsed separator trivia between two adjacent
 // simple-command operands.
 //
@@ -52,41 +45,17 @@ func (c *CallExpr) ArgSeparator(i int) CallExprSeparator {
 // OperandSeparator reports the separator between operand i and operand i+1 in
 // lexical simple-command order: all prefix assignments, then argv words.
 func (c *CallExpr) OperandSeparator(i int) CallExprSeparator {
-	if c == nil || i < 0 {
+	if c == nil || i < 0 || i >= len(c.separators) {
 		return CallExprSeparator{}
 	}
-	callExprSeparatorStore.RLock()
-	seps := callExprSeparatorStore.byKey[weak.Make(c)]
-	callExprSeparatorStore.RUnlock()
-	if i >= len(seps) {
-		return CallExprSeparator{}
-	}
-	return seps[i]
-}
-
-var callExprSeparatorStore struct {
-	sync.RWMutex
-	byKey map[weak.Pointer[CallExpr]][]CallExprSeparator
+	return c.separators[i]
 }
 
 func setCallExprSeparators(c *CallExpr, seps []CallExprSeparator) {
 	if c == nil || len(seps) == 0 {
 		return
 	}
-	key := weak.Make(c)
-	callExprSeparatorStore.Lock()
-	if callExprSeparatorStore.byKey == nil {
-		callExprSeparatorStore.byKey = make(map[weak.Pointer[CallExpr]][]CallExprSeparator)
-	}
-	callExprSeparatorStore.byKey[key] = slices.Clone(seps)
-	callExprSeparatorStore.Unlock()
-	runtime.AddCleanup(c, clearCallExprSeparators, key)
-}
-
-func clearCallExprSeparators(key weak.Pointer[CallExpr]) {
-	callExprSeparatorStore.Lock()
-	delete(callExprSeparatorStore.byKey, key)
-	callExprSeparatorStore.Unlock()
+	c.separators = seps
 }
 
 func combineCallExprSeparators(parts ...CallExprSeparator) CallExprSeparator {

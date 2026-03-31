@@ -189,11 +189,12 @@ func (p *Parser) fill() (n int) {
 	}
 	p.offs += int64(p.bsp)
 	left := len(p.bs) - int(p.bsp)
-	copy(p.readBuf[:left], p.bs[p.bsp:])
+	scratch := p.ensureScratch()
+	copy(scratch.readBuf[:left], p.bs[p.bsp:])
 readAgain:
 	n, err := 0, p.readErr
 	if err == nil {
-		n, err = p.src.Read(p.readBuf[left:])
+		n, err = p.src.Read(scratch.readBuf[left:])
 		p.readErr = err
 		if err == io.EOF {
 			p.readEOF = true
@@ -208,12 +209,12 @@ readAgain:
 			p.err = err
 		}
 		if left > 0 {
-			p.bs = p.readBuf[:left]
+			p.bs = scratch.readBuf[:left]
 		} else {
 			p.bs = nil
 		}
 	} else {
-		p.bs = p.readBuf[:left+n]
+		p.bs = scratch.readBuf[:left+n]
 	}
 	p.bsp = 0
 	return n
@@ -1061,21 +1062,22 @@ func (p *Parser) arithmToken(r rune) token {
 }
 
 func (p *Parser) newLit(r rune) {
+	scratch := p.ensureScratch()
 	switch {
 	case r < utf8.RuneSelf:
-		p.litBs = p.litBuf[:1]
+		p.litBs = scratch.litBuf[:1]
 		p.litBs[0] = byte(r)
 	case r > escNewl:
 		w := p.w
 		if w <= 0 || uint(w) > p.bsp {
-			p.litBs = p.litBuf[:0]
+			p.litBs = scratch.litBuf[:0]
 			return
 		}
-		p.litBs = append(p.litBuf[:0], p.bs[p.bsp-uint(w):p.bsp]...)
+		p.litBs = append(scratch.litBuf[:0], p.bs[p.bsp-uint(w):p.bsp]...)
 	default:
 		// don't let r == utf8.RuneSelf go to the second case as [utf8.RuneLen]
 		// would return -1
-		p.litBs = p.litBuf[:0]
+		p.litBs = scratch.litBuf[:0]
 	}
 }
 
