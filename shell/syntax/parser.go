@@ -889,6 +889,19 @@ func (p *Parser) ensureScratch() *parserScratch {
 	return p.scratch
 }
 
+func (p *Parser) backtrackSnapshot() Parser {
+	saved := *p
+	if p.scratch != nil {
+		scratchCopy := *p.scratch
+		saved.scratch = &scratchCopy
+	}
+	saved.bs = bytes.Clone(p.bs)
+	saved.sourceBs = bytes.Clone(p.sourceBs)
+	saved.litBs = bytes.Clone(p.litBs)
+	saved.wordRawBs = bytes.Clone(p.wordRawBs)
+	return saved
+}
+
 func (p *Parser) litBatchCap() int {
 	if p.litBatchAllocSize > 0 {
 		return p.litBatchAllocSize
@@ -5817,7 +5830,7 @@ func (p *Parser) tryAssignCandidate(declMode bool) (*Assign, bool) {
 	if eqIndex := p.scalarAssignEqIndex(); eqIndex > 0 {
 		return p.scalarAssignMode(eqIndex, true), true
 	}
-	saved := *p
+	saved := p.backtrackSnapshot()
 	start := p.pos
 	p.startCandidateCapture()
 	ref := p.varRef()
@@ -5971,7 +5984,7 @@ func (p *Parser) declOperand(allowInvalidAssign bool) DeclOperand {
 	if p.hasValidIdent() {
 		if p.bracketStartsWithSpace() {
 			start := p.pos
-			saved := *p
+			saved := p.backtrackSnapshot()
 			ref := p.varRef()
 			if ref != nil && varRefSubscriptClosed(ref) && varRefSubscriptHasWhitespace(ref) {
 				p.recordPendingArrayWord(start, ref.RawText())
