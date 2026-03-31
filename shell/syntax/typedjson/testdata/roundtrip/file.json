@@ -550,7 +550,12 @@
 											"Col": 10
 										}
 									}
-								]
+								],
+								"DiagnosticEnd": {
+									"Offset": 42,
+									"Line": 5,
+									"Col": 15
+								}
 							}
 						]
 					},

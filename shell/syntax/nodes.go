@@ -992,6 +992,7 @@ type CmdSubst struct {
 
 	Backquotes     bool // deprecated `foo`
 	BackquoteClose *BackquoteCloseTrivia
+	DiagnosticEnd  Pos  // optional linter-compat end position for $() diagnostics
 	TempFile       bool // mksh's ${ foo;}
 	ReplyVar       bool // mksh's ${|foo;}
 }

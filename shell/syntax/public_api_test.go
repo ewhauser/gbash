@@ -347,6 +347,42 @@ func TestPublicAssignSurfaceMetadata(t *testing.T) {
 	}
 }
 
+func TestPublicCmdSubstDiagnosticEndMetadata(t *testing.T) {
+	t.Parallel()
+
+	src := "#!/bin/bash\n[[ $(grep foo input.txt) ]] && :\n"
+	file := parseFileVariant(t, syntax.LangBash, src)
+	testClause, ok := file.Stmts[0].Cmd.(*syntax.BinaryCmd).X.Cmd.(*syntax.TestClause)
+	if !ok {
+		t.Fatalf("Cmd = %T, want nested *syntax.TestClause", file.Stmts[0].Cmd)
+	}
+	condWord, ok := testClause.X.(*syntax.CondWord)
+	if !ok {
+		t.Fatalf("TestClause.X = %T, want *syntax.CondWord", testClause.X)
+	}
+	cmdSubst, ok := condWord.Word.Parts[0].(*syntax.CmdSubst)
+	if !ok {
+		t.Fatalf("word part = %T, want *syntax.CmdSubst", condWord.Word.Parts[0])
+	}
+	if got := sourceSpan(src, cmdSubst.Pos(), cmdSubst.End()); got != "$(grep foo input.txt)" {
+		t.Fatalf("CmdSubst exact span = %q, want %q", got, "$(grep foo input.txt)")
+	}
+	if got := sourceSpan(src, cmdSubst.Pos(), cmdSubst.DiagnosticEnd); got != "$(grep foo input.txt) " {
+		t.Fatalf("CmdSubst diagnostic span = %q, want %q", got, "$(grep foo input.txt) ")
+	}
+
+	decoded := encodeDecodeFile(t, file)
+	testClause, ok = decoded.Stmts[0].Cmd.(*syntax.BinaryCmd).X.Cmd.(*syntax.TestClause)
+	if !ok {
+		t.Fatalf("decoded Cmd = %T, want nested *syntax.TestClause", decoded.Stmts[0].Cmd)
+	}
+	condWord = testClause.X.(*syntax.CondWord)
+	cmdSubst = condWord.Word.Parts[0].(*syntax.CmdSubst)
+	if got := sourceSpan(src, cmdSubst.Pos(), cmdSubst.DiagnosticEnd); got != "$(grep foo input.txt) " {
+		t.Fatalf("decoded CmdSubst diagnostic span = %q, want %q", got, "$(grep foo input.txt) ")
+	}
+}
+
 func TestPublicPatternQuoteFidelity(t *testing.T) {
 	t.Parallel()
 
