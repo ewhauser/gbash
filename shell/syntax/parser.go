@@ -587,8 +587,9 @@ type Parser struct {
 	r   rune   // next rune; [utf8.RuneSelf] when it went past EOF, or we stopped
 	w   int    // width of [Parser.r]
 
-	sourceBs   []byte
-	sourceOffs int64
+	sourceBs     []byte
+	sourceOffs   int64
+	sourceReplay *sourceReplayBuffer
 
 	f *File
 
@@ -777,6 +778,19 @@ type prependReader struct {
 	tail   io.Reader
 }
 
+type sourceReplayBuffer struct {
+	buf     []byte
+	src     io.Reader
+	readErr error
+	readEOF bool
+	readBuf [bufSize]byte
+}
+
+type sourceReplayCursor struct {
+	replay *sourceReplayBuffer
+	off    int
+}
+
 func newPrependReader(prefix []byte, tail io.Reader) io.Reader {
 	if len(prefix) == 0 {
 		return tail
@@ -816,6 +830,146 @@ func (r *prependReader) Read(p []byte) (int, error) {
 	return r.tail.Read(p)
 }
 
+func newSourceReplayBuffer(initial []byte, src io.Reader, readErr error, readEOF bool) *sourceReplayBuffer {
+	buf := append([]byte(nil), initial...)
+	if readErr == io.EOF {
+		readEOF = true
+	}
+	return &sourceReplayBuffer{
+		buf:     buf,
+		src:     src,
+		readErr: readErr,
+		readEOF: readEOF,
+	}
+}
+
+func (r *sourceReplayBuffer) Bytes() []byte {
+	if r == nil {
+		return []byte{}
+	}
+	if r.buf == nil {
+		return []byte{}
+	}
+	return r.buf
+}
+
+func (r *sourceReplayBuffer) cursor(offset int) io.Reader {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(r.buf) {
+		offset = len(r.buf)
+	}
+	return &sourceReplayCursor{
+		replay: r,
+		off:    offset,
+	}
+}
+
+func (r *sourceReplayBuffer) grow() (n int, err error) {
+	switch r.readErr {
+	case nil:
+	case io.EOF:
+		return 0, io.EOF
+	default:
+		return 0, r.readErr
+	}
+	if r.readEOF || r.src == nil {
+		return 0, io.EOF
+	}
+readAgain:
+	n, err = 0, r.readErr
+	if err == nil {
+		n, err = r.src.Read(r.readBuf[:])
+		r.readErr = err
+		if err == io.EOF {
+			r.readEOF = true
+		}
+	}
+	if n == 0 {
+		if err == nil {
+			goto readAgain
+		}
+		if err == io.EOF {
+			return 0, io.EOF
+		}
+		return 0, err
+	}
+	r.buf = append(r.buf, r.readBuf[:n]...)
+	return n, nil
+}
+
+func (r *sourceReplayBuffer) tailHasInternalNewline(offset int) bool {
+	if offset < 0 {
+		offset = 0
+	}
+	seenNewline := false
+	scan := offset
+	for {
+		buf := r.buf
+		for scan < len(buf) {
+			switch buf[scan] {
+			case '\n':
+				seenNewline = true
+			case '\r':
+			default:
+				if seenNewline {
+					return true
+				}
+			}
+			scan++
+		}
+		if n, err := r.grow(); n == 0 {
+			_ = err
+			return false
+		}
+	}
+}
+
+func (r *sourceReplayBuffer) tailHasNestedDblRightParen(offset int) bool {
+	if offset < 0 {
+		offset = 0
+	}
+	scan := offset
+	count := 0
+	prevClose := false
+	for {
+		buf := r.buf
+		for scan < len(buf) {
+			cur := buf[scan]
+			if prevClose && cur == ')' {
+				count++
+				if count > 1 {
+					return true
+				}
+			}
+			prevClose = cur == ')'
+			scan++
+		}
+		if n, err := r.grow(); n == 0 {
+			_ = err
+			return false
+		}
+	}
+}
+
+func (c *sourceReplayCursor) Read(dst []byte) (int, error) {
+	if len(dst) == 0 {
+		return 0, nil
+	}
+	for {
+		buf := c.replay.buf
+		if c.off < len(buf) {
+			n := copy(dst, buf[c.off:])
+			c.off += n
+			return n, nil
+		}
+		if n, err := c.replay.grow(); n == 0 {
+			return 0, err
+		}
+	}
+}
+
 var parserScratchPool = sync.Pool{
 	New: func() any { return &parserScratch{} },
 }
@@ -830,6 +984,7 @@ func (p *Parser) reset() {
 	p.bs, p.bsp = nil, 0
 	p.sourceBs = nil
 	p.sourceOffs = 0
+	p.sourceReplay = nil
 	p.offs, p.line, p.col = 0, 1, 1
 	p.r, p.w = 0, 0
 	p.err, p.readErr, p.readEOF = nil, nil, false
@@ -2677,6 +2832,18 @@ func (p *Parser) currentSourceTailPrefixed(prefix []byte) ([]byte, error) {
 	return p.unreadSourceTailAppend(tail)
 }
 
+func (p *Parser) currentSourceReplayPrefixed(prefix []byte) *sourceReplayBuffer {
+	initial := make([]byte, 0, len(prefix)+len(p.bs))
+	initial = append(initial, prefix...)
+	if src := p.currentRuneBytes(); len(src) > 0 {
+		initial = append(initial, src...)
+	}
+	if idx := int(p.bsp); idx >= 0 && idx <= len(p.bs) {
+		initial = append(initial, p.bs[idx:]...)
+	}
+	return newSourceReplayBuffer(initial, p.src, p.readErr, p.readEOF)
+}
+
 func sourceTailSuffix(src []byte, prefixLen int) []byte {
 	if prefixLen < 0 || len(src) < prefixLen {
 		return nil
@@ -2820,6 +2987,9 @@ func (p *Parser) sourceRange(start, end Pos) string {
 }
 
 func (p *Parser) sourceBuffer() ([]byte, int64) {
+	if p.sourceReplay != nil {
+		return p.sourceReplay.Bytes(), p.sourceOffs
+	}
 	if p.sourceBs != nil {
 		return p.sourceBs, p.sourceOffs
 	}
@@ -2982,6 +3152,29 @@ func (p *Parser) loadReplayView(pos Pos, src []byte, readErr error) {
 	p.bsp = uint(w)
 }
 
+func (p *Parser) loadReplayCursorView(pos Pos, src []byte, tail io.Reader) {
+	p.src = tail
+	p.bs = src
+	p.offs = int64(pos.Offset())
+	p.line = int64(pos.Line())
+	p.col = int64(pos.Col())
+	p.err = nil
+	p.readErr = nil
+	p.readEOF = false
+	if len(p.bs) == 0 {
+		if p.fill() == 0 {
+			p.r = utf8.RuneSelf
+			p.w = 1
+			p.bsp = 1
+			return
+		}
+	}
+	r, w := utf8.DecodeRune(p.bs)
+	p.r = r
+	p.w = w
+	p.bsp = uint(w)
+}
+
 func parseErrRecoverableInBackquotes(err ParseError) bool {
 	if err.Unexpected != ParseErrorSymbolEOF && err.Unexpected != ParseErrorSymbolBackquote {
 		return false
@@ -3125,13 +3318,37 @@ func (p *Parser) recoverBackquoteCmdSubst(cs *CmdSubst, old saveState, src []byt
 }
 
 func (p *Parser) setSourceBuffer(pos Pos, src []byte) {
+	p.sourceReplay = nil
 	p.sourceBs = append(p.sourceBs[:0], src...)
 	p.sourceOffs = int64(pos.Offset())
 }
 
 func (p *Parser) setSourceBufferView(pos Pos, src []byte) {
+	p.sourceReplay = nil
 	p.sourceBs = src
 	p.sourceOffs = int64(pos.Offset())
+}
+
+func (p *Parser) setSourceReplayView(pos Pos, replay *sourceReplayBuffer) {
+	p.sourceReplay = replay
+	p.sourceBs = nil
+	p.sourceOffs = int64(pos.Offset())
+}
+
+func (p *Parser) detachSourceReplay() {
+	replay := p.sourceReplay
+	if replay == nil {
+		return
+	}
+	cursor, ok := p.src.(*sourceReplayCursor)
+	if ok && cursor.replay == replay {
+		p.src = newPrependReader(replay.buf[cursor.off:], replay.src)
+	}
+	p.sourceReplay = nil
+	p.sourceBs = nil
+	p.sourceOffs = 0
+	p.readErr = nil
+	p.readEOF = false
 }
 
 func cloneHeredocStops(src []heredocStop) []heredocStop {
@@ -3166,6 +3383,7 @@ func (p *Parser) parenAmbiguityClone() *Parser {
 	clone.bsp = 0
 	clone.sourceBs = nil
 	clone.sourceOffs = 0
+	clone.sourceReplay = nil
 	clone.r = 0
 	clone.w = 0
 	clone.accComs = nil
@@ -3502,15 +3720,16 @@ func (p *Parser) parenAmbiguityWordPart() WordPart {
 	defer func() { p.parenAmbiguityProbeDepth-- }()
 
 	prefix := []byte(dollDblParen.String())
-	fullSrc, err := p.currentSourceTailPrefixed(prefix)
+	replay := p.currentSourceReplayPrefixed(prefix)
 	start := p.pos
+	fullSrc := replay.Bytes()
 	afterToken := sourceTailSuffix(fullSrc, len(prefix))
 	arithPos := posAddCol(start, len(prefix))
 	arith := p.parenAmbiguityClone()
 	arith.tok = dollDblParen
 	arith.pos = start
-	arith.loadReplayView(arithPos, afterToken, err)
-	arith.setSourceBufferView(start, fullSrc)
+	arith.loadReplayCursorView(arithPos, afterToken, replay.cursor(len(fullSrc)))
+	arith.setSourceReplayView(start, replay)
 	part := arith.arithmWordPart(false)
 	arithOK := arith.err == nil
 	arithRight := Pos{}
@@ -3518,29 +3737,36 @@ func (p *Parser) parenAmbiguityWordPart() WordPart {
 		arithRight = part.Right
 	}
 
+	fullSrc = replay.Bytes()
 	fallbackSrc := sourceTailSuffix(fullSrc, len(prefix)-1)
 	fallbackPos := posAddCol(start, len(dollParen.String()))
 	cmd := p.parenAmbiguityClone()
 	cmd.tok = dollParen
 	cmd.pos = start
-	cmd.loadReplayView(fallbackPos, fallbackSrc, err)
-	cmd.setSourceBufferView(start, fullSrc)
+	cmd.loadReplayCursorView(fallbackPos, fallbackSrc, replay.cursor(len(fullSrc)))
+	cmd.setSourceReplayView(start, replay)
 	cs := cmd.cmdSubst()
-	fallbackIncomplete := cmd.err != nil && IsIncomplete(cmd.err) && hasInternalNewline(afterToken)
+	fallbackIncomplete := cmd.err != nil && IsIncomplete(cmd.err) && replay.tailHasInternalNewline(len(prefix))
 	if fallbackIncomplete {
 		p.tok = dollParen
 		p.pos = start
-		p.loadReplayView(fallbackPos, fallbackSrc, err)
-		p.setSourceBufferView(start, fullSrc)
-		return p.cmdSubst()
+		fullSrc = replay.Bytes()
+		p.loadReplayCursorView(fallbackPos, sourceTailSuffix(fullSrc, len(prefix)-1), replay.cursor(len(fullSrc)))
+		p.setSourceReplayView(start, replay)
+		part := p.cmdSubst()
+		p.detachSourceReplay()
+		return part
 	}
 	fallbackOK := cmd.err == nil && cmd.allowParenAmbiguityFallback(cs.Stmts, cs.Last, cs.Right)
 	if fallbackOK {
 		p.tok = dollParen
 		p.pos = start
-		p.loadReplayView(fallbackPos, fallbackSrc, err)
-		p.setSourceBufferView(start, fullSrc)
-		return p.cmdSubst()
+		fullSrc = replay.Bytes()
+		p.loadReplayCursorView(fallbackPos, sourceTailSuffix(fullSrc, len(prefix)-1), replay.cursor(len(fullSrc)))
+		p.setSourceReplayView(start, replay)
+		part := p.cmdSubst()
+		p.detachSourceReplay()
+		return part
 	}
 	arithEndedEarly := false
 	fallbackTailEnd := Pos{}
@@ -3555,18 +3781,28 @@ func (p *Parser) parenAmbiguityWordPart() WordPart {
 
 	p.tok = dollDblParen
 	p.pos = start
-	p.loadReplayView(arithPos, afterToken, err)
-	p.setSourceBufferView(start, fullSrc)
+	fullSrc = replay.Bytes()
+	afterToken = sourceTailSuffix(fullSrc, len(prefix))
+	p.loadReplayCursorView(arithPos, afterToken, replay.cursor(len(fullSrc)))
+	p.setSourceReplayView(start, replay)
 	if arithOK && !arithEndedEarly {
-		return p.arithmWordPart(true)
+		part := p.arithmWordPart(true)
+		p.detachSourceReplay()
+		return part
 	}
-	if cmd.err == nil && keepParenAmbiguityArithError(cs.Stmts, cs.Last) && !arithEndedEarly && !hasNestedDblRightParen(afterToken) {
-		return p.arithmWordPart(false)
+	if cmd.err == nil && keepParenAmbiguityArithError(cs.Stmts, cs.Last) && !arithEndedEarly && !replay.tailHasNestedDblRightParen(len(prefix)) {
+		part := p.arithmWordPart(false)
+		p.detachSourceReplay()
+		return part
 	}
-	if cmd.err == nil && fallbackTailEnd.IsValid() && hasNestedDblRightParen(afterToken) {
-		return p.arithmWordPartTo(true, fallbackTailEnd)
+	if cmd.err == nil && fallbackTailEnd.IsValid() && replay.tailHasNestedDblRightParen(len(prefix)) {
+		part := p.arithmWordPartTo(true, fallbackTailEnd)
+		p.detachSourceReplay()
+		return part
 	}
-	return p.arithmWordPart(true)
+	part = p.arithmWordPart(true)
+	p.detachSourceReplay()
+	return part
 }
 
 func (p *Parser) wordPart() WordPart {
@@ -6513,15 +6749,16 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 	defer func() { p.parenAmbiguityProbeDepth-- }()
 
 	prefix := []byte(dblLeftParen.String())
-	fullSrc, err := p.currentSourceTailPrefixed(prefix)
+	replay := p.currentSourceReplayPrefixed(prefix)
 	start := p.pos
+	fullSrc := replay.Bytes()
 	afterToken := sourceTailSuffix(fullSrc, len(prefix))
 	arithPos := posAddCol(start, len(prefix))
 	arith := p.parenAmbiguityClone()
 	arith.tok = dblLeftParen
 	arith.pos = start
-	arith.loadReplayView(arithPos, afterToken, err)
-	arith.setSourceBufferView(start, fullSrc)
+	arith.loadReplayCursorView(arithPos, afterToken, replay.cursor(len(fullSrc)))
+	arith.setSourceReplayView(start, replay)
 	probeStmt := &Stmt{Position: s.Position}
 	arith.arithmExpCmdWithTail(probeStmt, false)
 	arithOK := arith.err == nil
@@ -6530,25 +6767,28 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 		arithRight = arithCmd.Right
 	}
 
+	fullSrc = replay.Bytes()
 	fallbackSrc := sourceTailSuffix(fullSrc, len(prefix)-1)
 	fallbackPos := posAddCol(start, len(leftParen.String()))
 	sub := p.parenAmbiguityClone()
 	sub.tok = leftParen
 	sub.pos = start
-	sub.loadReplayView(fallbackPos, fallbackSrc, err)
-	sub.setSourceBufferView(start, fullSrc)
+	sub.loadReplayCursorView(fallbackPos, fallbackSrc, replay.cursor(len(fullSrc)))
+	sub.setSourceReplayView(start, replay)
 	probeStmt = &Stmt{Position: s.Position}
 	sub.subshell(probeStmt)
 	fallbackIncomplete := false
 	if sub.err != nil && IsIncomplete(sub.err) {
-		fallbackIncomplete = hasInternalNewline(afterToken)
+		fallbackIncomplete = replay.tailHasInternalNewline(len(prefix))
 	}
 	if fallbackIncomplete {
 		p.tok = leftParen
 		p.pos = start
-		p.loadReplayView(fallbackPos, fallbackSrc, err)
-		p.setSourceBufferView(start, fullSrc)
+		fullSrc = replay.Bytes()
+		p.loadReplayCursorView(fallbackPos, sourceTailSuffix(fullSrc, len(prefix)-1), replay.cursor(len(fullSrc)))
+		p.setSourceReplayView(start, replay)
 		p.subshell(s)
+		p.detachSourceReplay()
 		return
 	}
 	fallbackOK := false
@@ -6557,9 +6797,11 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 			fallbackOK = true
 			p.tok = leftParen
 			p.pos = start
-			p.loadReplayView(fallbackPos, fallbackSrc, err)
-			p.setSourceBufferView(start, fullSrc)
+			fullSrc = replay.Bytes()
+			p.loadReplayCursorView(fallbackPos, sourceTailSuffix(fullSrc, len(prefix)-1), replay.cursor(len(fullSrc)))
+			p.setSourceReplayView(start, replay)
 			p.subshell(s)
+			p.detachSourceReplay()
 			return
 		}
 	}
@@ -6581,23 +6823,29 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 
 	p.tok = dblLeftParen
 	p.pos = start
-	p.loadReplayView(arithPos, afterToken, err)
-	p.setSourceBufferView(start, fullSrc)
+	fullSrc = replay.Bytes()
+	afterToken = sourceTailSuffix(fullSrc, len(prefix))
+	p.loadReplayCursorView(arithPos, afterToken, replay.cursor(len(fullSrc)))
+	p.setSourceReplayView(start, replay)
 	if arithOK && !arithEndedEarly {
 		p.arithmExpCmdWithTail(s, true)
+		p.detachSourceReplay()
 		return
 	}
 	if sub.err == nil {
-		if outer, ok := probeStmt.Cmd.(*Subshell); ok && keepParenAmbiguityArithError(outer.Stmts, outer.Last) && !arithEndedEarly && !hasNestedDblRightParen(afterToken) {
+		if outer, ok := probeStmt.Cmd.(*Subshell); ok && keepParenAmbiguityArithError(outer.Stmts, outer.Last) && !arithEndedEarly && !replay.tailHasNestedDblRightParen(len(prefix)) {
 			p.arithmExpCmdWithTail(s, false)
+			p.detachSourceReplay()
 			return
 		}
 	}
-	if sub.err == nil && fallbackTailEnd.IsValid() && hasNestedDblRightParen(afterToken) {
+	if sub.err == nil && fallbackTailEnd.IsValid() && replay.tailHasNestedDblRightParen(len(prefix)) {
 		p.arithmExpCmdWithTailTo(s, true, fallbackTailEnd)
+		p.detachSourceReplay()
 		return
 	}
 	p.arithmExpCmdWithTail(s, true)
+	p.detachSourceReplay()
 }
 
 func (p *Parser) arithmExpCmd(s *Stmt) {
