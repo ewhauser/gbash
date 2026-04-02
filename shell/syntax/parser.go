@@ -3161,6 +3161,9 @@ func (p *Parser) loadReplayCursorView(pos Pos, src []byte, tail io.Reader) {
 	p.err = nil
 	p.readErr = nil
 	p.readEOF = false
+	p.r = 0
+	p.w = 0
+	p.bsp = 0
 	if len(p.bs) == 0 {
 		if p.fill() == 0 {
 			p.r = utf8.RuneSelf
