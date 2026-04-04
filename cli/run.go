@@ -68,6 +68,12 @@ func run(ctx context.Context, cfg Config, args []string, stdin io.Reader, stdout
 		_, _ = io.WriteString(stdout, versionText(cfg))
 		return 0, nil
 	}
+	if runtimeOpts.detect && !runtimeOpts.dumpAST {
+		if runtimeOpts.json {
+			return writeCLIJSONError(stdout, cfg.Name, 2, fmt.Errorf("--detect requires --dump-ast"))
+		}
+		return 2, fmt.Errorf("--detect requires --dump-ast")
+	}
 	if runtimeOpts.server {
 		if runtimeOpts.json {
 			return writeCLIJSONError(stdout, cfg.Name, 2, fmt.Errorf("--server and --json are mutually exclusive"))
@@ -87,6 +93,20 @@ func run(ctx context.Context, cfg Config, args []string, stdin io.Reader, stdout
 				return 2, err
 			}
 		}
+	}
+	if runtimeOpts.dumpAST {
+		if runtimeOpts.json {
+			return writeCLIJSONError(stdout, cfg.Name, 2, fmt.Errorf("--dump-ast and --json are mutually exclusive"))
+		}
+		if runtimeOpts.server {
+			return 2, fmt.Errorf("--dump-ast and --server are mutually exclusive")
+		}
+		if parsed.Source == builtins.BashSourceStdin && (parsed.Interactive || stdinTTY) {
+			return 2, fmt.Errorf("--dump-ast is only supported for non-interactive executions")
+		}
+		stdin = wrapInheritedStdin(stdin, &runtimeOpts)
+		stdout = wrapInheritedStdout(stdout, &runtimeOpts)
+		return runBashInvocationAST(ctx, cfg, parsed, &runtimeOpts, stdin, stdout)
 	}
 	if runtimeOpts.json && parsed.Source == builtins.BashSourceStdin && (parsed.Interactive || stdinTTY) {
 		if jsonErr := writeJSONExecutionResult(stdout, buildJSONExecutionResult(2, nil, formatCLIError(cfg.Name, fmt.Errorf("--json is only supported for non-interactive executions")))); jsonErr != nil {

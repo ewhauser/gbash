@@ -114,7 +114,7 @@ func TestRunCLIHelpRendersFilesystemFlags(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("exitCode = %d, want 0", exitCode)
 	}
-	for _, want := range []string{"CLI filesystem options:", "--root DIR", "--cwd DIR", "--readwrite-root DIR", "--copy-script", "--max-file-bytes N", "CLI output options:", "--json"} {
+	for _, want := range []string{"CLI filesystem options:", "--root DIR", "--cwd DIR", "--readwrite-root DIR", "--copy-script", "--max-file-bytes N", "CLI output options:", "--json", "--dump-ast", "--detect"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout = %q, want help to contain %q", stdout.String(), want)
 		}
@@ -124,6 +124,260 @@ func TestRunCLIHelpRendersFilesystemFlags(t *testing.T) {
 	}
 	if got := stderr.String(); got != "" {
 		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRunCLIDumpASTCommandString(t *testing.T) {
+	t.Parallel()
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), []string{"--dump-ast", "-c", "echo hi\n"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	mustParseASTRootType(t, stdout.String())
+}
+
+func TestRunCLIDumpASTStdin(t *testing.T) {
+	t.Parallel()
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), []string{"--dump-ast"}, strings.NewReader("echo hi\n"), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	mustParseASTRootType(t, stdout.String())
+}
+
+func TestRunCLIDumpASTReadsRootMountedScript(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.sh"), []byte("echo from-file\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(main.sh) error = %v", err)
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), []string{"--root", root, "--dump-ast", "main.sh"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	mustParseASTRootType(t, stdout.String())
+}
+
+func TestRunCLIDumpASTCopyScriptStagesHostFile(t *testing.T) {
+	t.Parallel()
+
+	scriptPath := filepath.Join(t.TempDir(), "copy-script.sh")
+	if err := os.WriteFile(scriptPath, []byte("echo staged\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(copy-script.sh) error = %v", err)
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), []string{"--copy-script", "--dump-ast", scriptPath}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	mustParseASTRootType(t, stdout.String())
+}
+
+func TestRunCLIDumpASTParseErrorsReturnExit2(t *testing.T) {
+	t.Parallel()
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), []string{"--dump-ast", "-c", "echo <\n"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err == nil {
+		t.Fatal("runCLI() error = nil, want parse failure")
+	}
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2", exitCode)
+	}
+	if got := stdout.String(); got != "" {
+		t.Fatalf("stdout = %q, want empty", got)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	if !strings.Contains(err.Error(), "line 1") {
+		t.Fatalf("error = %v, want parse diagnostic", err)
+	}
+}
+
+func TestRunCLIDumpASTRejectsJSONOutputEnvelope(t *testing.T) {
+	t.Parallel()
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), []string{"--dump-ast", "--json", "-c", "echo hi\n"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+
+	payload := mustParseCLIJSONResult(t, stdout.String())
+	if !strings.Contains(payload.Stderr, "--dump-ast and --json are mutually exclusive") {
+		t.Fatalf("stderr = %q, want dump-ast/json rejection", payload.Stderr)
+	}
+}
+
+func TestRunCLIDumpASTRejectsServerMode(t *testing.T) {
+	t.Parallel()
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), []string{"--dump-ast", "--server", "--socket", filepath.Join(t.TempDir(), "gbash.sock")}, strings.NewReader(""), &stdout, &stderr, false)
+	if err == nil {
+		t.Fatal("runCLI() error = nil, want server conflict")
+	}
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2", exitCode)
+	}
+	if !strings.Contains(err.Error(), "--dump-ast and --server are mutually exclusive") {
+		t.Fatalf("error = %v, want dump-ast/server conflict", err)
+	}
+}
+
+func TestRunCLIDumpASTRejectsInteractiveInputs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		args     []string
+		stdinTTY bool
+	}{
+		{name: "stdin tty", args: []string{"--dump-ast"}, stdinTTY: true},
+		{name: "interactive flag", args: []string{"--dump-ast", "-i"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var stdout strings.Builder
+			var stderr strings.Builder
+
+			exitCode, err := runCLI(context.Background(), tc.args, strings.NewReader(""), &stdout, &stderr, tc.stdinTTY)
+			if err == nil {
+				t.Fatal("runCLI() error = nil, want interactive rejection")
+			}
+			if exitCode != 2 {
+				t.Fatalf("exitCode = %d, want 2", exitCode)
+			}
+			if !strings.Contains(err.Error(), "non-interactive") {
+				t.Fatalf("error = %v, want non-interactive rejection", err)
+			}
+		})
+	}
+}
+
+func TestRunCLIDetectRequiresDumpAST(t *testing.T) {
+	t.Parallel()
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), []string{"--detect", "-c", "echo hi\n"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err == nil {
+		t.Fatal("runCLI() error = nil, want detect rejection")
+	}
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2", exitCode)
+	}
+	if !strings.Contains(err.Error(), "--detect requires --dump-ast") {
+		t.Fatalf("error = %v, want detect rejection", err)
+	}
+}
+
+func TestRunCLIDumpASTDetectUsesShebangVariant(t *testing.T) {
+	t.Parallel()
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), []string{"--dump-ast", "--detect", "-c", "#!/bin/zsh\necho ${(q)foo}\n"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	mustParseASTRootType(t, stdout.String())
+}
+
+func TestRunCLIDumpASTDetectUsesPathExtensionForFiles(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.zsh"), []byte("echo ${(q)foo}\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(main.zsh) error = %v", err)
+	}
+
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), []string{"--root", root, "--dump-ast", "--detect", "main.zsh"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	mustParseASTRootType(t, stdout.String())
+}
+
+func TestRunCLIDumpASTDetectFallsBackToBashWithoutSourceHints(t *testing.T) {
+	t.Parallel()
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), []string{"--dump-ast", "--detect", "-c", "echo ${(q)foo}\n"}, strings.NewReader(""), &stdout, &stderr, false)
+	if err == nil {
+		t.Fatal("runCLI() error = nil, want bash parse failure")
+	}
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2", exitCode)
+	}
+	if !strings.Contains(err.Error(), "tried parsing as bash") {
+		t.Fatalf("error = %v, want bash-variant parse diagnostic", err)
 	}
 }
 
@@ -621,6 +875,18 @@ func mustParseCLIJSONResult(t *testing.T, raw string) cliJSONResult {
 		t.Fatalf("Unmarshal(JSON output) error = %v; raw=%q", err, raw)
 	}
 	return out
+}
+
+func mustParseASTRootType(t *testing.T, raw string) {
+	t.Helper()
+
+	var out map[string]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("Unmarshal(AST output) error = %v; raw=%q", err, raw)
+	}
+	if got, want := out["Type"], "File"; got != want {
+		t.Fatalf("AST root Type = %v, want %q; raw=%q", got, want, raw)
+	}
 }
 
 func reserveLoopbackTCPAddress(t *testing.T) string {

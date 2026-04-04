@@ -220,6 +220,14 @@ gbash -c 'echo hello' --json
 
 The JSON payload includes `stdout`, `stderr`, `exitCode`, truncation flags, timing metadata, and trace metadata when the wrapper enables tracing on the underlying runtime.
 
+For parser and tooling workflows, you can dump the parsed shell AST without executing the script:
+
+```bash
+gbash --dump-ast -c 'echo hello'
+```
+
+`--dump-ast` writes pretty-printed typed JSON for the parsed `shell/syntax` tree. Add `--detect` to choose the parser variant from a leading shebang first, then a positional file extension for file-backed inputs, and otherwise fall back to `bash`.
+
 For long-lived agent or editor integrations, the same shared CLI frontend can serve a JSON-RPC protocol instead of executing one script:
 
 ```bash
