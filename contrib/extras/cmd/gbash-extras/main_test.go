@@ -144,6 +144,31 @@ func TestCLIDoesNotRegisterNodeJSByDefault(t *testing.T) {
 	}
 }
 
+func TestCLISupportsASTDumpMode(t *testing.T) {
+	t.Parallel()
+	var stdout strings.Builder
+	var stderr strings.Builder
+
+	exitCode, err := runCLI(context.Background(), []string{"--dump-ast", "-c", "echo extras\n"}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("runCLI() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout.String()), &payload); err != nil {
+		t.Fatalf("Unmarshal(AST output) error = %v; raw=%q", err, stdout.String())
+	}
+	if got, want := payload["Type"], "File"; got != want {
+		t.Fatalf("AST root Type = %v, want %q; raw=%q", got, want, stdout.String())
+	}
+}
+
 func TestCLIServerServesStableExtrasRegistry(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
