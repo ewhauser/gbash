@@ -494,61 +494,7 @@ func (f *formatter) applySpec(spec *formatSpec) bool {
 	}
 
 	arg, present := f.nextArg()
-	switch spec.verb {
-	case 's':
-		f.out.WriteString(applyStringFormat(arg, spec))
-	case 'q':
-		f.out.WriteString(applyStringFormat(quoteShell(arg, f.opts), spec))
-	case 'b':
-		decoded, stop, diag := decodeEscapeString(arg, escapeModePercentB, f.opts.Dialect)
-		if diag != "" {
-			f.addDiagnostic(diag)
-		}
-		f.out.WriteString(applyStringFormat(decoded, spec))
-		return stop
-	case 'c':
-		var text string
-		if present && arg != "" {
-			text = string([]byte{arg[0]})
-		} else {
-			text = string([]byte{0})
-		}
-		f.out.WriteString(applyStringFormat(text, spec))
-	case 'd', 'i':
-		text, diag, warning := formatSigned(arg, present, spec, f.opts)
-		if diag != "" {
-			f.addDiagnostic(diag)
-		}
-		if warning != "" {
-			f.addWarning(warning)
-		}
-		f.out.WriteString(text)
-	case 'u', 'o', 'x', 'X':
-		text, diag, warning := formatUnsigned(arg, present, spec, f.opts)
-		if diag != "" {
-			f.addDiagnostic(diag)
-		}
-		if warning != "" {
-			f.addWarning(warning)
-		}
-		f.out.WriteString(text)
-	case 'e', 'E', 'f', 'F', 'g', 'G':
-		text, diag, warning := formatFloat(arg, present, spec, f.opts)
-		if diag != "" {
-			f.addDiagnostic(diag)
-		}
-		if warning != "" {
-			f.addWarning(warning)
-		}
-		f.out.WriteString(text)
-	case 'T':
-		text, diag := formatTime(arg, present, spec, f.opts)
-		if diag != "" {
-			f.addDiagnostic(diag)
-		}
-		f.out.WriteString(text)
-	}
-	return false
+	return f.writeFormattedArg(spec, arg, present)
 }
 
 func gnuAllowsQuoteFlag(verb byte) bool {
@@ -711,6 +657,10 @@ func (f *formatter) applyGNUSpec(spec *formatSpec, cycleBase int) bool {
 	}
 
 	arg, present := f.gnuArgAt(cycleBase, spec.argSlot)
+	return f.writeFormattedArg(spec, arg, present)
+}
+
+func (f *formatter) writeFormattedArg(spec *formatSpec, arg string, present bool) bool {
 	switch spec.verb {
 	case 's':
 		f.out.WriteString(applyStringFormat(arg, spec))

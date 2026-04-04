@@ -10,15 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	gbruntime "github.com/ewhauser/gbash"
 	"github.com/ewhauser/gbash/internal/testutil"
 )
 
-type grepOracleResult struct {
-	ExitCode int
-	Stdout   string
-	Stderr   string
-}
+type grepOracleResult = oracleCommandResult
 
 func TestGrepMatchesRipgrep(t *testing.T) {
 	t.Parallel()
@@ -156,41 +151,7 @@ func TestGrepMatchesRipgrep(t *testing.T) {
 }
 
 func runGBashGrep(t testing.TB, root, stdin string, args ...string) grepOracleResult {
-	t.Helper()
-
-	env := defaultBaseEnv()
-	env["HOME"] = "/"
-	env["LC_ALL"] = "C"
-	env["LANG"] = "C"
-	env["TZ"] = "UTC"
-
-	rt := newRuntime(t, &Config{
-		BaseEnv:    env,
-		FileSystem: gbruntime.ReadWriteDirectoryFileSystem(root, gbruntime.ReadWriteDirectoryOptions{}),
-	})
-
-	var script strings.Builder
-	script.WriteString("grep")
-	for _, arg := range args {
-		script.WriteByte(' ')
-		script.WriteString(diffShellQuote(arg))
-	}
-	script.WriteByte('\n')
-
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		WorkDir: "/work",
-		Script:  script.String(),
-		Stdin:   strings.NewReader(stdin),
-	})
-	if err != nil {
-		t.Fatalf("gbash Run(%q) error = %v", script.String(), err)
-	}
-
-	return grepOracleResult{
-		ExitCode: result.ExitCode,
-		Stdout:   result.Stdout,
-		Stderr:   result.Stderr,
-	}
+	return runGBashOracleCommand(t, root, stdin, "grep", args...)
 }
 
 func runRipgrep(t testing.TB, ripgrepPath, workDir, stdin string, args ...string) grepOracleResult {

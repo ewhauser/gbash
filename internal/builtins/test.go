@@ -730,30 +730,7 @@ func testModifiedAfterAccess(info stdfs.FileInfo) bool {
 }
 
 func testAccessTime(info stdfs.FileInfo) (time.Time, bool) {
-	sys := reflect.ValueOf(info.Sys()) //nolint:nilaway // caller guarantees non-nil info
-	if !sys.IsValid() {
-		return time.Time{}, false
-	}
-	if sys.Kind() == reflect.Pointer {
-		if sys.IsNil() {
-			return time.Time{}, false
-		}
-		sys = sys.Elem()
-	}
-	if sys.Kind() != reflect.Struct {
-		return time.Time{}, false
-	}
-	if field := sys.FieldByName("Atim"); field.IsValid() {
-		return testTimespec(field)
-	}
-	if field := sys.FieldByName("Atimespec"); field.IsValid() {
-		return testTimespec(field)
-	}
-	if sec := sys.FieldByName("Atime"); sec.IsValid() {
-		nsec := sys.FieldByName("AtimeNsec")
-		return time.Unix(int64(testUintField(sec)), int64(testUintField(nsec))), true
-	}
-	return time.Time{}, false
+	return fileInfoAccessTime(info, testTimespec, testUintField)
 }
 
 func testTimespec(value reflect.Value) (time.Time, bool) {

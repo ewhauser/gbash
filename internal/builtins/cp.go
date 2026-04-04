@@ -1370,29 +1370,7 @@ func cpPromptOverwrite(ctx context.Context, inv *Invocation, destDisplay string,
 	if err != nil {
 		return false, err
 	}
-	if inv != nil && inv.Stderr != nil {
-		if _, err := fmt.Fprintf(inv.Stderr, "cp: overwrite %s? ", quoteGNUOperand(destDisplay)); err != nil {
-			return false, &ExitError{Code: 1, Err: err}
-		}
-		if flusher, ok := inv.Stderr.(interface{ Flush() error }); ok {
-			if err := flusher.Flush(); err != nil {
-				return false, &ExitError{Code: 1, Err: err}
-			}
-		}
-	}
-	line, err := reader.ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, exitf(inv, 1, "cp: Failed to read from standard input")
-	}
-	if line == "" {
-		return false, nil
-	}
-	switch line[0] {
-	case 'y', 'Y':
-		return true, nil
-	default:
-		return false, nil
-	}
+	return promptOverwrite(inv, "cp", destDisplay, reader)
 }
 
 func cpPromptReader(ctx context.Context, inv *Invocation, state *cpRunState) (*bufio.Reader, error) {

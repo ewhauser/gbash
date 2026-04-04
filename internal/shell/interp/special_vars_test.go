@@ -253,39 +253,16 @@ func TestSECONDSAssignmentResetsBaseline(t *testing.T) {
 
 func TestSECONDSPrefixAssignmentRestoreKeepsElapsedTime(t *testing.T) {
 	t.Parallel()
-
-	runner, err := NewRunner(&RunnerConfig{Dir: "/tmp"})
-	if err != nil {
-		t.Fatalf("NewRunner() error = %v", err)
-	}
-	runner.Reset()
-	runner.fillExpandConfig(context.Background())
-	runner.startTime = time.Now().Add(-time.Second)
-
-	file, err := syntax.NewParser().Parse(strings.NewReader("SECONDS=5 external\n"), "seconds-prefix.sh")
-	if err != nil {
-		t.Fatalf("Parse() error = %v", err)
-	}
-	cm, ok := file.Stmts[0].Cmd.(*syntax.CallExpr)
-	if !ok {
-		t.Fatalf("command = %T, want *syntax.CallExpr", file.Stmts[0].Cmd)
-	}
-
-	restores := runner.runCallAssigns(cm.Assigns)
-	time.Sleep(1100 * time.Millisecond)
-	runner.restoreCallAssigns(restores)
-
-	value, err := strconv.Atoi(runner.lookupVar("SECONDS").String())
-	if err != nil {
-		t.Fatalf("Atoi(SECONDS) error = %v", err)
-	}
-	if value < 2 || value > 3 {
-		t.Fatalf("SECONDS = %d, want 2 or 3", value)
-	}
+	assertSecondsPrefixAssignmentRestoresElapsedTime(t, "SECONDS=5 external\n", "seconds-prefix.sh")
 }
 
 func TestSECONDSPrefixAssignmentRestoreIsLIFO(t *testing.T) {
 	t.Parallel()
+	assertSecondsPrefixAssignmentRestoresElapsedTime(t, "SECONDS=5 SECONDS=7 external\n", "seconds-prefix-lifo.sh")
+}
+
+func assertSecondsPrefixAssignmentRestoresElapsedTime(t *testing.T, script, name string) {
+	t.Helper()
 
 	runner, err := NewRunner(&RunnerConfig{Dir: "/tmp"})
 	if err != nil {
@@ -295,7 +272,7 @@ func TestSECONDSPrefixAssignmentRestoreIsLIFO(t *testing.T) {
 	runner.fillExpandConfig(context.Background())
 	runner.startTime = time.Now().Add(-time.Second)
 
-	file, err := syntax.NewParser().Parse(strings.NewReader("SECONDS=5 SECONDS=7 external\n"), "seconds-prefix-lifo.sh")
+	file, err := syntax.NewParser().Parse(strings.NewReader(script), name)
 	if err != nil {
 		t.Fatalf("Parse() error = %v", err)
 	}

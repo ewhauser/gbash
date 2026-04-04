@@ -10,15 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	gbruntime "github.com/ewhauser/gbash"
 	"github.com/ewhauser/gbash/internal/testutil"
 )
 
-type diffOracleResult struct {
-	ExitCode int
-	Stdout   string
-	Stderr   string
-}
+type diffOracleResult = oracleCommandResult
 
 func TestDiffMatchesGNUDiff(t *testing.T) {
 	t.Parallel()
@@ -145,41 +140,7 @@ func TestDiffMatchesGNUDiff(t *testing.T) {
 }
 
 func runGBashDiff(t testing.TB, root, stdin string, args ...string) diffOracleResult {
-	t.Helper()
-
-	env := defaultBaseEnv()
-	env["HOME"] = "/"
-	env["LC_ALL"] = "C"
-	env["LANG"] = "C"
-	env["TZ"] = "UTC"
-
-	rt := newRuntime(t, &Config{
-		BaseEnv:    env,
-		FileSystem: gbruntime.ReadWriteDirectoryFileSystem(root, gbruntime.ReadWriteDirectoryOptions{}),
-	})
-
-	var script strings.Builder
-	script.WriteString("diff")
-	for _, arg := range args {
-		script.WriteByte(' ')
-		script.WriteString(diffShellQuote(arg))
-	}
-	script.WriteByte('\n')
-
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		WorkDir: "/work",
-		Script:  script.String(),
-		Stdin:   strings.NewReader(stdin),
-	})
-	if err != nil {
-		t.Fatalf("gbash Run(%q) error = %v", script.String(), err)
-	}
-
-	return diffOracleResult{
-		ExitCode: result.ExitCode,
-		Stdout:   result.Stdout,
-		Stderr:   result.Stderr,
-	}
+	return runGBashOracleCommand(t, root, stdin, "diff", args...)
 }
 
 func runGNUDiff(t testing.TB, diffPath, workDir, stdin string, args ...string) diffOracleResult {

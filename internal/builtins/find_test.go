@@ -267,14 +267,7 @@ func TestFindPreservesAbsoluteRootSpellingInOutput(t *testing.T) {
 
 func TestFindTypeQueriesAvoidDirEntryInfoForKnownEntries(t *testing.T) {
 	t.Parallel()
-
-	var tracked *infoCountingFS
-	session := newSession(t, &Config{
-		FileSystem: CustomFileSystem(gbfs.FactoryFunc(func(context.Context) (gbfs.FileSystem, error) {
-			tracked = &infoCountingFS{FileSystem: gbfs.NewMemory()}
-			return tracked, nil
-		}), defaultHomeDir),
-	})
+	session, tracked := newInfoCountingSession(t)
 
 	writeSessionFile(t, session, "/bench/a.txt", []byte("a"))
 	writeSessionFile(t, session, "/bench/sub/b.txt", []byte("b"))
@@ -294,14 +287,7 @@ func TestFindTypeQueriesAvoidDirEntryInfoForKnownEntries(t *testing.T) {
 
 func TestFindMetadataFreePrintfAvoidsDirEntryInfo(t *testing.T) {
 	t.Parallel()
-
-	var tracked *infoCountingFS
-	session := newSession(t, &Config{
-		FileSystem: CustomFileSystem(gbfs.FactoryFunc(func(context.Context) (gbfs.FileSystem, error) {
-			tracked = &infoCountingFS{FileSystem: gbfs.NewMemory()}
-			return tracked, nil
-		}), defaultHomeDir),
-	})
+	session, tracked := newInfoCountingSession(t)
 
 	writeSessionFile(t, session, "/printf/a.txt", []byte("a"))
 	writeSessionFile(t, session, "/printf/sub/b.txt", []byte("b"))

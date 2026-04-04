@@ -186,45 +186,27 @@ func (m *MountableFS) OpenFile(ctx context.Context, name string, flag int, perm 
 }
 
 func (m *MountableFS) Stat(ctx context.Context, name string) (stdfs.FileInfo, error) {
-	abs := m.resolve(name)
-	entry, rel, mounted, synthetic := m.route(abs)
-	switch {
-	case mounted && rel == "/":
-		info, err := entry.fs.Stat(ctx, "/")
-		if err == nil {
-			return remapFileInfoName(path.Base(abs), info), nil
-		}
-		return syntheticDirInfo(abs), nil
-	case mounted:
-		return namespacedFS{mountPoint: entry.mountPoint, inner: entry.fs}.Stat(ctx, rel)
-	case synthetic:
-		info, err := m.base.Stat(ctx, abs)
-		if err == nil {
-			return info, nil
-		}
-		if errors.Is(err, stdfs.ErrNotExist) {
-			return syntheticDirInfo(abs), nil
-		}
-		return nil, err
-	default:
-		return m.base.Stat(ctx, abs)
-	}
+	return m.statLike(ctx, name, false)
 }
 
 func (m *MountableFS) Lstat(ctx context.Context, name string) (stdfs.FileInfo, error) {
+	return m.statLike(ctx, name, true)
+}
+
+func (m *MountableFS) statLike(ctx context.Context, name string, noFollow bool) (stdfs.FileInfo, error) {
 	abs := m.resolve(name)
 	entry, rel, mounted, synthetic := m.route(abs)
 	switch {
 	case mounted && rel == "/":
-		info, err := entry.fs.Lstat(ctx, "/")
+		info, err := m.mountInfo(ctx, entry, "/", noFollow)
 		if err == nil {
 			return remapFileInfoName(path.Base(abs), info), nil
 		}
 		return syntheticDirInfo(abs), nil
 	case mounted:
-		return namespacedFS{mountPoint: entry.mountPoint, inner: entry.fs}.Lstat(ctx, rel)
+		return m.namespacedInfo(ctx, entry, rel, noFollow)
 	case synthetic:
-		info, err := m.base.Lstat(ctx, abs)
+		info, err := m.baseInfo(ctx, abs, noFollow)
 		if err == nil {
 			return info, nil
 		}
@@ -233,8 +215,30 @@ func (m *MountableFS) Lstat(ctx context.Context, name string) (stdfs.FileInfo, e
 		}
 		return nil, err
 	default:
+		return m.baseInfo(ctx, abs, noFollow)
+	}
+}
+
+func (m *MountableFS) mountInfo(ctx context.Context, entry mountedEntry, rel string, noFollow bool) (stdfs.FileInfo, error) {
+	if noFollow {
+		return entry.fs.Lstat(ctx, rel)
+	}
+	return entry.fs.Stat(ctx, rel)
+}
+
+func (m *MountableFS) namespacedInfo(ctx context.Context, entry mountedEntry, rel string, noFollow bool) (stdfs.FileInfo, error) {
+	view := namespacedFS{mountPoint: entry.mountPoint, inner: entry.fs}
+	if noFollow {
+		return view.Lstat(ctx, rel)
+	}
+	return view.Stat(ctx, rel)
+}
+
+func (m *MountableFS) baseInfo(ctx context.Context, abs string, noFollow bool) (stdfs.FileInfo, error) {
+	if noFollow {
 		return m.base.Lstat(ctx, abs)
 	}
+	return m.base.Stat(ctx, abs)
 }
 
 func (m *MountableFS) ReadDir(ctx context.Context, name string) ([]stdfs.DirEntry, error) {

@@ -29,20 +29,12 @@ func TestCurlIsUnavailableByDefault(t *testing.T) {
 
 func TestCurlAllowsConfiguredOrigin(t *testing.T) {
 	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	rt, url := newAllowedHTTPRuntime(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("hello from network"))
-	}))
-	defer server.Close()
-
-	rt := newRuntime(t, &Config{
-		Network: &NetworkConfig{
-			AllowedURLPrefixes: []string{server.URL},
-			DenyPrivateRanges:  false,
-		},
-	})
+	}, nil)
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "curl " + server.URL + "\n",
+		Script: "curl " + url + "\n",
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -223,20 +215,12 @@ func TestCurlEnforcesResponseSizeLimit(t *testing.T) {
 
 func TestCurlCanWriteResponseToSandboxFile(t *testing.T) {
 	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	rt, url := newAllowedHTTPRuntime(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("saved"))
-	}))
-	defer server.Close()
-
-	rt := newRuntime(t, &Config{
-		Network: &NetworkConfig{
-			AllowedURLPrefixes: []string{server.URL},
-			DenyPrivateRanges:  false,
-		},
-	})
+	}, nil)
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "curl -o /tmp/out.txt " + server.URL + "\n cat /tmp/out.txt\n",
+		Script: "curl -o /tmp/out.txt " + url + "\n cat /tmp/out.txt\n",
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)

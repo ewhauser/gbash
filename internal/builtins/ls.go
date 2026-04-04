@@ -2282,62 +2282,7 @@ func (c *LS) loadLSEntries(ctx context.Context, inv *Invocation, dirAbs string, 
 }
 
 func sortLSEntries(entries []lsEntry, opts *lsOptions) {
-	switch opts.sortMode {
-	case lsSortSize:
-		sort.SliceStable(entries, func(i, j int) bool {
-			if entries[i].info.Size() == entries[j].info.Size() {
-				return entries[i].name < entries[j].name
-			}
-			return entries[i].info.Size() > entries[j].info.Size()
-		})
-	case lsSortTime:
-		sort.SliceStable(entries, func(i, j int) bool {
-			leftTime := lsSelectedTime(entries[i].info, opts)
-			rightTime := lsSelectedTime(entries[j].info, opts)
-			if leftTime.Equal(rightTime) {
-				return entries[i].name < entries[j].name
-			}
-			return leftTime.After(rightTime)
-		})
-	case lsSortVersion:
-		sort.SliceStable(entries, func(i, j int) bool {
-			return lsNaturalLess(entries[i].name, entries[j].name)
-		})
-	case lsSortExtension:
-		sort.SliceStable(entries, func(i, j int) bool {
-			leftExt := path.Ext(entries[i].name)
-			rightExt := path.Ext(entries[j].name)
-			if leftExt == rightExt {
-				return entries[i].name < entries[j].name
-			}
-			return leftExt < rightExt
-		})
-	case lsSortWidth:
-		sort.SliceStable(entries, func(i, j int) bool {
-			if len(entries[i].name) == len(entries[j].name) {
-				return entries[i].name < entries[j].name
-			}
-			return len(entries[i].name) < len(entries[j].name)
-		})
-	case lsSortNone:
-	default:
-		sort.SliceStable(entries, func(i, j int) bool {
-			return entries[i].name < entries[j].name
-		})
-	}
-	if opts.groupDirectoriesFirst && opts.sortMode != lsSortNone {
-		sort.SliceStable(entries, func(i, j int) bool {
-			if entries[i].groupAsDir == entries[j].groupAsDir {
-				return false
-			}
-			return entries[i].groupAsDir
-		})
-	}
-	if opts.reverse {
-		for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
-			entries[i], entries[j] = entries[j], entries[i]
-		}
-	}
+	sortLSItems(entries, opts, func(entry lsEntry) string { return entry.name }, func(entry lsEntry) stdfs.FileInfo { return entry.info }, func(entry lsEntry) bool { return entry.groupAsDir })
 }
 
 func lsLoadEntryInfo(ctx context.Context, inv *Invocation, abs string, opts *lsOptions) (info stdfs.FileInfo, groupAsDir, unknownShortMetadata bool, err error) {
@@ -2426,60 +2371,64 @@ func lsResolveSymlinkInfo(ctx context.Context, inv *Invocation, abs string) (std
 }
 
 func sortLSPathArgs(args []lsPathArg, opts *lsOptions) {
+	sortLSItems(args, opts, func(arg lsPathArg) string { return arg.name }, func(arg lsPathArg) stdfs.FileInfo { return arg.info }, func(arg lsPathArg) bool { return arg.groupAsDir })
+}
+
+func sortLSItems[T any](items []T, opts *lsOptions, name func(T) string, info func(T) stdfs.FileInfo, groupAsDir func(T) bool) {
 	switch opts.sortMode {
 	case lsSortSize:
-		sort.SliceStable(args, func(i, j int) bool {
-			if args[i].info.Size() == args[j].info.Size() {
-				return args[i].name < args[j].name
+		sort.SliceStable(items, func(i, j int) bool {
+			if info(items[i]).Size() == info(items[j]).Size() {
+				return name(items[i]) < name(items[j])
 			}
-			return args[i].info.Size() > args[j].info.Size()
+			return info(items[i]).Size() > info(items[j]).Size()
 		})
 	case lsSortTime:
-		sort.SliceStable(args, func(i, j int) bool {
-			leftTime := lsSelectedTime(args[i].info, opts)
-			rightTime := lsSelectedTime(args[j].info, opts)
+		sort.SliceStable(items, func(i, j int) bool {
+			leftTime := lsSelectedTime(info(items[i]), opts)
+			rightTime := lsSelectedTime(info(items[j]), opts)
 			if leftTime.Equal(rightTime) {
-				return args[i].name < args[j].name
+				return name(items[i]) < name(items[j])
 			}
 			return leftTime.After(rightTime)
 		})
 	case lsSortVersion:
-		sort.SliceStable(args, func(i, j int) bool {
-			return lsNaturalLess(args[i].name, args[j].name)
+		sort.SliceStable(items, func(i, j int) bool {
+			return lsNaturalLess(name(items[i]), name(items[j]))
 		})
 	case lsSortExtension:
-		sort.SliceStable(args, func(i, j int) bool {
-			leftExt := path.Ext(args[i].name)
-			rightExt := path.Ext(args[j].name)
+		sort.SliceStable(items, func(i, j int) bool {
+			leftExt := path.Ext(name(items[i]))
+			rightExt := path.Ext(name(items[j]))
 			if leftExt == rightExt {
-				return args[i].name < args[j].name
+				return name(items[i]) < name(items[j])
 			}
 			return leftExt < rightExt
 		})
 	case lsSortWidth:
-		sort.SliceStable(args, func(i, j int) bool {
-			if len(args[i].name) == len(args[j].name) {
-				return args[i].name < args[j].name
+		sort.SliceStable(items, func(i, j int) bool {
+			if len(name(items[i])) == len(name(items[j])) {
+				return name(items[i]) < name(items[j])
 			}
-			return len(args[i].name) < len(args[j].name)
+			return len(name(items[i])) < len(name(items[j]))
 		})
 	case lsSortNone:
 	default:
-		sort.SliceStable(args, func(i, j int) bool {
-			return args[i].name < args[j].name
+		sort.SliceStable(items, func(i, j int) bool {
+			return name(items[i]) < name(items[j])
 		})
 	}
 	if opts.groupDirectoriesFirst && opts.sortMode != lsSortNone {
-		sort.SliceStable(args, func(i, j int) bool {
-			if args[i].groupAsDir == args[j].groupAsDir {
+		sort.SliceStable(items, func(i, j int) bool {
+			if groupAsDir(items[i]) == groupAsDir(items[j]) {
 				return false
 			}
-			return args[i].groupAsDir
+			return groupAsDir(items[i])
 		})
 	}
 	if opts.reverse {
-		for i, j := 0, len(args)-1; i < j; i, j = i+1, j-1 {
-			args[i], args[j] = args[j], args[i]
+		for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+			items[i], items[j] = items[j], items[i]
 		}
 	}
 }

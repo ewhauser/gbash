@@ -85,37 +85,14 @@ func TestEnvTreatsDoubleDashAfterAssignmentsAsCommandName(t *testing.T) {
 func TestEnvCanExecuteDoubleDashCommandAfterAssignments(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	script := "#!/bin/sh\n" +
-		"echo pass\n"
-	if err := os.WriteFile(filepath.Join(root, "simple_echo"), []byte(script), 0o755); err != nil {
-		t.Fatalf("WriteFile(simple_echo) error = %v", err)
-	}
-	if err := os.Symlink("simple_echo", filepath.Join(root, "--")); err != nil {
-		t.Fatalf("Symlink(--) error = %v", err)
-	}
-
-	rt := newRuntime(t, &Config{
-		FileSystem: gbruntime.ReadWriteDirectoryFileSystem(root, gbruntime.ReadWriteDirectoryOptions{}),
-	})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		WorkDir: "/",
-		Script: "PATH=/bin:/usr/bin:\n" +
-			"export PATH\n" +
-			"env ONLY=present -- true\n",
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.ExitCode != 0 {
-		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
-	}
-	if got, want := result.Stdout, "pass\n"; got != want {
-		t.Fatalf("Stdout = %q, want %q", got, want)
-	}
-	if got := result.Stderr; got != "" {
-		t.Fatalf("Stderr = %q, want empty", got)
-	}
+	runEnvSymlinkCommandTest(
+		t,
+		"simple_echo",
+		"#!/bin/sh\necho pass\n",
+		"--",
+		"env ONLY=present -- true\n",
+		"pass\n",
+	)
 }
 
 func TestEnvPreservesExportedEnvironmentAlongsideAssignments(t *testing.T) {
@@ -616,37 +593,14 @@ func TestEnvNestedShellResolvesEqualsCommandThroughEmptyPathEntry(t *testing.T) 
 func TestEnvFollowsSymlinkCommandsFromEmptyPathEntry(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	script := "#!/bin/sh\n" +
-		"echo pass\n"
-	if err := os.WriteFile(filepath.Join(root, "simple_echo"), []byte(script), 0o755); err != nil {
-		t.Fatalf("WriteFile(simple_echo) error = %v", err)
-	}
-	if err := os.Symlink("simple_echo", filepath.Join(root, "-u")); err != nil {
-		t.Fatalf("Symlink(-u) error = %v", err)
-	}
-
-	rt := newRuntime(t, &Config{
-		FileSystem: gbruntime.ReadWriteDirectoryFileSystem(root, gbruntime.ReadWriteDirectoryOptions{}),
-	})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		WorkDir: "/",
-		Script: "PATH=/bin:/usr/bin:\n" +
-			"export PATH\n" +
-			"env -- -u pass\n",
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.ExitCode != 0 {
-		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
-	}
-	if got, want := result.Stdout, "pass\n"; got != want {
-		t.Fatalf("Stdout = %q, want %q", got, want)
-	}
-	if got := result.Stderr; got != "" {
-		t.Fatalf("Stderr = %q, want empty", got)
-	}
+	runEnvSymlinkCommandTest(
+		t,
+		"simple_echo",
+		"#!/bin/sh\necho pass\n",
+		"-u",
+		"env -- -u pass\n",
+		"pass\n",
+	)
 }
 
 func TestEnvDoesNotRewriteSilentExit127FromExistingCommand(t *testing.T) {
@@ -673,37 +627,14 @@ func TestEnvDoesNotRewriteSilentExit127FromExistingCommand(t *testing.T) {
 func TestEnvPreservesInvokedSymlinkNameForNestedCommands(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	script := "#!/bin/sh\n" +
-		"printf '%s\\n' \"${0##*/}\"\n"
-	if err := os.WriteFile(filepath.Join(root, "show_argv0"), []byte(script), 0o755); err != nil {
-		t.Fatalf("WriteFile(show_argv0) error = %v", err)
-	}
-	if err := os.Symlink("show_argv0", filepath.Join(root, "alias0")); err != nil {
-		t.Fatalf("Symlink(alias0) error = %v", err)
-	}
-
-	rt := newRuntime(t, &Config{
-		FileSystem: gbruntime.ReadWriteDirectoryFileSystem(root, gbruntime.ReadWriteDirectoryOptions{}),
-	})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		WorkDir: "/",
-		Script: "PATH=/bin:/usr/bin:\n" +
-			"export PATH\n" +
-			"env alias0\n",
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.ExitCode != 0 {
-		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
-	}
-	if got, want := result.Stdout, "alias0\n"; got != want {
-		t.Fatalf("Stdout = %q, want %q", got, want)
-	}
-	if got := result.Stderr; got != "" {
-		t.Fatalf("Stderr = %q, want empty", got)
-	}
+	runEnvSymlinkCommandTest(
+		t,
+		"show_argv0",
+		"#!/bin/sh\nprintf '%s\\n' \"${0##*/}\"\n",
+		"alias0",
+		"env alias0\n",
+		"alias0\n",
+	)
 }
 
 func TestEnvMapsHostAbsoluteCompatWrapperPathsFromTopBuilddir(t *testing.T) {

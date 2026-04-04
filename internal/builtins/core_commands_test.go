@@ -1088,14 +1088,7 @@ func TestLognameHelpVersionAndErrors(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
-	tests := []struct {
-		name            string
-		script          string
-		wantCode        int
-		wantOut         string
-		wantOutContains []string
-		wantStderr      string
-	}{
+	tests := []commandBehaviorTestCase{
 		{
 			name:     "short help",
 			script:   "logname -h\n",
@@ -1154,32 +1147,7 @@ func TestLognameHelpVersionAndErrors(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			result, err := rt.Run(context.Background(), &ExecutionRequest{
-				Script: tc.script,
-			})
-			if err != nil {
-				t.Fatalf("Run() error = %v", err)
-			}
-			if result.ExitCode != tc.wantCode {
-				t.Fatalf("ExitCode = %d, want %d; stderr=%q", result.ExitCode, tc.wantCode, result.Stderr)
-			}
-			if got := result.Stdout; len(tc.wantOutContains) > 0 {
-				for _, want := range tc.wantOutContains {
-					if !strings.Contains(got, want) {
-						t.Fatalf("Stdout = %q, want to contain %q", got, want)
-					}
-				}
-			} else if got != tc.wantOut {
-				t.Fatalf("Stdout = %q, want %q", got, tc.wantOut)
-			}
-			if got := result.Stderr; got != tc.wantStderr {
-				t.Fatalf("Stderr = %q, want %q", got, tc.wantStderr)
-			}
-		})
-	}
+	runCommandBehaviorCases(t, rt, tests)
 }
 
 func TestGroupsDefaultOutput(t *testing.T) {
@@ -1276,14 +1244,7 @@ func TestGroupsHelpVersionAndErrors(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
-	tests := []struct {
-		name            string
-		script          string
-		wantCode        int
-		wantOut         string
-		wantOutContains []string
-		wantStderr      string
-	}{
+	tests := []commandBehaviorTestCase{
 		{
 			name:     "short help",
 			script:   "groups -h\n",
@@ -1336,32 +1297,7 @@ func TestGroupsHelpVersionAndErrors(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			result, err := rt.Run(context.Background(), &ExecutionRequest{
-				Script: tc.script,
-			})
-			if err != nil {
-				t.Fatalf("Run() error = %v", err)
-			}
-			if result.ExitCode != tc.wantCode {
-				t.Fatalf("ExitCode = %d, want %d; stderr=%q", result.ExitCode, tc.wantCode, result.Stderr)
-			}
-			if got := result.Stdout; len(tc.wantOutContains) > 0 {
-				for _, want := range tc.wantOutContains {
-					if !strings.Contains(got, want) {
-						t.Fatalf("Stdout = %q, want to contain %q", got, want)
-					}
-				}
-			} else if got != tc.wantOut {
-				t.Fatalf("Stdout = %q, want %q", got, tc.wantOut)
-			}
-			if got := result.Stderr; got != tc.wantStderr {
-				t.Fatalf("Stderr = %q, want %q", got, tc.wantStderr)
-			}
-		})
-	}
+	runCommandBehaviorCases(t, rt, tests)
 }
 
 func TestWhoHelpVersionAndErrors(t *testing.T) {
@@ -1713,14 +1649,7 @@ func TestUsersHelpVersionAndErrors(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
-	tests := []struct {
-		name            string
-		script          string
-		wantCode        int
-		wantOut         string
-		wantOutContains []string
-		wantStderr      string
-	}{
+	tests := []commandBehaviorTestCase{
 		{
 			name:     "short help",
 			script:   "users -h\n",
@@ -1773,32 +1702,7 @@ func TestUsersHelpVersionAndErrors(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			result, err := rt.Run(context.Background(), &ExecutionRequest{
-				Script: tc.script,
-			})
-			if err != nil {
-				t.Fatalf("Run() error = %v", err)
-			}
-			if result.ExitCode != tc.wantCode {
-				t.Fatalf("ExitCode = %d, want %d; stderr=%q", result.ExitCode, tc.wantCode, result.Stderr)
-			}
-			if got := result.Stdout; len(tc.wantOutContains) > 0 {
-				for _, want := range tc.wantOutContains {
-					if !strings.Contains(got, want) {
-						t.Fatalf("Stdout = %q, want to contain %q", got, want)
-					}
-				}
-			} else if got != tc.wantOut {
-				t.Fatalf("Stdout = %q, want %q", got, tc.wantOut)
-			}
-			if got := result.Stderr; got != tc.wantStderr {
-				t.Fatalf("Stderr = %q, want %q", got, tc.wantStderr)
-			}
-		})
-	}
+	runCommandBehaviorCases(t, rt, tests)
 }
 
 func TestArchReportsMachineArchitecture(t *testing.T) {
@@ -1823,14 +1727,7 @@ func TestArchHelpVersionAndErrors(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
-	tests := []struct {
-		name            string
-		script          string
-		wantCode        int
-		wantOut         string
-		wantOutContains []string
-		wantStderr      string
-	}{
+	tests := []commandBehaviorTestCase{
 		{
 			name:     "short help",
 			script:   "arch -h\n",
@@ -1893,32 +1790,7 @@ func TestArchHelpVersionAndErrors(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			result, err := rt.Run(context.Background(), &ExecutionRequest{
-				Script: tc.script,
-			})
-			if err != nil {
-				t.Fatalf("Run() error = %v", err)
-			}
-			if result.ExitCode != tc.wantCode {
-				t.Fatalf("ExitCode = %d, want %d; stderr=%q", result.ExitCode, tc.wantCode, result.Stderr)
-			}
-			if got := result.Stdout; len(tc.wantOutContains) > 0 {
-				for _, want := range tc.wantOutContains {
-					if !strings.Contains(got, want) {
-						t.Fatalf("Stdout = %q, want to contain %q", got, want)
-					}
-				}
-			} else if got != tc.wantOut {
-				t.Fatalf("Stdout = %q, want %q", got, tc.wantOut)
-			}
-			if got := result.Stderr; got != tc.wantStderr {
-				t.Fatalf("Stderr = %q, want %q", got, tc.wantStderr)
-			}
-		})
-	}
+	runCommandBehaviorCases(t, rt, tests)
 }
 
 func TestUnameReportsSelectedSystemInformation(t *testing.T) {
@@ -2990,14 +2862,7 @@ func TestNprocHelpVersionAndErrors(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
-	tests := []struct {
-		name            string
-		script          string
-		wantCode        int
-		wantOut         string
-		wantOutContains []string
-		wantStderr      string
-	}{
+	tests := []commandBehaviorTestCase{
 		{
 			name:     "short help",
 			script:   "nproc -h\n",
@@ -3050,32 +2915,7 @@ func TestNprocHelpVersionAndErrors(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			result, err := rt.Run(context.Background(), &ExecutionRequest{
-				Script: tc.script,
-			})
-			if err != nil {
-				t.Fatalf("Run() error = %v", err)
-			}
-			if result.ExitCode != tc.wantCode {
-				t.Fatalf("ExitCode = %d, want %d; stderr=%q", result.ExitCode, tc.wantCode, result.Stderr)
-			}
-			if got := result.Stdout; len(tc.wantOutContains) > 0 {
-				for _, want := range tc.wantOutContains {
-					if !strings.Contains(got, want) {
-						t.Fatalf("Stdout = %q, want to contain %q", got, want)
-					}
-				}
-			} else if got != tc.wantOut {
-				t.Fatalf("Stdout = %q, want %q", got, tc.wantOut)
-			}
-			if got := result.Stderr; got != tc.wantStderr {
-				t.Fatalf("Stderr = %q, want %q", got, tc.wantStderr)
-			}
-		})
-	}
+	runCommandBehaviorCases(t, rt, tests)
 }
 
 func TestHostnameBuiltinUsesRuntimeNodename(t *testing.T) {
@@ -3124,14 +2964,7 @@ func TestHostidHelpVersionAndErrors(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
-	tests := []struct {
-		name            string
-		script          string
-		wantCode        int
-		wantOut         string
-		wantOutContains []string
-		wantStderr      string
-	}{
+	tests := []commandBehaviorTestCase{
 		{
 			name:     "short help",
 			script:   "hostid -h\n",
@@ -3190,32 +3023,7 @@ func TestHostidHelpVersionAndErrors(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			result, err := rt.Run(context.Background(), &ExecutionRequest{
-				Script: tc.script,
-			})
-			if err != nil {
-				t.Fatalf("Run() error = %v", err)
-			}
-			if result.ExitCode != tc.wantCode {
-				t.Fatalf("ExitCode = %d, want %d; stderr=%q", result.ExitCode, tc.wantCode, result.Stderr)
-			}
-			if got := result.Stdout; len(tc.wantOutContains) > 0 {
-				for _, want := range tc.wantOutContains {
-					if !strings.Contains(got, want) {
-						t.Fatalf("Stdout = %q, want to contain %q", got, want)
-					}
-				}
-			} else if got != tc.wantOut {
-				t.Fatalf("Stdout = %q, want %q", got, tc.wantOut)
-			}
-			if got := result.Stderr; got != tc.wantStderr {
-				t.Fatalf("Stderr = %q, want %q", got, tc.wantStderr)
-			}
-		})
-	}
+	runCommandBehaviorCases(t, rt, tests)
 }
 
 func TestBashRunsScriptFileAndPassesArgs(t *testing.T) {

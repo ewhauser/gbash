@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"io"
 )
 
 type Base64 struct{}
@@ -22,31 +21,10 @@ func (c *Base64) Run(ctx context.Context, inv *Invocation) error {
 }
 
 func (c *Base64) Spec() CommandSpec {
-	return CommandSpec{
-		Name:  "base64",
-		About: "encode/decode data and print to standard output\nWith no FILE, or when FILE is -, read standard input.\n\nThe data are encoded as described for the base64 alphabet in RFC 3548.\nWhen decoding, the input may contain newlines in addition\nto the bytes of the formal base64 alphabet. Use --ignore-garbage\nto attempt to recover from any other non-alphabet bytes in the\nencoded stream.",
-		Usage: "base64 [OPTION]... [FILE]",
-		Options: []OptionSpec{
-			{Name: "decode", Short: 'd', ShortAliases: []rune{'D'}, Long: "decode", Help: "decode data"},
-			{Name: "ignore-garbage", Short: 'i', Long: "ignore-garbage", Help: "when decoding, ignore non-alphabetic characters"},
-			{Name: "wrap", Short: 'w', Long: "wrap", ValueName: "COLS", Arity: OptionRequiredValue, Help: "wrap encoded lines after COLS character (default 76, 0 to disable wrapping)"},
-		},
-		Args: []ArgSpec{
-			{Name: "file", ValueName: "FILE"},
-		},
-		Parse: ParseConfig{
-			InferLongOptions:         true,
-			GroupShortOptions:        true,
-			ShortOptionValueAttached: true,
-			LongOptionValueEquals:    true,
-			AutoHelp:                 true,
-			AutoVersion:              true,
-		},
-		HelpRenderer: func(w io.Writer, spec CommandSpec) error {
-			_, err := io.WriteString(w, spec.About+"\n\nUsage: "+spec.Usage+"\n\nOptions:\n  -d, --decode           decode data\n  -i, --ignore-garbage   when decoding, ignore non-alphabetic characters\n  -w, --wrap=COLS        wrap encoded lines after COLS character (default 76, 0 to disable wrapping)\n  -h, --help             display this help and exit\n      --version          output version information and exit\n")
-			return err
-		},
-	}
+	return baseEncodingCommandSpec(
+		"base64",
+		"encode/decode data and print to standard output\nWith no FILE, or when FILE is -, read standard input.\n\nThe data are encoded as described for the base64 alphabet in RFC 3548.\nWhen decoding, the input may contain newlines in addition\nto the bytes of the formal base64 alphabet. Use --ignore-garbage\nto attempt to recover from any other non-alphabet bytes in the\nencoded stream.",
+	)
 }
 
 func (c *Base64) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {

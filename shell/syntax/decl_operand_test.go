@@ -23,25 +23,9 @@ func TestParserDeclOperand(t *testing.T) {
 		{src: "$x", wantType: &DeclDynamicWord{}, want: "$x"},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.src, func(t *testing.T) {
-			p := NewParser(Variant(LangBash))
-			op, err := p.DeclOperand(strings.NewReader(tc.src))
-			if err != nil {
-				t.Fatalf("DeclOperand(%q) error = %v", tc.src, err)
-			}
-			if reflect.TypeOf(op) != reflect.TypeOf(tc.wantType) {
-				t.Fatalf("DeclOperand(%q) type = %T, want %T", tc.src, op, tc.wantType)
-			}
-			var sb strings.Builder
-			if err := NewPrinter().Print(&sb, op); err != nil {
-				t.Fatalf("Print(%q) error = %v", tc.src, err)
-			}
-			if got := sb.String(); got != tc.want {
-				t.Fatalf("DeclOperand(%q) printed %q, want %q", tc.src, got, tc.want)
-			}
-		})
-	}
+	assertDeclOperandCases(t, tests, func(p *Parser, src string) (DeclOperand, error) {
+		return p.DeclOperand(strings.NewReader(src))
+	})
 }
 
 func TestParserDeclOperandField(t *testing.T) {
@@ -61,22 +45,34 @@ func TestParserDeclOperandField(t *testing.T) {
 		{src: "$x", wantType: &DeclDynamicWord{}, want: "$x"},
 	}
 
+	assertDeclOperandCases(t, tests, func(p *Parser, src string) (DeclOperand, error) {
+		return p.DeclOperandField(strings.NewReader(src))
+	})
+}
+
+func assertDeclOperandCases(t *testing.T, tests []struct {
+	src      string
+	wantType any
+	want     string
+}, parse func(*Parser, string) (DeclOperand, error)) {
+	t.Helper()
+
 	for _, tc := range tests {
 		t.Run(tc.src, func(t *testing.T) {
 			p := NewParser(Variant(LangBash))
-			op, err := p.DeclOperandField(strings.NewReader(tc.src))
+			op, err := parse(p, tc.src)
 			if err != nil {
-				t.Fatalf("DeclOperandField(%q) error = %v", tc.src, err)
+				t.Fatalf("parse(%q) error = %v", tc.src, err)
 			}
 			if reflect.TypeOf(op) != reflect.TypeOf(tc.wantType) {
-				t.Fatalf("DeclOperandField(%q) type = %T, want %T", tc.src, op, tc.wantType)
+				t.Fatalf("parse(%q) type = %T, want %T", tc.src, op, tc.wantType)
 			}
 			var sb strings.Builder
 			if err := NewPrinter().Print(&sb, op); err != nil {
 				t.Fatalf("Print(%q) error = %v", tc.src, err)
 			}
 			if got := sb.String(); got != tc.want {
-				t.Fatalf("DeclOperandField(%q) printed %q, want %q", tc.src, got, tc.want)
+				t.Fatalf("parse(%q) printed %q, want %q", tc.src, got, tc.want)
 			}
 		})
 	}

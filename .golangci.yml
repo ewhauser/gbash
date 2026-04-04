@@ -28,6 +28,7 @@ linters:
     - unparam
     - nilaway
     - regexponce
+    - dupl
 
   settings:
     custom:

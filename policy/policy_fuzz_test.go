@@ -10,47 +10,14 @@ import (
 )
 
 func FuzzCheckPathReadSymlinkPolicy(f *testing.F) {
-	f.Add([]byte{0, 0, 0})
-	f.Add([]byte{1, 1, 1})
-	f.Add([]byte{2, 2, 2})
-
-	f.Fuzz(func(t *testing.T, raw []byte) {
-		cursor := newPolicyFuzzCursor(raw)
-		mem := gbfs.NewMemory()
-		writePolicyFuzzFile(t, mem, "/safe/target.txt", []byte("hello\n"))
-		writePolicyFuzzFile(t, mem, "/denied/secret.txt", []byte("secret\n"))
-
-		linkCases := []string{"target.txt", "/safe/target.txt", "/denied/secret.txt"}
-		targetCases := []string{"/safe/target.txt", "/safe/link.txt", "/denied/secret.txt"}
-		linkTarget := linkCases[cursor.Intn(len(linkCases))]
-		target := targetCases[cursor.Intn(len(targetCases))]
-		follow := cursor.Intn(2) == 1
-
-		if err := mem.Symlink(context.Background(), linkTarget, "/safe/link.txt"); err != nil {
-			t.Fatalf("Symlink() error = %v", err)
-		}
-
-		pol := NewStatic(&Config{
-			ReadRoots:   []string{"/safe"},
-			WriteRoots:  []string{"/safe"},
-			SymlinkMode: SymlinkMode(map[bool]string{false: string(SymlinkDeny), true: string(SymlinkFollow)}[follow]),
-		})
-
-		err := CheckPath(context.Background(), pol, mem, FileActionRead, target)
-		expectAllowed := target == "/safe/target.txt"
-		if target == "/safe/link.txt" {
-			expectAllowed = follow && linkTarget != "/denied/secret.txt"
-		}
-		if expectAllowed && err != nil {
-			t.Fatalf("CheckPath(read, %q) error = %v, want nil", target, err)
-		}
-		if !expectAllowed && err == nil {
-			t.Fatalf("CheckPath(read, %q) unexpectedly allowed linkTarget=%q follow=%v", target, linkTarget, follow)
-		}
-	})
+	fuzzCheckPathSymlinkPolicy(f, FileActionRead)
 }
 
 func FuzzCheckPathWriteSymlinkPolicy(f *testing.F) {
+	fuzzCheckPathSymlinkPolicy(f, FileActionWrite)
+}
+
+func fuzzCheckPathSymlinkPolicy(f *testing.F, action FileAction) {
 	f.Add([]byte{0, 0, 0})
 	f.Add([]byte{1, 1, 1})
 	f.Add([]byte{2, 2, 2})
@@ -77,16 +44,16 @@ func FuzzCheckPathWriteSymlinkPolicy(f *testing.F) {
 			SymlinkMode: SymlinkMode(map[bool]string{false: string(SymlinkDeny), true: string(SymlinkFollow)}[follow]),
 		})
 
-		err := CheckPath(context.Background(), pol, mem, FileActionWrite, target)
+		err := CheckPath(context.Background(), pol, mem, action, target)
 		expectAllowed := target == "/safe/target.txt"
 		if target == "/safe/link.txt" {
 			expectAllowed = follow && linkTarget != "/denied/secret.txt"
 		}
 		if expectAllowed && err != nil {
-			t.Fatalf("CheckPath(write, %q) error = %v, want nil", target, err)
+			t.Fatalf("CheckPath(%s, %q) error = %v, want nil", action, target, err)
 		}
 		if !expectAllowed && err == nil {
-			t.Fatalf("CheckPath(write, %q) unexpectedly allowed linkTarget=%q follow=%v", target, linkTarget, follow)
+			t.Fatalf("CheckPath(%s, %q) unexpectedly allowed linkTarget=%q follow=%v", action, target, linkTarget, follow)
 		}
 	})
 }

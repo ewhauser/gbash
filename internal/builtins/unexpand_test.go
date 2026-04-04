@@ -46,40 +46,12 @@ func TestUnexpandHelpAndVersion(t *testing.T) {
 func TestUnexpandTransformsFilesAndStdin(t *testing.T) {
 	t.Parallel()
 
-	session := newSession(t, &Config{})
-	writeSessionFile(t, session, "/tmp/in.txt", []byte("        A     B\n123 \t1\n"))
-
-	fileResult := mustExecSession(t, session, "unexpand --tabs=3 /tmp/in.txt\n")
-	if fileResult.ExitCode != 0 {
-		t.Fatalf("file ExitCode = %d, want 0; stderr=%q", fileResult.ExitCode, fileResult.Stderr)
-	}
-	if got, want := fileResult.Stdout, "\t\t  A\t  B\n123\t1\n"; got != want {
-		t.Fatalf("file stdout = %q, want %q", got, want)
-	}
-
-	firstOnlyResult := mustExecSession(t, session, "printf '        A     B' | unexpand -3\n")
-	if firstOnlyResult.ExitCode != 0 {
-		t.Fatalf("firstOnly ExitCode = %d, want 0; stderr=%q", firstOnlyResult.ExitCode, firstOnlyResult.Stderr)
-	}
-	if got, want := firstOnlyResult.Stdout, "\t\t  A     B"; got != want {
-		t.Fatalf("firstOnly stdout = %q, want %q", got, want)
-	}
-
-	stdinResult := mustExecSession(t, session, "printf 'a  b  c' | unexpand -a -3 -\n")
-	if stdinResult.ExitCode != 0 {
-		t.Fatalf("stdin ExitCode = %d, want 0; stderr=%q", stdinResult.ExitCode, stdinResult.Stderr)
-	}
-	if got, want := stdinResult.Stdout, "a\tb\tc"; got != want {
-		t.Fatalf("stdin stdout = %q, want %q", got, want)
-	}
-
-	repeatedStdin := mustExecSession(t, session, "printf '        A' | unexpand -3 - -\n")
-	if repeatedStdin.ExitCode != 0 {
-		t.Fatalf("repeatedStdin ExitCode = %d, want 0; stderr=%q", repeatedStdin.ExitCode, repeatedStdin.Stderr)
-	}
-	if got, want := repeatedStdin.Stdout, "\t\t  A"; got != want {
-		t.Fatalf("repeatedStdin stdout = %q, want %q", got, want)
-	}
+	runTransformChecks(t, "/tmp/in.txt", []byte("        A     B\n123 \t1\n"), []transformCheck{
+		{name: "file", script: "unexpand --tabs=3 /tmp/in.txt\n", want: "\t\t  A\t  B\n123\t1\n"},
+		{name: "firstOnly", script: "printf '        A     B' | unexpand -3\n", want: "\t\t  A     B"},
+		{name: "stdin", script: "printf 'a  b  c' | unexpand -a -3 -\n", want: "a\tb\tc"},
+		{name: "repeatedStdin", script: "printf '        A' | unexpand -3 - -\n", want: "\t\t  A"},
+	})
 }
 
 func TestUnexpandTabListsAndGNUCases(t *testing.T) {
@@ -147,67 +119,21 @@ func TestUnexpandHandlesHugeTabstopWithoutPanicking(t *testing.T) {
 func TestUnexpandErrorsMatchCoreutilsStyle(t *testing.T) {
 	t.Parallel()
 
-	rt := newRuntime(t, &Config{})
-
-	invalidFlag, err := rt.Run(context.Background(), &ExecutionRequest{Script: "unexpand -f\n"})
-	if err != nil {
-		t.Fatalf("Run(invalidFlag) error = %v", err)
-	}
-	if invalidFlag.ExitCode != 1 {
-		t.Fatalf("invalidFlag ExitCode = %d, want 1", invalidFlag.ExitCode)
-	}
-	if got, want := invalidFlag.Stderr, "unexpand: invalid option -- 'f'\nTry 'unexpand --help' for more information.\n"; got != want {
-		t.Fatalf("invalidFlag stderr = %q, want %q", got, want)
-	}
-
-	invalidTabs, err := rt.Run(context.Background(), &ExecutionRequest{Script: "unexpand --tabs=1,+2,3\n"})
-	if err != nil {
-		t.Fatalf("Run(invalidTabs) error = %v", err)
-	}
-	if invalidTabs.ExitCode != 1 {
-		t.Fatalf("invalidTabs ExitCode = %d, want 1", invalidTabs.ExitCode)
-	}
-	if got, want := invalidTabs.Stderr, "unexpand: '+' specifier only allowed with the last value\n"; got != want {
-		t.Fatalf("invalidTabs stderr = %q, want %q", got, want)
-	}
-
-	invalidChar, err := rt.Run(context.Background(), &ExecutionRequest{Script: "unexpand --tabs=x\n"})
-	if err != nil {
-		t.Fatalf("Run(invalidChar) error = %v", err)
-	}
-	if invalidChar.ExitCode != 1 {
-		t.Fatalf("invalidChar ExitCode = %d, want 1", invalidChar.ExitCode)
-	}
-	if got, want := invalidChar.Stderr, "unexpand: tab size contains invalid character(s): 'x'\n"; got != want {
-		t.Fatalf("invalidChar stderr = %q, want %q", got, want)
-	}
-
-	overflowTabs, err := rt.Run(context.Background(), &ExecutionRequest{Script: "unexpand --tabs=18446744073709551616\n"})
-	if err != nil {
-		t.Fatalf("Run(overflowTabs) error = %v", err)
-	}
-	if overflowTabs.ExitCode != 1 {
-		t.Fatalf("overflowTabs ExitCode = %d, want 1", overflowTabs.ExitCode)
-	}
-	if got, want := overflowTabs.Stderr, "unexpand: tab stop value is too large\n"; got != want {
-		t.Fatalf("overflowTabs stderr = %q, want %q", got, want)
-	}
-
-	session := newSession(t, &Config{})
-	writeSessionFile(t, session, "/tmp/ok.txt", []byte("        a\n"))
-	multiResult := mustExecSession(t, session, "mkdir /tmp/dir\nunexpand /tmp/ok.txt /tmp/dir /tmp/missing.txt\n")
-	if multiResult.ExitCode != 1 {
-		t.Fatalf("multiResult ExitCode = %d, want 1; stderr=%q", multiResult.ExitCode, multiResult.Stderr)
-	}
-	if got, want := multiResult.Stdout, "\ta\n"; got != want {
-		t.Fatalf("multiResult stdout = %q, want %q", got, want)
-	}
-	for _, want := range []string{
-		"unexpand: /tmp/dir: Is a directory\n",
-		"unexpand: /tmp/missing.txt: No such file or directory\n",
-	} {
-		if !strings.Contains(multiResult.Stderr, want) {
-			t.Fatalf("multiResult stderr = %q, want substring %q", multiResult.Stderr, want)
-		}
-	}
+	assertTransformErrorScenarios(
+		t,
+		"unexpand",
+		[]byte("        a\n"),
+		[]exactStderrCase{
+			{name: "invalidFlag", script: "unexpand -f\n", wantCode: 1, wantStderr: "unexpand: invalid option -- 'f'\nTry 'unexpand --help' for more information.\n"},
+			{name: "invalidTabs", script: "unexpand --tabs=1,+2,3\n", wantCode: 1, wantStderr: "unexpand: '+' specifier only allowed with the last value\n"},
+			{name: "invalidChar", script: "unexpand --tabs=x\n", wantCode: 1, wantStderr: "unexpand: tab size contains invalid character(s): 'x'\n"},
+			{name: "overflowTabs", script: "unexpand --tabs=18446744073709551616\n", wantCode: 1, wantStderr: "unexpand: tab stop value is too large\n"},
+		},
+		"mkdir /tmp/dir\nunexpand /tmp/ok.txt /tmp/dir /tmp/missing.txt\n",
+		"\ta\n",
+		[]string{
+			"unexpand: /tmp/dir: Is a directory\n",
+			"unexpand: /tmp/missing.txt: No such file or directory\n",
+		},
+	)
 }

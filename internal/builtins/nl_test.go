@@ -137,29 +137,8 @@ func TestNLRejectsInvalidStylesAndWidth(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "printf '' | nl -binvalid\n",
+	runStderrContainsCases(t, rt, []stderrContainsCase{
+		{name: "invalid style", script: "printf '' | nl -binvalid\n", wantCode: 1, wantStderr: "invalid numbering style"},
+		{name: "invalid width", script: "printf '' | nl -w0\n", wantCode: 1, wantStderr: "line number field width"},
 	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.ExitCode != 1 {
-		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
-	}
-	if !strings.Contains(result.Stderr, "invalid numbering style") {
-		t.Fatalf("Stderr = %q, want invalid numbering style", result.Stderr)
-	}
-
-	result, err = rt.Run(context.Background(), &ExecutionRequest{
-		Script: "printf '' | nl -w0\n",
-	})
-	if err != nil {
-		t.Fatalf("Run() width error = %v", err)
-	}
-	if result.ExitCode != 1 {
-		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
-	}
-	if !strings.Contains(result.Stderr, "line number field width") {
-		t.Fatalf("Stderr = %q, want width error", result.Stderr)
-	}
 }

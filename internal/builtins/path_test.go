@@ -3,6 +3,7 @@ package builtins_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -522,47 +523,24 @@ func TestRmdirReportsSymlinkSlashErrors(t *testing.T) {
 
 func TestRmdirParentsKeepRelativeSymlinkDiagnostics(t *testing.T) {
 	t.Parallel()
-	session := newSession(t, &Config{
-		Policy: policy.NewStatic(&policy.Config{
-			ReadRoots:   []string{"/"},
-			WriteRoots:  []string{"/"},
-			SymlinkMode: policy.SymlinkFollow,
-		}),
-	})
-
-	setup := mustExecSession(t, session, "mkdir -p dir/dir2\nln -s dir sl\n")
-	if setup.ExitCode != 0 {
-		t.Fatalf("setup ExitCode = %d, want 0; stderr=%q", setup.ExitCode, setup.Stderr)
-	}
-
-	result := mustExecSession(t, session, "rmdir -p sl/dir2\n")
-	if result.ExitCode == 0 {
-		t.Fatalf("ExitCode = %d, want non-zero", result.ExitCode)
-	}
-	if got, want := result.Stderr, "rmdir: failed to remove 'sl': Not a directory\n"; got != want {
-		t.Fatalf("Stderr = %q, want %q", got, want)
-	}
-	if _, err := session.FileSystem().Stat(context.Background(), "/home/agent/dir/dir2"); !os.IsNotExist(err) {
-		t.Fatalf("Stat(dir/dir2) error = %v, want not exist", err)
-	}
+	assertRmdirParentsKeepsRelativeSymlinkDiagnostics(t, "rmdir -p sl/dir2\n")
 }
 
 func TestRmdirParentsKeepRelativeSymlinkDiagnosticsWithEmptyPath(t *testing.T) {
 	t.Parallel()
-	session := newSession(t, &Config{
-		Policy: policy.NewStatic(&policy.Config{
-			ReadRoots:   []string{"/"},
-			WriteRoots:  []string{"/"},
-			SymlinkMode: policy.SymlinkFollow,
-		}),
-	})
+	assertRmdirParentsKeepsRelativeSymlinkDiagnostics(t, "PATH=\n/bin/rmdir -p sl/dir2\n")
+}
 
+func assertRmdirParentsKeepsRelativeSymlinkDiagnostics(t *testing.T, script string) {
+	t.Helper()
+
+	session := newReadWriteFollowSession(t)
 	setup := mustExecSession(t, session, "mkdir -p dir/dir2\nln -s dir sl\n")
 	if setup.ExitCode != 0 {
 		t.Fatalf("setup ExitCode = %d, want 0; stderr=%q", setup.ExitCode, setup.Stderr)
 	}
 
-	result := mustExecSession(t, session, "PATH=\n/bin/rmdir -p sl/dir2\n")
+	result := mustExecSession(t, session, script)
 	if result.ExitCode == 0 {
 		t.Fatalf("ExitCode = %d, want non-zero", result.ExitCode)
 	}
@@ -1805,28 +1783,7 @@ func TestChmodAcceptsRecursiveOptionAfterMode(t *testing.T) {
 
 func TestChmodSupportsDoubleDashModeAndFiles(t *testing.T) {
 	t.Parallel()
-	session := newSession(t, &Config{})
-
-	result := mustExecSession(t, session, "echo one > /home/agent/--\necho two > /home/agent/file.txt\nchmod -- -- /home/agent/file.txt\nstat -c '%a' /home/agent/--\nstat -c '%a' /home/agent/file.txt\nchmod -w -- /home/agent/-- /home/agent/file.txt\nstat -c '%a' /home/agent/--\nstat -c '%a' /home/agent/file.txt\n")
-	if result.ExitCode != 0 {
-		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
-	}
-	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("Stdout lines = %v, want 4", lines)
-	}
-	if got, want := lines[0], "644"; got != want {
-		t.Fatalf("first stat = %q, want %q", got, want)
-	}
-	if got, want := lines[1], "644"; got != want {
-		t.Fatalf("second stat = %q, want %q", got, want)
-	}
-	if got, want := lines[2], "444"; got != want {
-		t.Fatalf("third stat = %q, want %q", got, want)
-	}
-	if got, want := lines[3], "444"; got != want {
-		t.Fatalf("fourth stat = %q, want %q", got, want)
-	}
+	assertPathCommandLines(t, "echo one > /home/agent/--\necho two > /home/agent/file.txt\nchmod -- -- /home/agent/file.txt\nstat -c '%a' /home/agent/--\nstat -c '%a' /home/agent/file.txt\nchmod -w -- /home/agent/-- /home/agent/file.txt\nstat -c '%a' /home/agent/--\nstat -c '%a' /home/agent/file.txt\n", []string{"644", "644", "444", "444"})
 }
 
 func TestChmodRejectsMixedCopyAndLiteralPermissions(t *testing.T) {
@@ -1899,38 +1856,7 @@ func TestChownSupportsReferenceFromAndRecursiveFlags(t *testing.T) {
 
 func TestChownNoDereferenceTargetsTheSymlink(t *testing.T) {
 	t.Parallel()
-	rt := newRuntime(t, &Config{
-		Policy: policy.NewStatic(&policy.Config{
-			ReadRoots:   []string{"/"},
-			WriteRoots:  []string{"/"},
-			SymlinkMode: policy.SymlinkFollow,
-		}),
-	})
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "echo data > /home/agent/target.txt\nln -s target.txt /home/agent/link.txt\nchown 61:62 /home/agent/link.txt\nstat -c '%u:%g' /home/agent/target.txt\nstat -c '%u:%g %F' /home/agent/link.txt\nchown -h 71:72 /home/agent/link.txt\nstat -c '%u:%g' /home/agent/target.txt\nstat -c '%u:%g %F' /home/agent/link.txt\n",
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.ExitCode != 0 {
-		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
-	}
-	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("Stdout lines = %v, want 4", lines)
-	}
-	if got, want := lines[0], "61:62"; got != want {
-		t.Fatalf("target after dereference = %q, want %q", got, want)
-	}
-	if got, want := lines[1], "1000:1000 symbolic link"; got != want {
-		t.Fatalf("link before -h = %q, want %q", got, want)
-	}
-	if got, want := lines[2], "61:62"; got != want {
-		t.Fatalf("target after -h = %q, want %q", got, want)
-	}
-	if got, want := lines[3], "71:72 symbolic link"; got != want {
-		t.Fatalf("link after -h = %q, want %q", got, want)
-	}
+	assertNoDereferenceSymlinkOwnership(t, "chown", "61:62", "71:72", []string{"61:62", "1000:1000 symbolic link", "61:62", "71:72 symbolic link"})
 }
 
 func TestChownDoesNotChangeModTime(t *testing.T) {
@@ -1960,28 +1886,7 @@ func TestChownDoesNotChangeModTime(t *testing.T) {
 
 func TestChgrpSupportsNamedNumericAndColonGroups(t *testing.T) {
 	t.Parallel()
-	session := newSession(t, &Config{})
-
-	result := mustExecSession(t, session, "echo hi > /home/agent/file.txt\nstat -c '%g:%G' /home/agent/file.txt\nchgrp 456 /home/agent/file.txt\nstat -c '%g:%G' /home/agent/file.txt\nchgrp agent /home/agent/file.txt\nstat -c '%g:%G' /home/agent/file.txt\nchgrp :789 /home/agent/file.txt\nstat -c '%g:%G' /home/agent/file.txt\n")
-	if result.ExitCode != 0 {
-		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
-	}
-	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("Stdout lines = %v, want 4", lines)
-	}
-	if got, want := lines[0], "1000:agent"; got != want {
-		t.Fatalf("initial stat = %q, want %q", got, want)
-	}
-	if got, want := lines[1], "456:456"; got != want {
-		t.Fatalf("numeric chgrp stat = %q, want %q", got, want)
-	}
-	if got, want := lines[2], "1000:agent"; got != want {
-		t.Fatalf("named chgrp stat = %q, want %q", got, want)
-	}
-	if got, want := lines[3], "789:789"; got != want {
-		t.Fatalf("colon chgrp stat = %q, want %q", got, want)
-	}
+	assertPathCommandLines(t, "echo hi > /home/agent/file.txt\nstat -c '%g:%G' /home/agent/file.txt\nchgrp 456 /home/agent/file.txt\nstat -c '%g:%G' /home/agent/file.txt\nchgrp agent /home/agent/file.txt\nstat -c '%g:%G' /home/agent/file.txt\nchgrp :789 /home/agent/file.txt\nstat -c '%g:%G' /home/agent/file.txt\n", []string{"1000:agent", "456:456", "1000:agent", "789:789"})
 }
 
 func TestChgrpAndChownQuietSuppressMissingFileDiagnostics(t *testing.T) {
@@ -2057,6 +1962,31 @@ func TestChgrpSupportsReferenceFromRecursiveAndTrailingReference(t *testing.T) {
 
 func TestChgrpNoDereferenceTargetsTheSymlink(t *testing.T) {
 	t.Parallel()
+	assertNoDereferenceSymlinkOwnership(t, "chgrp", "61", "71", []string{"61", "1000 symbolic link", "61", "71 symbolic link"})
+}
+
+func assertPathCommandLines(t *testing.T, script string, wantLines []string) {
+	t.Helper()
+
+	session := newSession(t, &Config{})
+	result := mustExecSession(t, session, script)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
+	if len(lines) != len(wantLines) {
+		t.Fatalf("Stdout lines = %v, want %d", lines, len(wantLines))
+	}
+	for i, want := range wantLines {
+		if got := lines[i]; got != want {
+			t.Fatalf("line %d = %q, want %q", i, got, want)
+		}
+	}
+}
+
+func assertNoDereferenceSymlinkOwnership(t *testing.T, commandName, firstValue, secondValue string, wantLines []string) {
+	t.Helper()
+
 	rt := newRuntime(t, &Config{
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:   []string{"/"},
@@ -2064,8 +1994,19 @@ func TestChgrpNoDereferenceTargetsTheSymlink(t *testing.T) {
 			SymlinkMode: policy.SymlinkFollow,
 		}),
 	})
+	statFmt := statFormatForOwnership(commandName)
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "echo data > /home/agent/target.txt\nln -s target.txt /home/agent/link.txt\nchgrp 61 /home/agent/link.txt\nstat -c '%g' /home/agent/target.txt\nstat -c '%g %F' /home/agent/link.txt\nchgrp -h 71 /home/agent/link.txt\nstat -c '%g' /home/agent/target.txt\nstat -c '%g %F' /home/agent/link.txt\n",
+		Script: fmt.Sprintf(
+			"echo data > /home/agent/target.txt\nln -s target.txt /home/agent/link.txt\n%s %s /home/agent/link.txt\nstat -c '%s' /home/agent/target.txt\nstat -c '%s %%F' /home/agent/link.txt\n%s -h %s /home/agent/link.txt\nstat -c '%s' /home/agent/target.txt\nstat -c '%s %%F' /home/agent/link.txt\n",
+			commandName,
+			firstValue,
+			statFmt,
+			statFmt,
+			commandName,
+			secondValue,
+			statFmt,
+			statFmt,
+		),
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -2074,21 +2015,21 @@ func TestChgrpNoDereferenceTargetsTheSymlink(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
 	lines := strings.Split(strings.TrimSpace(result.Stdout), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("Stdout lines = %v, want 4", lines)
+	if len(lines) != len(wantLines) {
+		t.Fatalf("Stdout lines = %v, want %d", lines, len(wantLines))
 	}
-	if got, want := lines[0], "61"; got != want {
-		t.Fatalf("target after dereference = %q, want %q", got, want)
+	for i, want := range wantLines {
+		if got := lines[i]; got != want {
+			t.Fatalf("line %d = %q, want %q", i, got, want)
+		}
 	}
-	if got, want := lines[1], "1000 symbolic link"; got != want {
-		t.Fatalf("link before -h = %q, want %q", got, want)
+}
+
+func statFormatForOwnership(commandName string) string {
+	if commandName == "chown" {
+		return "%u:%g"
 	}
-	if got, want := lines[2], "61"; got != want {
-		t.Fatalf("target after -h = %q, want %q", got, want)
-	}
-	if got, want := lines[3], "71 symbolic link"; got != want {
-		t.Fatalf("link after -h = %q, want %q", got, want)
-	}
+	return "%g"
 }
 
 func TestChgrpInfersLongOptionsAfterPositionals(t *testing.T) {

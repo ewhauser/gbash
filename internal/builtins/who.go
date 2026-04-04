@@ -496,30 +496,7 @@ func whoIdleTimestamp(info stdfs.FileInfo) (int64, bool) {
 }
 
 func whoAccessTime(info stdfs.FileInfo) (time.Time, bool) {
-	sys := reflect.ValueOf(info.Sys())
-	if !sys.IsValid() {
-		return time.Time{}, false
-	}
-	if sys.Kind() == reflect.Pointer {
-		if sys.IsNil() {
-			return time.Time{}, false
-		}
-		sys = sys.Elem()
-	}
-	if sys.Kind() != reflect.Struct {
-		return time.Time{}, false
-	}
-	if field := sys.FieldByName("Atim"); field.IsValid() {
-		return whoTimespec(field)
-	}
-	if field := sys.FieldByName("Atimespec"); field.IsValid() {
-		return whoTimespec(field)
-	}
-	if sec := sys.FieldByName("Atime"); sec.IsValid() {
-		nsec := sys.FieldByName("AtimeNsec")
-		return time.Unix(int64(whoUintField(sec)), int64(whoUintField(nsec))), true
-	}
-	return time.Time{}, false
+	return fileInfoAccessTime(info, whoTimespec, whoUintField)
 }
 
 func whoTimespec(value reflect.Value) (time.Time, bool) {

@@ -124,33 +124,15 @@ func TestDiffContextOutputUsesPlusForInsertions(t *testing.T) {
 
 func TestDiffHelpAndVersionShortCircuitOptionParsing(t *testing.T) {
 	t.Parallel()
-	rt := newRuntime(t, &Config{})
 
-	helpResult, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "diff --help --definitely-invalid\n",
-	})
-	if err != nil {
-		t.Fatalf("Run(help) error = %v", err)
-	}
-	if helpResult.ExitCode != 0 {
-		t.Fatalf("help ExitCode = %d, want 0; stderr=%q", helpResult.ExitCode, helpResult.Stderr)
-	}
-	if !strings.Contains(helpResult.Stdout, "Usage: diff [OPTION]... FILES") {
-		t.Fatalf("help Stdout = %q, want help text", helpResult.Stdout)
-	}
-
-	versionResult, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "diff -v -z\n",
-	})
-	if err != nil {
-		t.Fatalf("Run(version) error = %v", err)
-	}
-	if versionResult.ExitCode != 0 {
-		t.Fatalf("version ExitCode = %d, want 0; stderr=%q", versionResult.ExitCode, versionResult.Stderr)
-	}
-	if !strings.Contains(versionResult.Stdout, "diff (GNU diffutils) 3.12") {
-		t.Fatalf("version Stdout = %q, want version text", versionResult.Stdout)
-	}
+	runHelpAndVersionShortCircuitTest(
+		t,
+		"diff",
+		"diff --help --definitely-invalid\n",
+		"Usage: diff [OPTION]... FILES",
+		"diff -v -z\n",
+		"diff (GNU diffutils) 3.12",
+	)
 }
 
 func TestDiffNoDereferenceReportsSymlinkTypeMismatch(t *testing.T) {

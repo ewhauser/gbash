@@ -117,53 +117,16 @@ func (c *Expand) Spec() CommandSpec {
 
 func (c *Expand) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCommand) error {
 	spec := c.Spec()
-	if matches.Has("help") {
-		return RenderCommandHelp(inv.Stdout, &spec)
-	}
-	if matches.Has("version") {
-		return RenderCommandVersion(inv.Stdout, &spec)
-	}
-
-	opts, err := parseExpandMatches(inv, matches)
-	if err != nil {
-		return err
-	}
-
-	files := opts.files
-	if len(files) == 0 {
-		files = []string{"-"}
-	}
-
-	var hadErrors bool
-
-	for _, name := range files {
-		data, err := func() ([]byte, error) {
-			if name == "-" {
-				return readAllStdin(ctx, inv)
-			}
-			read, _, err := readAllFile(ctx, inv, name)
-			if err != nil {
-				return nil, err
-			}
-			return read, nil
-		}()
-		if err != nil {
-			hadErrors = true
-			if _, writeErr := fmt.Fprintf(inv.Stderr, "expand: %s: %s\n", name, readAllErrorText(err)); writeErr != nil {
-				return &ExitError{Code: 1, Err: writeErr}
-			}
-			continue
-		}
-
-		if _, err := inv.Stdout.Write(expandBytes(data, &opts)); err != nil {
-			return &ExitError{Code: 1, Err: err}
-		}
-	}
-
-	if hadErrors {
-		return &ExitError{Code: 1}
-	}
-	return nil
+	return runByteTransformCommand(
+		ctx,
+		inv,
+		matches,
+		&spec,
+		c.Name(),
+		parseExpandMatches,
+		func(opts expandOptions) []string { return opts.files },
+		expandBytes,
+	)
 }
 
 func parseExpandMatches(inv *Invocation, matches *ParsedCommand) (expandOptions, error) {

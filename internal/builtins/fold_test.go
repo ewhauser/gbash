@@ -9,17 +9,21 @@ import (
 func TestFoldHelpAndVersion(t *testing.T) {
 	t.Parallel()
 
-	rt := newRuntime(t, &Config{})
+	runHelpAndVersionShortCircuitTest(
+		t,
+		"fold",
+		"fold --help\n",
+		"Usage: fold [OPTION]... [FILE]...",
+		"fold --version\n",
+		"fold (gbash)\n",
+	)
 
+	rt := newRuntime(t, &Config{})
 	helpResult, err := rt.Run(context.Background(), &ExecutionRequest{Script: "fold --help\n"})
 	if err != nil {
 		t.Fatalf("Run(help) error = %v", err)
 	}
-	if helpResult.ExitCode != 0 {
-		t.Fatalf("help ExitCode = %d, want 0; stderr=%q", helpResult.ExitCode, helpResult.Stderr)
-	}
 	for _, want := range []string{
-		"Usage: fold [OPTION]... [FILE]...\n",
 		"  -b, --bytes",
 		"  -s, --spaces",
 		"  -w, --width=WIDTH",
@@ -27,17 +31,6 @@ func TestFoldHelpAndVersion(t *testing.T) {
 		if !strings.Contains(helpResult.Stdout, want) {
 			t.Fatalf("help stdout = %q, want substring %q", helpResult.Stdout, want)
 		}
-	}
-
-	versionResult, err := rt.Run(context.Background(), &ExecutionRequest{Script: "fold --version\n"})
-	if err != nil {
-		t.Fatalf("Run(version) error = %v", err)
-	}
-	if versionResult.ExitCode != 0 {
-		t.Fatalf("version ExitCode = %d, want 0; stderr=%q", versionResult.ExitCode, versionResult.Stderr)
-	}
-	if got, want := versionResult.Stdout, "fold (gbash)\n"; got != want {
-		t.Fatalf("version stdout = %q, want %q", got, want)
 	}
 }
 

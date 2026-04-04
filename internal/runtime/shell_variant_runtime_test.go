@@ -290,31 +290,7 @@ func TestSessionExecShellVariantGatesBashOnlyBuiltins(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-
-			session := newSession(t, &Config{})
-			result, err := session.Exec(context.Background(), &ExecutionRequest{
-				ShellVariant: tc.variant,
-				Script:       script,
-			})
-			if err != nil {
-				t.Fatalf("Exec() error = %v", err)
-			}
-			if !strings.HasPrefix(result.Stdout, tc.wantStatusBlock) {
-				t.Fatalf("Stdout prefix = %q, want prefix %q", result.Stdout, tc.wantStatusBlock)
-			}
-			for _, want := range tc.wantEnable {
-				if !strings.Contains(result.Stdout, want) {
-					t.Fatalf("Stdout missing %q: %q", want, result.Stdout)
-				}
-			}
-			for _, omit := range tc.omitEnable {
-				if strings.Contains(result.Stdout, omit) {
-					t.Fatalf("Stdout unexpectedly contains %q: %q", omit, result.Stdout)
-				}
-			}
-			if got := result.Stderr; got != "" {
-				t.Fatalf("Stderr = %q, want empty", got)
-			}
+			assertVariantBuiltinStatus(t, script, tc.variant, tc.wantStatusBlock, tc.wantEnable, tc.omitEnable)
 		})
 	}
 }
@@ -383,31 +359,36 @@ func TestSessionExecDirectoryStackBuiltinsMatchVariant(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-
-			session := newSession(t, &Config{})
-			result, err := session.Exec(context.Background(), &ExecutionRequest{
-				ShellVariant: tc.variant,
-				Script:       script,
-			})
-			if err != nil {
-				t.Fatalf("Exec() error = %v", err)
-			}
-			if !strings.HasPrefix(result.Stdout, tc.wantStatusBlock) {
-				t.Fatalf("Stdout prefix = %q, want prefix %q", result.Stdout, tc.wantStatusBlock)
-			}
-			for _, want := range tc.wantEnable {
-				if !strings.Contains(result.Stdout, want) {
-					t.Fatalf("Stdout missing %q: %q", want, result.Stdout)
-				}
-			}
-			for _, omit := range tc.omitEnable {
-				if strings.Contains(result.Stdout, omit) {
-					t.Fatalf("Stdout unexpectedly contains %q: %q", omit, result.Stdout)
-				}
-			}
-			if got := result.Stderr; got != "" {
-				t.Fatalf("Stderr = %q, want empty", got)
-			}
+			assertVariantBuiltinStatus(t, script, tc.variant, tc.wantStatusBlock, tc.wantEnable, tc.omitEnable)
 		})
+	}
+}
+
+func assertVariantBuiltinStatus(t *testing.T, script string, variant shellvariant.ShellVariant, wantStatusBlock string, wantEnable, omitEnable []string) {
+	t.Helper()
+
+	session := newSession(t, &Config{})
+	result, err := session.Exec(context.Background(), &ExecutionRequest{
+		ShellVariant: variant,
+		Script:       script,
+	})
+	if err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if !strings.HasPrefix(result.Stdout, wantStatusBlock) {
+		t.Fatalf("Stdout prefix = %q, want prefix %q", result.Stdout, wantStatusBlock)
+	}
+	for _, want := range wantEnable {
+		if !strings.Contains(result.Stdout, want) {
+			t.Fatalf("Stdout missing %q: %q", want, result.Stdout)
+		}
+	}
+	for _, omit := range omitEnable {
+		if strings.Contains(result.Stdout, omit) {
+			t.Fatalf("Stdout unexpectedly contains %q: %q", omit, result.Stdout)
+		}
+	}
+	if got := result.Stderr; got != "" {
+		t.Fatalf("Stderr = %q, want empty", got)
 	}
 }

@@ -377,69 +377,30 @@ func runShufPreparedInput(ctx context.Context, inv *Invocation, writer *bufio.Wr
 }
 
 func shufRunByteSlice(ctx context.Context, inv *Invocation, writer *bufio.Writer, rng *shufRNGHandle, records [][]byte, opts *shufOptions, sep byte) error {
-	if opts.repeat {
-		if len(records) == 0 {
-			return exitf(inv, 1, "shuf: no lines to repeat")
-		}
-		if !opts.headCountSet {
-			for {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				index, err := shufChooseIndex(rng, len(records))
-				if err != nil {
-					return shufRandomExecutionError(inv, opts.randomSource, err)
-				}
-				if err := shufWriteBytesRecord(writer, records[index], sep); err != nil {
-					if shufBrokenPipe(err) {
-						return nil
-					}
-					return &ExitError{Code: 1, Err: err}
-				}
-			}
-		}
-		for i := uint64(0); i < opts.headCount; i++ {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			index, err := shufChooseIndex(rng, len(records))
-			if err != nil {
-				return shufRandomExecutionError(inv, opts.randomSource, err)
-			}
-			if err := shufWriteBytesRecord(writer, records[index], sep); err != nil {
-				if shufBrokenPipe(err) {
-					return nil
-				}
-				return &ExitError{Code: 1, Err: err}
-			}
-		}
-		return nil
-	}
-
-	limit := len(records)
-	if opts.headCountSet && opts.headCount < uint64(limit) {
-		limit = int(opts.headCount)
-	}
-	if err := shufShufflePrefix(records, limit, rng); err != nil {
-		return shufRandomExecutionError(inv, opts.randomSource, err)
-	}
-	for i := 0; i < limit; i++ {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := shufWriteBytesRecord(writer, records[i], sep); err != nil {
-			if shufBrokenPipe(err) {
-				return nil
-			}
-			return &ExitError{Code: 1, Err: err}
-		}
-	}
-	return nil
+	return shufRunSlice(
+		ctx,
+		inv,
+		rng,
+		records,
+		opts,
+		func(records [][]byte, index int) error { return shufWriteBytesRecord(writer, records[index], sep) },
+	)
 }
 
 func shufRunStringSlice(ctx context.Context, inv *Invocation, writer *bufio.Writer, rng *shufRNGHandle, args []string, opts *shufOptions, sep byte) error {
+	return shufRunSlice(
+		ctx,
+		inv,
+		rng,
+		args,
+		opts,
+		func(args []string, index int) error { return shufWriteStringRecord(writer, args[index], sep) },
+	)
+}
+
+func shufRunSlice[T any](ctx context.Context, inv *Invocation, rng *shufRNGHandle, items []T, opts *shufOptions, write func([]T, int) error) error {
 	if opts.repeat {
-		if len(args) == 0 {
+		if len(items) == 0 {
 			return exitf(inv, 1, "shuf: no lines to repeat")
 		}
 		if !opts.headCountSet {
@@ -447,11 +408,11 @@ func shufRunStringSlice(ctx context.Context, inv *Invocation, writer *bufio.Writ
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				index, err := shufChooseIndex(rng, len(args))
+				index, err := shufChooseIndex(rng, len(items))
 				if err != nil {
 					return shufRandomExecutionError(inv, opts.randomSource, err)
 				}
-				if err := shufWriteStringRecord(writer, args[index], sep); err != nil {
+				if err := write(items, index); err != nil {
 					if shufBrokenPipe(err) {
 						return nil
 					}
@@ -463,11 +424,11 @@ func shufRunStringSlice(ctx context.Context, inv *Invocation, writer *bufio.Writ
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			index, err := shufChooseIndex(rng, len(args))
+			index, err := shufChooseIndex(rng, len(items))
 			if err != nil {
 				return shufRandomExecutionError(inv, opts.randomSource, err)
 			}
-			if err := shufWriteStringRecord(writer, args[index], sep); err != nil {
+			if err := write(items, index); err != nil {
 				if shufBrokenPipe(err) {
 					return nil
 				}
@@ -477,18 +438,18 @@ func shufRunStringSlice(ctx context.Context, inv *Invocation, writer *bufio.Writ
 		return nil
 	}
 
-	limit := len(args)
+	limit := len(items)
 	if opts.headCountSet && opts.headCount < uint64(limit) {
 		limit = int(opts.headCount)
 	}
-	if err := shufShufflePrefix(args, limit, rng); err != nil {
+	if err := shufShufflePrefix(items, limit, rng); err != nil {
 		return shufRandomExecutionError(inv, opts.randomSource, err)
 	}
 	for i := 0; i < limit; i++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := shufWriteStringRecord(writer, args[i], sep); err != nil {
+		if err := write(items, i); err != nil {
 			if shufBrokenPipe(err) {
 				return nil
 			}

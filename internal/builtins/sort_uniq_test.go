@@ -602,31 +602,10 @@ func TestSortRejectsInvalidFieldSeparators(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "printf 'a\\n' > /tmp/in.txt\nsort -t '' /tmp/in.txt\n",
+	runStderrContainsCases(t, rt, []stderrContainsCase{
+		{name: "empty separator", script: "printf 'a\\n' > /tmp/in.txt\nsort -t '' /tmp/in.txt\n", wantCode: 2, wantStderr: "empty tab"},
+		{name: "multi-character separator", script: "printf 'a::1\\n' > /tmp/in.txt\nsort -t '::' /tmp/in.txt\n", wantCode: 2, wantStderr: "multi-character tab '::'"},
 	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.ExitCode != 2 {
-		t.Fatalf("ExitCode = %d, want 2; stderr=%q", result.ExitCode, result.Stderr)
-	}
-	if !strings.Contains(result.Stderr, "empty tab") {
-		t.Fatalf("Stderr = %q, want empty-tab error", result.Stderr)
-	}
-
-	result, err = rt.Run(context.Background(), &ExecutionRequest{
-		Script: "printf 'a::1\\n' > /tmp/in.txt\nsort -t '::' /tmp/in.txt\n",
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if result.ExitCode != 2 {
-		t.Fatalf("ExitCode = %d, want 2; stderr=%q", result.ExitCode, result.Stderr)
-	}
-	if !strings.Contains(result.Stderr, "multi-character tab '::'") {
-		t.Fatalf("Stderr = %q, want multi-character separator error", result.Stderr)
-	}
 }
 
 func TestUniqSupportsCountsAndAdjacentRuns(t *testing.T) {

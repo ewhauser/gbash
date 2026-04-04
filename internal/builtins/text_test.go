@@ -648,31 +648,10 @@ func TestWCRejectsFiles0FromConflictsAndBadNames(t *testing.T) {
 	t.Parallel()
 	rt := newRuntime(t, &Config{})
 
-	conflict, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "wc --files0-from=- file\n",
+	runStderrContainsCases(t, rt, []stderrContainsCase{
+		{name: "conflict", script: "wc --files0-from=- file\n", wantCode: 1, wantStderr: "file operands cannot be combined with --files0-from"},
+		{name: "zero-length name", script: "printf '\\0/tmp/a.txt\\0' | wc --files0-from=-\n", wantCode: 1, wantStderr: "invalid zero-length file name"},
 	})
-	if err != nil {
-		t.Fatalf("Run(conflict) error = %v", err)
-	}
-	if conflict.ExitCode != 1 {
-		t.Fatalf("ExitCode = %d, want 1; stderr=%q", conflict.ExitCode, conflict.Stderr)
-	}
-	if !strings.Contains(conflict.Stderr, "file operands cannot be combined with --files0-from") {
-		t.Fatalf("Stderr = %q, want files0-from conflict", conflict.Stderr)
-	}
-
-	invalid, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "printf '\\0/tmp/a.txt\\0' | wc --files0-from=-\n",
-	})
-	if err != nil {
-		t.Fatalf("Run(invalid) error = %v", err)
-	}
-	if invalid.ExitCode != 1 {
-		t.Fatalf("ExitCode = %d, want 1; stderr=%q", invalid.ExitCode, invalid.Stderr)
-	}
-	if !strings.Contains(invalid.Stderr, "invalid zero-length file name") {
-		t.Fatalf("Stderr = %q, want zero-length filename error", invalid.Stderr)
-	}
 }
 
 func TestWCFiles0FromMatchesGNUEmptyInvalidAndQuotedNames(t *testing.T) {
@@ -1016,11 +995,7 @@ func TestCatSupportsNumberFlag(t *testing.T) {
 
 func TestColumnSupportsTableModeWithShortAndLongFlags(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name   string
-		script string
-		want   string
-	}{
+	tests := []sessionStdoutCase{
 		{
 			name:   "short",
 			script: "printf 'short long\\nlonger x\\n' | column -t\n",
@@ -1033,23 +1008,7 @@ func TestColumnSupportsTableModeWithShortAndLongFlags(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			session := newSession(t, &Config{})
-
-			result := mustExecSession(t, session, tc.script)
-			if result.ExitCode != 0 {
-				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
-			}
-			if got := result.Stdout; got != tc.want {
-				t.Fatalf("Stdout = %q, want %q", got, tc.want)
-			}
-			if result.Stderr != "" {
-				t.Fatalf("Stderr = %q, want empty", result.Stderr)
-			}
-		})
-	}
+	runSessionStdoutCases(t, tests)
 }
 
 func TestColumnSupportsSeparatorsOutputDelimitersAndNoMerge(t *testing.T) {
@@ -1070,11 +1029,7 @@ func TestColumnSupportsSeparatorsOutputDelimitersAndNoMerge(t *testing.T) {
 
 func TestColumnFillModeSupportsWidthAndInvalidParseIntBehavior(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name   string
-		script string
-		want   string
-	}{
+	tests := []sessionStdoutCase{
 		{
 			name:   "width",
 			script: "printf 'a\\nb\\nc\\nd\\ne\\nf\\n' | column -c20\n",
@@ -1087,23 +1042,7 @@ func TestColumnFillModeSupportsWidthAndInvalidParseIntBehavior(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			session := newSession(t, &Config{})
-
-			result := mustExecSession(t, session, tc.script)
-			if result.ExitCode != 0 {
-				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
-			}
-			if got := result.Stdout; got != tc.want {
-				t.Fatalf("Stdout = %q, want %q", got, tc.want)
-			}
-			if result.Stderr != "" {
-				t.Fatalf("Stderr = %q, want empty", result.Stderr)
-			}
-		})
-	}
+	runSessionStdoutCases(t, tests)
 }
 
 func TestColumnSupportsDashMultipleFilesAndWhitespaceOnlyInput(t *testing.T) {

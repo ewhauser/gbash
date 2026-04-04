@@ -2229,25 +2229,8 @@ func (cfg *Config) quotedElemFields(pe *syntax.ParamExp) ([]string, bool, error)
 							return nil, false, nil
 						}
 					}
-					switch pe.Exp.Op {
-					case syntax.AlternateUnset, syntax.AlternateUnsetOrNull:
-						if pe.Exp.Op == syntax.AlternateUnset && hasElems || pe.Exp.Op == syntax.AlternateUnsetOrNull && !null {
-							word, err := cfg.quotedParamWord(pe.Exp.Word)
-							return word, true, err
-						}
-					case syntax.DefaultUnset, syntax.DefaultUnsetOrNull:
-						if pe.Exp.Op == syntax.DefaultUnset && !hasElems || pe.Exp.Op == syntax.DefaultUnsetOrNull && null {
-							word, err := cfg.quotedParamWord(pe.Exp.Word)
-							return word, true, err
-						}
-					case syntax.ErrorUnset, syntax.ErrorUnsetOrNull:
-						if pe.Exp.Op == syntax.ErrorUnset && !hasElems || pe.Exp.Op == syntax.ErrorUnsetOrNull && null {
-							return nil, false, nil
-						}
-					case syntax.AssignUnset, syntax.AssignUnsetOrNull:
-						if pe.Exp.Op == syntax.AssignUnset && !hasElems || pe.Exp.Op == syntax.AssignUnsetOrNull && null {
-							return nil, false, nil
-						}
+					if fields, handled, err := cfg.quotedArrayExpansionWord(pe.Exp, hasElems, null); handled || err != nil {
+						return fields, handled, err
 					}
 					targetState, err := cfg.paramExpState(target)
 					if err != nil {
@@ -2301,25 +2284,8 @@ func (cfg *Config) quotedElemFields(pe *syntax.ParamExp) ([]string, bool, error)
 	hasElems := len(elems) > 0
 	null := arrayExpansionNull(pe, fields, elems)
 	if pe.Exp != nil {
-		switch pe.Exp.Op {
-		case syntax.AlternateUnset, syntax.AlternateUnsetOrNull:
-			if pe.Exp.Op == syntax.AlternateUnset && hasElems || pe.Exp.Op == syntax.AlternateUnsetOrNull && !null {
-				word, err := cfg.quotedParamWord(pe.Exp.Word)
-				return word, true, err
-			}
-		case syntax.DefaultUnset, syntax.DefaultUnsetOrNull:
-			if pe.Exp.Op == syntax.DefaultUnset && !hasElems || pe.Exp.Op == syntax.DefaultUnsetOrNull && null {
-				word, err := cfg.quotedParamWord(pe.Exp.Word)
-				return word, true, err
-			}
-		case syntax.ErrorUnset, syntax.ErrorUnsetOrNull:
-			if pe.Exp.Op == syntax.ErrorUnset && !hasElems || pe.Exp.Op == syntax.ErrorUnsetOrNull && null {
-				return nil, false, nil
-			}
-		case syntax.AssignUnset, syntax.AssignUnsetOrNull:
-			if pe.Exp.Op == syntax.AssignUnset && !hasElems || pe.Exp.Op == syntax.AssignUnsetOrNull && null {
-				return nil, false, nil
-			}
+		if word, handled, err := cfg.quotedArrayExpansionWord(pe.Exp, hasElems, null); handled || err != nil {
+			return word, handled, err
 		}
 	}
 	state, err := cfg.paramExpState(pe)
@@ -2334,6 +2300,33 @@ func (cfg *Config) quotedElemFields(pe *syntax.ParamExp) ([]string, bool, error)
 		return []string{cfg.ifsJoin(elems)}, true, nil
 	}
 	return elems, true, nil
+}
+
+func (cfg *Config) quotedArrayExpansionWord(exp *syntax.Expansion, hasElems, null bool) ([]string, bool, error) {
+	if exp == nil {
+		return nil, false, nil
+	}
+	switch exp.Op {
+	case syntax.AlternateUnset, syntax.AlternateUnsetOrNull:
+		if exp.Op == syntax.AlternateUnset && hasElems || exp.Op == syntax.AlternateUnsetOrNull && !null {
+			word, err := cfg.quotedParamWord(exp.Word)
+			return word, true, err
+		}
+	case syntax.DefaultUnset, syntax.DefaultUnsetOrNull:
+		if exp.Op == syntax.DefaultUnset && !hasElems || exp.Op == syntax.DefaultUnsetOrNull && null {
+			word, err := cfg.quotedParamWord(exp.Word)
+			return word, true, err
+		}
+	case syntax.ErrorUnset, syntax.ErrorUnsetOrNull:
+		if exp.Op == syntax.ErrorUnset && !hasElems || exp.Op == syntax.ErrorUnsetOrNull && null {
+			return nil, true, nil
+		}
+	case syntax.AssignUnset, syntax.AssignUnsetOrNull:
+		if exp.Op == syntax.AssignUnset && !hasElems || exp.Op == syntax.AssignUnsetOrNull && null {
+			return nil, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 func quotedIndirectArrayTarget(pe *syntax.ParamExp) bool {
