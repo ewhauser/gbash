@@ -1,7 +1,7 @@
 # gbash
 
 Status: Draft v0.1
-Last updated: 2026-03-30
+Last updated: 2026-04-04
 
 ## 1. Purpose
 
@@ -178,6 +178,8 @@ The normal CLI entrypoint also accepts filesystem selection flags before the she
 - `gbash --inherit-env <vars> ...` copies the named host environment variables into the runtime base environment without otherwise widening the default environment surface; the value is a comma-separated list of shell variable names
 - `gbash --copy-script ...` stages the positional host regular file into the sandbox before execution instead of requiring it to already exist in the sandbox namespace
 - `gbash --json ...` emits one JSON object for a non-interactive execution with `stdout`, `stderr`, `exitCode`, truncation flags, timing metadata, and optional trace metadata when tracing is enabled
+- `gbash --dump-ast ...` parses the selected non-interactive input and writes the typed JSON `shell/syntax` AST to stdout without executing the script
+- `gbash --dump-ast --detect ...` chooses the AST parser variant from a leading shebang first, then a positional file extension for file-backed inputs, and otherwise falls back to `bash`; `--detect` is not a standalone reporting mode
 - `gbash --server --socket <path>` serves a long-lived JSON-RPC protocol over a Unix domain socket instead of executing a script
 - `gbash --server --listen <host:port>` serves the same protocol over an explicit loopback TCP listener instead of executing a script
 - `gbash --session-ttl <duration>` controls how long idle server sessions survive without active work
