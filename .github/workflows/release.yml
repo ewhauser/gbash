@@ -26,6 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       should_publish: ${{ steps.context.outputs.should_publish }}
       version: ${{ steps.context.outputs.version }}
@@ -52,7 +53,7 @@ jobs:
           elif [[ "${EVENT_NAME}" == "push" ]]; then
             # Look up the merged PR associated with this push commit.
             pr_json=$(gh api "repos/${REPOSITORY}/commits/${COMMIT_SHA}/pulls" \
-              --jq '[.[] | select(.merged_at != null and .base.ref == "main")] | .[0] // empty' || true)
+              --jq '[.[] | select(.merged_at != null and .base.ref == "main")] | .[0] // empty')
 
             if [[ -n "${pr_json}" ]]; then
               pr_head_repo=$(echo "${pr_json}" | jq -r '.head.repo.full_name')
