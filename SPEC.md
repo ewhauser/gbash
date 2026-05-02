@@ -731,6 +731,7 @@ Important properties:
 - the runtime may reserve a small synthetic namespace such as `/dev/null`, `/dev/urandom`, and `/dev/zero` above any backend so shell-visible device behavior stays consistent across in-memory and host-backed filesystems
 - host-backed filesystems must still satisfy policy checks and must never imply host command execution
 - a read-write host-backed filesystem may be enabled explicitly for external test harnesses or advanced embedding, but it is not the default runtime backend
+- host-backed filesystem mutations that create entries, including named pipes, must perform the final host operation relative to a resolved sandbox-confined directory handle rather than reusing a post-check absolute host path
 - shell redirects and command file access share the same filesystem view
 - symlink support is optional and must default to the safer behavior when policy is ambiguous
 - for backends without symlink creation/traversal support, `Lstat` behaves like `Stat`, `Readlink` fails for non-symlinks, and `Realpath` resolves only existing virtual paths
@@ -815,7 +816,7 @@ The policy package should be able to answer three questions:
 2. may this builtin run?
 3. may this path be read or written?
 
-Network policy for the current runtime is enforced by the dedicated `network/` layer rather than by generic shell evaluation. Commands never receive host `http.Client` access directly; they only receive the runtime-owned sandboxed `network.Client`.
+Network policy for the current runtime is enforced by the dedicated `network/` layer rather than by generic shell evaluation. Commands never receive host `http.Client` access directly; they only receive the runtime-owned sandboxed `network.Client`. The default sandboxed HTTP client must not inherit host proxy environment variables, and private-range blocking must be enforced during the actual dial using the same resolver surface used by the preflight URL check.
 
 Path-policy enforcement rule for the current runtime:
 

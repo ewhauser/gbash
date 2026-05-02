@@ -334,15 +334,22 @@ func (h *ReadWriteFS) MkdirAll(_ context.Context, name string, perm stdfs.FileMo
 
 func (h *ReadWriteFS) Mkfifo(_ context.Context, name string, perm stdfs.FileMode) error {
 	abs := h.resolve(name)
-	target, err := h.resolveLeaf(abs)
+	root, resolved, err := openResolvedRoot(h.root, h.canonicalRoot, strings.TrimPrefix(abs, "/"), false, true)
 	if err != nil {
 		return h.pathError("mkfifo", abs, err)
 	}
+	defer func() { _ = root.Close() }()
+
+	parent, base, err := openResolvedParentFile(root, resolved.rel)
+	if err != nil {
+		return h.pathError("mkfifo", abs, err)
+	}
+	defer func() { _ = parent.Close() }()
 
 	if perm == 0 {
 		perm = 0o666
 	}
-	if err := syscall.Mkfifo(target, uint32(perm.Perm())); err != nil {
+	if err := mkfifoAt(parent, base, perm); err != nil {
 		return h.pathError("mkfifo", abs, err)
 	}
 	return nil
@@ -498,50 +505,6 @@ func (h *ReadWriteFS) moveOwnership(oldTarget, newTarget string) {
 }
 func (h *ReadWriteFS) resolve(name string) string {
 	return Resolve(h.Getwd(), name)
-}
-
-func (h *ReadWriteFS) resolveLeaf(abs string) (string, error) {
-	abs = Clean(abs)
-	if abs == "/" {
-		return h.canonicalRoot, nil
-	}
-
-	lexical := h.lexicalPath(abs)
-	parent := filepath.Dir(lexical)
-	missingParts := make([]string, 0, 4)
-	for {
-		canonicalParent, err := filepath.EvalSymlinks(parent)
-		if err == nil {
-			canonicalParent = filepath.Clean(canonicalParent)
-			if !withinHostRoot(canonicalParent, h.canonicalRoot) {
-				return "", stdfs.ErrPermission
-			}
-			target := canonicalParent
-			for i := len(missingParts) - 1; i >= 0; i-- {
-				target = filepath.Join(target, missingParts[i])
-			}
-			return filepath.Join(target, filepath.Base(lexical)), nil
-		}
-		if !os.IsNotExist(err) {
-			return "", err
-		}
-		if filepath.Clean(parent) == h.root {
-			if !withinHostRoot(h.canonicalRoot, h.canonicalRoot) {
-				return "", stdfs.ErrPermission
-			}
-			target := h.canonicalRoot
-			for i := len(missingParts) - 1; i >= 0; i-- {
-				target = filepath.Join(target, missingParts[i])
-			}
-			return filepath.Join(target, filepath.Base(lexical)), nil
-		}
-		missingParts = append(missingParts, filepath.Base(parent))
-		next := filepath.Dir(parent)
-		if next == parent {
-			return "", err
-		}
-		parent = next
-	}
 }
 
 func (h *ReadWriteFS) lexicalPath(abs string) string {
