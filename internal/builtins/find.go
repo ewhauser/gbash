@@ -293,6 +293,9 @@ func (c *Find) walk(
 	}
 
 	shouldCollect, eval := shouldCollectFindNode(expr, matchCtx, depth, opts, hasExplicitPrint)
+	if followedTargetMissing && requirements.hasPrintfAction && requirements.needsPrintfMetadata {
+		shouldCollect = false
+	}
 	recordNode := func() error {
 		if requirements.hasPrintfAction && requirements.needsPrintfMetadata {
 			if _, err := ensureInfo(); err != nil {

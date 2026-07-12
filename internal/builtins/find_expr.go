@@ -142,9 +142,10 @@ type findEvalContext struct {
 }
 
 type findEvalResult struct {
-	matches bool
-	pruned  bool
-	printed bool
+	matches     bool
+	unavailable bool
+	pruned      bool
+	printed     bool
 }
 
 type findPrintData struct {

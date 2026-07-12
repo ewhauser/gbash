@@ -61,12 +61,12 @@ func evaluateFindExpr(expr findExpr, ctx *findEvalContext) findEvalResult {
 		return findEvalResult{}
 	case *findEmptyExpr:
 		if !ctx.metadataAvailable {
-			return findEvalResult{}
+			return findEvalResult{unavailable: true}
 		}
 		return findEvalResult{matches: ctx.isEmpty}
 	case *findMTimeExpr:
 		if !ctx.metadataAvailable {
-			return findEvalResult{}
+			return findEvalResult{unavailable: true}
 		}
 		ageDays := time.Since(ctx.mtime).Hours() / 24
 		switch e.comparison {
@@ -79,17 +79,17 @@ func evaluateFindExpr(expr findExpr, ctx *findEvalContext) findEvalResult {
 		}
 	case *findNewerExpr:
 		if !ctx.metadataAvailable {
-			return findEvalResult{}
+			return findEvalResult{unavailable: true}
 		}
 		return findEvalResult{matches: e.referenceReady && e.referenceFound && ctx.mtime.After(e.resolvedTime)}
 	case *findSizeExpr:
 		if !ctx.metadataAvailable {
-			return findEvalResult{}
+			return findEvalResult{unavailable: true}
 		}
 		return findEvalResult{matches: findSizeMatch(ctx.size, e)}
 	case *findPermExpr:
 		if !ctx.metadataAvailable {
-			return findEvalResult{}
+			return findEvalResult{unavailable: true}
 		}
 		fileMode := ctx.mode.Perm()
 		targetMode := e.mode.Perm()
@@ -109,17 +109,24 @@ func evaluateFindExpr(expr findExpr, ctx *findEvalContext) findEvalResult {
 		return findEvalResult{matches: true, printed: true}
 	case *findNotExpr:
 		inner := evaluateFindExpr(e.expr, ctx)
+		if inner.unavailable {
+			return inner
+		}
 		return findEvalResult{matches: !inner.matches, pruned: inner.pruned}
 	case *findAndExpr:
 		left := evaluateFindExpr(e.left, ctx)
+		if left.unavailable {
+			return left
+		}
 		if !left.matches {
 			return findEvalResult{matches: false, pruned: left.pruned}
 		}
 		right := evaluateFindExpr(e.right, ctx)
 		return findEvalResult{
-			matches: right.matches,
-			pruned:  left.pruned || right.pruned,
-			printed: left.printed || right.printed,
+			matches:     right.matches,
+			unavailable: right.unavailable,
+			pruned:      left.pruned || right.pruned,
+			printed:     left.printed || right.printed,
 		}
 	case *findOrExpr:
 		left := evaluateFindExpr(e.left, ctx)
@@ -127,10 +134,13 @@ func evaluateFindExpr(expr findExpr, ctx *findEvalContext) findEvalResult {
 			return left
 		}
 		right := evaluateFindExpr(e.right, ctx)
+		if right.matches {
+			return right
+		}
 		return findEvalResult{
-			matches: right.matches,
-			pruned:  left.pruned || right.pruned,
-			printed: right.printed,
+			unavailable: left.unavailable || right.unavailable,
+			pruned:      left.pruned || right.pruned,
+			printed:     right.printed,
 		}
 	default:
 		return findEvalResult{}

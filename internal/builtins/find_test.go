@@ -6,6 +6,7 @@ import (
 	stdfs "io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -40,19 +41,37 @@ func TestFindSkipsUnresolvableRelativeSymlinksDuringTraversal(t *testing.T) {
 		}),
 	})
 
-	result := mustExecSession(t, session,
-		"find /work -type f\n"+
-			"find /work -name dangling -print\n"+
-			"find /work -name dangling -o -size 4c\n",
-	)
+	result := mustExecSession(t, session, "find /work -type f\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
 	}
-	if got, want := result.Stdout, "/work/file.txt\n/work/dangling\n/work/file.txt\n/work/dangling\n"; got != want {
+	if got, want := result.Stdout, "/work/file.txt\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 	if result.Stderr != "" {
 		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+
+	result = mustExecSession(t, session, "find /work -name dangling -print\n")
+	if got, want := result.Stdout, "/work/dangling\n"; got != want {
+		t.Fatalf("name Stdout = %q, want %q", got, want)
+	}
+
+	result = mustExecSession(t, session, "find /work -name dangling -o -size 4c\n")
+	lines := strings.Fields(result.Stdout)
+	sort.Strings(lines)
+	if got, want := strings.Join(lines, "\n"), "/work/dangling\n/work/file.txt"; got != want {
+		t.Fatalf("or Stdout lines = %q, want %q", got, want)
+	}
+
+	result = mustExecSession(t, session, "find /work -name dangling ! -size 4c -print\n")
+	if result.Stdout != "" {
+		t.Fatalf("negated metadata Stdout = %q, want empty", result.Stdout)
+	}
+
+	result = mustExecSession(t, session, "find /work -mindepth 1 -printf '%p %s\\n'\n")
+	if got, want := result.Stdout, "/work/file.txt 4\n"; got != want {
+		t.Fatalf("printf Stdout = %q, want %q", got, want)
 	}
 
 	if err := os.Symlink("../../outside.txt", filepath.Join(work, "escaping")); err != nil {
