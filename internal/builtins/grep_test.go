@@ -278,3 +278,33 @@ func TestGrepRecursiveExcludeSkipsBrokenSymlink(t *testing.T) {
 		t.Fatalf("Stderr = %q, want empty", result.Stderr)
 	}
 }
+
+func TestGrepRecursiveFileGlobsDoNotFilterSymlinkedDirectories(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	if err := session.FileSystem().MkdirAll(context.Background(), "/tmp/target", 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	writeSessionFile(t, session, "/tmp/target/keep.go", []byte("needle\n"))
+	if err := session.FileSystem().Symlink(context.Background(), "target", "/tmp/link_to_tree"); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	result := mustExecSession(t, session, "grep -rh --include='*.go' needle /tmp/link_to_tree\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "needle\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+}

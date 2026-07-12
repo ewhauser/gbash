@@ -850,11 +850,14 @@ func (c *Grep) enumerateRecursive(ctx context.Context, inv *Invocation, currentA
 
 	info := linfo
 	if linfo.Mode()&stdfs.ModeSymlink != 0 {
-		if !grepRecursiveFileIncluded(path.Base(currentAbs), opts) {
-			return nil
-		}
 		info, _, err = statPath(ctx, inv, currentAbs)
 		if err != nil {
+			// File globs do not apply to directories, so resolve a usable
+			// symlink before filtering it. If the target cannot be resolved,
+			// an excluded filename can still be skipped quietly.
+			if !grepRecursiveFileIncluded(path.Base(currentAbs), opts) {
+				return nil
+			}
 			if grepShouldPropagateError(err) {
 				return err
 			}
