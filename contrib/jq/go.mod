@@ -11,7 +11,7 @@ require (
 require (
 	github.com/itchyny/timefmt-go v0.1.7 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 )
 
