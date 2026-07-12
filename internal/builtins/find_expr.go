@@ -130,28 +130,32 @@ type findRequirements struct {
 }
 
 type findEvalContext struct {
-	displayPath string
-	name        string
-	isDir       bool
-	isEmpty     bool
-	mtime       time.Time
-	size        int64
-	mode        stdfs.FileMode
+	displayPath       string
+	name              string
+	metadataAvailable bool
+	isDir             bool
+	isFile            bool
+	isEmpty           bool
+	mtime             time.Time
+	size              int64
+	mode              stdfs.FileMode
 }
 
 type findEvalResult struct {
-	matches bool
-	pruned  bool
-	printed bool
+	matches     bool
+	unavailable bool
+	pruned      bool
+	printed     bool
 }
 
 type findPrintData struct {
-	path          string
-	name          string
-	size          int64
-	mtime         time.Time
-	mode          stdfs.FileMode
-	isDirectory   bool
-	depth         int
-	startingPoint string
+	path              string
+	name              string
+	size              int64
+	mtime             time.Time
+	mode              stdfs.FileMode
+	isDirectory       bool
+	depth             int
+	startingPoint     string
+	metadataAvailable bool
 }

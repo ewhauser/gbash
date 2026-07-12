@@ -2,6 +2,7 @@ package builtins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdfs "io/fs"
 	"path"
@@ -179,12 +180,16 @@ func (c *Find) walk(
 	name := findNodeName(rootArg, rootAbs, currentAbs, entryName, info)
 
 	followedIsDir := false
+	followedIsFile := false
 	followedIsDirKnown := false
+	followedTargetMissing := false
 	if info != nil {
 		followedIsDir = info.IsDir()
+		followedIsFile = info.Mode().IsRegular()
 		followedIsDirKnown = true
 	} else if currentEntry != nil && entryTypeKnown && !entryIsSymlink {
 		followedIsDir = entryIsDir
+		followedIsFile = currentEntry.Type().IsRegular()
 		followedIsDirKnown = true
 	}
 
@@ -198,6 +203,7 @@ func (c *Find) walk(
 		}
 		info = entryInfo
 		followedIsDir = info.IsDir()
+		followedIsFile = info.Mode().IsRegular()
 		followedIsDirKnown = true
 		return info, nil
 	}
@@ -205,10 +211,17 @@ func (c *Find) walk(
 	canDescend := !opts.hasMaxDepth || depth < opts.maxDepth
 	if !followedIsDirKnown {
 		if _, err := ensureInfo(); err != nil {
-			return err
+			// A dangling symlink has no followed target type, but it remains a
+			// traversal node so metadata-free predicates can still match it.
+			if entryIsSymlink && errors.Is(err, stdfs.ErrNotExist) {
+				followedIsDirKnown = true
+				followedTargetMissing = true
+			} else {
+				return err
+			}
 		}
 	}
-	if requirements.exprNeedsSize || requirements.exprNeedsMTime || requirements.exprNeedsMode {
+	if !followedTargetMissing && (requirements.exprNeedsSize || requirements.exprNeedsMTime || requirements.exprNeedsMode) {
 		if _, err := ensureInfo(); err != nil {
 			return err
 		}
@@ -217,7 +230,7 @@ func (c *Find) walk(
 	var entries []stdfs.DirEntry
 	entriesLoaded := false
 	isEmpty := false
-	if requirements.needsEmpty {
+	if requirements.needsEmpty && !followedTargetMissing {
 		if followedIsDir {
 			if !entriesLoaded {
 				dirEntries, err := readDir(ctx, inv, currentAbs)
@@ -246,30 +259,32 @@ func (c *Find) walk(
 	}
 
 	matchCtx := &findEvalContext{
-		displayPath: displayPath,
-		name:        name,
+		displayPath:       displayPath,
+		name:              name,
+		metadataAvailable: !followedTargetMissing,
 	}
 	if requirements.needsType {
 		matchCtx.isDir = followedIsDir
+		matchCtx.isFile = followedIsFile
 	}
 	if requirements.needsEmpty {
 		matchCtx.isEmpty = isEmpty
 	}
-	if requirements.exprNeedsMTime {
+	if requirements.exprNeedsMTime && !followedTargetMissing {
 		fileInfo, err := ensureInfo()
 		if err != nil {
 			return err
 		}
 		matchCtx.mtime = fileInfo.ModTime()
 	}
-	if requirements.exprNeedsSize {
+	if requirements.exprNeedsSize && !followedTargetMissing {
 		fileInfo, err := ensureInfo()
 		if err != nil {
 			return err
 		}
 		matchCtx.size = fileInfo.Size()
 	}
-	if requirements.exprNeedsMode {
+	if requirements.exprNeedsMode && !followedTargetMissing {
 		fileInfo, err := ensureInfo()
 		if err != nil {
 			return err
@@ -279,12 +294,12 @@ func (c *Find) walk(
 
 	shouldCollect, eval := shouldCollectFindNode(expr, matchCtx, depth, opts, hasExplicitPrint)
 	recordNode := func() error {
-		if requirements.hasPrintfAction && requirements.needsPrintfMetadata {
+		if !followedTargetMissing && requirements.hasPrintfAction && requirements.needsPrintfMetadata {
 			if _, err := ensureInfo(); err != nil {
 				return err
 			}
 		}
-		recordFindNode(state, displayPath, name, info, depth, rootArg, requirements)
+		recordFindNode(state, displayPath, name, info, depth, rootArg, requirements, !followedTargetMissing)
 		return nil
 	}
 	if !opts.depthFirst && shouldCollect {
@@ -350,16 +365,17 @@ func shouldCollectFindNode(expr findExpr, matchCtx *findEvalContext, depth int, 
 	return result.matches, result
 }
 
-func recordFindNode(state *findTraversalState, displayPath, name string, info stdfs.FileInfo, depth int, rootArg string, requirements findRequirements) {
+func recordFindNode(state *findTraversalState, displayPath, name string, info stdfs.FileInfo, depth int, rootArg string, requirements findRequirements, metadataAvailable bool) {
 	state.results = append(state.results, displayPath)
 	if !requirements.hasPrintfAction {
 		return
 	}
 	state.printData = append(state.printData, findPrintData{
-		path:          displayPath,
-		name:          name,
-		depth:         depth,
-		startingPoint: rootArg,
+		path:              displayPath,
+		name:              name,
+		depth:             depth,
+		startingPoint:     rootArg,
+		metadataAvailable: metadataAvailable,
 	})
 	if !requirements.needsPrintfMetadata || info == nil {
 		return
@@ -384,7 +400,11 @@ func (c *Find) runActions(ctx context.Context, inv *Invocation, actions []findAc
 				return 0, err
 			}
 		case *findPrintfAction:
+			needsMetadata := analyzeFindPrintfRequirements(a.format).needsPrintfMetadata
 			for _, item := range state.printData {
+				if needsMetadata && !item.metadataAvailable {
+					continue
+				}
 				if _, err := fmt.Fprint(inv.Stdout, formatFindPrintf(a.format, &item)); err != nil {
 					return 0, &ExitError{Code: 1, Err: err}
 				}
