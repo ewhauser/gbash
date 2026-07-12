@@ -25,6 +25,7 @@
     "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
+    "@types/node": "^24",
     "typescript": "^5.9.3"
   }
 }
