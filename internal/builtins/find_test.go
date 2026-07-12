@@ -40,15 +40,29 @@ func TestFindSkipsUnresolvableRelativeSymlinksDuringTraversal(t *testing.T) {
 		}),
 	})
 
-	result := mustExecSession(t, session, "find /work -type f\n")
+	result := mustExecSession(t, session,
+		"find /work -type f\n"+
+			"find /work -name dangling -print\n",
+	)
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "/work/file.txt\n"; got != want {
+	if got, want := result.Stdout, "/work/file.txt\n/work/dangling\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 	if result.Stderr != "" {
 		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+
+	if err := os.Symlink("../../outside.txt", filepath.Join(work, "escaping")); err != nil {
+		t.Fatalf("Symlink(escaping) error = %v", err)
+	}
+	result = mustExecSession(t, session, "find /work -type f\n")
+	if result.ExitCode == 0 {
+		t.Fatalf("ExitCode = 0, want non-zero; stderr=%q", result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "permission denied") {
+		t.Fatalf("Stderr = %q, want permission diagnostic", result.Stderr)
 	}
 }
 

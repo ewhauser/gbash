@@ -53,7 +53,7 @@ func evaluateFindExpr(expr findExpr, ctx *findEvalContext) findEvalResult {
 		return findEvalResult{matches: e.regex.MatchString(ctx.displayPath)}
 	case *findTypeExpr:
 		if e.fileType == 'f' {
-			return findEvalResult{matches: !ctx.isDir}
+			return findEvalResult{matches: ctx.isFile}
 		}
 		if e.fileType == 'd' {
 			return findEvalResult{matches: ctx.isDir}

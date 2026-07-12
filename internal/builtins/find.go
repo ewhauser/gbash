@@ -180,12 +180,15 @@ func (c *Find) walk(
 	name := findNodeName(rootArg, rootAbs, currentAbs, entryName, info)
 
 	followedIsDir := false
+	followedIsFile := false
 	followedIsDirKnown := false
 	if info != nil {
 		followedIsDir = info.IsDir()
+		followedIsFile = info.Mode().IsRegular()
 		followedIsDirKnown = true
 	} else if currentEntry != nil && entryTypeKnown && !entryIsSymlink {
 		followedIsDir = entryIsDir
+		followedIsFile = currentEntry.Type().IsRegular()
 		followedIsDirKnown = true
 	}
 
@@ -199,6 +202,7 @@ func (c *Find) walk(
 		}
 		info = entryInfo
 		followedIsDir = info.IsDir()
+		followedIsFile = info.Mode().IsRegular()
 		followedIsDirKnown = true
 		return info, nil
 	}
@@ -206,14 +210,13 @@ func (c *Find) walk(
 	canDescend := !opts.hasMaxDepth || depth < opts.maxDepth
 	if !followedIsDirKnown {
 		if _, err := ensureInfo(); err != nil {
-			// Directory entries can contain dangling symlinks or symlinks whose
-			// targets are outside the sandbox. They cannot match the supported
-			// target types or be traversed, but they must not abort the rest of
-			// the directory walk.
-			if entryIsSymlink && (errors.Is(err, stdfs.ErrNotExist) || errors.Is(err, stdfs.ErrPermission)) {
-				return nil
+			// A dangling symlink has no followed target type, but it remains a
+			// traversal node so metadata-free predicates can still match it.
+			if entryIsSymlink && errors.Is(err, stdfs.ErrNotExist) {
+				followedIsDirKnown = true
+			} else {
+				return err
 			}
-			return err
 		}
 	}
 	if requirements.exprNeedsSize || requirements.exprNeedsMTime || requirements.exprNeedsMode {
@@ -259,6 +262,7 @@ func (c *Find) walk(
 	}
 	if requirements.needsType {
 		matchCtx.isDir = followedIsDir
+		matchCtx.isFile = followedIsFile
 	}
 	if requirements.needsEmpty {
 		matchCtx.isEmpty = isEmpty
