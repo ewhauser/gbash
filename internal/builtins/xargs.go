@@ -146,7 +146,9 @@ func (c *XArgs) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedC
 	if err != nil {
 		return err
 	}
-	if opts.maxProcs > 1 {
+	if opts.maxProcs == 0 {
+		xargsWarn(inv, "warning: -P 0 not supported in this build, running serially")
+	} else if opts.maxProcs > 1 {
 		xargsWarn(inv, "warning: -P N>1 not supported in this build, running serially")
 	}
 

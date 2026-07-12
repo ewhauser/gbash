@@ -277,13 +277,22 @@ func TestXArgsAcceptsMaxProcsFlag(t *testing.T) {
 func TestXArgsWarnsWhenParallelExecutionIsRequested(t *testing.T) {
 	t.Parallel()
 
-	for _, maxProcs := range []string{"-P2", "--max-procs=2"} {
-		t.Run(maxProcs, func(t *testing.T) {
+	tests := []struct {
+		maxProcs string
+		warning  string
+	}{
+		{maxProcs: "-P0", warning: "xargs: warning: -P 0 not supported in this build, running serially\n"},
+		{maxProcs: "--max-procs=0", warning: "xargs: warning: -P 0 not supported in this build, running serially\n"},
+		{maxProcs: "-P2", warning: "xargs: warning: -P N>1 not supported in this build, running serially\n"},
+		{maxProcs: "--max-procs=2", warning: "xargs: warning: -P N>1 not supported in this build, running serially\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.maxProcs, func(t *testing.T) {
 			t.Parallel()
 			rt := newRuntime(t, &Config{})
 
 			result, err := rt.Run(context.Background(), &ExecutionRequest{
-				Script: "printf 'one\\ntwo\\n' | xargs " + maxProcs + " -n1 echo\n",
+				Script: "printf 'one\\ntwo\\n' | xargs " + test.maxProcs + " -n1 echo\n",
 			})
 			if err != nil {
 				t.Fatalf("Run() error = %v", err)
@@ -294,7 +303,7 @@ func TestXArgsWarnsWhenParallelExecutionIsRequested(t *testing.T) {
 			if got, want := result.Stdout, "one\ntwo\n"; got != want {
 				t.Fatalf("Stdout = %q, want %q", got, want)
 			}
-			if got, want := result.Stderr, "xargs: warning: -P N>1 not supported in this build, running serially\n"; got != want {
+			if got, want := result.Stderr, test.warning; got != want {
 				t.Fatalf("Stderr = %q, want %q", got, want)
 			}
 		})
