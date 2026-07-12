@@ -81,6 +81,10 @@ func TestFindSkipsUnresolvableRelativeSymlinksDuringTraversal(t *testing.T) {
 	if got, want := result.Stdout, "/work/dangling\n"; got != want {
 		t.Fatalf("mixed actions Stdout = %q, want %q", got, want)
 	}
+	result = mustExecSession(t, session, "find /work -name dangling -printf '%p\\n' -printf '%s\\n'\n")
+	if got, want := result.Stdout, "/work/dangling\n"; got != want {
+		t.Fatalf("mixed printf Stdout = %q, want %q", got, want)
+	}
 
 	if err := os.Symlink("../../outside.txt", filepath.Join(work, "escaping")); err != nil {
 		t.Fatalf("Symlink(escaping) error = %v", err)

@@ -294,15 +294,12 @@ func (c *Find) walk(
 
 	shouldCollect, eval := shouldCollectFindNode(expr, matchCtx, depth, opts, hasExplicitPrint)
 	recordNode := func() error {
-		includePrintf := true
-		if followedTargetMissing && requirements.hasPrintfAction && requirements.needsPrintfMetadata {
-			includePrintf = false
-		} else if requirements.hasPrintfAction && requirements.needsPrintfMetadata {
+		if !followedTargetMissing && requirements.hasPrintfAction && requirements.needsPrintfMetadata {
 			if _, err := ensureInfo(); err != nil {
 				return err
 			}
 		}
-		recordFindNode(state, displayPath, name, info, depth, rootArg, requirements, includePrintf)
+		recordFindNode(state, displayPath, name, info, depth, rootArg, requirements, !followedTargetMissing)
 		return nil
 	}
 	if !opts.depthFirst && shouldCollect {
@@ -368,16 +365,17 @@ func shouldCollectFindNode(expr findExpr, matchCtx *findEvalContext, depth int, 
 	return result.matches, result
 }
 
-func recordFindNode(state *findTraversalState, displayPath, name string, info stdfs.FileInfo, depth int, rootArg string, requirements findRequirements, includePrintf bool) {
+func recordFindNode(state *findTraversalState, displayPath, name string, info stdfs.FileInfo, depth int, rootArg string, requirements findRequirements, metadataAvailable bool) {
 	state.results = append(state.results, displayPath)
-	if !requirements.hasPrintfAction || !includePrintf {
+	if !requirements.hasPrintfAction {
 		return
 	}
 	state.printData = append(state.printData, findPrintData{
-		path:          displayPath,
-		name:          name,
-		depth:         depth,
-		startingPoint: rootArg,
+		path:              displayPath,
+		name:              name,
+		depth:             depth,
+		startingPoint:     rootArg,
+		metadataAvailable: metadataAvailable,
 	})
 	if !requirements.needsPrintfMetadata || info == nil {
 		return
@@ -402,7 +400,11 @@ func (c *Find) runActions(ctx context.Context, inv *Invocation, actions []findAc
 				return 0, err
 			}
 		case *findPrintfAction:
+			needsMetadata := analyzeFindPrintfRequirements(a.format).needsPrintfMetadata
 			for _, item := range state.printData {
+				if needsMetadata && !item.metadataAvailable {
+					continue
+				}
 				if _, err := fmt.Fprint(inv.Stdout, formatFindPrintf(a.format, &item)); err != nil {
 					return 0, &ExitError{Code: 1, Err: err}
 				}

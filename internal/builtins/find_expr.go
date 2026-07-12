@@ -149,12 +149,13 @@ type findEvalResult struct {
 }
 
 type findPrintData struct {
-	path          string
-	name          string
-	size          int64
-	mtime         time.Time
-	mode          stdfs.FileMode
-	isDirectory   bool
-	depth         int
-	startingPoint string
+	path              string
+	name              string
+	size              int64
+	mtime             time.Time
+	mode              stdfs.FileMode
+	isDirectory       bool
+	depth             int
+	startingPoint     string
+	metadataAvailable bool
 }
