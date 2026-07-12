@@ -45,6 +45,11 @@ type grepPatternInput struct {
 	value string
 }
 
+type grepFileGlob struct {
+	pattern string
+	include bool
+}
+
 type grepOptions struct {
 	commandName       string
 	patternInputs     []grepPatternInput
@@ -67,8 +72,7 @@ type grepOptions struct {
 	maxCountSet       bool
 	beforeContext     int
 	afterContext      int
-	includeGlobs      []string
-	excludeGlobs      []string
+	fileGlobs         []grepFileGlob
 }
 
 type grepMatcher struct {
@@ -339,9 +343,14 @@ func parseGrepMatches(inv *Invocation, matches *ParsedCommand) (grepOptions, []s
 			}
 			setGrepContext(&opts, "-C", number)
 		case "include":
-			opts.includeGlobs = append(opts.includeGlobs, grepNextOptionValue(includeValues, &includeIndex))
+			opts.fileGlobs = append(opts.fileGlobs, grepFileGlob{
+				pattern: grepNextOptionValue(includeValues, &includeIndex),
+				include: true,
+			})
 		case "exclude":
-			opts.excludeGlobs = append(opts.excludeGlobs, grepNextOptionValue(excludeValues, &excludeIndex))
+			opts.fileGlobs = append(opts.fileGlobs, grepFileGlob{
+				pattern: grepNextOptionValue(excludeValues, &excludeIndex),
+			})
 		}
 	}
 
@@ -837,6 +846,10 @@ func (c *Grep) enumerateRecursive(ctx context.Context, inv *Invocation, currentA
 
 	info := linfo
 	if linfo.Mode()&stdfs.ModeSymlink != 0 {
+		included, matched := grepRecursiveFileDecision(path.Base(currentAbs), opts)
+		if matched && !included {
+			return nil
+		}
 		info, _, err = statPath(ctx, inv, currentAbs)
 		if err != nil {
 			if grepShouldPropagateError(err) {
@@ -885,23 +898,22 @@ func (c *Grep) enumerateRecursive(ctx context.Context, inv *Invocation, currentA
 }
 
 func grepRecursiveFileIncluded(name string, opts *grepOptions) bool {
-	if opts == nil {
-		return true
+	included, _ := grepRecursiveFileDecision(name, opts)
+	return included
+}
+
+func grepRecursiveFileDecision(name string, opts *grepOptions) (included, matched bool) {
+	if opts == nil || len(opts.fileGlobs) == 0 {
+		return true, false
 	}
-	for _, pattern := range opts.excludeGlobs {
-		if matched, _ := path.Match(pattern, name); matched {
-			return false
+	included = !opts.fileGlobs[0].include
+	for _, glob := range opts.fileGlobs {
+		if globMatched, _ := path.Match(glob.pattern, name); globMatched {
+			included = glob.include
+			matched = true
 		}
 	}
-	if len(opts.includeGlobs) == 0 {
-		return true
-	}
-	for _, pattern := range opts.includeGlobs {
-		if matched, _ := path.Match(pattern, name); matched {
-			return true
-		}
-	}
-	return false
+	return included, matched
 }
 
 var _ Command = (*Grep)(nil)
