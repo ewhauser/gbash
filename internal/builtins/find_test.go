@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	stdfs "io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +14,43 @@ import (
 	gbfs "github.com/ewhauser/gbash/fs"
 	"github.com/ewhauser/gbash/policy"
 )
+
+func TestFindSkipsUnresolvableRelativeSymlinksDuringTraversal(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	if err := os.Mkdir(work, 0o755); err != nil {
+		t.Fatalf("Mkdir(work) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "file.txt"), []byte("file"), 0o644); err != nil {
+		t.Fatalf("WriteFile(file.txt) error = %v", err)
+	}
+	if err := os.Symlink("missing.txt", filepath.Join(work, "dangling")); err != nil {
+		t.Fatalf("Symlink(dangling) error = %v", err)
+	}
+	session := newSession(t, &Config{
+		FileSystem: CustomFileSystem(gbfs.FactoryFunc(func(context.Context) (gbfs.FileSystem, error) {
+			return gbfs.NewReadWrite(gbfs.ReadWriteOptions{Root: root})
+		}), defaultHomeDir),
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/", "/usr/bin", "/bin"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	result := mustExecSession(t, session, "find /work -type f\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "/work/file.txt\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+}
 
 func TestFindSupportsCaseInsensitivePathAndRegexFlagsIsolated(t *testing.T) {
 	t.Parallel()

@@ -2,6 +2,7 @@ package builtins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdfs "io/fs"
 	"path"
@@ -205,6 +206,13 @@ func (c *Find) walk(
 	canDescend := !opts.hasMaxDepth || depth < opts.maxDepth
 	if !followedIsDirKnown {
 		if _, err := ensureInfo(); err != nil {
+			// Directory entries can contain dangling symlinks or symlinks whose
+			// targets are outside the sandbox. They cannot match the supported
+			// target types or be traversed, but they must not abort the rest of
+			// the directory walk.
+			if entryIsSymlink && (errors.Is(err, stdfs.ErrNotExist) || errors.Is(err, stdfs.ErrPermission)) {
+				return nil
+			}
 			return err
 		}
 	}
