@@ -229,7 +229,11 @@ func TestGrepRecursiveIncludeAndExcludeGlobs(t *testing.T) {
 			"grep -rl --include='*.txt' --include='keep.go' needle /tmp/tree\n" +
 			"grep -rl --exclude='*.go' --include='*.go' needle /tmp/tree\n" +
 			"grep -rl --exclude='*.bin' --include='*.txt' needle /tmp/tree\n" +
-			"grep -h --include='*.txt' needle /tmp/tree/root.go\n",
+			"grep -h --include='*.txt' needle /tmp/tree/root.go /tmp/tree/root.txt\n" +
+			"mkdir -p /tmp/classes\n" +
+			"printf 'needle\\n' > /tmp/classes/7.txt\n" +
+			"printf 'needle\\n' > /tmp/classes/a.txt\n" +
+			"grep -rl --include='[[:digit:]].txt' needle /tmp/classes\n",
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -237,7 +241,7 @@ func TestGrepRecursiveIncludeAndExcludeGlobs(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "needle\nneedle\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/root.go\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/sub/skip_test.go\n/tmp/tree/root.go\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/sub/skip_test.go\nneedle\n"; got != want {
+	if got, want := result.Stdout, "needle\nneedle\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/root.go\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/sub/skip_test.go\n/tmp/tree/root.go\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/sub/skip_test.go\nneedle\n/tmp/classes/7.txt\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 	if result.Stderr != "" {
@@ -263,11 +267,11 @@ func TestGrepRecursiveExcludeSkipsBrokenSymlink(t *testing.T) {
 		t.Fatalf("Symlink() error = %v", err)
 	}
 
-	result := mustExecSession(t, session, "grep -rh --exclude='*.log' needle /tmp/tree\n")
+	result := mustExecSession(t, session, "grep -rh --exclude='*.log' needle /tmp/tree\ngrep -rh --include='*.txt' needle /tmp/tree\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "needle\n"; got != want {
+	if got, want := result.Stdout, "needle\nneedle\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 	if result.Stderr != "" {

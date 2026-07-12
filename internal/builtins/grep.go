@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	shellpattern "github.com/ewhauser/gbash/internal/shellpattern"
 )
 
 type Grep struct{}
@@ -830,7 +832,9 @@ func (c *Grep) enumerateTopLevelPath(ctx context.Context, inv *Invocation, file 
 		return c.enumerateRecursive(ctx, inv, abs, opts, state, visitedDirs, records)
 	}
 
-	*records = append(*records, grepFileRecord{abs: abs})
+	if grepRecursiveFileIncluded(path.Base(abs), opts) {
+		*records = append(*records, grepFileRecord{abs: abs})
+	}
 	return nil
 }
 
@@ -846,8 +850,7 @@ func (c *Grep) enumerateRecursive(ctx context.Context, inv *Invocation, currentA
 
 	info := linfo
 	if linfo.Mode()&stdfs.ModeSymlink != 0 {
-		included, matched := grepRecursiveFileDecision(path.Base(currentAbs), opts)
-		if matched && !included {
+		if !grepRecursiveFileIncluded(path.Base(currentAbs), opts) {
 			return nil
 		}
 		info, _, err = statPath(ctx, inv, currentAbs)
@@ -898,22 +901,16 @@ func (c *Grep) enumerateRecursive(ctx context.Context, inv *Invocation, currentA
 }
 
 func grepRecursiveFileIncluded(name string, opts *grepOptions) bool {
-	included, _ := grepRecursiveFileDecision(name, opts)
-	return included
-}
-
-func grepRecursiveFileDecision(name string, opts *grepOptions) (included, matched bool) {
 	if opts == nil || len(opts.fileGlobs) == 0 {
-		return true, false
+		return true
 	}
-	included = !opts.fileGlobs[0].include
+	included := !opts.fileGlobs[0].include
 	for _, glob := range opts.fileGlobs {
-		if globMatched, _ := path.Match(glob.pattern, name); globMatched {
+		if globMatched, _ := shellpattern.Match(glob.pattern, name, shellpattern.EntireString|shellpattern.GlobLeadingDot); globMatched {
 			included = glob.include
-			matched = true
 		}
 	}
-	return included, matched
+	return included
 }
 
 var _ Command = (*Grep)(nil)
