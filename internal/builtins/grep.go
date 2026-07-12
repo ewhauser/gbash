@@ -67,6 +67,8 @@ type grepOptions struct {
 	maxCountSet       bool
 	beforeContext     int
 	afterContext      int
+	includeGlobs      []string
+	excludeGlobs      []string
 }
 
 type grepMatcher struct {
@@ -131,6 +133,8 @@ func (c *Grep) Spec() CommandSpec {
 			{Name: "after-context", Short: 'A', Arity: OptionRequiredValue, ValueName: "NUM", Help: "print NUM lines of trailing context"},
 			{Name: "before-context", Short: 'B', Arity: OptionRequiredValue, ValueName: "NUM", Help: "print NUM lines of leading context"},
 			{Name: "context", Short: 'C', Arity: OptionRequiredValue, ValueName: "NUM", Help: "print NUM lines of output context"},
+			{Name: "include", Long: "include", Arity: OptionRequiredValue, ValueName: "GLOB", Help: "search only files that match GLOB (a file pattern)"},
+			{Name: "exclude", Long: "exclude", Arity: OptionRequiredValue, ValueName: "GLOB", Help: "skip files that match GLOB"},
 		},
 		Args: []ArgSpec{
 			{Name: "arg", ValueName: "ARG", Repeatable: true},
@@ -252,6 +256,10 @@ func parseGrepMatches(inv *Invocation, matches *ParsedCommand) (grepOptions, []s
 	beforeIndex := 0
 	contextValues := matches.Values("context")
 	contextIndex := 0
+	includeValues := matches.Values("include")
+	includeIndex := 0
+	excludeValues := matches.Values("exclude")
+	excludeIndex := 0
 
 	for _, name := range matches.OptionOrder() {
 		switch name {
@@ -330,6 +338,10 @@ func parseGrepMatches(inv *Invocation, matches *ParsedCommand) (grepOptions, []s
 				return grepOptions{}, nil, exitf(inv, 2, "%s: invalid context length %q", grepCommandName(&opts), value)
 			}
 			setGrepContext(&opts, "-C", number)
+		case "include":
+			opts.includeGlobs = append(opts.includeGlobs, grepNextOptionValue(includeValues, &includeIndex))
+		case "exclude":
+			opts.excludeGlobs = append(opts.excludeGlobs, grepNextOptionValue(excludeValues, &excludeIndex))
 		}
 	}
 
@@ -836,7 +848,9 @@ func (c *Grep) enumerateRecursive(ctx context.Context, inv *Invocation, currentA
 	}
 
 	if !info.IsDir() {
-		*records = append(*records, grepFileRecord{abs: currentAbs})
+		if grepRecursiveFileIncluded(path.Base(currentAbs), opts) {
+			*records = append(*records, grepFileRecord{abs: currentAbs})
+		}
 		return nil
 	}
 
@@ -868,6 +882,26 @@ func (c *Grep) enumerateRecursive(ctx context.Context, inv *Invocation, currentA
 		}
 	}
 	return nil
+}
+
+func grepRecursiveFileIncluded(name string, opts *grepOptions) bool {
+	if opts == nil {
+		return true
+	}
+	for _, pattern := range opts.excludeGlobs {
+		if matched, _ := path.Match(pattern, name); matched {
+			return false
+		}
+	}
+	if len(opts.includeGlobs) == 0 {
+		return true
+	}
+	for _, pattern := range opts.includeGlobs {
+		if matched, _ := path.Match(pattern, name); matched {
+			return true
+		}
+	}
+	return false
 }
 
 var _ Command = (*Grep)(nil)

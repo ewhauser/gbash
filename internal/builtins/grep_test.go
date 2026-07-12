@@ -214,3 +214,31 @@ func TestGrepRecursiveSearchAvoidsSymlinkLoops(t *testing.T) {
 		t.Fatalf("Stderr = %q, want empty", result.Stderr)
 	}
 }
+
+func TestGrepRecursiveIncludeAndExcludeGlobs(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkdir -p /tmp/tree/sub\n" +
+			"printf 'needle\\n' > /tmp/tree/root.go\n" +
+			"printf 'needle\\n' > /tmp/tree/root.txt\n" +
+			"printf 'needle\\n' > /tmp/tree/sub/keep.go\n" +
+			"printf 'needle\\n' > /tmp/tree/sub/skip_test.go\n" +
+			"grep -rh --include='*.go' --exclude='*_test.go' needle /tmp/tree\n" +
+			"grep -rl --include='*.txt' --include='keep.go' needle /tmp/tree\n" +
+			"grep -h --include='*.txt' needle /tmp/tree/root.go\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "needle\nneedle\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\nneedle\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+}
