@@ -60,8 +60,14 @@ func evaluateFindExpr(expr findExpr, ctx *findEvalContext) findEvalResult {
 		}
 		return findEvalResult{}
 	case *findEmptyExpr:
+		if !ctx.metadataAvailable {
+			return findEvalResult{}
+		}
 		return findEvalResult{matches: ctx.isEmpty}
 	case *findMTimeExpr:
+		if !ctx.metadataAvailable {
+			return findEvalResult{}
+		}
 		ageDays := time.Since(ctx.mtime).Hours() / 24
 		switch e.comparison {
 		case findCompareMore:
@@ -72,10 +78,19 @@ func evaluateFindExpr(expr findExpr, ctx *findEvalContext) findEvalResult {
 			return findEvalResult{matches: int(math.Floor(ageDays)) == e.days}
 		}
 	case *findNewerExpr:
+		if !ctx.metadataAvailable {
+			return findEvalResult{}
+		}
 		return findEvalResult{matches: e.referenceReady && e.referenceFound && ctx.mtime.After(e.resolvedTime)}
 	case *findSizeExpr:
+		if !ctx.metadataAvailable {
+			return findEvalResult{}
+		}
 		return findEvalResult{matches: findSizeMatch(ctx.size, e)}
 	case *findPermExpr:
+		if !ctx.metadataAvailable {
+			return findEvalResult{}
+		}
 		fileMode := ctx.mode.Perm()
 		targetMode := e.mode.Perm()
 		switch e.matchType {

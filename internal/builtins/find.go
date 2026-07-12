@@ -182,6 +182,7 @@ func (c *Find) walk(
 	followedIsDir := false
 	followedIsFile := false
 	followedIsDirKnown := false
+	followedTargetMissing := false
 	if info != nil {
 		followedIsDir = info.IsDir()
 		followedIsFile = info.Mode().IsRegular()
@@ -214,12 +215,13 @@ func (c *Find) walk(
 			// traversal node so metadata-free predicates can still match it.
 			if entryIsSymlink && errors.Is(err, stdfs.ErrNotExist) {
 				followedIsDirKnown = true
+				followedTargetMissing = true
 			} else {
 				return err
 			}
 		}
 	}
-	if requirements.exprNeedsSize || requirements.exprNeedsMTime || requirements.exprNeedsMode {
+	if !followedTargetMissing && (requirements.exprNeedsSize || requirements.exprNeedsMTime || requirements.exprNeedsMode) {
 		if _, err := ensureInfo(); err != nil {
 			return err
 		}
@@ -228,7 +230,7 @@ func (c *Find) walk(
 	var entries []stdfs.DirEntry
 	entriesLoaded := false
 	isEmpty := false
-	if requirements.needsEmpty {
+	if requirements.needsEmpty && !followedTargetMissing {
 		if followedIsDir {
 			if !entriesLoaded {
 				dirEntries, err := readDir(ctx, inv, currentAbs)
@@ -257,8 +259,9 @@ func (c *Find) walk(
 	}
 
 	matchCtx := &findEvalContext{
-		displayPath: displayPath,
-		name:        name,
+		displayPath:       displayPath,
+		name:              name,
+		metadataAvailable: !followedTargetMissing,
 	}
 	if requirements.needsType {
 		matchCtx.isDir = followedIsDir
@@ -267,21 +270,21 @@ func (c *Find) walk(
 	if requirements.needsEmpty {
 		matchCtx.isEmpty = isEmpty
 	}
-	if requirements.exprNeedsMTime {
+	if requirements.exprNeedsMTime && !followedTargetMissing {
 		fileInfo, err := ensureInfo()
 		if err != nil {
 			return err
 		}
 		matchCtx.mtime = fileInfo.ModTime()
 	}
-	if requirements.exprNeedsSize {
+	if requirements.exprNeedsSize && !followedTargetMissing {
 		fileInfo, err := ensureInfo()
 		if err != nil {
 			return err
 		}
 		matchCtx.size = fileInfo.Size()
 	}
-	if requirements.exprNeedsMode {
+	if requirements.exprNeedsMode && !followedTargetMissing {
 		fileInfo, err := ensureInfo()
 		if err != nil {
 			return err

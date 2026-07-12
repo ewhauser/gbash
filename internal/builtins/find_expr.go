@@ -130,14 +130,15 @@ type findRequirements struct {
 }
 
 type findEvalContext struct {
-	displayPath string
-	name        string
-	isDir       bool
-	isFile      bool
-	isEmpty     bool
-	mtime       time.Time
-	size        int64
-	mode        stdfs.FileMode
+	displayPath       string
+	name              string
+	metadataAvailable bool
+	isDir             bool
+	isFile            bool
+	isEmpty           bool
+	mtime             time.Time
+	size              int64
+	mode              stdfs.FileMode
 }
 
 type findEvalResult struct {

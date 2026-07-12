@@ -42,12 +42,13 @@ func TestFindSkipsUnresolvableRelativeSymlinksDuringTraversal(t *testing.T) {
 
 	result := mustExecSession(t, session,
 		"find /work -type f\n"+
-			"find /work -name dangling -print\n",
+			"find /work -name dangling -print\n"+
+			"find /work -name dangling -o -size 4c\n",
 	)
 	if result.ExitCode != 0 {
-		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
 	}
-	if got, want := result.Stdout, "/work/file.txt\n/work/dangling\n"; got != want {
+	if got, want := result.Stdout, "/work/file.txt\n/work/dangling\n/work/file.txt\n/work/dangling\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 	if result.Stderr != "" {
