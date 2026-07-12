@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	shellpattern "github.com/ewhauser/gbash/internal/shellpattern"
 )
 
 type Grep struct{}
@@ -45,6 +47,11 @@ type grepPatternInput struct {
 	value string
 }
 
+type grepFileGlob struct {
+	pattern string
+	include bool
+}
+
 type grepOptions struct {
 	commandName       string
 	patternInputs     []grepPatternInput
@@ -67,6 +74,7 @@ type grepOptions struct {
 	maxCountSet       bool
 	beforeContext     int
 	afterContext      int
+	fileGlobs         []grepFileGlob
 }
 
 type grepMatcher struct {
@@ -131,6 +139,8 @@ func (c *Grep) Spec() CommandSpec {
 			{Name: "after-context", Short: 'A', Arity: OptionRequiredValue, ValueName: "NUM", Help: "print NUM lines of trailing context"},
 			{Name: "before-context", Short: 'B', Arity: OptionRequiredValue, ValueName: "NUM", Help: "print NUM lines of leading context"},
 			{Name: "context", Short: 'C', Arity: OptionRequiredValue, ValueName: "NUM", Help: "print NUM lines of output context"},
+			{Name: "include", Long: "include", Arity: OptionRequiredValue, ValueName: "GLOB", Help: "search only files that match GLOB (a file pattern)"},
+			{Name: "exclude", Long: "exclude", Arity: OptionRequiredValue, ValueName: "GLOB", Help: "skip files that match GLOB"},
 		},
 		Args: []ArgSpec{
 			{Name: "arg", ValueName: "ARG", Repeatable: true},
@@ -252,6 +262,10 @@ func parseGrepMatches(inv *Invocation, matches *ParsedCommand) (grepOptions, []s
 	beforeIndex := 0
 	contextValues := matches.Values("context")
 	contextIndex := 0
+	includeValues := matches.Values("include")
+	includeIndex := 0
+	excludeValues := matches.Values("exclude")
+	excludeIndex := 0
 
 	for _, name := range matches.OptionOrder() {
 		switch name {
@@ -330,6 +344,15 @@ func parseGrepMatches(inv *Invocation, matches *ParsedCommand) (grepOptions, []s
 				return grepOptions{}, nil, exitf(inv, 2, "%s: invalid context length %q", grepCommandName(&opts), value)
 			}
 			setGrepContext(&opts, "-C", number)
+		case "include":
+			opts.fileGlobs = append(opts.fileGlobs, grepFileGlob{
+				pattern: grepNextOptionValue(includeValues, &includeIndex),
+				include: true,
+			})
+		case "exclude":
+			opts.fileGlobs = append(opts.fileGlobs, grepFileGlob{
+				pattern: grepNextOptionValue(excludeValues, &excludeIndex),
+			})
 		}
 	}
 
@@ -809,7 +832,9 @@ func (c *Grep) enumerateTopLevelPath(ctx context.Context, inv *Invocation, file 
 		return c.enumerateRecursive(ctx, inv, abs, opts, state, visitedDirs, records)
 	}
 
-	*records = append(*records, grepFileRecord{abs: abs})
+	if grepRecursiveFileIncluded(file, opts) {
+		*records = append(*records, grepFileRecord{abs: abs})
+	}
 	return nil
 }
 
@@ -827,6 +852,12 @@ func (c *Grep) enumerateRecursive(ctx context.Context, inv *Invocation, currentA
 	if linfo.Mode()&stdfs.ModeSymlink != 0 {
 		info, _, err = statPath(ctx, inv, currentAbs)
 		if err != nil {
+			// File globs do not apply to directories, so resolve a usable
+			// symlink before filtering it. If the target cannot be resolved,
+			// an excluded filename can still be skipped quietly.
+			if !grepRecursiveFileIncluded(path.Base(currentAbs), opts) {
+				return nil
+			}
 			if grepShouldPropagateError(err) {
 				return err
 			}
@@ -836,7 +867,9 @@ func (c *Grep) enumerateRecursive(ctx context.Context, inv *Invocation, currentA
 	}
 
 	if !info.IsDir() {
-		*records = append(*records, grepFileRecord{abs: currentAbs})
+		if grepRecursiveFileIncluded(path.Base(currentAbs), opts) {
+			*records = append(*records, grepFileRecord{abs: currentAbs})
+		}
 		return nil
 	}
 
@@ -868,6 +901,43 @@ func (c *Grep) enumerateRecursive(ctx context.Context, inv *Invocation, currentA
 		}
 	}
 	return nil
+}
+
+func grepRecursiveFileIncluded(name string, opts *grepOptions) bool {
+	if opts == nil || len(opts.fileGlobs) == 0 {
+		return true
+	}
+	included := !opts.fileGlobs[0].include
+	for _, glob := range opts.fileGlobs {
+		globMatched := grepFileGlobMatch(glob.pattern, name)
+		if globMatched {
+			included = glob.include
+		}
+	}
+	return included
+}
+
+func grepFileGlobMatch(pattern, candidate string) bool {
+	if !strings.Contains(pattern, "/") {
+		candidate = path.Base(candidate)
+	}
+	for {
+		matched, err := shellpattern.Match(pattern, candidate, shellpattern.EntireString|shellpattern.GlobLeadingDot)
+		if err != nil {
+			return (err.Error() == "[ was not matched with a closing ]" || err.Error() == `\ at end of pattern`) && pattern == candidate
+		}
+		if matched {
+			return true
+		}
+		if !strings.Contains(pattern, "/") {
+			return false
+		}
+		slash := strings.IndexByte(candidate, '/')
+		if slash < 0 {
+			return false
+		}
+		candidate = candidate[slash+1:]
+	}
 }
 
 var _ Command = (*Grep)(nil)
