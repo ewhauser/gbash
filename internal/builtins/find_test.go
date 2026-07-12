@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	stdfs "io/fs"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +15,88 @@ import (
 	gbfs "github.com/ewhauser/gbash/fs"
 	"github.com/ewhauser/gbash/policy"
 )
+
+func TestFindSkipsUnresolvableRelativeSymlinksDuringTraversal(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	if err := os.Mkdir(work, 0o755); err != nil {
+		t.Fatalf("Mkdir(work) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "file.txt"), []byte("file"), 0o644); err != nil {
+		t.Fatalf("WriteFile(file.txt) error = %v", err)
+	}
+	if err := os.Symlink("missing.txt", filepath.Join(work, "dangling")); err != nil {
+		t.Fatalf("Symlink(dangling) error = %v", err)
+	}
+	session := newSession(t, &Config{
+		FileSystem: CustomFileSystem(gbfs.FactoryFunc(func(context.Context) (gbfs.FileSystem, error) {
+			return gbfs.NewReadWrite(gbfs.ReadWriteOptions{Root: root})
+		}), defaultHomeDir),
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/", "/usr/bin", "/bin"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	result := mustExecSession(t, session, "find /work -type f\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if got, want := result.Stdout, "/work/file.txt\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+
+	result = mustExecSession(t, session, "find /work -name dangling -print\n")
+	if got, want := result.Stdout, "/work/dangling\n"; got != want {
+		t.Fatalf("name Stdout = %q, want %q", got, want)
+	}
+
+	result = mustExecSession(t, session, "find /work -name dangling -o -size 4c\n")
+	lines := strings.Fields(result.Stdout)
+	sort.Strings(lines)
+	if got, want := strings.Join(lines, "\n"), "/work/dangling\n/work/file.txt"; got != want {
+		t.Fatalf("or Stdout lines = %q, want %q", got, want)
+	}
+
+	result = mustExecSession(t, session, "find /work -name dangling ! -size 4c -print\n")
+	if result.Stdout != "" {
+		t.Fatalf("negated metadata Stdout = %q, want empty", result.Stdout)
+	}
+	result = mustExecSession(t, session, "find /work -name dangling ! -type f -print\n")
+	if result.Stdout != "" {
+		t.Fatalf("negated type Stdout = %q, want empty", result.Stdout)
+	}
+
+	result = mustExecSession(t, session, "find /work -mindepth 1 -printf '%p %s\\n'\n")
+	if got, want := result.Stdout, "/work/file.txt 4\n"; got != want {
+		t.Fatalf("printf Stdout = %q, want %q", got, want)
+	}
+	result = mustExecSession(t, session, "find /work -name dangling -print -printf '%s\\n'\n")
+	if got, want := result.Stdout, "/work/dangling\n"; got != want {
+		t.Fatalf("mixed actions Stdout = %q, want %q", got, want)
+	}
+	result = mustExecSession(t, session, "find /work -name dangling -printf '%p\\n' -printf '%s\\n'\n")
+	if got, want := result.Stdout, "/work/dangling\n"; got != want {
+		t.Fatalf("mixed printf Stdout = %q, want %q", got, want)
+	}
+
+	if err := os.Symlink("../../outside.txt", filepath.Join(work, "escaping")); err != nil {
+		t.Fatalf("Symlink(escaping) error = %v", err)
+	}
+	result = mustExecSession(t, session, "find /work -type f\n")
+	if result.ExitCode == 0 {
+		t.Fatalf("ExitCode = 0, want non-zero; stderr=%q", result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "permission denied") {
+		t.Fatalf("Stderr = %q, want permission diagnostic", result.Stderr)
+	}
+}
 
 func TestFindSupportsCaseInsensitivePathAndRegexFlagsIsolated(t *testing.T) {
 	t.Parallel()
@@ -166,6 +251,11 @@ func TestFindSupportsPermMindepthDepthAndPrune(t *testing.T) {
 	}
 	if got, want := parts[5], "/prune\n/prune/keep\n/prune/keep/seen.txt\n"; got != want {
 		t.Fatalf("prune output = %q, want %q", got, want)
+	}
+
+	result = mustExecSession(t, session, "find /tree -prune -name never -o -print\n")
+	if got, want := result.Stdout, "/tree\n"; got != want {
+		t.Fatalf("prune state through or = %q, want %q", got, want)
 	}
 }
 
