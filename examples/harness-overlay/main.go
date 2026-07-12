@@ -52,6 +52,14 @@ type cliOptions struct {
 }
 
 func main() {
+	if _, err := parseCLIOptions(os.Stderr, os.Args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	workspaceDir, err := resolveWorkspaceDir()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -108,9 +116,14 @@ func runWithWorkspace(ctx context.Context, workspaceDir string, stdin io.Reader,
 		script = string(data)
 	}
 
+	var execStdin io.Reader
+	if opts.script != "" {
+		execStdin = stdin
+	}
 	result, err := session.Exec(ctx, &gbash.ExecutionRequest{
 		Name:    exampleName,
 		Script:  script,
+		Stdin:   execStdin,
 		WorkDir: gbash.DefaultWorkspaceMountPoint,
 	})
 	if err != nil {

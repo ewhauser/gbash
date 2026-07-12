@@ -42,6 +42,26 @@ func TestRunScriptHarnessHelp(t *testing.T) {
 	}
 }
 
+func TestRunScriptPassesStdinThrough(t *testing.T) {
+	t.Parallel()
+
+	workspaceDir := preparedWorkspaceForTests(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode, err := runWithWorkspace(context.Background(), workspaceDir, strings.NewReader("input\n"), &stdout, &stderr, []string{
+		"--script", "cat",
+	})
+	if err != nil {
+		t.Fatalf("runWithWorkspace() error = %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exitCode = %d, want 0; stderr=%q", exitCode, stderr.String())
+	}
+	if got, want := stdout.String(), "input\n"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
 func TestOfflineHarnessLoopWithMockProvider(t *testing.T) {
 	t.Parallel()
 
@@ -126,10 +146,36 @@ func TestUpdateHarnessScriptStagesPreparedWorkspace(t *testing.T) {
 	for _, relative := range []string{
 		".harness",
 		"AGENTS.md",
+		"bin/unlisted",
 	} {
 		if _, err := os.Stat(filepath.Join(workspaceDir, relative)); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatalf("Stat(%q) error = %v, want fs.ErrNotExist", relative, err)
 		}
+	}
+
+	branch := strings.TrimSpace(runGitCommand(t, upstreamDir, "branch", "--show-current"))
+	writeFile(t, filepath.Join(upstreamDir, "bin", "harness"), "#!/usr/bin/env bash\necho updated\n", 0o755)
+	runGitCommand(t, upstreamDir, "add", "bin/harness")
+	runGitCommand(t, upstreamDir, "commit", "-m", "update harness")
+	cmd = osexec.CommandContext(
+		t.Context(),
+		filepath.Join(exampleDir, "update-harness.sh"),
+		"--ref", branch,
+		"--cache-dir", cacheDir,
+	)
+	cmd.Dir = exampleDir
+	cmd.Env = append(os.Environ(), "HARNESS_UPSTREAM_REPO="+upstreamDir)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("update-harness.sh branch refresh error = %v\n%s", err, output)
+	}
+	workspaceDir = strings.TrimSpace(string(output))
+	got, err := os.ReadFile(filepath.Join(workspaceDir, "bin", "harness"))
+	if err != nil {
+		t.Fatalf("ReadFile(updated bin/harness) error = %v", err)
+	}
+	if want := "#!/usr/bin/env bash\necho updated\n"; string(got) != want {
+		t.Fatalf("updated bin/harness = %q, want %q", got, want)
 	}
 }
 
@@ -174,6 +220,7 @@ fi
 printf 'harness\n'
 `, 0o755)
 	writeFile(t, filepath.Join(upstreamDir, "bin", "hs"), "#!/usr/bin/env bash\necho hs\n", 0o755)
+	writeFile(t, filepath.Join(upstreamDir, "bin", "unlisted"), "#!/usr/bin/env bash\necho unlisted\n", 0o755)
 	writeFile(t, filepath.Join(upstreamDir, "plugins", "auth", "commands", "login"), "auth-login\n", 0o755)
 	writeFile(t, filepath.Join(upstreamDir, "plugins", "core", "tools", "bash"), "core-bash\n", 0o755)
 	writeFile(t, filepath.Join(upstreamDir, "plugins", "openai", "providers", "openai"), "openai-provider\n", 0o755)

@@ -67,7 +67,11 @@ else
 fi
 
 git -C "${clone_dir}" fetch --quiet --tags origin
-git -C "${clone_dir}" checkout --quiet "${ref}"
+checkout_ref="${ref}"
+if git -C "${clone_dir}" show-ref --verify --quiet "refs/remotes/origin/${ref}"; then
+  checkout_ref="refs/remotes/origin/${ref}"
+fi
+git -C "${clone_dir}" checkout --quiet --detach "${checkout_ref}"
 
 resolved_ref="$(git -C "${clone_dir}" rev-parse HEAD)"
 workspace_dir="${cache_dir}/workspaces/${resolved_ref}"
@@ -77,8 +81,9 @@ cleanup_tmp_workspace() {
 }
 trap cleanup_tmp_workspace EXIT
 
-mkdir -p "${tmp_workspace}" "${tmp_workspace}/plugins"
-cp -R "${clone_dir}/bin" "${tmp_workspace}/bin"
+mkdir -p "${tmp_workspace}/bin" "${tmp_workspace}/plugins"
+cp "${clone_dir}/bin/harness" "${tmp_workspace}/bin/harness"
+cp "${clone_dir}/bin/hs" "${tmp_workspace}/bin/hs"
 for plugin in auth core openai anthropic chatgpt skills subagents; do
   cp -R "${clone_dir}/plugins/${plugin}" "${tmp_workspace}/plugins/${plugin}"
 done

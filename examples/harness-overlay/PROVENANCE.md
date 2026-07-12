@@ -9,6 +9,7 @@
 Upstream artifacts staged into the prepared cache workspace by `update-harness.sh`:
 
 - `workspace/bin/harness`
+- `workspace/bin/hs`
 - `workspace/plugins/auth`
 - `workspace/plugins/core`
 - `workspace/plugins/openai`
