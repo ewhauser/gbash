@@ -11,7 +11,7 @@ require (
 require (
 	github.com/go-quicktest/qt v1.101.0
 	github.com/google/go-cmp v0.7.0
-	golang.org/x/sys v0.42.0
+	golang.org/x/sys v0.44.0
 )
 
 require (
