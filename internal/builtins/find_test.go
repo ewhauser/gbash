@@ -68,10 +68,18 @@ func TestFindSkipsUnresolvableRelativeSymlinksDuringTraversal(t *testing.T) {
 	if result.Stdout != "" {
 		t.Fatalf("negated metadata Stdout = %q, want empty", result.Stdout)
 	}
+	result = mustExecSession(t, session, "find /work -name dangling ! -type f -print\n")
+	if result.Stdout != "" {
+		t.Fatalf("negated type Stdout = %q, want empty", result.Stdout)
+	}
 
 	result = mustExecSession(t, session, "find /work -mindepth 1 -printf '%p %s\\n'\n")
 	if got, want := result.Stdout, "/work/file.txt 4\n"; got != want {
 		t.Fatalf("printf Stdout = %q, want %q", got, want)
+	}
+	result = mustExecSession(t, session, "find /work -name dangling -print -printf '%s\\n'\n")
+	if got, want := result.Stdout, "/work/dangling\n"; got != want {
+		t.Fatalf("mixed actions Stdout = %q, want %q", got, want)
 	}
 
 	if err := os.Symlink("../../outside.txt", filepath.Join(work, "escaping")); err != nil {
@@ -239,6 +247,11 @@ func TestFindSupportsPermMindepthDepthAndPrune(t *testing.T) {
 	}
 	if got, want := parts[5], "/prune\n/prune/keep\n/prune/keep/seen.txt\n"; got != want {
 		t.Fatalf("prune output = %q, want %q", got, want)
+	}
+
+	result = mustExecSession(t, session, "find /tree -prune -name never -o -print\n")
+	if got, want := result.Stdout, "/tree\n"; got != want {
+		t.Fatalf("prune state through or = %q, want %q", got, want)
 	}
 }
 

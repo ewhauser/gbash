@@ -293,16 +293,16 @@ func (c *Find) walk(
 	}
 
 	shouldCollect, eval := shouldCollectFindNode(expr, matchCtx, depth, opts, hasExplicitPrint)
-	if followedTargetMissing && requirements.hasPrintfAction && requirements.needsPrintfMetadata {
-		shouldCollect = false
-	}
 	recordNode := func() error {
-		if requirements.hasPrintfAction && requirements.needsPrintfMetadata {
+		includePrintf := true
+		if followedTargetMissing && requirements.hasPrintfAction && requirements.needsPrintfMetadata {
+			includePrintf = false
+		} else if requirements.hasPrintfAction && requirements.needsPrintfMetadata {
 			if _, err := ensureInfo(); err != nil {
 				return err
 			}
 		}
-		recordFindNode(state, displayPath, name, info, depth, rootArg, requirements)
+		recordFindNode(state, displayPath, name, info, depth, rootArg, requirements, includePrintf)
 		return nil
 	}
 	if !opts.depthFirst && shouldCollect {
@@ -368,9 +368,9 @@ func shouldCollectFindNode(expr findExpr, matchCtx *findEvalContext, depth int, 
 	return result.matches, result
 }
 
-func recordFindNode(state *findTraversalState, displayPath, name string, info stdfs.FileInfo, depth int, rootArg string, requirements findRequirements) {
+func recordFindNode(state *findTraversalState, displayPath, name string, info stdfs.FileInfo, depth int, rootArg string, requirements findRequirements, includePrintf bool) {
 	state.results = append(state.results, displayPath)
-	if !requirements.hasPrintfAction {
+	if !requirements.hasPrintfAction || !includePrintf {
 		return
 	}
 	state.printData = append(state.printData, findPrintData{

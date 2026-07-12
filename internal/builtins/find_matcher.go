@@ -52,6 +52,9 @@ func evaluateFindExpr(expr findExpr, ctx *findEvalContext) findEvalResult {
 	case *findRegexExpr:
 		return findEvalResult{matches: e.regex.MatchString(ctx.displayPath)}
 	case *findTypeExpr:
+		if !ctx.metadataAvailable {
+			return findEvalResult{unavailable: true}
+		}
 		if e.fileType == 'f' {
 			return findEvalResult{matches: ctx.isFile}
 		}
@@ -135,6 +138,7 @@ func evaluateFindExpr(expr findExpr, ctx *findEvalContext) findEvalResult {
 		}
 		right := evaluateFindExpr(e.right, ctx)
 		if right.matches {
+			right.pruned = left.pruned || right.pruned
 			return right
 		}
 		return findEvalResult{
