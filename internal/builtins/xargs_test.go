@@ -268,8 +268,54 @@ func TestXArgsAcceptsMaxProcsFlag(t *testing.T) {
 	if got, want := result.Stdout, "one\ntwo\nthree\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
-	if got, want := result.Stderr, "xargs: warning: options --max-args and --replace/-I/-i are mutually exclusive, ignoring previous --max-args value\n"; got != want {
+	if got, want := result.Stderr, "xargs: warning: options --max-args and --replace/-I/-i are mutually exclusive, ignoring previous --max-args value\n"+
+		"xargs: warning: -P N>1 not supported in this build, running serially\n"; got != want {
 		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
+func TestXArgsWarnsWhenParallelExecutionIsRequested(t *testing.T) {
+	t.Parallel()
+
+	for _, maxProcs := range []string{"-P2", "--max-procs=2"} {
+		t.Run(maxProcs, func(t *testing.T) {
+			t.Parallel()
+			rt := newRuntime(t, &Config{})
+
+			result, err := rt.Run(context.Background(), &ExecutionRequest{
+				Script: "printf 'one\\ntwo\\n' | xargs " + maxProcs + " -n1 echo\n",
+			})
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if result.ExitCode != 0 {
+				t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+			}
+			if got, want := result.Stdout, "one\ntwo\n"; got != want {
+				t.Fatalf("Stdout = %q, want %q", got, want)
+			}
+			if got, want := result.Stderr, "xargs: warning: -P N>1 not supported in this build, running serially\n"; got != want {
+				t.Fatalf("Stderr = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestXArgsShowLimitsReportsSerialMaximum(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf '' | xargs --show-limits --no-run-if-empty\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "Maximum parallelism (--max-procs must be no greater): 1\n") {
+		t.Fatalf("Stderr = %q, want serial maximum", result.Stderr)
 	}
 }
 
@@ -384,7 +430,7 @@ func TestXArgsSetsProcessSlotVar(t *testing.T) {
 	rt := newRuntime(t, &Config{})
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "printf 'one\\ntwo\\n' | xargs -n1 --process-slot-var=SLOT sh -c 'printf \"%s:%s\\\\n\" \"$SLOT\" \"$1\"' _\n",
+		Script: "printf 'one\\ntwo\\n' | xargs -P2 -n1 --process-slot-var=SLOT sh -c 'printf \"%s:%s\\\\n\" \"$SLOT\" \"$1\"' _\n",
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -394,5 +440,8 @@ func TestXArgsSetsProcessSlotVar(t *testing.T) {
 	}
 	if got, want := result.Stdout, "0:one\n0:two\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if got, want := result.Stderr, "xargs: warning: -P N>1 not supported in this build, running serially\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }

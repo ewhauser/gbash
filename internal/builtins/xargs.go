@@ -146,6 +146,9 @@ func (c *XArgs) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedC
 	if err != nil {
 		return err
 	}
+	if opts.maxProcs > 1 {
+		xargsWarn(inv, "warning: -P N>1 not supported in this build, running serially")
+	}
 
 	maxSupported := xargsMaxCharsLimit(inv.Env)
 	if opts.maxCharsSet && opts.maxChars > maxSupported {
@@ -492,7 +495,7 @@ func writeXArgsLimits(inv *Invocation, opts *xargsOptions) error {
 		xargsPosixArgMin,
 		usable,
 		opts.maxChars,
-		math.MaxInt32,
+		1,
 	)
 	return err
 }
@@ -882,9 +885,8 @@ func runXArgsTasksSequential(ctx context.Context, inv *Invocation, opts *xargsOp
 }
 
 func runXArgsTasksParallel(ctx context.Context, inv *Invocation, opts *xargsOptions, tasks []xargsTask) (int, error) {
-	// The current runtime subexec path is not safe for concurrent inv.Exec calls,
-	// so in the sandbox we preserve -P parsing and batching behavior but execute
-	// the resulting commands serially.
+	// RunParsed warns that the current runtime subexec path is not safe for
+	// concurrent inv.Exec calls. Preserve batching behavior and execute serially.
 	return runXArgsTasksSequential(ctx, inv, opts, tasks)
 }
 
