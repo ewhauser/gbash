@@ -4,20 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-)
-
-var (
-	preparedWorkspaceOnce sync.Once
-	preparedWorkspaceBase string
-	preparedWorkspaceErr  error
 )
 
 func TestRunScriptHarnessHelp(t *testing.T) {
@@ -76,24 +68,7 @@ func TestUpdateHarnessScriptStagesPreparedWorkspace(t *testing.T) {
 	t.Parallel()
 
 	exampleDir := copyTreeToTemp(t, mustExampleDir())
-	upstreamDir := filepath.Join(t.TempDir(), "upstream")
-	writeFile(t, filepath.Join(upstreamDir, "bin", "harness"), "#!/usr/bin/env bash\necho harness\n", 0o755)
-	writeFile(t, filepath.Join(upstreamDir, "bin", "hs"), "#!/usr/bin/env bash\necho hs\n", 0o755)
-	writeFile(t, filepath.Join(upstreamDir, "plugins", "auth", "commands", "login"), "auth-login\n", 0o755)
-	writeFile(t, filepath.Join(upstreamDir, "plugins", "core", "tools", "bash"), "core-bash\n", 0o755)
-	writeFile(t, filepath.Join(upstreamDir, "plugins", "openai", "providers", "openai"), "openai-provider\n", 0o755)
-	writeFile(t, filepath.Join(upstreamDir, "plugins", "anthropic", "providers", "anthropic"), "anthropic-provider\n", 0o755)
-	writeFile(t, filepath.Join(upstreamDir, "plugins", "chatgpt", "providers", "chatgpt"), "chatgpt-provider\n", 0o755)
-	writeFile(t, filepath.Join(upstreamDir, "plugins", "skills", "tools", "skills"), "skills-tool\n", 0o755)
-	writeFile(t, filepath.Join(upstreamDir, "plugins", "subagents", "tools", "subagents"), "subagents-tool\n", 0o755)
-	writeFile(t, filepath.Join(upstreamDir, "LICENSE"), "upstream license\n", 0o644)
-
-	runGitCommand(t, upstreamDir, "init")
-	runGitCommand(t, upstreamDir, "config", "user.name", "Test User")
-	runGitCommand(t, upstreamDir, "config", "user.email", "test@example.com")
-	runGitCommand(t, upstreamDir, "add", ".")
-	runGitCommand(t, upstreamDir, "commit", "-m", "initial")
-	ref := strings.TrimSpace(runGitCommand(t, upstreamDir, "rev-parse", "HEAD"))
+	upstreamDir, ref := createTestHarnessUpstream(t)
 
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	cmd := osexec.CommandContext(
@@ -161,37 +136,62 @@ func TestUpdateHarnessScriptStagesPreparedWorkspace(t *testing.T) {
 func preparedWorkspaceForTests(t *testing.T) string {
 	t.Helper()
 
-	preparedWorkspaceOnce.Do(func() {
-		cacheDir, err := os.MkdirTemp("", "harness-overlay-cache-")
-		if err != nil {
-			preparedWorkspaceErr = fmt.Errorf("create cache dir: %w", err)
-			return
-		}
-
-		cmd := osexec.CommandContext(
-			context.Background(),
-			filepath.Join(mustExampleDir(), "update-harness.sh"),
-			"--cache-dir", cacheDir,
-		)
-		cmd.Dir = mustExampleDir()
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			preparedWorkspaceErr = fmt.Errorf("prepare workspace: %w\n%s", err, output)
-			return
-		}
-
-		preparedWorkspaceBase = strings.TrimSpace(string(output))
-		if preparedWorkspaceBase == "" {
-			preparedWorkspaceErr = fmt.Errorf("prepare workspace returned an empty path")
-			return
-		}
-	})
-
-	if preparedWorkspaceErr != nil {
-		t.Fatalf("preparedWorkspaceForTests() error = %v", preparedWorkspaceErr)
+	upstreamDir, ref := createTestHarnessUpstream(t)
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	cmd := osexec.CommandContext(
+		t.Context(),
+		filepath.Join(mustExampleDir(), "update-harness.sh"),
+		"--ref", ref,
+		"--cache-dir", cacheDir,
+	)
+	cmd.Dir = mustExampleDir()
+	cmd.Env = append(os.Environ(), "HARNESS_UPSTREAM_REPO="+upstreamDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("prepare workspace error = %v\n%s", err, output)
 	}
+	workspaceDir := strings.TrimSpace(string(output))
+	if workspaceDir == "" {
+		t.Fatal("prepare workspace returned an empty path")
+	}
+	return workspaceDir
+}
 
-	return copyTreeToTemp(t, preparedWorkspaceBase)
+func createTestHarnessUpstream(t *testing.T) (string, string) {
+	t.Helper()
+
+	upstreamDir := filepath.Join(t.TempDir(), "upstream")
+	writeFile(t, filepath.Join(upstreamDir, "bin", "harness"), `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "help" ]]; then
+  printf 'harness\ntools (discovered):\n  bash\ncommands (discovered):\n  session\n'
+  exit 0
+fi
+if [[ "${HARNESS_PROVIDER:-}" == "mock" ]]; then
+  printf 'stored\n'
+  exit 0
+fi
+printf 'harness\n'
+`, 0o755)
+	writeFile(t, filepath.Join(upstreamDir, "bin", "hs"), "#!/usr/bin/env bash\necho hs\n", 0o755)
+	writeFile(t, filepath.Join(upstreamDir, "plugins", "auth", "commands", "login"), "auth-login\n", 0o755)
+	writeFile(t, filepath.Join(upstreamDir, "plugins", "core", "tools", "bash"), "core-bash\n", 0o755)
+	writeFile(t, filepath.Join(upstreamDir, "plugins", "openai", "providers", "openai"), "openai-provider\n", 0o755)
+	writeFile(t, filepath.Join(upstreamDir, "plugins", "openai", "hooks.d", "assemble", "10-messages"), "#!/usr/bin/env bash\ncat\n", 0o755)
+	writeFile(t, filepath.Join(upstreamDir, "plugins", "openai", "hooks.d", "receive", "10-save"), "#!/usr/bin/env bash\ncat\n", 0o755)
+	writeFile(t, filepath.Join(upstreamDir, "plugins", "anthropic", "providers", "anthropic"), "anthropic-provider\n", 0o755)
+	writeFile(t, filepath.Join(upstreamDir, "plugins", "chatgpt", "providers", "chatgpt"), "chatgpt-provider\n", 0o755)
+	writeFile(t, filepath.Join(upstreamDir, "plugins", "skills", "tools", "skills"), "skills-tool\n", 0o755)
+	writeFile(t, filepath.Join(upstreamDir, "plugins", "subagents", "tools", "subagents"), "subagents-tool\n", 0o755)
+	writeFile(t, filepath.Join(upstreamDir, "LICENSE"), "upstream license\n", 0o644)
+
+	runGitCommand(t, upstreamDir, "init")
+	runGitCommand(t, upstreamDir, "config", "user.name", "Test User")
+	runGitCommand(t, upstreamDir, "config", "user.email", "test@example.com")
+	runGitCommand(t, upstreamDir, "add", ".")
+	runGitCommand(t, upstreamDir, "commit", "-m", "initial")
+	ref := strings.TrimSpace(runGitCommand(t, upstreamDir, "rev-parse", "HEAD"))
+	return upstreamDir, ref
 }
 
 func copyTreeToTemp(t *testing.T, src string) string {
