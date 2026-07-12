@@ -230,6 +230,7 @@ func TestGrepRecursiveIncludeAndExcludeGlobs(t *testing.T) {
 			"grep -rl --exclude='*.go' --include='*.go' needle /tmp/tree\n" +
 			"grep -rl --exclude='*.bin' --include='*.txt' needle /tmp/tree\n" +
 			"grep -h --include='*.txt' needle /tmp/tree/root.go /tmp/tree/root.txt\n" +
+			"cd /tmp && grep -h --include='tree/*.txt' needle tree/root.txt\n" +
 			"mkdir -p /tmp/classes\n" +
 			"printf 'needle\\n' > /tmp/classes/7.txt\n" +
 			"printf 'needle\\n' > /tmp/classes/a.txt\n" +
@@ -241,7 +242,7 @@ func TestGrepRecursiveIncludeAndExcludeGlobs(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "needle\nneedle\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/root.go\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/sub/skip_test.go\n/tmp/tree/root.go\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/sub/skip_test.go\nneedle\n/tmp/classes/7.txt\n"; got != want {
+	if got, want := result.Stdout, "needle\nneedle\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/root.go\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/sub/skip_test.go\n/tmp/tree/root.go\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/sub/skip_test.go\nneedle\nneedle\n/tmp/classes/7.txt\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 	if result.Stderr != "" {
@@ -256,8 +257,11 @@ func TestGrepInvalidFileGlobsMatchLiteralBasenames(t *testing.T) {
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
 		Script: "mkdir -p /tmp/literal\n" +
 			"printf 'needle\\n' > '/tmp/literal/['\n" +
+			"printf 'needle\\n' > '/tmp/literal/[z-a]'\n" +
 			"grep -rh --include='[' needle /tmp/literal\n" +
-			"grep -rh --exclude='[' needle /tmp/literal || true\n",
+			"grep -rh --exclude='[' needle /tmp/literal || true\n" +
+			"grep -rh --include='[z-a]' needle /tmp/literal || true\n" +
+			"grep -rh --exclude='[z-a]' needle /tmp/literal\n",
 	})
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -265,7 +269,7 @@ func TestGrepInvalidFileGlobsMatchLiteralBasenames(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
-	if got, want := result.Stdout, "needle\n"; got != want {
+	if got, want := result.Stdout, "needle\nneedle\nneedle\nneedle\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 	if result.Stderr != "" {

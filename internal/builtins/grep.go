@@ -832,7 +832,7 @@ func (c *Grep) enumerateTopLevelPath(ctx context.Context, inv *Invocation, file 
 		return c.enumerateRecursive(ctx, inv, abs, opts, state, visitedDirs, records)
 	}
 
-	if grepRecursiveFileIncluded(path.Base(abs), opts) {
+	if grepRecursiveFileIncluded(file, opts) {
 		*records = append(*records, grepFileRecord{abs: abs})
 	}
 	return nil
@@ -909,15 +909,35 @@ func grepRecursiveFileIncluded(name string, opts *grepOptions) bool {
 	}
 	included := !opts.fileGlobs[0].include
 	for _, glob := range opts.fileGlobs {
-		globMatched, err := shellpattern.Match(glob.pattern, name, shellpattern.EntireString|shellpattern.GlobLeadingDot)
-		if err != nil {
-			globMatched = glob.pattern == name
-		}
+		globMatched := grepFileGlobMatch(glob.pattern, name)
 		if globMatched {
 			included = glob.include
 		}
 	}
 	return included
+}
+
+func grepFileGlobMatch(pattern, candidate string) bool {
+	if !strings.Contains(pattern, "/") {
+		candidate = path.Base(candidate)
+	}
+	for {
+		matched, err := shellpattern.Match(pattern, candidate, shellpattern.EntireString|shellpattern.GlobLeadingDot)
+		if err != nil {
+			return (err.Error() == "[ was not matched with a closing ]" || err.Error() == `\ at end of pattern`) && pattern == candidate
+		}
+		if matched {
+			return true
+		}
+		if !strings.Contains(pattern, "/") {
+			return false
+		}
+		slash := strings.IndexByte(candidate, '/')
+		if slash < 0 {
+			return false
+		}
+		candidate = candidate[slash+1:]
+	}
 }
 
 var _ Command = (*Grep)(nil)
