@@ -909,7 +909,11 @@ func grepRecursiveFileIncluded(name string, opts *grepOptions) bool {
 	}
 	included := !opts.fileGlobs[0].include
 	for _, glob := range opts.fileGlobs {
-		if globMatched, _ := shellpattern.Match(glob.pattern, name, shellpattern.EntireString|shellpattern.GlobLeadingDot); globMatched {
+		globMatched, err := shellpattern.Match(glob.pattern, name, shellpattern.EntireString|shellpattern.GlobLeadingDot)
+		if err != nil {
+			globMatched = glob.pattern == name
+		}
+		if globMatched {
 			included = glob.include
 		}
 	}
