@@ -44,17 +44,39 @@ func litPatterns(strs ...string) []*Pattern {
 }
 func word(ps ...WordPart) *Word { return &Word{Parts: ps} }
 func litWord(s string) *Word    { return word(lit(s)) }
+func heredocCloseCandidateForTest(raw, value string) *HeredocCloseCandidate {
+	return newHeredocCloseCandidate(NewPos(0, 1, 1), []byte(raw), []byte(value), LangBash, true, false)
+}
 func heredocDelim(ps ...WordPart) *HeredocDelim {
 	w := word(ps...)
-	value, quoted := new(Parser).unquotedWordBytes(w)
+	value, quoted := wordUnquotedBytes(w)
 	return &HeredocDelim{
 		Parts:       ps,
 		Value:       string(value),
 		Quoted:      quoted,
 		BodyExpands: !quoted,
+		CloseRaw:    string(value),
+		CloseCandidate: heredocCloseCandidateForTest(
+			string(value),
+			string(value),
+		),
+		Matched: true,
 	}
 }
 func litHeredocDelim(s string) *HeredocDelim { return heredocDelim(lit(s)) }
+func dashHeredocDelim(ps ...WordPart) *HeredocDelim {
+	d := heredocDelim(ps...)
+	d.IndentMode = HeredocIndentStripTabs
+	return d
+}
+func dashHeredocDelimRaw(raw string, indentTabs uint16, ps ...WordPart) *HeredocDelim {
+	d := dashHeredocDelim(ps...)
+	d.CloseRaw = raw
+	d.CloseCandidate = heredocCloseCandidateForTest(raw, d.Value)
+	d.IndentTabs = indentTabs
+	return d
+}
+func litDashHeredocDelim(s string) *HeredocDelim { return dashHeredocDelim(lit(s)) }
 func sub(expr ArithmExpr) *Subscript {
 	return &Subscript{Kind: SubscriptExpr, Expr: expr}
 }
@@ -147,13 +169,16 @@ func sglQuoted(s string) *SglQuoted        { return &SglQuoted{Value: s} }
 func sglDQuoted(s string) *SglQuoted       { return &SglQuoted{Dollar: true, Value: s} }
 func dblQuoted(ps ...WordPart) *DblQuoted  { return &DblQuoted{Parts: ps} }
 func dblDQuoted(ps ...WordPart) *DblQuoted { return &DblQuoted{Dollar: true, Parts: ps} }
-func block(sts ...*Stmt) *Block            { return &Block{Stmts: sts} }
-func subshell(sts ...*Stmt) *Subshell      { return &Subshell{Stmts: sts} }
-func arithmExp(e ArithmExpr) *ArithmExp    { return &ArithmExp{X: e} }
-func arithmExpBr(e ArithmExpr) *ArithmExp  { return &ArithmExp{Bracket: true, X: e} }
-func arithmCmd(e ArithmExpr) *ArithmCmd    { return &ArithmCmd{X: e} }
-func parenArit(e ArithmExpr) *ParenArithm  { return &ParenArithm{X: e} }
-func parenTest(e TestExpr) *ParenTest      { return &ParenTest{X: e} }
+func patternGroup(pats ...*Pattern) *PatternGroup {
+	return &PatternGroup{Patterns: pats}
+}
+func block(sts ...*Stmt) *Block           { return &Block{Stmts: sts} }
+func subshell(sts ...*Stmt) *Subshell     { return &Subshell{Stmts: sts} }
+func arithmExp(e ArithmExpr) *ArithmExp   { return &ArithmExp{X: e} }
+func arithmExpBr(e ArithmExpr) *ArithmExp { return &ArithmExp{Bracket: true, X: e} }
+func arithmCmd(e ArithmExpr) *ArithmCmd   { return &ArithmCmd{X: e} }
+func parenArit(e ArithmExpr) *ParenArithm { return &ParenArithm{X: e} }
+func parenTest(e TestExpr) *ParenTest     { return &ParenTest{X: e} }
 func extglob(op GlobOperator, pats ...*Pattern) *ExtGlob {
 	return &ExtGlob{Op: op, Patterns: pats}
 }
@@ -1535,7 +1560,7 @@ var fileTests = []fileTestCase{
 				Cmd: litCall("foo"),
 				Redirs: []*Redirect{{
 					Op:        DashHdoc,
-					HdocDelim: litHeredocDelim("EOF"),
+					HdocDelim: dashHeredocDelimRaw("\tEOF", 1, lit("EOF")),
 					Hdoc:      litWord("\t\tbar\n\t"),
 				}},
 			}},
@@ -1549,7 +1574,7 @@ var fileTests = []fileTestCase{
 				Cmd: litCall("foo"),
 				Redirs: []*Redirect{{
 					Op:        DashHdoc,
-					HdocDelim: litHeredocDelim("EOF"),
+					HdocDelim: dashHeredocDelimRaw("\tEOF", 1, lit("EOF")),
 					Hdoc:      litWord("\t"),
 				}},
 			}},
@@ -1705,7 +1730,7 @@ var fileTests = []fileTestCase{
 			Cmd: litCall("foo"),
 			Redirs: []*Redirect{{
 				Op:        DashHdoc,
-				HdocDelim: litHeredocDelim("EOF"),
+				HdocDelim: litDashHeredocDelim("EOF"),
 				Hdoc:      litWord("\tbar\n"),
 			}},
 		}),
@@ -1726,7 +1751,7 @@ var fileTests = []fileTestCase{
 			Cmd: litCall("foo"),
 			Redirs: []*Redirect{{
 				Op:        DashHdoc,
-				HdocDelim: litHeredocDelim("EOF"),
+				HdocDelim: litDashHeredocDelim("EOF"),
 			}},
 		}),
 	),
@@ -1736,7 +1761,7 @@ var fileTests = []fileTestCase{
 			Cmd: litCall("foo"),
 			Redirs: []*Redirect{{
 				Op:        DashHdoc,
-				HdocDelim: litHeredocDelim("EOF"),
+				HdocDelim: litDashHeredocDelim("EOF"),
 				Hdoc:      litWord("\tbar\n"),
 			}},
 		}),
@@ -1747,7 +1772,7 @@ var fileTests = []fileTestCase{
 			Cmd: litCall("foo"),
 			Redirs: []*Redirect{{
 				Op:        DashHdoc,
-				HdocDelim: heredocDelim(sglQuoted("EOF")),
+				HdocDelim: dashHeredocDelim(sglQuoted("EOF")),
 				Hdoc:      litWord("\tbar\n"),
 			}},
 		}),
@@ -4365,17 +4390,39 @@ var fileTests = []fileTestCase{
 		langFile(&TestClause{X: condBinary(TsMatch, litCondWord("a"), litCondPattern("-n"))}, LangBash|LangMirBSDKorn|LangZsh),
 	),
 	fileTest(
+		[]string{`[[ " a" == @( a) ]]`},
+		langFile(&TestClause{X: condBinary(TsMatch,
+			condWord(dblQuoted(lit(" a"))),
+			condPattern(extglob(GlobOne, litPattern(" a"))),
+		)}, LangBash|LangMirBSDKorn),
+	),
+	fileTest(
 		[]string{`[[ a == (b|c)* ]]`},
 		langFile(&TestClause{X: condBinary(TsMatch, litCondWord("a"), condPattern(
-			lit("(b|c)"),
+			patternGroup(litPattern("b"), litPattern("c")),
 			&PatternAny{},
 		))}, LangZsh),
 	),
 	fileTest(
+		[]string{`case $i in (b|c)*) foo ;; esac`},
+		langFile(&CaseClause{
+			Word: word(litParamExp("i")),
+			Items: []*CaseItem{{
+				Op: Break,
+				Patterns: []*Pattern{
+					pattern(
+						patternGroup(litPattern("b"), litPattern("c")),
+						&PatternAny{},
+					),
+				},
+				Stmts: litStmts("foo"),
+			}},
+		}, LangZsh),
+	),
+	fileTest(
 		[]string{`[[ a == (#i)bar ]]`},
 		langFile(&TestClause{X: condBinary(TsMatch, litCondWord("a"), condPattern(
-			lit("(#i)"),
-			lit("bar"),
+			lit("(#i)bar"),
 		))}, LangZsh),
 	),
 	fileTest(
@@ -4658,6 +4705,23 @@ var fileTests = []fileTestCase{
 				declAssign(&Assign{
 					Ref:   litRef("foo"),
 					Array: arrValuesMode(ArrayExprIndexed, litWord("b1")),
+				}),
+			),
+		}, LangBash),
+	),
+	fileTest(
+		[]string{"local a=loc $var c=loc"},
+		langFile(&DeclClause{
+			Variant: lit("local"),
+			Operands: declOperands(
+				declAssign(&Assign{
+					Ref:   litRef("a"),
+					Value: litWord("loc"),
+				}),
+				declDynamicWord(word(litParamExp("var"))),
+				declAssign(&Assign{
+					Ref:   litRef("c"),
+					Value: litWord("loc"),
 				}),
 			),
 		}, LangBash),
@@ -5424,6 +5488,14 @@ var fileTests = []fileTestCase{
 		}, LangZsh),
 	),
 	fileTest(
+		[]string{"${~foo}"},
+		langFile(&ParamExp{
+			GlobSubst: true,
+			Param:     lit("foo"),
+		}, LangZsh),
+		langErr2("1:1: `${~foo}` is a zsh feature; tried parsing as LANG", LangPOSIX|LangBash|LangMirBSDKorn|LangBats),
+	),
+	fileTest(
 		[]string{"$+foo $#bar"},
 		langFile(call(
 			word(&ParamExp{
@@ -5779,11 +5851,14 @@ func (c sanityChecker) visit(node Node) bool {
 		c.checkPos(node, node.Lbrace, "{")
 		c.checkPos(node, node.Rbrace, "}")
 	case *IfClause:
-		if node.ThenPos.IsValid() {
-			c.checkPos(node, node.Position, "if", "elif")
+		switch node.Kind {
+		case IfClauseIf, IfClauseElif:
+			c.checkPos(node, node.Position, string(node.Kind))
 			c.checkPos(node, node.ThenPos, "then")
-		} else {
+		case IfClauseElse:
 			c.checkPos(node, node.Position, "else")
+		default:
+			c.tb.Errorf("Unexpected IfClause.Kind %q in %q", node.Kind, c.src)
 		}
 		c.checkPos(node, node.FiPos, "fi")
 	case *WhileClause:
@@ -5854,6 +5929,9 @@ func (c sanityChecker) visit(node Node) bool {
 	case *PatternCharClass:
 		c.checkPos(node, node.ValuePos, node.Value)
 		c.checkPos(node, node.ValueEnd)
+	case *PatternGroup:
+		c.checkPos(node, node.Lparen, "(")
+		c.checkPos(node, node.Rparen, ")")
 	case *CondUnary:
 		strs := []string{node.Op.String()}
 		switch node.Op {

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -179,12 +180,7 @@ func New(cfg *Config, opts ...Option) (*HTTPClient, error) {
 	}
 
 	client := &HTTPClient{
-		cfg: resolved,
-		doer: &http.Client{
-			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
+		cfg:      resolved,
 		resolver: net.DefaultResolver,
 	}
 	for _, opt := range opts {
@@ -192,7 +188,87 @@ func New(cfg *Config, opts ...Option) (*HTTPClient, error) {
 			opt(client)
 		}
 	}
+	if client.doer == nil {
+		client.doer = client.defaultDoer()
+	}
 	return client, nil
+}
+
+func (c *HTTPClient) defaultDoer() HTTPDoer {
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy:                 nil,
+			DialContext:           c.dialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+func (c *HTTPClient) dialContext(ctx context.Context, networkName, address string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+
+	ips, err := c.resolveDialIPs(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	if c.cfg.denyPrivateRanges {
+		if slices.ContainsFunc(ips, isPrivateIP) {
+			return nil, &AccessDeniedError{URL: host, Reason: "host resolves to private or loopback IP"}
+		}
+	}
+
+	dialer := net.Dialer{KeepAlive: 30 * time.Second}
+	var lastErr error
+	for _, ip := range ips {
+		conn, err := dialer.DialContext(ctx, networkName, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+}
+
+func (c *HTTPClient) resolveDialIPs(ctx context.Context, host string) ([]net.IP, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return []net.IP{ip}, nil
+	}
+
+	addresses, err := c.lookupIPAddrs(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	ips := make([]net.IP, 0, len(addresses))
+	for _, address := range addresses {
+		if address.IP != nil {
+			ips = append(ips, address.IP)
+		}
+	}
+	if len(ips) == 0 {
+		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+	}
+	return ips, nil
+}
+
+func (c *HTTPClient) lookupIPAddrs(ctx context.Context, host string) ([]net.IPAddr, error) {
+	resolver := c.resolver
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+	return resolver.LookupIPAddr(ctx, host)
 }
 
 func resolveConfig(cfg *Config) (resolvedConfig, error) {
@@ -384,7 +460,7 @@ func (c *HTTPClient) checkPrivateHost(ctx context.Context, parsed *url.URL) erro
 		return nil
 	}
 
-	addresses, err := c.resolver.LookupIPAddr(ctx, host)
+	addresses, err := c.lookupIPAddrs(ctx, host)
 	if err != nil {
 		var dnsErr *net.DNSError
 		if errors.As(err, &dnsErr) && (dnsErr.IsNotFound || dnsErr.Err == "no such host") {

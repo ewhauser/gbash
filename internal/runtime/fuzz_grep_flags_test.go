@@ -28,6 +28,8 @@ func FuzzGrepFlagsCommand(f *testing.F) {
 		writeSessionFile(t, session, "/tmp/grep-b.txt", []byte("match\n"))
 		writeSessionFile(t, session, "/tmp/grep-pattern-file.txt", []byte("alpha\nbeta\n"))
 		writeSessionFile(t, session, "/tmp/grep-pattern-input.txt", []byte("alpha\nbeta\ngamma\n"))
+		writeSessionFile(t, session, "/tmp/grep-tree/include.txt", []byte("match\n"))
+		writeSessionFile(t, session, "/tmp/grep-tree/exclude.log", []byte("match\n"))
 
 		script := []byte(
 			"grep 'x\\+y' /tmp/grep-bre.txt >/tmp/grep-bre.out || true\n" +
@@ -45,6 +47,7 @@ func FuzzGrepFlagsCommand(f *testing.F) {
 				"grep -H match /tmp/grep-a.txt >/tmp/grep-H.out || true\n" +
 				"grep -h match /tmp/grep-a.txt /tmp/grep-b.txt >/tmp/grep-h.out || true\n" +
 				"grep -s hit /tmp/grep-does-not-exist.txt >/tmp/grep-s.out || true\n" +
+				"grep -r --include='*.txt' --exclude='exclude*' match /tmp/grep-tree >/tmp/grep-globs.out || true\n" +
 				"grep -n beta " + shellQuote(inputPath) + " >/tmp/grep-input.out || true\n",
 		)
 

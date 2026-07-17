@@ -7,7 +7,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -15,6 +17,23 @@ type resolverFunc func(context.Context, string) ([]net.IPAddr, error)
 
 func (fn resolverFunc) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	return fn(ctx, host)
+}
+
+type sequenceResolver struct {
+	mu        sync.Mutex
+	responses [][]net.IPAddr
+}
+
+func (r *sequenceResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if len(r.responses) == 0 {
+		return nil, &net.DNSError{Err: "no such host", IsNotFound: true}
+	}
+	response := r.responses[0]
+	r.responses = r.responses[1:]
+	return response, nil
 }
 
 type staticHTTPDoer struct{}
@@ -233,5 +252,83 @@ func TestClientBlocksPrivateRangesAfterDNSResolution(t *testing.T) {
 	_, err = client.Do(context.Background(), &Request{URL: "https://api.example.com/path"})
 	if !IsDenied(err) {
 		t.Fatalf("Do() error = %v, want denied error", err)
+	}
+}
+
+func TestClientBlocksPrivateRangesDuringDial(t *testing.T) {
+	t.Parallel()
+	client, err := New(&Config{
+		AllowedURLPrefixes: []string{"http://api.example.test:80"},
+		DenyPrivateRanges:  true,
+	}, WithResolver(&sequenceResolver{
+		responses: [][]net.IPAddr{
+			{{IP: net.ParseIP("93.184.216.34")}},
+			{{IP: net.ParseIP("127.0.0.1")}},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = client.Do(context.Background(), &Request{URL: "http://api.example.test:80/path"})
+	if !IsDenied(err) {
+		t.Fatalf("Do() error = %v, want denied error", err)
+	}
+}
+
+func TestClientIgnoresHostProxyEnvironment(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("backend"))
+	}))
+	defer backend.Close()
+
+	var mu sync.Mutex
+	proxyHit := false
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		proxyHit = true
+		mu.Unlock()
+		http.Error(w, "proxy", http.StatusBadGateway)
+	}))
+	defer proxy.Close()
+
+	t.Setenv("HTTP_PROXY", proxy.URL)
+	t.Setenv("http_proxy", proxy.URL)
+	t.Setenv("HTTPS_PROXY", proxy.URL)
+	t.Setenv("NO_PROXY", "")
+
+	backendURL, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatalf("Parse(%q) error = %v", backend.URL, err)
+	}
+	_, port, err := net.SplitHostPort(backendURL.Host)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q) error = %v", backendURL.Host, err)
+	}
+	allowedHost := net.JoinHostPort("allowed.example.test", port)
+
+	client, err := New(&Config{
+		AllowedURLPrefixes: []string{"http://" + allowedHost},
+		DenyPrivateRanges:  false,
+	}, WithResolver(resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+	})))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	resp, err := client.Do(context.Background(), &Request{URL: "http://" + allowedHost + "/via-default-transport"})
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	if got, want := string(resp.Body), "backend"; got != want {
+		t.Fatalf("Body = %q, want %q", got, want)
+	}
+
+	mu.Lock()
+	hit := proxyHit
+	mu.Unlock()
+	if hit {
+		t.Fatal("proxy server was used, want direct sandbox-controlled dial")
 	}
 }

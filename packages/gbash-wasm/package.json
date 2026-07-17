@@ -1,6 +1,6 @@
 {
   "name": "@ewhauser/gbash-wasm",
-  "version": "0.0.33",
+  "version": "0.0.38",
   "description": "JavaScript-hosted WebAssembly bridge for gbash",
   "type": "module",
   "files": [
@@ -25,6 +25,7 @@
     "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
+    "@types/node": "^24",
     "typescript": "^5.9.3"
   }
 }

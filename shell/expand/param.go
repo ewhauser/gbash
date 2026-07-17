@@ -65,6 +65,9 @@ func invalidParamExpansion(pe *syntax.ParamExp) error {
 	if pe.Slice != nil && pe.Slice.MissingOffset {
 		return badSubstitution(pe)
 	}
+	if pe.GlobSubst {
+		return fmt.Errorf("unsupported")
+	}
 	if (pe.Length || pe.Width || pe.IsSet) &&
 		(len(pe.Modifiers) > 0 || pe.Slice != nil || pe.Repl != nil || pe.Names != 0 || pe.Exp != nil) {
 		return badSubstitution(pe)
@@ -573,7 +576,9 @@ func parseIndirectSubscriptWord(content string) (*syntax.Word, bool) {
 	if !errors.As(err, &parseErr) {
 		return nil, false
 	}
-	if strings.HasPrefix(parseErr.Text, "reached EOF without closing quote") {
+	if parseErr.Kind == syntax.ParseErrorKindUnclosed &&
+		len(parseErr.Expected) == 1 &&
+		(parseErr.Expected[0] == syntax.ParseErrorSymbolSingleQuote || parseErr.Expected[0] == syntax.ParseErrorSymbolDoubleQuote) {
 		return nil, false
 	}
 	return &syntax.Word{Parts: []syntax.WordPart{&syntax.Lit{Value: content}}}, true

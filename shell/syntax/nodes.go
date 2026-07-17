@@ -410,6 +410,7 @@ type Assign struct {
 	Ref          *VarRef
 	Value        *Word      // =val
 	Array        *ArrayExpr // =(arr)
+	Surface      *AssignSurfaceForm
 	literalValue bool
 }
 
@@ -432,6 +433,14 @@ func (a *Assign) End() Pos {
 		return a.Array.End()
 	}
 	return posAddCol(a.Ref.End(), 1)
+}
+
+// AssignSurfaceForm records the exact assignment operator span together with
+// the first value byte after that operator.
+type AssignSurfaceForm struct {
+	OperatorPos Pos
+	OperatorEnd Pos
+	ValuePos    Pos
 }
 
 // Redirect represents an input/output redirection.
@@ -467,14 +476,42 @@ func (r *Redirect) End() Pos {
 	return posAddCol(r.OpPos, len(r.Op.String()))
 }
 
-// HeredocDelim represents a here-document delimiter and the parser metadata
-// derived from it.
+// HeredocIndentMode describes how a here-document closer is matched.
+type HeredocIndentMode uint8
+
+const (
+	HeredocIndentNone HeredocIndentMode = iota
+	HeredocIndentStripTabs
+)
+
+// HeredocCloseCandidate records the raw token metadata for a line that looked
+// like a potential here-document closer.
+type HeredocCloseCandidate struct {
+	Pos, End Pos
+
+	Raw               string
+	DelimOffset       uint
+	LeadingWhitespace string
+	RawTokenMismatch  bool
+}
+
+// HeredocDelim represents a here-document delimiter together with the parser
+// metadata derived from both the opener and the final closer candidate line.
 type HeredocDelim struct {
 	Parts []WordPart
 
 	Value       string // delimiter text after quote removal
 	Quoted      bool   // whether any quoting/escaping was present
 	BodyExpands bool   // whether the heredoc body allows shell expansion
+
+	ClosePos, CloseEnd Pos
+	CloseRaw           string
+	CloseCandidate     *HeredocCloseCandidate
+	Matched            bool
+	EOFTerminated      bool
+	TrailingText       string
+	IndentMode         HeredocIndentMode
+	IndentTabs         uint16
 }
 
 func (d *HeredocDelim) Pos() Pos {
@@ -499,6 +536,8 @@ func (d *HeredocDelim) End() Pos {
 type CallExpr struct {
 	Assigns []*Assign // a=x b=y args
 	Args    []*Word
+
+	separators []CallExprSeparator
 }
 
 func (c *CallExpr) Pos() Pos {
@@ -539,11 +578,22 @@ type Block struct {
 func (b *Block) Pos() Pos { return b.Lbrace }
 func (b *Block) End() Pos { return posAddCol(b.Rbrace, 1) }
 
+// IfClauseKind identifies which reserved word introduced an [IfClause] node.
+type IfClauseKind string
+
+const (
+	IfClauseUnknown IfClauseKind = ""
+	IfClauseIf      IfClauseKind = "if"
+	IfClauseElif    IfClauseKind = "elif"
+	IfClauseElse    IfClauseKind = "else"
+)
+
 // IfClause represents an if statement.
 type IfClause struct {
-	Position Pos // position of the starting "if", "elif", or "else" token
-	ThenPos  Pos // position of "then", empty if this is an "else"
-	FiPos    Pos // position of "fi", shared with .Else if non-nil
+	Position Pos          // position of the starting "if", "elif", or "else" token
+	Kind     IfClauseKind // branch token kind; empty on synthetic trees that omit branch metadata
+	ThenPos  Pos          // position of "then", recovered if missing, empty only for an "else"
+	FiPos    Pos          // position of "fi", shared with .Else if non-nil
 
 	Cond     []*Stmt
 	CondLast []Comment
@@ -557,6 +607,10 @@ type IfClause struct {
 
 func (c *IfClause) Pos() Pos { return c.Position }
 func (c *IfClause) End() Pos { return posAddCol(c.FiPos, 2) }
+
+func (c *IfClause) hasThen() bool {
+	return c != nil && (c.ThenPos.IsValid() || c.ThenPos.IsRecovered())
+}
 
 // WhileClause represents a while or an until clause.
 type WhileClause struct {
@@ -660,14 +714,80 @@ func (f *FuncDecl) End() Pos { return f.Body.End() }
 type Word struct {
 	Parts []WordPart
 
+	// LeadingEscape records a leading unquoted backslash escape at the start of
+	// the word, such as the leading "\" in "\command".
+	LeadingEscape *WordLeadingEscape
+
 	// AliasExpansions preserves the alias-expansion chain that produced this
 	// word, if any. The chain is ordered from the outermost alias expansion to
 	// the innermost recursive expansion.
 	AliasExpansions []*AliasExpansion
+
+	raw string
 }
 
 func (w *Word) Pos() Pos { return w.Parts[0].Pos() } //nolint:nilaway // callers ensure w and w.Parts are non-nil; Word always has at least one part
 func (w *Word) End() Pos { return w.Parts[len(w.Parts)-1].End() }
+
+// RawText returns the exact source text captured for the parsed word.
+//
+// Raw text is only preserved for words built directly by [Parse]. Synthetic
+// words, such as manually constructed nodes or typedjson-decoded trees, return
+// an empty string.
+func (w *Word) RawText() string {
+	if w == nil {
+		return ""
+	}
+	return w.raw
+}
+
+// UnquotedText returns the word after shell quote removal.
+//
+// The returned string preserves expansion and other shell syntax text while
+// removing quotes and backslash escapes that affected parsing.
+func (w *Word) UnquotedText() string {
+	buf, _ := wordUnquotedBytes(w)
+	return string(buf)
+}
+
+// WasQuoted reports whether quote removal changed how the word was parsed.
+func (w *Word) WasQuoted() bool {
+	_, quoted := wordUnquotedBytes(w)
+	return quoted
+}
+
+// TestLikeSplit describes a recovered comparison-like operator embedded inside
+// a single parsed word, such as "foo=bar" or "\"QT6=${QT6:-no}\"".
+//
+// The split is advisory metadata only. It does not change the underlying parse
+// shape: for example, [[ foo=bar ]] still parses as [*CondWord], and [ or test
+// arguments remain ordinary [*CallExpr] words.
+type TestLikeSplit struct {
+	Left        *Word
+	Operator    string
+	OperatorPos Pos
+	OperatorEnd Pos
+	Right       *Word
+}
+
+// TestLikeSplit recovers a glued comparison-like operator embedded inside a
+// single parsed word.
+//
+// The helper derives the split from the parsed word-part tree, including
+// nested quoted literal content, without reparsing the surrounding shell
+// syntax. It ignores operator-looking text inside expansions, substitutions,
+// and similar nested syntax. Synthetic or typedjson-decoded trees still expose
+// the split, but only words built directly by [Parse] preserve exact fragment
+// [RawText].
+func (w *Word) TestLikeSplit() *TestLikeSplit {
+	return wordTestLikeSplit(w)
+}
+
+// WordLeadingEscape records the source span of a leading unquoted backslash
+// escape at the start of a parsed word.
+type WordLeadingEscape struct {
+	Pos, End Pos
+}
 
 // AliasExpansion records one alias expansion applied while parsing.
 type AliasExpansion struct {
@@ -722,6 +842,8 @@ func (*BraceExp) wordPartNode()  {}
 type Pattern struct {
 	Start, EndPos Pos
 	Parts         []PatternPart
+
+	raw string
 }
 
 func (p *Pattern) Pos() Pos {
@@ -738,11 +860,38 @@ func (p *Pattern) End() Pos {
 	return p.EndPos
 }
 
+// RawText returns the exact source text captured for the parsed pattern.
+//
+// Raw text is only preserved for patterns built directly by [Parse]. Synthetic
+// patterns, such as manually constructed nodes or typedjson-decoded trees,
+// return an empty string.
+func (p *Pattern) RawText() string {
+	if p == nil {
+		return ""
+	}
+	return p.raw
+}
+
+// UnquotedText returns the pattern after shell quote removal.
+//
+// The returned string preserves pattern syntax and expansions while removing
+// quotes and backslash escapes that affected parsing.
+func (p *Pattern) UnquotedText() string {
+	buf, _ := patternUnquotedBytes(p)
+	return string(buf)
+}
+
+// WasQuoted reports whether quote removal changed how the pattern was parsed.
+func (p *Pattern) WasQuoted() bool {
+	_, quoted := patternUnquotedBytes(p)
+	return quoted
+}
+
 // PatternPart represents all nodes that can form part of a shell pattern.
 //
 // These are [*Lit], [*SglQuoted], [*DblQuoted], [*ParamExp], [*CmdSubst],
 // [*ArithmExp], [*ProcSubst], [*PatternAny], [*PatternSingle],
-// [*PatternCharClass], and [*ExtGlob].
+// [*PatternCharClass], [*PatternGroup], and [*ExtGlob].
 type PatternPart interface {
 	Node
 	patternPartNode()
@@ -758,6 +907,7 @@ func (*ProcSubst) patternPartNode()        {}
 func (*PatternAny) patternPartNode()       {}
 func (*PatternSingle) patternPartNode()    {}
 func (*PatternCharClass) patternPartNode() {}
+func (*PatternGroup) patternPartNode()     {}
 func (*ExtGlob) patternPartNode()          {}
 
 // Lit represents a string literal.
@@ -819,6 +969,20 @@ type PatternCharClass struct {
 func (p *PatternCharClass) Pos() Pos { return p.ValuePos }
 func (p *PatternCharClass) End() Pos { return p.ValueEnd }
 
+// PatternGroup represents a bare parenthesized grouped alternation such as
+// `(foo|bar)` in a shell pattern.
+//
+// This node appears for grouped alternation in zsh pattern contexts and in
+// bash-like recovery parses which materialize the surrounding AST without
+// treating the construct as valid syntax.
+type PatternGroup struct {
+	Lparen, Rparen Pos
+	Patterns       []*Pattern
+}
+
+func (p *PatternGroup) Pos() Pos { return p.Lparen }
+func (p *PatternGroup) End() Pos { return posAddCol(p.Rparen, 1) }
+
 // CmdSubst represents a command substitution.
 type CmdSubst struct {
 	Left, Right Pos
@@ -826,13 +990,23 @@ type CmdSubst struct {
 	Stmts []*Stmt
 	Last  []Comment
 
-	Backquotes bool // deprecated `foo`
-	TempFile   bool // mksh's ${ foo;}
-	ReplyVar   bool // mksh's ${|foo;}
+	Backquotes     bool // deprecated `foo`
+	BackquoteClose *BackquoteCloseTrivia
+	DiagnosticEnd  Pos  // optional linter-compat end position for $() diagnostics
+	TempFile       bool // mksh's ${ foo;}
+	ReplyVar       bool // mksh's ${|foo;}
 }
 
 func (c *CmdSubst) Pos() Pos { return c.Left }
 func (c *CmdSubst) End() Pos { return posAddCol(c.Right, 1) }
+
+// BackquoteCloseTrivia records the contiguous run of backslashes immediately
+// before a closing backquote.
+type BackquoteCloseTrivia struct {
+	BackslashPos   Pos
+	BackslashEnd   Pos
+	BackslashCount uint16
+}
 
 // ParamExp represents a parameter expansion.
 type ParamExp struct {
@@ -848,10 +1022,11 @@ type ParamExp struct {
 	// TODO(v4): perhaps use an Operator token here,
 	// given how we've grown the number of booleans
 	// TODO(v4): rename Excl to reflect its purpose
-	Excl   bool // ${!a}
-	Length bool // ${#a}
-	Width  bool // mksh's ${%a}
-	IsSet  bool // ${+a} with [LangZsh]
+	Excl      bool // ${!a}
+	Length    bool // ${#a}
+	Width     bool // mksh's ${%a}
+	IsSet     bool // ${+a} with [LangZsh]
+	GlobSubst bool // ${~a} with [LangZsh]
 
 	// Only one of these is set at a time.
 	// TODO(v4): consider joining Param and NestedParam into a single field,
@@ -882,7 +1057,7 @@ type ParamExp struct {
 // only expanding a name without any further logic.
 func (p *ParamExp) simple() bool {
 	return p.Flags == nil &&
-		!p.Excl && !p.Length && !p.Width && !p.IsSet &&
+		!p.Excl && !p.Length && !p.Width && !p.IsSet && !p.GlobSubst &&
 		p.NestedParam == nil && p.Index == nil &&
 		len(p.Modifiers) == 0 && p.Slice == nil &&
 		p.Repl == nil && p.Names == 0 && p.Exp == nil

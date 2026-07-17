@@ -214,3 +214,125 @@ func TestGrepRecursiveSearchAvoidsSymlinkLoops(t *testing.T) {
 		t.Fatalf("Stderr = %q, want empty", result.Stderr)
 	}
 }
+
+func TestGrepRecursiveIncludeAndExcludeGlobs(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkdir -p /tmp/tree/sub\n" +
+			"printf 'needle\\n' > /tmp/tree/root.go\n" +
+			"printf 'needle\\n' > /tmp/tree/root.txt\n" +
+			"printf 'needle\\n' > /tmp/tree/sub/keep.go\n" +
+			"printf 'needle\\n' > /tmp/tree/sub/skip_test.go\n" +
+			"grep -rh --include='*.go' --exclude='*_test.go' needle /tmp/tree\n" +
+			"grep -rl --include='*.txt' --include='keep.go' needle /tmp/tree\n" +
+			"grep -rl --exclude='*.go' --include='*.go' needle /tmp/tree\n" +
+			"grep -rl --exclude='*.bin' --include='*.txt' needle /tmp/tree\n" +
+			"grep -h --include='*.txt' needle /tmp/tree/root.go /tmp/tree/root.txt\n" +
+			"cd /tmp && grep -h --include='tree/*.txt' needle tree/root.txt\n" +
+			"mkdir -p /tmp/classes\n" +
+			"printf 'needle\\n' > /tmp/classes/7.txt\n" +
+			"printf 'needle\\n' > /tmp/classes/a.txt\n" +
+			"grep -rl --include='[[:digit:]].txt' needle /tmp/classes\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "needle\nneedle\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/root.go\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/sub/skip_test.go\n/tmp/tree/root.go\n/tmp/tree/root.txt\n/tmp/tree/sub/keep.go\n/tmp/tree/sub/skip_test.go\nneedle\nneedle\n/tmp/classes/7.txt\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+}
+
+func TestGrepInvalidFileGlobsMatchLiteralBasenames(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "mkdir -p /tmp/literal\n" +
+			"printf 'needle\\n' > '/tmp/literal/['\n" +
+			"printf 'needle\\n' > '/tmp/literal/[z-a]'\n" +
+			"grep -rh --include='[' needle /tmp/literal\n" +
+			"grep -rh --exclude='[' needle /tmp/literal || true\n" +
+			"grep -rh --include='[z-a]' needle /tmp/literal || true\n" +
+			"grep -rh --exclude='[z-a]' needle /tmp/literal\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "needle\nneedle\nneedle\nneedle\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+}
+
+func TestGrepRecursiveExcludeSkipsBrokenSymlink(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	if err := session.FileSystem().MkdirAll(context.Background(), "/tmp/tree", 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	writeSessionFile(t, session, "/tmp/tree/keep.txt", []byte("needle\n"))
+	if err := session.FileSystem().Symlink(context.Background(), "missing", "/tmp/tree/bad.log"); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	result := mustExecSession(t, session, "grep -rh --exclude='*.log' needle /tmp/tree\ngrep -rh --include='*.txt' needle /tmp/tree\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "needle\nneedle\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+}
+
+func TestGrepRecursiveFileGlobsDoNotFilterSymlinkedDirectories(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:   []string{"/"},
+			WriteRoots:  []string{"/"},
+			SymlinkMode: policy.SymlinkFollow,
+		}),
+	})
+
+	if err := session.FileSystem().MkdirAll(context.Background(), "/tmp/target", 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	writeSessionFile(t, session, "/tmp/target/keep.go", []byte("needle\n"))
+	if err := session.FileSystem().Symlink(context.Background(), "target", "/tmp/link_to_tree"); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	result := mustExecSession(t, session, "grep -rh --include='*.go' needle /tmp/link_to_tree\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "needle\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if result.Stderr != "" {
+		t.Fatalf("Stderr = %q, want empty", result.Stderr)
+	}
+}

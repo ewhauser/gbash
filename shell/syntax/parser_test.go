@@ -4,6 +4,7 @@
 package syntax
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -25,6 +26,46 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
+
+func TestParserBacktrackSnapshotClonesScratch(t *testing.T) {
+	p := &Parser{}
+	scratch := p.ensureScratch()
+	copy(scratch.readBuf[:], []byte("read"))
+	copy(scratch.litBuf[:], []byte("lit"))
+	p.bs = scratch.readBuf[:4]
+	p.sourceBs = scratch.readBuf[1:4]
+	p.litBs = scratch.litBuf[:3]
+	p.wordRawBs = []byte("word")
+
+	saved := p.backtrackSnapshot()
+	if saved.scratch == p.scratch {
+		t.Fatal("backtrack snapshot reused parser scratch")
+	}
+
+	p.bs[0] = 'R'
+	p.sourceBs[0] = 'S'
+	p.litBs[0] = 'L'
+	p.wordRawBs[0] = 'W'
+
+	if got := string(saved.bs); got != "read" {
+		t.Fatalf("snapshot bs = %q, want %q", got, "read")
+	}
+	if got := string(saved.sourceBs); got != "ead" {
+		t.Fatalf("snapshot sourceBs = %q, want %q", got, "ead")
+	}
+	if got := string(saved.litBs); got != "lit" {
+		t.Fatalf("snapshot litBs = %q, want %q", got, "lit")
+	}
+	if got := string(saved.wordRawBs); got != "word" {
+		t.Fatalf("snapshot wordRawBs = %q, want %q", got, "word")
+	}
+	if got := saved.scratch.readBuf[:4]; !bytes.Equal(got, []byte("read")) {
+		t.Fatalf("snapshot readBuf = %q, want %q", got, "read")
+	}
+	if got := saved.scratch.litBuf[:3]; !bytes.Equal(got, []byte("lit")) {
+		t.Fatalf("snapshot litBuf = %q, want %q", got, "lit")
+	}
+}
 
 func TestParseFiles(t *testing.T) {
 	t.Parallel()
@@ -85,6 +126,447 @@ func TestParseErr(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestParseLangErrorFeatureMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		lang          LangVariant
+		src           string
+		reader        func(string) io.Reader
+		wantID        FeatureID
+		wantIDString  string
+		wantCategory  FeatureCategory
+		wantSubtype   FeatureSubtype
+		wantDetail    string
+		wantFeature   string
+		wantErrorText string
+	}{
+		{
+			name:          "extended glob",
+			lang:          LangPOSIX,
+			src:           "echo @(foo)",
+			wantID:        FeaturePatternExtendedGlob,
+			wantIDString:  "pattern_extended_glob",
+			wantCategory:  FeatureCategoryPattern,
+			wantSubtype:   FeatureSubtypeUnknown,
+			wantFeature:   "extended globs",
+			wantErrorText: "1:6: extended globs are a bash/mksh feature; tried parsing as posix",
+		},
+		{
+			name:          "parameter expansion flags",
+			lang:          LangBash,
+			src:           "echo ${(f)foo}",
+			wantID:        FeatureParameterExpansionFlags,
+			wantIDString:  "parameter_expansion_flags",
+			wantCategory:  FeatureCategoryParameterExpansion,
+			wantSubtype:   FeatureSubtypeParameterExpansionFlag,
+			wantDetail:    "f",
+			wantFeature:   "parameter expansion flags",
+			wantErrorText: "1:6: parameter expansion flags are a zsh feature; tried parsing as bash",
+		},
+		{
+			name:          "parameter expansion flags chunked at lparen",
+			lang:          LangBash,
+			src:           "echo ${(f)foo}",
+			reader:        func(src string) io.Reader { return newChunkReader(src, 8) },
+			wantID:        FeatureParameterExpansionFlags,
+			wantIDString:  "parameter_expansion_flags",
+			wantCategory:  FeatureCategoryParameterExpansion,
+			wantSubtype:   FeatureSubtypeParameterExpansionFlag,
+			wantDetail:    "f",
+			wantFeature:   "parameter expansion flags",
+			wantErrorText: "1:6: parameter expansion flags are a zsh feature; tried parsing as bash",
+		},
+		{
+			name:          "parameter expansion tilde flag",
+			lang:          LangBash,
+			src:           "echo ${(~)foo}",
+			wantID:        FeatureParameterExpansionFlags,
+			wantIDString:  "parameter_expansion_flags",
+			wantCategory:  FeatureCategoryParameterExpansion,
+			wantSubtype:   FeatureSubtypeParameterExpansionTildeFlag,
+			wantDetail:    "~",
+			wantFeature:   "parameter expansion flags",
+			wantErrorText: "1:6: parameter expansion flags are a zsh feature; tried parsing as bash",
+		},
+		{
+			name:          "parameter expansion tilde flag chunked at lparen",
+			lang:          LangBash,
+			src:           "echo ${(~)foo}",
+			reader:        func(src string) io.Reader { return newChunkReader(src, 8) },
+			wantID:        FeatureParameterExpansionFlags,
+			wantIDString:  "parameter_expansion_flags",
+			wantCategory:  FeatureCategoryParameterExpansion,
+			wantSubtype:   FeatureSubtypeParameterExpansionTildeFlag,
+			wantDetail:    "~",
+			wantFeature:   "parameter expansion flags",
+			wantErrorText: "1:6: parameter expansion flags are a zsh feature; tried parsing as bash",
+		},
+		{
+			name:          "parameter expansion separator payload does not imply tilde flag",
+			lang:          LangBash,
+			src:           "echo ${(s.~.)foo}",
+			reader:        func(src string) io.Reader { return newChunkReader(src, 8) },
+			wantID:        FeatureParameterExpansionFlags,
+			wantIDString:  "parameter_expansion_flags",
+			wantCategory:  FeatureCategoryParameterExpansion,
+			wantSubtype:   FeatureSubtypeParameterExpansionFlag,
+			wantDetail:    "s.~.",
+			wantFeature:   "parameter expansion flags",
+			wantErrorText: "1:6: parameter expansion flags are a zsh feature; tried parsing as bash",
+		},
+		{
+			name:          "parameter expansion glob substitution prefix",
+			lang:          LangBash,
+			src:           "echo ${~foo}",
+			wantID:        FeatureParameterExpansionGlobSubstPrefix,
+			wantIDString:  "parameter_expansion_glob_subst_prefix",
+			wantCategory:  FeatureCategoryParameterExpansion,
+			wantFeature:   "`${~foo}`",
+			wantErrorText: "1:6: `${~foo}` is a zsh feature; tried parsing as bash",
+		},
+		{
+			name:          "nested parameter expansion",
+			lang:          LangBash,
+			src:           "echo ${${nested}}",
+			wantID:        FeatureParameterExpansionNested,
+			wantIDString:  "parameter_expansion_nested",
+			wantCategory:  FeatureCategoryParameterExpansion,
+			wantSubtype:   FeatureSubtypeParameterExpansionNested,
+			wantFeature:   "nested parameter expansions",
+			wantErrorText: "1:6: nested parameter expansions are a zsh feature; tried parsing as bash",
+		},
+		{
+			name:          "array syntax",
+			lang:          LangPOSIX,
+			src:           "echo ${foo[1]}",
+			wantID:        FeatureArraySyntax,
+			wantIDString:  "array_syntax",
+			wantCategory:  FeatureCategoryArray,
+			wantSubtype:   FeatureSubtypeUnknown,
+			wantFeature:   "arrays",
+			wantErrorText: "1:11: arrays are a bash/mksh/zsh feature; tried parsing as posix",
+		},
+		{
+			name:          "quoted index parameter expansion",
+			lang:          LangPOSIX,
+			src:           `echo ${foo["bar"]}`,
+			wantID:        FeatureArraySyntax,
+			wantIDString:  "array_syntax",
+			wantCategory:  FeatureCategoryArray,
+			wantSubtype:   FeatureSubtypeParameterExpansionQuotedIndex,
+			wantDetail:    "\"",
+			wantFeature:   "arrays",
+			wantErrorText: "1:11: arrays are a bash/mksh/zsh feature; tried parsing as posix",
+		},
+		{
+			name:          "quoted index parameter expansion chunked at lbrack",
+			lang:          LangPOSIX,
+			src:           `echo ${foo["bar"]}`,
+			reader:        func(src string) io.Reader { return newChunkReader(src, 11) },
+			wantID:        FeatureArraySyntax,
+			wantIDString:  "array_syntax",
+			wantCategory:  FeatureCategoryArray,
+			wantSubtype:   FeatureSubtypeParameterExpansionQuotedIndex,
+			wantDetail:    "\"",
+			wantFeature:   "arrays",
+			wantErrorText: "1:11: arrays are a bash/mksh/zsh feature; tried parsing as posix",
+		},
+		{
+			name:          "regex tests",
+			lang:          LangMirBSDKorn,
+			src:           "[[ foo =~ bar ]]",
+			wantID:        FeatureConditionalRegexTest,
+			wantIDString:  "conditional_regex_test",
+			wantCategory:  FeatureCategoryConditional,
+			wantSubtype:   FeatureSubtypeUnknown,
+			wantFeature:   "regex tests",
+			wantErrorText: "1:8: regex tests are a bash/zsh feature; tried parsing as mksh",
+		},
+		{
+			name:          "redirect operator",
+			lang:          LangPOSIX,
+			src:           "echo hi &>out",
+			wantID:        FeatureRedirectionOperator,
+			wantIDString:  "redirection_operator",
+			wantCategory:  FeatureCategoryRedirection,
+			wantSubtype:   FeatureSubtypeUnknown,
+			wantDetail:    "`&>`",
+			wantFeature:   "`&>` redirects",
+			wantErrorText: "1:9: `&>` redirects are a bash/mksh/zsh feature; tried parsing as posix",
+		},
+		{
+			name:          "process substitution family",
+			lang:          LangBash,
+			src:           "echo =(foo)",
+			wantID:        FeatureSubstitutionProcess,
+			wantIDString:  "substitution_process",
+			wantCategory:  FeatureCategorySubstitution,
+			wantSubtype:   FeatureSubtypeUnknown,
+			wantDetail:    "`=(`",
+			wantFeature:   "`=(` process substitutions",
+			wantErrorText: "1:6: `=(` process substitutions are a zsh feature; tried parsing as bash",
+		},
+		{
+			name:          "builtin keyword-like family",
+			lang:          LangPOSIX,
+			src:           "let )",
+			wantID:        FeatureBuiltinKeywordLike,
+			wantIDString:  "builtin_keyword_like",
+			wantCategory:  FeatureCategoryBuiltin,
+			wantSubtype:   FeatureSubtypeUnknown,
+			wantDetail:    "`let`",
+			wantFeature:   "the `let` builtin",
+			wantErrorText: "1:5: the `let` builtin is a bash feature; tried parsing as posix",
+		},
+		{
+			name:          "parameter expansion name operator family",
+			lang:          LangMirBSDKorn,
+			src:           "echo ${!foo@}",
+			wantID:        FeatureParameterExpansionNameOperator,
+			wantIDString:  "parameter_expansion_name_operator",
+			wantCategory:  FeatureCategoryParameterExpansion,
+			wantSubtype:   FeatureSubtypeUnknown,
+			wantDetail:    "@",
+			wantFeature:   "`${!foo@}`",
+			wantErrorText: "1:6: `${!foo@}` is a bash feature; tried parsing as mksh",
+		},
+		{
+			name:          "parameter expansion case operator family",
+			lang:          LangMirBSDKorn,
+			src:           "echo ${foo^^}",
+			wantID:        FeatureParameterExpansionCaseOperator,
+			wantIDString:  "parameter_expansion_case_operator",
+			wantCategory:  FeatureCategoryParameterExpansion,
+			wantSubtype:   FeatureSubtypeUnknown,
+			wantFeature:   "this expansion operator",
+			wantErrorText: "1:11: this expansion operator is a bash feature; tried parsing as mksh",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			reader := io.Reader(strings.NewReader(tt.src))
+			if tt.reader != nil {
+				reader = tt.reader(tt.src)
+			}
+			_, err := NewParser(Variant(tt.lang)).Parse(reader, "")
+			if err == nil {
+				t.Fatalf("Parse(%q) error = nil, want LangError", tt.src)
+			}
+
+			var langErr LangError
+			if !errors.As(err, &langErr) {
+				t.Fatalf("Parse(%q) error = %T, want LangError", tt.src, err)
+			}
+
+			if got := langErr.FeatureID; got != tt.wantID {
+				t.Fatalf("FeatureID = %v, want %v", got, tt.wantID)
+			}
+			if got := langErr.FeatureID.String(); got != tt.wantIDString {
+				t.Fatalf("FeatureID.String() = %q, want %q", got, tt.wantIDString)
+			}
+			if got := langErr.FeatureID.Category(); got != tt.wantCategory {
+				t.Fatalf("FeatureID.Category() = %v, want %v", got, tt.wantCategory)
+			}
+			if got := langErr.FeatureSubtype; got != tt.wantSubtype {
+				t.Fatalf("FeatureSubtype = %q, want %q", got, tt.wantSubtype)
+			}
+			if got := langErr.FeatureDetail; got != tt.wantDetail {
+				t.Fatalf("FeatureDetail = %q, want %q", got, tt.wantDetail)
+			}
+			if got := langErr.Feature; got != tt.wantFeature {
+				t.Fatalf("Feature = %q, want %q", got, tt.wantFeature)
+			}
+			if got := langErr.FeatureID.Format(langErr.FeatureDetail); got != tt.wantFeature {
+				t.Fatalf("FeatureID.Format(FeatureDetail) = %q, want %q", got, tt.wantFeature)
+			}
+			if got := err.Error(); got != tt.wantErrorText {
+				t.Fatalf("Error mismatch\nwant: %s\ngot:  %s", tt.wantErrorText, got)
+			}
+		})
+	}
+}
+
+func TestParseLangErrorFeatureMetadataDoesNotDrainReader(t *testing.T) {
+	t.Parallel()
+
+	reader := &scriptedChunkReader{chunks: []string{
+		"echo ${(",
+		"f)foo}",
+		"echo should remain unread\n",
+	}}
+	_, err := NewParser(Variant(LangBash)).Parse(reader, "")
+	if err == nil {
+		t.Fatal("Parse error = nil, want LangError")
+	}
+
+	var langErr LangError
+	if !errors.As(err, &langErr) {
+		t.Fatalf("Parse error = %T, want LangError", err)
+	}
+	if got, want := langErr.FeatureID, FeatureParameterExpansionFlags; got != want {
+		t.Fatalf("FeatureID = %v, want %v", got, want)
+	}
+	if got, want := langErr.FeatureDetail, "f"; got != want {
+		t.Fatalf("FeatureDetail = %q, want %q", got, want)
+	}
+	if got, want := reader.index, 1; got != want {
+		t.Fatalf("reader consumed %d chunks, want %d", got, want)
+	}
+	if got, want := reader.chunks[1], "foo}"; got != want {
+		t.Fatalf("remaining chunk = %q, want %q", got, want)
+	}
+}
+
+func TestParseLangErrorFeatureMetadataDoesNotOverreadDelimiterChunk(t *testing.T) {
+	t.Parallel()
+
+	reader := &scriptedChunkReader{chunks: []string{
+		"echo ${(",
+		"f)foo}echo should remain unread\n",
+	}}
+	_, err := NewParser(Variant(LangBash)).Parse(reader, "")
+	if err == nil {
+		t.Fatal("Parse error = nil, want LangError")
+	}
+
+	var langErr LangError
+	if !errors.As(err, &langErr) {
+		t.Fatalf("Parse error = %T, want LangError", err)
+	}
+	if got, want := langErr.FeatureID, FeatureParameterExpansionFlags; got != want {
+		t.Fatalf("FeatureID = %v, want %v", got, want)
+	}
+	if got, want := langErr.FeatureDetail, "f"; got != want {
+		t.Fatalf("FeatureDetail = %q, want %q", got, want)
+	}
+	if got, want := reader.index, 1; got != want {
+		t.Fatalf("reader consumed %d chunks, want %d", got, want)
+	}
+	if got, want := reader.chunks[1], "foo}echo should remain unread\n"; got != want {
+		t.Fatalf("remaining chunk = %q, want %q", got, want)
+	}
+}
+
+func TestParseLangErrorParameterExpansionSpans(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		lang     LangVariant
+		src      string
+		wantID   FeatureID
+		wantPos  string
+		wantEnd  string
+		wantSpan string
+	}{
+		{
+			name:     "flags",
+			lang:     LangBash,
+			src:      "echo ${(f)foo}",
+			wantID:   FeatureParameterExpansionFlags,
+			wantPos:  "1:6",
+			wantEnd:  "1:9",
+			wantSpan: "${(",
+		},
+		{
+			name:     "width prefix",
+			lang:     LangBash,
+			src:      "echo ${%foo}",
+			wantID:   FeatureParameterExpansionWidthPrefix,
+			wantPos:  "1:6",
+			wantEnd:  "1:9",
+			wantSpan: "${%",
+		},
+		{
+			name:     "indirect prefix",
+			lang:     LangPOSIX,
+			src:      "echo ${!foo}",
+			wantID:   FeatureParameterExpansionIndirectPrefix,
+			wantPos:  "1:6",
+			wantEnd:  "1:9",
+			wantSpan: "${!",
+		},
+		{
+			name:     "is-set prefix",
+			lang:     LangBash,
+			src:      "echo ${+foo}",
+			wantID:   FeatureParameterExpansionIsSetPrefix,
+			wantPos:  "1:6",
+			wantEnd:  "1:9",
+			wantSpan: "${+",
+		},
+		{
+			name:     "nested parameter expansion",
+			lang:     LangBash,
+			src:      "echo ${${nested}}",
+			wantID:   FeatureParameterExpansionNested,
+			wantPos:  "1:6",
+			wantEnd:  "1:8",
+			wantSpan: "${",
+		},
+		{
+			name:     "quoted nested parameter expansion",
+			lang:     LangBash,
+			src:      `echo ${"${nested}"}`,
+			wantID:   FeatureParameterExpansionNested,
+			wantPos:  "1:6",
+			wantEnd:  "1:9",
+			wantSpan: `${"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := NewParser(Variant(tt.lang)).Parse(strings.NewReader(tt.src), "")
+			if err == nil {
+				t.Fatalf("Parse(%q) error = nil, want LangError", tt.src)
+			}
+
+			var langErr LangError
+			if !errors.As(err, &langErr) {
+				t.Fatalf("Parse(%q) error = %T, want LangError", tt.src, err)
+			}
+			if got := langErr.FeatureID; got != tt.wantID {
+				t.Fatalf("FeatureID = %v, want %v", got, tt.wantID)
+			}
+			if got := langErr.Pos.String(); got != tt.wantPos {
+				t.Fatalf("Pos = %q, want %q", got, tt.wantPos)
+			}
+			if got := langErr.End.String(); got != tt.wantEnd {
+				t.Fatalf("End = %q, want %q", got, tt.wantEnd)
+			}
+			start, end := int(langErr.Pos.Offset()), int(langErr.End.Offset())
+			if got := tt.src[start:end]; got != tt.wantSpan {
+				t.Fatalf("span = %q, want %q", got, tt.wantSpan)
+			}
+		})
+	}
+}
+
+func TestLangErrorFeatureFallback(t *testing.T) {
+	t.Parallel()
+
+	err := LangError{
+		Pos:           NewPos(0, 1, 6),
+		FeatureID:     FeaturePatternExtendedGlob,
+		FeatureDetail: "",
+		Langs:         []LangVariant{LangBash, LangMirBSDKorn},
+		LangUsed:      LangPOSIX,
+	}
+
+	const want = "1:6: extended globs are a bash/mksh feature; tried parsing as posix"
+	if got := err.Error(); got != want {
+		t.Fatalf("LangError.Error() = %q, want %q", got, want)
 	}
 }
 
@@ -482,6 +964,16 @@ func TestParseErrorBashErrorParseCompatibility(t *testing.T) {
 			want: "stdin: line 1: syntax error near unexpected token `bar'\nstdin: line 1: `foo(bar'",
 		},
 		{
+			name: "dynamic function-like open paren keeps parser token",
+			src:  "$(echo x)(\n",
+			want: "stdin: line 1: syntax error near unexpected token `newline'\nstdin: line 1: `$(echo x)('",
+		},
+		{
+			name: "function-like open paren with redirection literal token",
+			src:  "foo(2>err\n",
+			want: "stdin: line 1: syntax error near unexpected token `2'\nstdin: line 1: `foo(2>err'",
+		},
+		{
 			name: "incomplete if",
 			src:  "echo hi; if\n",
 			want: "stdin: line 1: syntax error: unexpected end of file from `if' command on line 1",
@@ -532,6 +1024,16 @@ func TestParseErrorBashErrorParseCompatibility(t *testing.T) {
 			want: "stdin: line 1: unexpected token `||' in conditional command\nstdin: line 1: syntax error near `|'\nstdin: line 1: `[[ || true ]]'",
 		},
 		{
+			name: "stray test closer",
+			src:  "]] )\n",
+			want: "stdin: line 1: syntax error near unexpected token `]]'\nstdin: line 1: `]] )'",
+		},
+		{
+			name: "empty conditional expression",
+			src:  "[[ ]]\n",
+			want: "stdin: line 1: syntax error near `]]'\nstdin: line 1: `[[ ]]'",
+		},
+		{
 			name: "array literal in case clause",
 			src:  "case a=() in\n",
 			want: "stdin: line 1: syntax error near unexpected token `('\nstdin: line 1: `case a=() in'",
@@ -576,6 +1078,81 @@ func TestParseErrorBashErrorParseCompatibility(t *testing.T) {
 	}
 }
 
+func TestParseErrorTypedContext(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		src       string
+		wantKind  parseErrorContextKind
+		wantToken string
+	}{
+		{
+			name:      "foo open at eof",
+			src:       "foo(",
+			wantKind:  parseErrorContextFuncOpen,
+			wantToken: "newline",
+		},
+		{
+			name:      "foo open with literal token",
+			src:       "foo(bar",
+			wantKind:  parseErrorContextFuncOpen,
+			wantToken: "bar",
+		},
+		{
+			name:      "function foo open at eof",
+			src:       "function foo(",
+			wantKind:  parseErrorContextFuncOpen,
+			wantToken: "newline",
+		},
+		{
+			name:      "dynamic func name preserves parser token",
+			src:       "$(echo x)(",
+			wantKind:  parseErrorContextFuncOpen,
+			wantToken: "newline",
+		},
+		{
+			name:      "func name preserves redirection literal token",
+			src:       "foo(2>err",
+			wantKind:  parseErrorContextFuncOpen,
+			wantToken: "2",
+		},
+		{
+			name:      "stray test closer",
+			src:       "]] )",
+			wantKind:  parseErrorContextUnexpectedToken,
+			wantToken: "]]",
+		},
+		{
+			name:      "empty conditional expression",
+			src:       "[[ ]]",
+			wantKind:  parseErrorContextNearToken,
+			wantToken: "]]",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(tc.src), "stdin")
+			if err == nil {
+				t.Fatal("Parse() error = nil, want parse error")
+			}
+			var parseErr ParseError
+			if !errors.As(err, &parseErr) {
+				t.Fatalf("Parse() error = %T, want ParseError", err)
+			}
+			if got := parseErr.typedContext.kind; got != tc.wantKind {
+				t.Fatalf("typedContext.kind = %v, want %v", got, tc.wantKind)
+			}
+			if got := parseErr.typedContext.token; got != tc.wantToken {
+				t.Fatalf("typedContext.token = %q, want %q", got, tc.wantToken)
+			}
+		})
+	}
+}
+
 func TestParseErrorInteractiveCommandStringFormatting(t *testing.T) {
 	t.Parallel()
 
@@ -613,10 +1190,50 @@ func TestParseErrorRecoverableNestedArrayLiteral(t *testing.T) {
 	if !parseErr.Recoverable() {
 		t.Fatal("Recoverable() = false, want true")
 	}
+	if got, want := parseErr.Kind, ParseErrorKindUnexpected; got != want {
+		t.Fatalf("Kind = %q, want %q", got, want)
+	}
+	if got, want := parseErr.Unexpected, ParseErrorSymbolLeftParen; got != want {
+		t.Fatalf("Unexpected = %q, want %q", got, want)
+	}
+	if !parseErr.IsRecoverable {
+		t.Fatal("IsRecoverable = false, want true")
+	}
+	if got, want := parseErr.Error(), "stdin:1:12: syntax error near unexpected token `('"; got != want {
+		t.Fatalf("Error() = %q, want %q", got, want)
+	}
 	if parseErr.SourceLine == "" {
 		parseErr.SourceLine = sourceLineForTest("a=( inside=() )\n", parseErr.Pos.Line())
 	}
 	const want = "stdin: line 1: syntax error near unexpected token `('\nstdin: line 1: `a=( inside=() )'"
+	if got := parseErr.BashError(); got != want {
+		t.Fatalf("BashError() = %q, want %q", got, want)
+	}
+}
+
+func TestParseErrorBashCompatFunctionNameUnexpectedQuotedWord(t *testing.T) {
+	t.Parallel()
+
+	parser := NewParser(Variant(LangBash))
+	src := "foo$identity('z')\n"
+	_, err := parser.Parse(strings.NewReader(src), "stdin")
+	if err == nil {
+		t.Fatal("Parse() error = nil, want parse error")
+	}
+	var parseErr ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("Parse() error = %T, want ParseError", err)
+	}
+	if got, want := parseErr.Kind, ParseErrorKindUnexpected; got != want {
+		t.Fatalf("Kind = %q, want %q", got, want)
+	}
+	if got, want := parseErr.Unexpected, ParseErrorSymbolSingleQuote; got != want {
+		t.Fatalf("Unexpected = %q, want %q", got, want)
+	}
+	if parseErr.SourceLine == "" {
+		parseErr.SourceLine = sourceLineForTest(src, parseErr.Pos.Line())
+	}
+	const want = "stdin: line 1: syntax error near unexpected token `'z''\nstdin: line 1: `foo$identity('z')'"
 	if got := parseErr.BashError(); got != want {
 		t.Fatalf("BashError() = %q, want %q", got, want)
 	}
@@ -655,6 +1272,19 @@ func TestParseErrorBashCompatEmptyThenAndDoBodies(t *testing.T) {
 			if !errors.As(err, &parseErr) {
 				t.Fatalf("Parse() error = %T, want ParseError", err)
 			}
+			wantUnexpected := ParseErrorSymbolFi
+			if tc.name == "empty do body" {
+				wantUnexpected = ParseErrorSymbolDone
+			}
+			if got, want := parseErr.Kind, ParseErrorKindUnexpected; got != want {
+				t.Fatalf("Kind = %q, want %q", got, want)
+			}
+			if got, want := parseErr.Unexpected, wantUnexpected; got != want {
+				t.Fatalf("Unexpected = %q, want %q", got, want)
+			}
+			if got := parseErr.Expected; len(got) != 0 {
+				t.Fatalf("Expected = %v, want nil", got)
+			}
 			if parseErr.SourceLine == "" {
 				parseErr.SourceLine = sourceLineForTest(tc.src, parseErr.Pos.Line())
 			}
@@ -662,6 +1292,270 @@ func TestParseErrorBashCompatEmptyThenAndDoBodies(t *testing.T) {
 				t.Fatalf("BashError() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseErrorMetadataCompoundRecovery(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		src        string
+		kind       ParseErrorKind
+		construct  ParseErrorSymbol
+		unexpected ParseErrorSymbol
+		expected   []ParseErrorSymbol
+	}{
+		{
+			name:       "missing then",
+			src:        "if foo\n",
+			kind:       ParseErrorKindMissing,
+			construct:  ParseErrorSymbol("if <cond>"),
+			unexpected: ParseErrorSymbolEOF,
+			expected:   []ParseErrorSymbol{ParseErrorSymbolThen},
+		},
+		{
+			name:       "missing do",
+			src:        "while false\n",
+			kind:       ParseErrorKindMissing,
+			construct:  ParseErrorSymbol("while <cond>"),
+			unexpected: ParseErrorSymbolEOF,
+			expected:   []ParseErrorSymbol{ParseErrorSymbolDo},
+		},
+		{
+			name:       "missing fi",
+			src:        "if foo; then echo hi\n",
+			kind:       ParseErrorKindMissing,
+			construct:  ParseErrorSymbol("if"),
+			unexpected: ParseErrorSymbolEOF,
+			expected:   []ParseErrorSymbol{ParseErrorSymbolFi},
+		},
+		{
+			name:       "missing done",
+			src:        "while false; do echo hi\n",
+			kind:       ParseErrorKindMissing,
+			construct:  ParseErrorSymbol("while"),
+			unexpected: ParseErrorSymbolEOF,
+			expected:   []ParseErrorSymbol{ParseErrorSymbolDone},
+		},
+		{
+			name:       "missing esac",
+			src:        "case x in x) echo hi;;\n",
+			kind:       ParseErrorKindMissing,
+			construct:  ParseErrorSymbol("case"),
+			unexpected: ParseErrorSymbolEOF,
+			expected:   []ParseErrorSymbol{ParseErrorSymbolEsac},
+		},
+		{
+			name:       "missing right brace",
+			src:        "{ echo hi\n",
+			kind:       ParseErrorKindUnclosed,
+			construct:  ParseErrorSymbolLeftBrace,
+			unexpected: ParseErrorSymbolEOF,
+			expected:   []ParseErrorSymbol{ParseErrorSymbolRightBrace},
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(tc.src), "stdin")
+			if err == nil {
+				t.Fatal("Parse() error = nil, want ParseError")
+			}
+			var parseErr ParseError
+			if !errors.As(err, &parseErr) {
+				t.Fatalf("Parse() error = %T, want ParseError", err)
+			}
+			if got, want := parseErr.Kind, tc.kind; got != want {
+				t.Fatalf("Kind = %q, want %q", got, want)
+			}
+			if got, want := parseErr.Construct, tc.construct; got != want {
+				t.Fatalf("Construct = %q, want %q", got, want)
+			}
+			if got, want := parseErr.Unexpected, tc.unexpected; got != want {
+				t.Fatalf("Unexpected = %q, want %q", got, want)
+			}
+			if !slices.Equal(parseErr.Expected, tc.expected) {
+				t.Fatalf("Expected = %v, want %v", parseErr.Expected, tc.expected)
+			}
+			if parseErr.IsRecoverable {
+				t.Fatal("IsRecoverable = true, want false")
+			}
+		})
+	}
+}
+
+func TestParseErrorMetadataStrayClosingKeywords(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		src        string
+		variant    LangVariant
+		construct  ParseErrorSymbol
+		unexpected ParseErrorSymbol
+	}{
+		{
+			name:       "then posix",
+			src:        "then\n",
+			construct:  ParseErrorSymbol("if"),
+			unexpected: ParseErrorSymbolThen,
+		},
+		{
+			name:       "elif bash",
+			src:        "elif\n",
+			variant:    LangBash,
+			construct:  ParseErrorSymbol("if"),
+			unexpected: ParseErrorSymbol("elif"),
+		},
+		{
+			name:       "fi posix",
+			src:        "fi\n",
+			construct:  ParseErrorSymbol("if"),
+			unexpected: ParseErrorSymbolFi,
+		},
+		{
+			name:       "do bash",
+			src:        "do\n",
+			variant:    LangBash,
+			construct:  ParseErrorSymbol("loop"),
+			unexpected: ParseErrorSymbolDo,
+		},
+		{
+			name:       "done posix",
+			src:        "done\n",
+			construct:  ParseErrorSymbol("loop"),
+			unexpected: ParseErrorSymbolDone,
+		},
+		{
+			name:       "esac bash",
+			src:        "esac\n",
+			variant:    LangBash,
+			construct:  ParseErrorSymbol("case"),
+			unexpected: ParseErrorSymbolEsac,
+		},
+		{
+			name:       "right brace",
+			src:        "}\n",
+			construct:  ParseErrorSymbolLeftBrace,
+			unexpected: ParseErrorSymbolRightBrace,
+		},
+		{
+			name:       "right brace after pipe",
+			src:        "foo | }\n",
+			construct:  ParseErrorSymbolLeftBrace,
+			unexpected: ParseErrorSymbolRightBrace,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			parser := NewParser()
+			if tc.variant != 0 {
+				parser = NewParser(Variant(tc.variant))
+			}
+			_, err := parser.Parse(strings.NewReader(tc.src), "stdin")
+			if err == nil {
+				t.Fatal("Parse() error = nil, want ParseError")
+			}
+			var parseErr ParseError
+			if !errors.As(err, &parseErr) {
+				t.Fatalf("Parse() error = %T, want ParseError", err)
+			}
+			if got, want := parseErr.Kind, ParseErrorKindUnexpected; got != want {
+				t.Fatalf("Kind = %q, want %q", got, want)
+			}
+			if got, want := parseErr.Construct, tc.construct; got != want {
+				t.Fatalf("Construct = %q, want %q", got, want)
+			}
+			if got, want := parseErr.Unexpected, tc.unexpected; got != want {
+				t.Fatalf("Unexpected = %q, want %q", got, want)
+			}
+			if got := parseErr.Expected; len(got) != 0 {
+				t.Fatalf("Expected = %v, want nil", got)
+			}
+		})
+	}
+}
+
+func TestParseErrorMetadataUnclosedHeredoc(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewParser(Variant(LangBash)).Parse(strings.NewReader("<<EOF\n"), "stdin")
+	if err == nil {
+		t.Fatal("Parse() error = nil, want ParseError")
+	}
+	var parseErr ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("Parse() error = %T, want ParseError", err)
+	}
+	if got, want := parseErr.Kind, ParseErrorKindUnclosed; got != want {
+		t.Fatalf("Kind = %q, want %q", got, want)
+	}
+	if got, want := parseErr.Construct, ParseErrorSymbolHereDocument; got != want {
+		t.Fatalf("Construct = %q, want %q", got, want)
+	}
+	if got, want := parseErr.Unexpected, ParseErrorSymbolEOF; got != want {
+		t.Fatalf("Unexpected = %q, want %q", got, want)
+	}
+	if got, want := parseErr.Expected, []ParseErrorSymbol{ParseErrorSymbol("EOF")}; !slices.Equal(got, want) {
+		t.Fatalf("Expected = %v, want %v", got, want)
+	}
+}
+
+func TestParseErrorMetadataArithmeticExpressionExpected(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewParser(Variant(LangBash)).Arithmetic(strings.NewReader("1+"))
+	if err == nil {
+		t.Fatal("Arithmetic() error = nil, want ParseError")
+	}
+	var parseErr ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("Arithmetic() error = %T, want ParseError", err)
+	}
+	if got, want := parseErr.Kind, ParseErrorKindMissing; got != want {
+		t.Fatalf("Kind = %q, want %q", got, want)
+	}
+	if got, want := parseErr.Construct, ParseErrorSymbol("+"); got != want {
+		t.Fatalf("Construct = %q, want %q", got, want)
+	}
+	if got, want := parseErr.Unexpected, ParseErrorSymbolEOF; got != want {
+		t.Fatalf("Unexpected = %q, want %q", got, want)
+	}
+	if got, want := parseErr.Expected, []ParseErrorSymbol{ParseErrorSymbolExpression}; !slices.Equal(got, want) {
+		t.Fatalf("Expected = %v, want %v", got, want)
+	}
+}
+
+func TestParseErrorMetadataPatternUnexpectedLeftParen(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewParser(Variant(LangBash)).Parse(strings.NewReader("[[ x == (foo|bar)* ]]\n"), "stdin")
+	if err == nil {
+		t.Fatal("Parse() error = nil, want ParseError")
+	}
+	var parseErr ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("Parse() error = %T, want ParseError", err)
+	}
+	if got, want := parseErr.Kind, ParseErrorKindUnexpected; got != want {
+		t.Fatalf("Kind = %q, want %q", got, want)
+	}
+	if got, want := parseErr.Construct, ParseErrorSymbolPattern; got != want {
+		t.Fatalf("Construct = %q, want %q", got, want)
+	}
+	if got, want := parseErr.Unexpected, ParseErrorSymbolLeftParen; got != want {
+		t.Fatalf("Unexpected = %q, want %q", got, want)
+	}
+	if got := parseErr.Expected; len(got) != 0 {
+		t.Fatalf("Expected = %v, want nil", got)
 	}
 }
 
@@ -836,6 +1730,216 @@ func TestParseHeredocBackquoteDelimiterPreservesCmdSubstForm(t *testing.T) {
 	cmdSubst, ok := redir.HdocDelim.Parts[0].(*CmdSubst)
 	qt.Assert(t, qt.IsTrue(ok))
 	qt.Assert(t, qt.IsTrue(cmdSubst.Backquotes))
+}
+
+func singleHeredocDelimForTest(t *testing.T, prog *File) *HeredocDelim {
+	t.Helper()
+	qt.Assert(t, qt.IsTrue(prog != nil))
+	qt.Assert(t, qt.Equals(len(prog.Stmts), 1))
+	qt.Assert(t, qt.Equals(len(prog.Stmts[0].Redirs), 1))
+	delim := prog.Stmts[0].Redirs[0].HdocDelim
+	qt.Assert(t, qt.IsTrue(delim != nil))
+	return delim
+}
+
+func assertHeredocCloseSpan(t *testing.T, src string, delim *HeredocDelim, wantValid bool) {
+	t.Helper()
+	if !wantValid {
+		qt.Assert(t, qt.IsFalse(delim.ClosePos.IsValid()))
+		qt.Assert(t, qt.IsFalse(delim.CloseEnd.IsValid()))
+		return
+	}
+	qt.Assert(t, qt.IsTrue(delim.ClosePos.IsValid()))
+	qt.Assert(t, qt.IsTrue(delim.CloseEnd.IsValid()))
+	start, end := int(delim.ClosePos.Offset()), int(delim.CloseEnd.Offset())
+	qt.Assert(t, qt.IsTrue(start >= 0))
+	qt.Assert(t, qt.IsTrue(end >= start))
+	qt.Assert(t, qt.IsTrue(end <= len(src)))
+	qt.Assert(t, qt.Equals(src[start:end], delim.CloseRaw))
+}
+
+func assertHeredocCloseCandidate(t *testing.T, src string, delim *HeredocDelim, wantRaw string, wantOffset uint, wantLeading string, wantMismatch bool) {
+	t.Helper()
+	if wantRaw == "" {
+		qt.Assert(t, qt.IsNil(delim.CloseCandidate))
+		return
+	}
+	qt.Assert(t, qt.IsTrue(delim.CloseCandidate != nil))
+	start, end := int(delim.CloseCandidate.Pos.Offset()), int(delim.CloseCandidate.End.Offset())
+	qt.Assert(t, qt.IsTrue(start >= 0))
+	qt.Assert(t, qt.IsTrue(end >= start))
+	qt.Assert(t, qt.IsTrue(end <= len(src)))
+	qt.Assert(t, qt.Equals(src[start:end], delim.CloseCandidate.Raw))
+	qt.Assert(t, qt.Equals(delim.CloseCandidate.Raw, wantRaw))
+	qt.Assert(t, qt.Equals(delim.CloseCandidate.DelimOffset, wantOffset))
+	qt.Assert(t, qt.Equals(delim.CloseCandidate.LeadingWhitespace, wantLeading))
+	qt.Assert(t, qt.Equals(delim.CloseCandidate.RawTokenMismatch, wantMismatch))
+}
+
+func TestParseHeredocCloserMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		src            string
+		wantRaw        string
+		wantCandidate  string
+		wantOffset     uint
+		wantLeading    string
+		wantMismatch   bool
+		wantIndentMode HeredocIndentMode
+		wantIndentTabs uint16
+	}{
+		{
+			name:           "plain closer",
+			src:            "cat <<EOF\nbody\nEOF\n",
+			wantRaw:        "EOF",
+			wantCandidate:  "EOF",
+			wantIndentMode: HeredocIndentNone,
+		},
+		{
+			name:           "quoted opener",
+			src:            "cat <<'EOF'\nbody\nEOF\n",
+			wantRaw:        "EOF",
+			wantCandidate:  "EOF",
+			wantIndentMode: HeredocIndentNone,
+		},
+		{
+			name:           "dash heredoc tab closer",
+			src:            "cat <<-EOF\nbody\n\tEOF\n",
+			wantRaw:        "\tEOF",
+			wantCandidate:  "EOF",
+			wantOffset:     1,
+			wantLeading:    "\t",
+			wantIndentMode: HeredocIndentStripTabs,
+			wantIndentTabs: 1,
+		},
+		{
+			name:           "closer at eof",
+			src:            "cat <<EOF\nbody\nEOF",
+			wantRaw:        "EOF",
+			wantCandidate:  "EOF",
+			wantIndentMode: HeredocIndentNone,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			prog, err := NewParser().Parse(strings.NewReader(tc.src), "")
+			qt.Assert(t, qt.IsNil(err))
+
+			delim := singleHeredocDelimForTest(t, prog)
+			qt.Assert(t, qt.Equals(delim.CloseRaw, tc.wantRaw))
+			qt.Assert(t, qt.Equals(delim.Matched, true))
+			qt.Assert(t, qt.Equals(delim.EOFTerminated, false))
+			qt.Assert(t, qt.Equals(delim.TrailingText, ""))
+			qt.Assert(t, qt.Equals(delim.IndentMode, tc.wantIndentMode))
+			qt.Assert(t, qt.Equals(delim.IndentTabs, tc.wantIndentTabs))
+			assertHeredocCloseSpan(t, tc.src, delim, true)
+			assertHeredocCloseCandidate(t, tc.src, delim, tc.wantCandidate, tc.wantOffset, tc.wantLeading, tc.wantMismatch)
+		})
+	}
+}
+
+func TestParseHeredocCloserMetadataOnEOF(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		src            string
+		wantRaw        string
+		wantTrailing   string
+		wantCandidate  string
+		wantOffset     uint
+		wantLeading    string
+		wantMismatch   bool
+		wantSpan       bool
+		wantIndentMode HeredocIndentMode
+		wantIndentTabs uint16
+	}{
+		{
+			name:           "no final candidate line",
+			src:            "cat <<EOF\nbody\n",
+			wantIndentMode: HeredocIndentNone,
+		},
+		{
+			name:           "space near match",
+			src:            "cat <<EOF\nbody\nEOF ",
+			wantRaw:        "EOF ",
+			wantTrailing:   " ",
+			wantCandidate:  "EOF",
+			wantSpan:       true,
+			wantIndentMode: HeredocIndentNone,
+		},
+		{
+			name:           "space near match before trailing newline",
+			src:            "cat <<EOF\nbody\nEOF \n",
+			wantRaw:        "EOF ",
+			wantTrailing:   " ",
+			wantCandidate:  "EOF",
+			wantSpan:       true,
+			wantIndentMode: HeredocIndentNone,
+		},
+		{
+			name:           "tab indented hash near match",
+			src:            "cat <<-EOF\nbody\n\tEOF#",
+			wantRaw:        "\tEOF#",
+			wantTrailing:   "#",
+			wantSpan:       true,
+			wantIndentMode: HeredocIndentStripTabs,
+			wantIndentTabs: 1,
+		},
+		{
+			name:           "indented closer candidate",
+			src:            "cat <<EOF\nbody\n EOF",
+			wantRaw:        " EOF",
+			wantCandidate:  "EOF",
+			wantOffset:     1,
+			wantLeading:    " ",
+			wantSpan:       true,
+			wantIndentMode: HeredocIndentNone,
+		},
+		{
+			name:           "later in line closer candidate",
+			src:            "cat <<EOF\nbody\nx EOF",
+			wantRaw:        "x EOF",
+			wantCandidate:  "EOF",
+			wantOffset:     2,
+			wantLeading:    " ",
+			wantSpan:       true,
+			wantIndentMode: HeredocIndentNone,
+		},
+		{
+			name:           "raw token mismatch closer candidate",
+			src:            "cat <<BLOCK\nbody\n'BLOCK'",
+			wantRaw:        "'BLOCK'",
+			wantCandidate:  "'BLOCK'",
+			wantMismatch:   true,
+			wantSpan:       true,
+			wantIndentMode: HeredocIndentNone,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			prog, err := NewParser().Parse(strings.NewReader(tc.src), "")
+			qt.Assert(t, qt.Not(qt.IsNil(err)))
+
+			delim := singleHeredocDelimForTest(t, prog)
+			qt.Assert(t, qt.Equals(delim.CloseRaw, tc.wantRaw))
+			qt.Assert(t, qt.Equals(delim.Matched, false))
+			qt.Assert(t, qt.Equals(delim.EOFTerminated, true))
+			qt.Assert(t, qt.Equals(delim.TrailingText, tc.wantTrailing))
+			qt.Assert(t, qt.Equals(delim.IndentMode, tc.wantIndentMode))
+			qt.Assert(t, qt.Equals(delim.IndentTabs, tc.wantIndentTabs))
+			assertHeredocCloseSpan(t, tc.src, delim, tc.wantSpan)
+			assertHeredocCloseCandidate(t, tc.src, delim, tc.wantCandidate, tc.wantOffset, tc.wantLeading, tc.wantMismatch)
+		})
+	}
 }
 
 func TestParseConfirm(t *testing.T) {
@@ -1148,9 +2252,13 @@ func confirmParse(in, cmd string, wantErr bool) func(*testing.T) {
 
 var cmpOpt = cmp.Options{
 	cmp.FilterValues(func(p1, p2 Pos) bool { return true }, cmp.Ignore()),
+	cmpopts.IgnoreFields(IfClause{}, "Kind"),
 	cmpopts.IgnoreFields(ArithmExp{}, "Source"),
 	cmpopts.IgnoreFields(ArithmCmd{}, "Source"),
-	cmpopts.IgnoreUnexported(Assign{}, Subscript{}, VarRef{}, ParseError{}),
+	cmpopts.IgnoreFields(Assign{}, "Surface"),
+	cmpopts.IgnoreFields(CmdSubst{}, "BackquoteClose", "DiagnosticEnd"),
+	cmpopts.IgnoreFields(Word{}, "LeadingEscape"),
+	cmpopts.IgnoreUnexported(Assign{}, CallExpr{}, Subscript{}, VarRef{}, Word{}, Pattern{}, ParseError{}),
 }
 
 func sourceLineForTest(src string, lineNum uint) string {
@@ -1995,13 +3103,17 @@ var errorCases = []errorCase{
 		langErr("1:9: invalid parameter name", LangZsh),
 	),
 	errCase(
+		"echo ${~foo}",
+		langErr("1:6: `${~foo}` is a zsh feature; tried parsing as LANG", LangPOSIX|LangBash|LangMirBSDKorn|LangBats),
+	),
+	errCase(
 		"echo ${#${",
-		langErr("1:9: nested parameter expansions are a zsh feature; tried parsing as LANG"),
+		langErr("1:6: nested parameter expansions are a zsh feature; tried parsing as LANG"),
 		langErr("1:11: invalid parameter name", LangZsh),
 	),
 	errCase(
 		"echo ${#$(",
-		langErr("1:9: nested parameter expansions are a zsh feature; tried parsing as LANG"),
+		langErr("1:6: nested parameter expansions are a zsh feature; tried parsing as LANG"),
 		langErr("1:9: reached EOF without matching `$(` with `)`", LangZsh),
 	),
 	errCase(
@@ -2152,6 +3264,10 @@ var errorCases = []errorCase{
 	errCase(
 		"case $i in &) foo;",
 		langErr("1:12: case patterns must consist of words"),
+	),
+	errCase(
+		"case x in a;) echo hi ;; esac",
+		langErr("1:12: syntax error near unexpected token `;'"),
 	),
 	errCase(
 		"case i {",
@@ -2408,6 +3524,10 @@ var errorCases = []errorCase{
 	errCase(
 		"[[ '^(a b)$' == ^(a\\ b)$ ]]",
 		langErr("1:18: syntax error in conditional expression: unexpected token `('", LangBash),
+	),
+	errCase(
+		"case x in (a|b)*) echo hi ;; esac",
+		langErr("1:11: syntax error near unexpected token `('", LangBash|LangMirBSDKorn),
 	),
 	errCase(
 		"[[ a =~ [a b] ]]",
@@ -2823,8 +3943,22 @@ type strictStringReader struct {
 	gaveEOF bool
 }
 
+type chunkReader struct {
+	*strings.Reader
+	maxChunk int
+}
+
+type scriptedChunkReader struct {
+	chunks []string
+	index  int
+}
+
 func newStrictReader(s string) *strictStringReader {
 	return &strictStringReader{Reader: strings.NewReader(s)}
+}
+
+func newChunkReader(s string, maxChunk int) *chunkReader {
+	return &chunkReader{Reader: strings.NewReader(s), maxChunk: maxChunk}
 }
 
 func (r *strictStringReader) Read(p []byte) (int, error) {
@@ -2836,6 +3970,25 @@ func (r *strictStringReader) Read(p []byte) (int, error) {
 		r.gaveEOF = true
 	}
 	return n, err
+}
+
+func (r *chunkReader) Read(p []byte) (int, error) {
+	if r.maxChunk > 0 && len(p) > r.maxChunk {
+		p = p[:r.maxChunk]
+	}
+	return r.Reader.Read(p)
+}
+
+func (r *scriptedChunkReader) Read(p []byte) (int, error) {
+	if r.index >= len(r.chunks) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.chunks[r.index])
+	r.chunks[r.index] = r.chunks[r.index][n:]
+	if r.chunks[r.index] == "" {
+		r.index++
+	}
+	return n, nil
 }
 
 func TestParseStmtsSeq(t *testing.T) {
@@ -2860,6 +4013,51 @@ func TestParseStmtsSeq(t *testing.T) {
 	inWriter.Close()
 	<-recv
 	<-recv
+	if err := <-errc; err != nil {
+		t.Fatalf("Expected no error: %v", err)
+	}
+}
+
+func TestParseStmtsSeqLongCasePatternDoesNotBlock(t *testing.T) {
+	t.Parallel()
+
+	p := NewParser()
+	inReader, inWriter := io.Pipe()
+	stmtc := make(chan *Stmt, 1)
+	errc := make(chan error, 1)
+	go func() {
+		var firstErr error
+		for stmt, err := range p.StmtsSeq(inReader) {
+			if firstErr == nil && err != nil {
+				firstErr = err
+			}
+			if err == nil {
+				stmtc <- stmt
+			}
+		}
+		errc <- firstErr
+	}()
+
+	pattern := strings.Repeat("a", bufSize+32)
+	_, err := io.WriteString(inWriter, "case x in "+pattern+") echo hi ;; esac\n")
+	qt.Assert(t, qt.IsNil(err))
+
+	select {
+	case stmt := <-stmtc:
+		caseClause, ok := stmt.Cmd.(*CaseClause)
+		if !ok {
+			t.Fatalf("stmt.Cmd = %T, want *CaseClause", stmt.Cmd)
+		}
+		qt.Assert(t, qt.HasLen(caseClause.Items, 1))
+		qt.Assert(t, qt.HasLen(caseClause.Items[0].Patterns, 1))
+		if got := caseClause.Items[0].Patterns[0].UnquotedText(); got != pattern {
+			t.Fatalf("case pattern = %q, want %q", got, pattern)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("StmtsSeq blocked on a complete case clause until EOF")
+	}
+
+	qt.Assert(t, qt.IsNil(inWriter.Close()))
 	if err := <-errc; err != nil {
 		t.Fatalf("Expected no error: %v", err)
 	}
@@ -2919,6 +4117,43 @@ func TestParseStmtsSeqError(t *testing.T) {
 				t.Fatalf("Expected an error in %q, but got nil", in)
 			}
 		})
+	}
+}
+
+func TestParseStopsAfterHeredocBodyError(t *testing.T) {
+	t.Parallel()
+
+	src := "cat <<EOF\n${\nEOF\necho after\n"
+	file, err := NewParser().Parse(strings.NewReader(src), "stdin")
+	if err == nil {
+		t.Fatal("Parse() error = nil, want ParseError")
+	}
+	var parseErr ParseError
+	if !errors.As(err, &parseErr) {
+		t.Fatalf("Parse() error = %T, want ParseError", err)
+	}
+	if got, want := len(file.Stmts), 1; got != want {
+		t.Fatalf("len(Stmts) = %d, want %d", got, want)
+	}
+	call, ok := file.Stmts[0].Cmd.(*CallExpr)
+	if !ok {
+		t.Fatalf("statement command = %T, want *CallExpr", file.Stmts[0].Cmd)
+	}
+	if got, want := call.Args[0].Lit(), "cat"; got != want {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+	if got, want := len(file.Stmts[0].Redirs), 1; got != want {
+		t.Fatalf("len(Redirs) = %d, want %d", got, want)
+	}
+	delim := file.Stmts[0].Redirs[0].HdocDelim
+	if delim == nil {
+		t.Fatal("HdocDelim = nil, want metadata")
+	}
+	if !delim.Matched {
+		t.Fatal("HdocDelim.Matched = false, want true")
+	}
+	if got, want := delim.CloseRaw, "EOF"; got != want {
+		t.Fatalf("HdocDelim.CloseRaw = %q, want %q", got, want)
 	}
 }
 
@@ -3011,6 +4246,44 @@ func TestParseAliasExpansionPreservesWordProvenance(t *testing.T) {
 		if diff := cmp.Diff(tt.want, got); diff != "" {
 			t.Fatalf("alias provenance mismatch (-want +got):\n%s", diff)
 		}
+	}
+}
+
+func TestParseAliasExpansionPreservesCallExprSeparators(t *testing.T) {
+	t.Parallel()
+
+	parser := NewParser(ExpandAliases(func(name string) (AliasSpec, bool) {
+		switch name {
+		case "hi":
+			return AliasSpec{Value: "echo hello "}, true
+		case "punct":
+			return AliasSpec{Value: "world"}, true
+		default:
+			return AliasSpec{}, false
+		}
+	}))
+
+	file, err := parser.Parse(strings.NewReader("hi punct\n"), "")
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	call := file.Stmts[0].Cmd.(*CallExpr)
+	sep := call.ArgSeparator(1)
+	if !sep.IsValid() {
+		t.Fatal("ArgSeparator(1).IsValid() = false, want true")
+	}
+	if got, want := sep.SpaceCount(), 2; got != want {
+		t.Fatalf("ArgSeparator(1).SpaceCount() = %d, want %d", got, want)
+	}
+	if got := sep.TabCount(); got != 0 {
+		t.Fatalf("ArgSeparator(1).TabCount() = %d, want 0", got)
+	}
+	if got := sep.HasNewline(); got {
+		t.Fatal("ArgSeparator(1).HasNewline() = true, want false")
+	}
+	if got := sep.HasMultipleSpacesOnSameLine(); !got {
+		t.Fatal("ArgSeparator(1).HasMultipleSpacesOnSameLine() = false, want true")
 	}
 }
 
@@ -3407,6 +4680,29 @@ func TestPosEdgeCases(t *testing.T) {
 	qt.Check(t, qt.Equals(f.Stmts[1].End().String(), "2:9"))
 }
 
+func TestCmdSubstDollarParenDiagnosticEndKeepsExactSyntaxEnd(t *testing.T) {
+	t.Parallel()
+
+	src := "#!/bin/bash\n[[ $(grep -i tcp <<<\"$is_new_protocol-$net\") ]] && :\n"
+	p := NewParser()
+	f, err := p.Parse(strings.NewReader(src), "")
+	qt.Assert(t, qt.IsNil(err))
+
+	testClause := f.Stmts[0].Cmd.(*BinaryCmd).X.Cmd.(*TestClause)
+	condWord := testClause.X.(*CondWord)
+	cmdSubst := condWord.Word.Parts[0].(*CmdSubst)
+
+	qt.Check(t, qt.Equals(cmdSubst.Pos().String(), "2:4"))
+	qt.Check(t, qt.Equals(cmdSubst.Right.String(), "2:44"))
+	qt.Check(t, qt.Equals(cmdSubst.End().String(), "2:45"))
+	qt.Check(t, qt.Equals(cmdSubst.DiagnosticEnd.String(), "2:46"))
+
+	start := int(cmdSubst.Pos().Offset())
+	end := int(cmdSubst.End().Offset())
+	qt.Check(t, qt.Equals(src[start:end], "$(grep -i tcp <<<\"$is_new_protocol-$net\")"))
+	qt.Check(t, qt.Equals(src[start:int(cmdSubst.DiagnosticEnd.Offset())], "$(grep -i tcp <<<\"$is_new_protocol-$net\") "))
+}
+
 func TestBareCarriageReturnIsNotWhitespace(t *testing.T) {
 	t.Parallel()
 
@@ -3566,6 +4862,337 @@ func TestParseRecoverErrors(t *testing.T) {
 	}
 }
 
+func TestParseRecoverErrorsIfClauseMissingThenBodies(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		src          string
+		wantCond     []string
+		wantThen     []string
+		wantElseCond []string
+		wantElseThen []string
+		wantPrinted  string
+	}{
+		{
+			name:        "body before fi",
+			src:         "if foo\nbar\nfi\n",
+			wantCond:    []string{"foo"},
+			wantThen:    []string{"bar"},
+			wantPrinted: "if foo; then",
+		},
+		{
+			name:         "body before else",
+			src:          "if foo\nbar\nelse\nbaz\nfi\n",
+			wantCond:     []string{"foo"},
+			wantThen:     []string{"bar"},
+			wantElseThen: []string{"baz"},
+			wantPrinted:  "else",
+		},
+		{
+			name:         "recovered elif",
+			src:          "if foo\nbar\nelif baz\nqux\nfi\n",
+			wantCond:     []string{"foo"},
+			wantThen:     []string{"bar"},
+			wantElseCond: []string{"baz"},
+			wantElseThen: []string{"qux"},
+			wantPrinted:  "elif baz; then",
+		},
+		{
+			name:     "single line keeps condition together",
+			src:      "if foo; bar; fi\n",
+			wantCond: []string{"foo", "bar"},
+			wantThen: []string{""},
+		},
+		{
+			name:     "line continuation keeps condition together",
+			src:      "if foo;\\\nbar; fi\n",
+			wantCond: []string{"foo", "bar"},
+			wantThen: []string{""},
+		},
+		{
+			name:     "comment newline still splits body",
+			src:      "if foo; #\\\\\nbar\nfi\n",
+			wantCond: []string{"foo"},
+			wantThen: []string{"bar"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			parser := NewParser(RecoverErrors(4))
+			f, err := parser.Parse(strings.NewReader(tc.src), "")
+			qt.Assert(t, qt.IsNil(err))
+			qt.Assert(t, qt.HasLen(f.Stmts, 1))
+
+			root, ok := f.Stmts[0].Cmd.(*IfClause)
+			if !ok {
+				t.Fatalf("root command = %T, want *IfClause", f.Stmts[0].Cmd)
+			}
+			qt.Check(t, qt.Equals(root.Kind, IfClauseIf))
+			qt.Assert(t, qt.IsTrue(root.hasThen()))
+			qt.Assert(t, qt.IsTrue(root.ThenPos.IsRecovered()))
+			qt.Check(t, qt.DeepEquals(stmtCommandNames(root.Cond), tc.wantCond))
+			qt.Check(t, qt.DeepEquals(stmtCommandNames(root.Then), tc.wantThen))
+			if len(tc.wantThen) == 1 && tc.wantThen[0] == "" {
+				qt.Check(t, qt.IsTrue(root.Then[0].Pos().IsRecovered()))
+			}
+
+			if len(tc.wantElseCond) == 0 && len(tc.wantElseThen) == 0 {
+				qt.Check(t, qt.IsNil(root.Else))
+			} else {
+				qt.Assert(t, qt.IsNotNil(root.Else))
+				qt.Check(t, qt.DeepEquals(stmtCommandNames(root.Else.Cond), tc.wantElseCond))
+				qt.Check(t, qt.DeepEquals(stmtCommandNames(root.Else.Then), tc.wantElseThen))
+				if len(tc.wantElseCond) > 0 {
+					qt.Check(t, qt.Equals(root.Else.Kind, IfClauseElif))
+					qt.Check(t, qt.IsTrue(root.Else.hasThen()))
+					qt.Check(t, qt.IsTrue(root.Else.ThenPos.IsRecovered()))
+				} else {
+					qt.Check(t, qt.Equals(root.Else.Kind, IfClauseElse))
+					qt.Check(t, qt.IsFalse(root.Else.hasThen()))
+				}
+			}
+
+			var printed strings.Builder
+			err = NewPrinter().Print(&printed, f)
+			qt.Assert(t, qt.IsNil(err))
+			if tc.wantPrinted != "" && !strings.Contains(printed.String(), tc.wantPrinted) {
+				t.Fatalf("printed form %q does not contain %q", printed.String(), tc.wantPrinted)
+			}
+		})
+	}
+}
+
+func TestParseRecoverErrorsPatternGroupPreservesIfClause(t *testing.T) {
+	t.Parallel()
+
+	src := "if [[ x == (foo|bar)* ]]; then echo one; elif [[ y == z ]]; then echo two; fi\n"
+	file, err := NewParser(Variant(LangBash), RecoverErrors(4)).Parse(strings.NewReader(src), "")
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.HasLen(file.Stmts, 1))
+
+	ifClause, ok := file.Stmts[0].Cmd.(*IfClause)
+	if !ok {
+		t.Fatalf("Cmd = %T, want *IfClause", file.Stmts[0].Cmd)
+	}
+	qt.Assert(t, qt.HasLen(ifClause.Cond, 1))
+	testClause, ok := ifClause.Cond[0].Cmd.(*TestClause)
+	if !ok {
+		t.Fatalf("if cond = %T, want *TestClause", ifClause.Cond[0].Cmd)
+	}
+	bin, ok := testClause.X.(*CondBinary)
+	if !ok {
+		t.Fatalf("if cond expr = %T, want *CondBinary", testClause.X)
+	}
+	pat := bin.Y.(*CondPattern).Pattern
+	group, ok := pat.Parts[0].(*PatternGroup)
+	if !ok {
+		t.Fatalf("pat.Parts[0] = %T, want *PatternGroup", pat.Parts[0])
+	}
+	qt.Assert(t, qt.HasLen(group.Patterns, 2))
+	if ifClause.Else == nil {
+		t.Fatal("ifClause.Else = nil, want elif clause")
+	}
+	qt.Assert(t, qt.HasLen(ifClause.Else.Cond, 1))
+	elifTest, ok := ifClause.Else.Cond[0].Cmd.(*TestClause)
+	if !ok {
+		t.Fatalf("elif cond = %T, want *TestClause", ifClause.Else.Cond[0].Cmd)
+	}
+	elifBin, ok := elifTest.X.(*CondBinary)
+	if !ok {
+		t.Fatalf("elif cond expr = %T, want *CondBinary", elifTest.X)
+	}
+	elifPat := elifBin.Y.(*CondPattern).Pattern
+	if got := elifPat.UnquotedText(); got != "z" {
+		t.Fatalf("elif pattern = %q, want %q", got, "z")
+	}
+}
+
+func TestParseRecoverErrorsPatternGroupPreservesCaseClause(t *testing.T) {
+	t.Parallel()
+
+	src := "case $x in (foo|bar)*) echo one ;; baz) echo two ;; esac\n"
+	file, err := NewParser(Variant(LangBash), RecoverErrors(4)).Parse(strings.NewReader(src), "")
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.HasLen(file.Stmts, 1))
+
+	caseClause, ok := file.Stmts[0].Cmd.(*CaseClause)
+	if !ok {
+		t.Fatalf("Cmd = %T, want *CaseClause", file.Stmts[0].Cmd)
+	}
+	qt.Assert(t, qt.HasLen(caseClause.Items, 2))
+	groupPat := caseClause.Items[0].Patterns[0]
+	group, ok := groupPat.Parts[0].(*PatternGroup)
+	if !ok {
+		t.Fatalf("first case pattern part = %T, want *PatternGroup", groupPat.Parts[0])
+	}
+	qt.Assert(t, qt.HasLen(group.Patterns, 2))
+	if got := caseClause.Items[1].Patterns[0].UnquotedText(); got != "baz" {
+		t.Fatalf("second case pattern = %q, want %q", got, "baz")
+	}
+}
+
+func TestParsePatternExtGlobDisabledInPatternContexts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "conditional pattern",
+			src:  "[[ x == @(foo|bar) ]]\n",
+		},
+		{
+			name: "case pattern",
+			src:  "case $x in @(foo|bar)) echo one ;; esac\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := NewParser(Variant(LangBash), ParseExtGlob(false)).Parse(strings.NewReader(tc.src), "")
+			qt.Assert(t, qt.Not(qt.IsNil(err)))
+
+			var parseErr ParseError
+			if !errors.As(err, &parseErr) {
+				t.Fatalf("Parse() error = %T, want ParseError", err)
+			}
+			qt.Check(t, qt.Equals(parseErr.Kind, ParseErrorKindUnexpected))
+			qt.Check(t, qt.Equals(parseErr.Construct, ParseErrorSymbolPattern))
+			qt.Check(t, qt.Equals(parseErr.Unexpected, ParseErrorSymbolLeftParen))
+		})
+	}
+}
+
+func TestParseRecoverErrorsInvalidBarePatternParenPreservesFollowingStmt(t *testing.T) {
+	t.Parallel()
+
+	src := "[[ x == (foo ]]\necho after\n"
+	file, err := NewParser(Variant(LangBash), RecoverErrors(4)).Parse(strings.NewReader(src), "")
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.HasLen(file.Stmts, 2))
+
+	testClause, ok := file.Stmts[0].Cmd.(*TestClause)
+	if !ok {
+		t.Fatalf("file.Stmts[0].Cmd = %T, want *TestClause", file.Stmts[0].Cmd)
+	}
+	bin, ok := testClause.X.(*CondBinary)
+	if !ok {
+		t.Fatalf("testClause.X = %T, want *CondBinary", testClause.X)
+	}
+	pat := bin.Y.(*CondPattern).Pattern
+	if got := pat.RawText(); got != "(foo" {
+		t.Fatalf("pattern.RawText() = %q, want %q", got, "(foo")
+	}
+
+	call, ok := file.Stmts[1].Cmd.(*CallExpr)
+	if !ok {
+		t.Fatalf("file.Stmts[1].Cmd = %T, want *CallExpr", file.Stmts[1].Cmd)
+	}
+	if got := stmtCommandNames([]*Stmt{file.Stmts[1]}); !slices.Equal(got, []string{"echo"}) {
+		t.Fatalf("second stmt command names = %v, want %v", got, []string{"echo"})
+	}
+	qt.Assert(t, qt.HasLen(call.Args, 2))
+	if got := call.Args[1].Lit(); got != "after" {
+		t.Fatalf("call.Args[1].Lit() = %q, want %q", got, "after")
+	}
+}
+
+func TestParseExtGlobArmKeepsLiteralParensInWords(t *testing.T) {
+	t.Parallel()
+
+	src := "echo @(x|(a|b))\n"
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.HasLen(file.Stmts, 1))
+
+	call, ok := file.Stmts[0].Cmd.(*CallExpr)
+	if !ok {
+		t.Fatalf("Cmd = %T, want *CallExpr", file.Stmts[0].Cmd)
+	}
+	qt.Assert(t, qt.HasLen(call.Args, 2))
+	qt.Assert(t, qt.HasLen(call.Args[1].Parts, 1))
+
+	extglob, ok := call.Args[1].Parts[0].(*ExtGlob)
+	if !ok {
+		t.Fatalf("call.Args[1].Parts[0] = %T, want *ExtGlob", call.Args[1].Parts[0])
+	}
+	qt.Assert(t, qt.HasLen(extglob.Patterns, 2))
+	if got := extglob.Patterns[1].RawText(); got != "(a|b)" {
+		t.Fatalf("extglob.Patterns[1].RawText() = %q, want %q", got, "(a|b)")
+	}
+	if group := firstPatternGroup(extglob.Patterns[1]); group != nil {
+		t.Fatalf("extglob.Patterns[1] contains unexpected PatternGroup at %v", group.Pos())
+	}
+}
+
+func TestParseCondPatternExtGlobArmKeepsLiteralParens(t *testing.T) {
+	t.Parallel()
+
+	src := "[[ \"(a|b)\" == @(x|(a|b)) ]]\n"
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.HasLen(file.Stmts, 1))
+
+	testClause, ok := file.Stmts[0].Cmd.(*TestClause)
+	if !ok {
+		t.Fatalf("Cmd = %T, want *TestClause", file.Stmts[0].Cmd)
+	}
+	bin, ok := testClause.X.(*CondBinary)
+	if !ok {
+		t.Fatalf("testClause.X = %T, want *CondBinary", testClause.X)
+	}
+	pat := bin.Y.(*CondPattern).Pattern
+	qt.Assert(t, qt.HasLen(pat.Parts, 1))
+
+	extglob, ok := pat.Parts[0].(*ExtGlob)
+	if !ok {
+		t.Fatalf("pat.Parts[0] = %T, want *ExtGlob", pat.Parts[0])
+	}
+	qt.Assert(t, qt.HasLen(extglob.Patterns, 2))
+	if got := extglob.Patterns[1].RawText(); got != "(a|b)" {
+		t.Fatalf("extglob.Patterns[1].RawText() = %q, want %q", got, "(a|b)")
+	}
+	if group := firstPatternGroup(extglob.Patterns[1]); group != nil {
+		t.Fatalf("extglob.Patterns[1] contains unexpected PatternGroup at %v", group.Pos())
+	}
+}
+
+func TestParseCasePatternExtGlobArmKeepsLiteralParens(t *testing.T) {
+	t.Parallel()
+
+	src := "case $x in @(x|(a|b))) echo one ;; esac\n"
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.HasLen(file.Stmts, 1))
+
+	caseClause, ok := file.Stmts[0].Cmd.(*CaseClause)
+	if !ok {
+		t.Fatalf("Cmd = %T, want *CaseClause", file.Stmts[0].Cmd)
+	}
+	qt.Assert(t, qt.HasLen(caseClause.Items, 1))
+	qt.Assert(t, qt.HasLen(caseClause.Items[0].Patterns, 1))
+	qt.Assert(t, qt.HasLen(caseClause.Items[0].Patterns[0].Parts, 1))
+
+	extglob, ok := caseClause.Items[0].Patterns[0].Parts[0].(*ExtGlob)
+	if !ok {
+		t.Fatalf("caseClause.Items[0].Patterns[0].Parts[0] = %T, want *ExtGlob", caseClause.Items[0].Patterns[0].Parts[0])
+	}
+	qt.Assert(t, qt.HasLen(extglob.Patterns, 2))
+	if got := extglob.Patterns[1].RawText(); got != "(a|b)" {
+		t.Fatalf("extglob.Patterns[1].RawText() = %q, want %q", got, "(a|b)")
+	}
+	if group := firstPatternGroup(extglob.Patterns[1]); group != nil {
+		t.Fatalf("extglob.Patterns[1] contains unexpected PatternGroup at %v", group.Pos())
+	}
+}
+
 func countRecoveredPositions(x reflect.Value) int {
 	switch x.Kind() {
 	case reflect.Interface:
@@ -3588,10 +5215,29 @@ func countRecoveredPositions(x reflect.Value) int {
 			return 0
 		}
 		n := 0
-		for _, field := range x.Fields() {
-			n += countRecoveredPositions(field)
+		for i := range x.NumField() {
+			if !x.Type().Field(i).IsExported() {
+				continue
+			}
+			n += countRecoveredPositions(x.Field(i))
 		}
 		return n
 	}
 	return 0
+}
+
+func stmtCommandNames(stmts []*Stmt) []string {
+	if len(stmts) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(stmts))
+	for _, stmt := range stmts {
+		call, ok := stmt.Cmd.(*CallExpr)
+		if !ok || len(call.Args) == 0 {
+			names = append(names, "")
+			continue
+		}
+		names = append(names, call.Args[0].Lit())
+	}
+	return names
 }

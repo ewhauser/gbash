@@ -864,6 +864,42 @@ func TestPatternASTExpansionDoesNotTildeExpandExtglobArms(t *testing.T) {
 	}
 }
 
+func TestPatternASTExpansionPreservesExtglobArmWhitespace(t *testing.T) {
+	t.Parallel()
+
+	pat := parseCondPattern(t, `@( a)`)
+	got, err := Pattern(&Config{Env: testEnv{}}, pat)
+	if err != nil {
+		t.Fatalf("did not want error, got %v", err)
+	}
+	if got != `@( a)` {
+		t.Fatalf("wanted %q, got %q", `@( a)`, got)
+	}
+}
+
+func TestPatternASTExpansionStringifiesSyntheticPatternGroup(t *testing.T) {
+	t.Parallel()
+
+	pat := &syntax.Pattern{
+		Parts: []syntax.PatternPart{
+			&syntax.PatternGroup{
+				Patterns: []*syntax.Pattern{
+					{Parts: []syntax.PatternPart{&syntax.Lit{Value: "foo"}}},
+					{Parts: []syntax.PatternPart{&syntax.DblQuoted{Parts: []syntax.WordPart{&syntax.Lit{Value: "*"}}}}},
+				},
+			},
+			&syntax.PatternSingle{},
+		},
+	}
+	got, err := Pattern(&Config{Env: testEnv{}}, pat)
+	if err != nil {
+		t.Fatalf("did not want error, got %v", err)
+	}
+	if got != `(foo|\*)?` {
+		t.Fatalf("wanted %q, got %q", `(foo|\*)?`, got)
+	}
+}
+
 func TestLiteralParameterPatternOperatorsUsePatternAST(t *testing.T) {
 	t.Parallel()
 

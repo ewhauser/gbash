@@ -83,6 +83,14 @@ func TestParserNoProgressRegressions(t *testing.T) {
 		runParserAttackHelper(t, []byte("$((h0oe c`"), LangPOSIX, false, 0)
 	})
 
+	t.Run("incomplete-empty-arithm-word-eof", func(t *testing.T) {
+		runParserAttackHelper(t, []byte("echo $(("), LangBash, false, 0)
+	})
+
+	t.Run("incomplete-empty-arithm-cmd-eof", func(t *testing.T) {
+		runParserAttackHelper(t, []byte("(("), LangBash, false, 0)
+	})
+
 	t.Run("adversarial-arithm-subscript-recovery", func(t *testing.T) {
 		runParserAttackHelper(t, []byte("$((0[!  "), parserFuzzVariant(0x01), true, parserFuzzRecover(0))
 	})

@@ -550,7 +550,12 @@
 											"Col": 10
 										}
 									}
-								]
+								],
+								"DiagnosticEnd": {
+									"Offset": 42,
+									"Line": 5,
+									"Col": 15
+								}
 							}
 						]
 					},
@@ -1466,6 +1471,7 @@
 					"Line": 11,
 					"Col": 1
 				},
+				"Kind": "if",
 				"ThenPos": {
 					"Offset": 113,
 					"Line": 11,

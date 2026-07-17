@@ -114,6 +114,12 @@ func TestParseMalformedBackquoteRecoversOuterScript(t *testing.T) {
 			if !cs.Backquotes {
 				t.Fatalf("CmdSubst.Backquotes = false, want true")
 			}
+			if cs.BackquoteClose == nil {
+				t.Fatal("CmdSubst.BackquoteClose = nil, want trivia")
+			}
+			if got, want := cs.BackquoteClose.BackslashEnd, cs.Right; got != want {
+				t.Fatalf("BackquoteClose.BackslashEnd = %v, want %v", got, want)
+			}
 			if tc.name == "unclosed quote" && len(cs.Stmts) != 0 {
 				t.Fatalf("len(CmdSubst.Stmts) = %d, want 0 deferred parse", len(cs.Stmts))
 			}
@@ -124,6 +130,127 @@ func TestParseMalformedBackquoteRecoversOuterScript(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseBackquoteCloseTrivia(t *testing.T) {
+	t.Parallel()
+
+	src := "echo `echo \\\\\\\\`\n"
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+	if err != nil {
+		t.Fatalf("Parse error = %v", err)
+	}
+	call := file.Stmts[0].Cmd.(*CallExpr)
+	cs, ok := call.Args[1].Parts[0].(*CmdSubst)
+	if !ok {
+		t.Fatalf("arg[1] part = %T, want *CmdSubst", call.Args[1].Parts[0])
+	}
+	if cs.BackquoteClose == nil {
+		t.Fatal("CmdSubst.BackquoteClose = nil, want trivia")
+	}
+	if got, want := cs.BackquoteClose.BackslashCount, uint16(2); got != want {
+		t.Fatalf("BackquoteClose.BackslashCount = %d, want %d", got, want)
+	}
+	if got, want := cs.BackquoteClose.BackslashEnd, cs.Right; got != want {
+		t.Fatalf("BackquoteClose.BackslashEnd = %v, want %v", got, want)
+	}
+	start, end := int(cs.BackquoteClose.BackslashPos.Offset()), int(cs.BackquoteClose.BackslashEnd.Offset())
+	if got := src[start:end]; got != `\\` {
+		t.Fatalf("backslash span = %q, want %q", got, `\\`)
+	}
+}
+
+func TestParseBackquoteCloseTriviaPastLexerWindow(t *testing.T) {
+	t.Parallel()
+
+	src := "echo `echo " + strings.Repeat("x", bufSize+64) + " \\\\\\\\`\n"
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+	if err != nil {
+		t.Fatalf("Parse error = %v", err)
+	}
+	call := file.Stmts[0].Cmd.(*CallExpr)
+	cs, ok := call.Args[1].Parts[0].(*CmdSubst)
+	if !ok {
+		t.Fatalf("arg[1] part = %T, want *CmdSubst", call.Args[1].Parts[0])
+	}
+	if cs.BackquoteClose == nil {
+		t.Fatal("CmdSubst.BackquoteClose = nil, want trivia")
+	}
+	if got, want := cs.BackquoteClose.BackslashCount, uint16(2); got != want {
+		t.Fatalf("BackquoteClose.BackslashCount = %d, want %d", got, want)
+	}
+	if got, want := cs.BackquoteClose.BackslashEnd, cs.Right; got != want {
+		t.Fatalf("BackquoteClose.BackslashEnd = %v, want %v", got, want)
+	}
+}
+
+func TestParseBackquoteCloseTriviaAfterEscapedNewline(t *testing.T) {
+	t.Parallel()
+
+	src := "echo `echo " + `\\` + "\\\n`\n"
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+	if err != nil {
+		t.Fatalf("Parse error = %v", err)
+	}
+	call := file.Stmts[0].Cmd.(*CallExpr)
+	cs, ok := call.Args[1].Parts[0].(*CmdSubst)
+	if !ok {
+		t.Fatalf("arg[1] part = %T, want *CmdSubst", call.Args[1].Parts[0])
+	}
+	if cs.BackquoteClose == nil {
+		t.Fatal("CmdSubst.BackquoteClose = nil, want trivia")
+	}
+	if got, want := cs.BackquoteClose.BackslashCount, uint16(0); got != want {
+		t.Fatalf("BackquoteClose.BackslashCount = %d, want %d", got, want)
+	}
+}
+
+func TestParseRecoveredBackquoteCloseTriviaUsesNormalizedCount(t *testing.T) {
+	t.Parallel()
+
+	src := "echo `echo \" \\\\\\\\`\necho after\n"
+	file, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+	if err != nil {
+		t.Fatalf("Parse error = %v", err)
+	}
+	call := file.Stmts[0].Cmd.(*CallExpr)
+	cs, ok := call.Args[1].Parts[0].(*CmdSubst)
+	if !ok {
+		t.Fatalf("arg[1] part = %T, want *CmdSubst", call.Args[1].Parts[0])
+	}
+	if got := len(cs.Stmts); got != 0 {
+		t.Fatalf("len(CmdSubst.Stmts) = %d, want 0 recovered parse", got)
+	}
+	if cs.BackquoteClose == nil {
+		t.Fatal("CmdSubst.BackquoteClose = nil, want trivia")
+	}
+	if got, want := cs.BackquoteClose.BackslashCount, uint16(2); got != want {
+		t.Fatalf("BackquoteClose.BackslashCount = %d, want %d", got, want)
+	}
+	if got, want := cs.BackquoteClose.BackslashEnd, cs.Right; got != want {
+		t.Fatalf("BackquoteClose.BackslashEnd = %v, want %v", got, want)
+	}
+}
+
+func TestParseRecoverErrorsMissingBackquoteCloseClearsTrivia(t *testing.T) {
+	t.Parallel()
+
+	src := "echo `echo hi\n"
+	file, err := NewParser(Variant(LangBash), RecoverErrors(4)).Parse(strings.NewReader(src), "")
+	if err != nil {
+		t.Fatalf("Parse error = %v", err)
+	}
+	call := file.Stmts[0].Cmd.(*CallExpr)
+	cs, ok := call.Args[1].Parts[0].(*CmdSubst)
+	if !ok {
+		t.Fatalf("arg[1] part = %T, want *CmdSubst", call.Args[1].Parts[0])
+	}
+	if !cs.Right.IsRecovered() {
+		t.Fatalf("CmdSubst.Right = %v, want recovered position", cs.Right)
+	}
+	if cs.BackquoteClose != nil {
+		t.Fatalf("CmdSubst.BackquoteClose = %#v, want nil", cs.BackquoteClose)
 	}
 }
 
@@ -172,5 +299,63 @@ func TestParseMalformedBackquoteRecoveryKeepsUnreadTail(t *testing.T) {
 	next := file.Stmts[1].Cmd.(*CallExpr)
 	if got := next.Args[1].Lit(); got != "after" {
 		t.Fatalf("second stmt arg = %q, want %q", got, "after")
+	}
+}
+
+func TestParseErrRecoverableInBackquotes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  ParseError
+		want bool
+	}{
+		{
+			name: "unclosed single quote at eof",
+			err: ParseError{
+				Kind:       ParseErrorKindUnclosed,
+				Unexpected: ParseErrorSymbolEOF,
+				Expected:   []ParseErrorSymbol{ParseErrorSymbolSingleQuote},
+			},
+			want: true,
+		},
+		{
+			name: "unclosed brace at eof",
+			err: ParseError{
+				Kind:       ParseErrorKindUnclosed,
+				Construct:  ParseErrorSymbolLeftBrace,
+				Unexpected: ParseErrorSymbolEOF,
+				Expected:   []ParseErrorSymbol{ParseErrorSymbolRightBrace},
+			},
+			want: true,
+		},
+		{
+			name: "unmatched brace at backquote",
+			err: ParseError{
+				Kind:       ParseErrorKindUnmatched,
+				Construct:  ParseErrorSymbolLeftBrace,
+				Unexpected: ParseErrorSymbolBackquote,
+				Expected:   []ParseErrorSymbol{ParseErrorSymbolRightBrace},
+			},
+			want: true,
+		},
+		{
+			name: "missing fi at backquote",
+			err: ParseError{
+				Kind:       ParseErrorKindMissing,
+				Construct:  ParseErrorSymbol("if"),
+				Unexpected: ParseErrorSymbolBackquote,
+				Expected:   []ParseErrorSymbol{ParseErrorSymbolFi},
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseErrRecoverableInBackquotes(tc.err); got != tc.want {
+				t.Fatalf("parseErrRecoverableInBackquotes(%+v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }

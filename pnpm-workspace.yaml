@@ -1,3 +1,6 @@
 packages:
   - "packages/*"
   - "website"
+
+allowBuilds:
+  sharp: true

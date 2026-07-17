@@ -25,6 +25,8 @@ type runtimeOptions struct {
 	cwd             string
 	maxFileBytes    int64
 	json            bool
+	dumpAST         bool
+	detect          bool
 	server          bool
 	socket          string
 	listen          string
@@ -105,6 +107,10 @@ func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
 			opts.maxFileBytes = value
 		case arg == "--json":
 			opts.json = true
+		case arg == "--dump-ast":
+			opts.dumpAST = true
+		case arg == "--detect":
+			opts.detect = true
 		case arg == "--server":
 			opts.server = true
 		case arg == "--socket":
@@ -235,6 +241,23 @@ func appendUniqueStrings(dst []string, values ...string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func (opts *runtimeOptions) defaultWorkingDir() string {
+	if opts == nil {
+		return gbash.InMemoryFileSystem().WorkingDir
+	}
+	if cwdValue := strings.TrimSpace(opts.cwd); cwdValue != "" {
+		return normalizeSandboxPath(cwdValue)
+	}
+	switch {
+	case strings.TrimSpace(opts.root) != "":
+		return gbash.DefaultWorkspaceMountPoint
+	case strings.TrimSpace(opts.readWriteRoot) != "":
+		return "/"
+	default:
+		return gbash.InMemoryFileSystem().WorkingDir
+	}
 }
 
 func (opts *runtimeOptions) gbashOptions() ([]gbash.Option, error) {
@@ -590,6 +613,8 @@ func renderHelp(w io.Writer, name string) error {
 		"  --max-file-bytes N    override the sandbox file-size/read-size limit in bytes\n"+
 		"\nCLI output options:\n"+
 		"  --json                emit one JSON result object for a non-interactive execution\n"+
+		"  --dump-ast            parse the selected input and print typed-json AST output only\n"+
+		"  --detect              auto-detect the parser variant for --dump-ast from shebang or file extension\n"+
 		"\nCLI server options:\n"+
 		"  --server                run the shared gbash JSON-RPC server instead of executing a script\n"+
 		"  --socket PATH           listen on PATH for Unix domain socket clients\n"+

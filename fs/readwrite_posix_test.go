@@ -114,6 +114,39 @@ func TestReadWriteFSMkdirAllCreatesNestedMissingParents(t *testing.T) {
 	}
 }
 
+func TestReadWriteFSMkfifoCreatesNamedPipe(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+
+	fsys, err := NewReadWrite(ReadWriteOptions{Root: root})
+	if err != nil {
+		t.Fatalf("NewReadWrite() error = %v", err)
+	}
+
+	if err := fsys.MkdirAll(context.Background(), "/pipes", 0o755); err != nil {
+		t.Fatalf("MkdirAll(/pipes) error = %v", err)
+	}
+	if err := fsys.Mkfifo(context.Background(), "/pipes/events", 0o600); err != nil {
+		t.Fatalf("Mkfifo(/pipes/events) error = %v", err)
+	}
+
+	info, err := fsys.Lstat(context.Background(), "/pipes/events")
+	if err != nil {
+		t.Fatalf("Lstat(/pipes/events) error = %v", err)
+	}
+	if info.Mode()&stdfs.ModeNamedPipe == 0 {
+		t.Fatalf("Lstat(/pipes/events).Mode() = %v, want named pipe", info.Mode())
+	}
+
+	hostInfo, err := os.Lstat(filepath.Join(root, "pipes", "events"))
+	if err != nil {
+		t.Fatalf("os.Lstat(host pipe) error = %v", err)
+	}
+	if hostInfo.Mode()&stdfs.ModeNamedPipe == 0 {
+		t.Fatalf("os.Lstat(host pipe).Mode() = %v, want named pipe", hostInfo.Mode())
+	}
+}
+
 func TestReadWriteFSStatPreservesRawSysStat(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -331,6 +364,32 @@ func TestReadWriteFSDeniesWriteThroughSymlinkedParent(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(outsideRoot, "pwned.txt")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("Stat(outside pwned.txt) error = %v, want not exist", statErr)
+	}
+}
+
+func TestReadWriteFSDeniesMkfifoThroughSymlinkedParent(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	outsideRoot := t.TempDir()
+
+	if err := os.Symlink(outsideRoot, filepath.Join(root, "escape")); err != nil {
+		t.Fatalf("Symlink(escape) error = %v", err)
+	}
+
+	fsys, err := NewReadWrite(ReadWriteOptions{Root: root})
+	if err != nil {
+		t.Fatalf("NewReadWrite() error = %v", err)
+	}
+
+	err = fsys.Mkfifo(context.Background(), "/escape/events", 0o600)
+	if err == nil {
+		t.Fatal("Mkfifo(/escape/events) error = nil, want permission")
+	}
+	if !errors.Is(err, stdfs.ErrPermission) {
+		t.Fatalf("Mkfifo(/escape/events) error = %v, want permission", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(outsideRoot, "events")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("Stat(outside events) error = %v, want not exist", statErr)
 	}
 }
 

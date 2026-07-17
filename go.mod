@@ -3,15 +3,15 @@ module github.com/ewhauser/gbash
 go 1.26.0
 
 require (
-	golang.org/x/crypto v0.48.0
-	golang.org/x/term v0.40.0
-	golang.org/x/text v0.34.0
+	golang.org/x/crypto v0.52.0
+	golang.org/x/term v0.43.0
+	golang.org/x/text v0.37.0
 )
 
 require (
 	github.com/go-quicktest/qt v1.101.0
 	github.com/google/go-cmp v0.7.0
-	golang.org/x/sys v0.42.0
+	golang.org/x/sys v0.45.0
 )
 
 require (

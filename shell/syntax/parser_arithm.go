@@ -49,7 +49,12 @@ func (p *Parser) arithmExprTernary(compact bool) ArithmExpr {
 	}
 
 	if value == nil {
-		p.curErr("%#q must follow an expression", p.tok)
+		p.posErrWithMetadata(p.pos, parseErrorMetadata{
+			kind:       ParseErrorKindMissing,
+			construct:  parseErrorSymbolFromToken(p.tok),
+			unexpected: parseErrorSymbolFromToken(p.tok),
+			expected:   []ParseErrorSymbol{ParseErrorSymbolExpression},
+		}, "%#q must follow an expression", p.tok)
 	}
 	questPos := p.pos
 	p.nextArithOp(compact)
@@ -130,7 +135,12 @@ func (p *Parser) arithmExprPower(compact bool) ArithmExpr {
 	}
 
 	if value == nil {
-		p.curErr("%#q must follow an expression", p.tok)
+		p.posErrWithMetadata(p.pos, parseErrorMetadata{
+			kind:       ParseErrorKindMissing,
+			construct:  parseErrorSymbolFromToken(p.tok),
+			unexpected: parseErrorSymbolFromToken(p.tok),
+			expected:   []ParseErrorSymbol{ParseErrorSymbolExpression},
+		}, "%#q must follow an expression", p.tok)
 	}
 
 	op := p.tok
@@ -188,7 +198,7 @@ func (p *Parser) arithmExprValue(compact bool) ArithmExpr {
 		pe.X = p.followArithm(leftParen, pe.Lparen)
 		pe.Rparen = p.matched(pe.Lparen, leftParen, rightParen)
 		if p.quote == paramExpArithm && p.tok == _LitWord {
-			p.checkLang(pe.Lparen, LangZsh, "subscript flags")
+			p.checkLang(pe.Lparen, LangZsh, FeatureArithmeticSubscriptFlags)
 		}
 		x = pe
 	case leftBrack:
@@ -422,7 +432,12 @@ func (p *Parser) arithmExprBinary(compact bool, nextOp func(bool) ArithmExpr, op
 		}
 
 		if value == nil {
-			p.curErr("%#q must follow an expression", p.tok)
+			p.posErrWithMetadata(p.pos, parseErrorMetadata{
+				kind:       ParseErrorKindMissing,
+				construct:  parseErrorSymbolFromToken(p.tok),
+				unexpected: parseErrorSymbolFromToken(p.tok),
+				expected:   []ParseErrorSymbol{ParseErrorSymbolExpression},
+			}, "%#q must follow an expression", p.tok)
 		}
 
 		pos := p.pos
@@ -475,7 +490,7 @@ func (p *Parser) arithmMatchingErr(pos Pos, left, right token) {
 	case rightParen, _EOF:
 		p.matchingErr(pos, left, right)
 	case period:
-		p.checkLang(p.pos, LangZsh, `floating point arithmetic`)
+		p.checkLang(p.pos, LangZsh, FeatureArithmeticFloatingPoint)
 	default:
 		if p.quote&allArithmExpr != 0 {
 			p.curErr("not a valid arithmetic operator: %#q", p.tok)

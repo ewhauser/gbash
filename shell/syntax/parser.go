@@ -12,8 +12,10 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
+	"unsafe"
 )
 
 // ParserOption is a function which can be passed to NewParser
@@ -260,6 +262,13 @@ func LegacyBashCompat(enabled bool) ParserOption {
 // operators like `@(foo)` and `!(bar)` as dedicated syntax nodes.
 func ParseExtGlob(enabled bool) ParserOption {
 	return func(p *Parser) { p.parseExtGlob = enabled }
+}
+
+// ConditionalPatternExtGlob controls whether conditional patterns on the RHS
+// of `[[ ... == pattern ]]` should recognize Bash extglob operators even when
+// general extglob parsing is otherwise disabled.
+func ConditionalPatternExtGlob(enabled bool) ParserOption {
+	return func(p *Parser) { p.condPatternExtGlob = enabled }
 }
 
 // NewParser allocates a new [Parser] and applies any number of options.
@@ -578,12 +587,14 @@ type Parser struct {
 	r   rune   // next rune; [utf8.RuneSelf] when it went past EOF, or we stopped
 	w   int    // width of [Parser.r]
 
-	sourceBs   []byte
-	sourceOffs int64
+	sourceBs     []byte
+	sourceOffs   int64
+	sourceReplay *sourceReplayBuffer
 
 	f *File
 
-	spaced bool // whether [Parser.tok] has whitespace on its left
+	spaced       bool              // whether [Parser.tok] has whitespace on its left
+	tokSeparator CallExprSeparator // whitespace trivia on the left of [Parser.tok]
 
 	err     error // lexer/parser error
 	readErr error // got a read error, but bytes left
@@ -604,8 +615,9 @@ type Parser struct {
 	lang         LangVariant
 	// legacyBashCompat switches a handful of [[ =~ ]] diagnostics to match
 	// the older bash behavior observed through the bash builtin conformance path.
-	legacyBashCompat bool
-	parseExtGlob     bool
+	legacyBashCompat   bool
+	parseExtGlob       bool
+	condPatternExtGlob bool
 
 	stopAt []byte
 
@@ -618,7 +630,7 @@ type Parser struct {
 	buriedHdocs int
 	heredocs    []*Redirect
 
-	hdocStops [][]byte // stack of end words for open heredocs
+	hdocStops []heredocStop // stack of open heredoc closer matchers
 
 	parsingDoc bool // true if using [Parser.Document]
 
@@ -635,15 +647,22 @@ type Parser struct {
 
 	// lastBquoteEsc is how many times the last backquote token was escaped
 	lastBquoteEsc int
+	// lastBquoteRawBackslashes is the contiguous raw backslash run immediately
+	// before the last backquote token.
+	lastBquoteRawBackslashes int
+	// rawBackslashRun tracks the contiguous raw backslash run immediately
+	// before the next unread source byte.
+	rawBackslashRun int
 
 	accComs []Comment
 	curComs *[]Comment
 
-	litBatch  []Lit
-	wordBatch []wordAlloc
+	litBatch           []Lit
+	wordBatch          []wordAlloc
+	litBatchAllocSize  int
+	wordBatchAllocSize int
 
-	readBuf        [bufSize]byte
-	litBuf         [bufSize]byte
+	scratch        *parserScratch
 	litBs          []byte
 	wordRawBs      []byte
 	captureWordRaw bool
@@ -666,6 +685,21 @@ type Parser struct {
 
 	pendingHeredocWarningPos    Pos
 	pendingHeredocWarningWanted string
+}
+
+type heredocStop struct {
+	word  []byte
+	close heredocCloseCapture
+}
+
+type heredocCloseCapture struct {
+	pos, end      Pos
+	raw           string
+	candidate     *HeredocCloseCandidate
+	matched       bool
+	eofTerminated bool
+	trailingText  string
+	indentTabs    uint16
 }
 
 type aliasInputState struct {
@@ -720,12 +754,237 @@ func (p *Parser) Incomplete() bool {
 
 const bufSize = 1 << 10
 
+const (
+	litBatchSize  = 256
+	wordBatchSize = 128
+
+	rawWordPartLitBatchSize  = 32
+	rawWordPartWordBatchSize = 16
+	parenProbeLitBatchSize   = 32
+	parenProbeWordBatchSize  = 16
+)
+
+type parserScratch struct {
+	readBuf [bufSize]byte
+	litBuf  [bufSize]byte
+}
+
+type lenReader interface {
+	Len() int
+}
+
+type prependReader struct {
+	prefix *bytes.Reader
+	tail   io.Reader
+}
+
+type sourceReplayBuffer struct {
+	buf     []byte
+	src     io.Reader
+	readErr error
+	readEOF bool
+	readBuf [bufSize]byte
+}
+
+type sourceReplayCursor struct {
+	replay *sourceReplayBuffer
+	off    int
+}
+
+func newPrependReader(prefix []byte, tail io.Reader) io.Reader {
+	if len(prefix) == 0 {
+		return tail
+	}
+	return &prependReader{
+		prefix: bytes.NewReader(prefix),
+		tail:   tail,
+	}
+}
+
+func (r *prependReader) Len() int {
+	n := 0
+	if r.prefix != nil {
+		n += r.prefix.Len()
+	}
+	if tail, ok := r.tail.(lenReader); ok {
+		n += tail.Len()
+	}
+	return n
+}
+
+func (r *prependReader) Read(p []byte) (int, error) {
+	if r.prefix != nil {
+		n, err := r.prefix.Read(p)
+		if err == io.EOF {
+			r.prefix = nil
+			if n > 0 {
+				return n, nil
+			}
+		} else {
+			return n, err
+		}
+	}
+	if r.tail == nil {
+		return 0, io.EOF
+	}
+	return r.tail.Read(p)
+}
+
+func newSourceReplayBuffer(initial []byte, src io.Reader, readErr error, readEOF bool) *sourceReplayBuffer {
+	buf := append([]byte(nil), initial...)
+	if readErr == io.EOF {
+		readEOF = true
+	}
+	return &sourceReplayBuffer{
+		buf:     buf,
+		src:     src,
+		readErr: readErr,
+		readEOF: readEOF,
+	}
+}
+
+func (r *sourceReplayBuffer) Bytes() []byte {
+	if r == nil {
+		return []byte{}
+	}
+	if r.buf == nil {
+		return []byte{}
+	}
+	return r.buf
+}
+
+func (r *sourceReplayBuffer) cursor(offset int) io.Reader {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(r.buf) {
+		offset = len(r.buf)
+	}
+	return &sourceReplayCursor{
+		replay: r,
+		off:    offset,
+	}
+}
+
+func (r *sourceReplayBuffer) grow() (n int, err error) {
+	switch r.readErr {
+	case nil:
+	case io.EOF:
+		return 0, io.EOF
+	default:
+		return 0, r.readErr
+	}
+	if r.readEOF || r.src == nil {
+		return 0, io.EOF
+	}
+readAgain:
+	n, err = 0, r.readErr
+	if err == nil {
+		n, err = r.src.Read(r.readBuf[:])
+		r.readErr = err
+		if err == io.EOF {
+			r.readEOF = true
+		}
+	}
+	if n == 0 {
+		if err == nil {
+			goto readAgain
+		}
+		if err == io.EOF {
+			return 0, io.EOF
+		}
+		return 0, err
+	}
+	r.buf = append(r.buf, r.readBuf[:n]...)
+	return n, nil
+}
+
+func (r *sourceReplayBuffer) tailHasInternalNewline(offset int) bool {
+	if offset < 0 {
+		offset = 0
+	}
+	seenNewline := false
+	scan := offset
+	for {
+		buf := r.buf
+		for scan < len(buf) {
+			switch buf[scan] {
+			case '\n':
+				seenNewline = true
+			case '\r':
+			default:
+				if seenNewline {
+					return true
+				}
+			}
+			scan++
+		}
+		if n, err := r.grow(); n == 0 {
+			_ = err
+			return false
+		}
+	}
+}
+
+func (r *sourceReplayBuffer) tailHasNestedDblRightParen(offset int) bool {
+	if offset < 0 {
+		offset = 0
+	}
+	scan := offset
+	count := 0
+	prevClose := false
+	for {
+		buf := r.buf
+		for scan < len(buf) {
+			cur := buf[scan]
+			if prevClose && cur == ')' {
+				count++
+				if count > 1 {
+					return true
+				}
+			}
+			prevClose = cur == ')'
+			scan++
+		}
+		if n, err := r.grow(); n == 0 {
+			_ = err
+			return false
+		}
+	}
+}
+
+func (c *sourceReplayCursor) Read(dst []byte) (int, error) {
+	if len(dst) == 0 {
+		return 0, nil
+	}
+	for {
+		buf := c.replay.buf
+		if c.off < len(buf) {
+			n := copy(dst, buf[c.off:])
+			c.off += n
+			return n, nil
+		}
+		if n, err := c.replay.grow(); n == 0 {
+			return 0, err
+		}
+	}
+}
+
+var parserScratchPool = sync.Pool{
+	New: func() any { return &parserScratch{} },
+}
+
+var tempParserPool = sync.Pool{
+	New: func() any { return &Parser{} },
+}
+
 func (p *Parser) reset() {
 	p.tok, p.val = illegalTok, ""
 	p.eqlOffs = 0
 	p.bs, p.bsp = nil, 0
 	p.sourceBs = nil
 	p.sourceOffs = 0
+	p.sourceReplay = nil
 	p.offs, p.line, p.col = 0, 1, 1
 	p.r, p.w = 0, 0
 	p.err, p.readErr, p.readEOF = nil, nil, false
@@ -737,6 +996,9 @@ func (p *Parser) reset() {
 	p.parsingDoc = false
 	p.openBquotes = 0
 	p.openBquoteDquotes = 0
+	p.lastBquoteEsc = 0
+	p.lastBquoteRawBackslashes = 0
+	p.rawBackslashRun = 0
 	p.accComs = nil
 	p.accComs, p.curComs = nil, &p.accComs
 	p.litBatch = nil
@@ -751,6 +1013,7 @@ func (p *Parser) reset() {
 	p.aliasInputStack = p.aliasInputStack[:0]
 	p.aliasSource = nil
 	p.tokAliasChain = nil
+	p.tokSeparator = CallExprSeparator{}
 	p.pendingHeredocWarningPos = Pos{}
 	p.pendingHeredocWarningWanted = ""
 	p.parenAmbiguityProbeDepth = 0
@@ -774,9 +1037,43 @@ func (p *Parser) nextPos() Pos {
 	return NewPos(uint(offset), line, col)
 }
 
+func (p *Parser) ensureScratch() *parserScratch {
+	if p.scratch == nil {
+		p.scratch = &parserScratch{}
+	}
+	return p.scratch
+}
+
+func (p *Parser) backtrackSnapshot() Parser {
+	saved := *p
+	if p.scratch != nil {
+		scratchCopy := *p.scratch
+		saved.scratch = &scratchCopy
+	}
+	saved.bs = bytes.Clone(p.bs)
+	saved.sourceBs = bytes.Clone(p.sourceBs)
+	saved.litBs = bytes.Clone(p.litBs)
+	saved.wordRawBs = bytes.Clone(p.wordRawBs)
+	return saved
+}
+
+func (p *Parser) litBatchCap() int {
+	if p.litBatchAllocSize > 0 {
+		return p.litBatchAllocSize
+	}
+	return litBatchSize
+}
+
+func (p *Parser) wordBatchCap() int {
+	if p.wordBatchAllocSize > 0 {
+		return p.wordBatchAllocSize
+	}
+	return wordBatchSize
+}
+
 func (p *Parser) lit(pos Pos, val string) *Lit {
 	if len(p.litBatch) == 0 {
-		p.litBatch = make([]Lit, 32)
+		p.litBatch = make([]Lit, p.litBatchCap())
 	}
 	l := &p.litBatch[0]
 	p.litBatch = p.litBatch[1:]
@@ -788,7 +1085,7 @@ func (p *Parser) lit(pos Pos, val string) *Lit {
 
 func (p *Parser) rawLit(start, end Pos, val string) *Lit {
 	if len(p.litBatch) == 0 {
-		p.litBatch = make([]Lit, 32)
+		p.litBatch = make([]Lit, p.litBatchCap())
 	}
 	l := &p.litBatch[0]
 	p.litBatch = p.litBatch[1:]
@@ -809,7 +1106,7 @@ type wordAlloc struct {
 
 func (p *Parser) wordAnyNumber() *Word {
 	if len(p.wordBatch) == 0 {
-		p.wordBatch = make([]wordAlloc, 32)
+		p.wordBatch = make([]wordAlloc, p.wordBatchCap())
 	}
 	alloc := &p.wordBatch[0]
 	p.wordBatch = p.wordBatch[1:]
@@ -821,7 +1118,7 @@ func (p *Parser) wordAnyNumber() *Word {
 
 func (p *Parser) wordOne(part WordPart) *Word {
 	if len(p.wordBatch) == 0 {
-		p.wordBatch = make([]wordAlloc, 32)
+		p.wordBatch = make([]wordAlloc, p.wordBatchCap())
 	}
 	alloc := &p.wordBatch[0]
 	p.wordBatch = p.wordBatch[1:]
@@ -1016,98 +1313,189 @@ func (p *Parser) expandCommandAlias() bool {
 	return true
 }
 
-func (p *Parser) unquotedWordBytes(w *Word) ([]byte, bool) {
-	return p.unquotedWordBytesRaw(w, nil)
+func heredocIndentMode(op RedirOperator) HeredocIndentMode {
+	if op == DashHdoc {
+		return HeredocIndentStripTabs
+	}
+	return HeredocIndentNone
 }
 
-func (p *Parser) unquotedWordBytesRaw(w *Word, raw []byte) ([]byte, bool) {
-	buf := make([]byte, 0, 4)
-	didUnquote := false
-	var rawBase uint
-	if w != nil {
-		rawBase = w.Pos().Offset()
-	}
-	for _, wp := range w.Parts {
-		var quoted bool
-		buf, quoted = p.unquotedWordPartRaw(buf, wp, false, raw, rawBase)
-		didUnquote = didUnquote || quoted
-	}
-	return buf, didUnquote
-}
-
-func (p *Parser) unquotedWordPart(buf []byte, wp WordPart, quotes bool) (_ []byte, quoted bool) {
-	return p.unquotedWordPartRaw(buf, wp, quotes, nil, 0)
-}
-
-func (p *Parser) unquotedWordPartRaw(buf []byte, wp WordPart, quotes bool, raw []byte, rawBase uint) (_ []byte, quoted bool) {
-	switch wp := wp.(type) {
-	case *Lit:
-		for i := 0; i < len(wp.Value); i++ {
-			if b := wp.Value[i]; b == '\\' && !quotes {
-				if i++; i < len(wp.Value) {
-					buf = append(buf, wp.Value[i])
-				}
-				quoted = true
-			} else {
-				buf = append(buf, b)
-			}
-		}
-	case *SglQuoted:
-		buf = append(buf, []byte(wp.Value)...)
-		quoted = true
-	case *DblQuoted:
-		for _, wp2 := range wp.Parts {
-			buf, _ = p.unquotedWordPartRaw(buf, wp2, true, raw, rawBase)
-		}
-		quoted = true
-	case *BraceExp:
-		buf = append(buf, '{')
-		for i, elem := range wp.Elems {
-			if i > 0 {
-				if wp.Sequence {
-					buf = append(buf, '.', '.')
-				} else {
-					buf = append(buf, ',')
-				}
-			}
-			for _, elemPart := range elem.Parts {
-				buf, _ = p.unquotedWordPartRaw(buf, elemPart, quotes, raw, rawBase)
-			}
-		}
-		buf = append(buf, '}')
-	default:
-		if partRaw, ok := wordPartRawBytes(raw, rawBase, wp); ok {
-			buf = append(buf, partRaw...)
-		} else {
-			buf = append(buf, wordPartString(wp)...)
-		}
-	}
-	return buf, quoted
-}
-
-func wordPartRawBytes(raw []byte, rawBase uint, wp WordPart) ([]byte, bool) {
-	if len(raw) == 0 || wp == nil || !wp.Pos().IsValid() || !wp.End().IsValid() {
-		return nil, false
-	}
-	start := int(wp.Pos().Offset() - rawBase)
-	end := int(wp.End().Offset() - rawBase)
-	if start < 0 || end < start || end > len(raw) {
-		return nil, false
-	}
-	return raw[start:end], true
-}
-
-func (p *Parser) heredocDelimFromWord(w *Word, raw string) *HeredocDelim {
+func (p *Parser) heredocDelimFromWord(w *Word, raw string, op RedirOperator) *HeredocDelim {
 	if w == nil {
 		return nil
 	}
-	value, quoted := p.unquotedWordBytesRaw(w, []byte(raw))
+	value, quoted := wordUnquotedBytesRaw(w, []byte(raw))
 	return &HeredocDelim{
 		Parts:       w.Parts,
 		Value:       string(value),
 		Quoted:      quoted,
 		BodyExpands: !quoted,
+		IndentMode:  heredocIndentMode(op),
 	}
+}
+
+func (p *Parser) setHeredocCloseCapture(delim *HeredocDelim, capture heredocCloseCapture) {
+	if delim == nil {
+		return
+	}
+	delim.ClosePos = capture.pos
+	delim.CloseEnd = capture.end
+	delim.CloseRaw = capture.raw
+	delim.CloseCandidate = capture.candidate
+	delim.Matched = capture.matched
+	delim.EOFTerminated = capture.eofTerminated
+	delim.TrailingText = capture.trailingText
+	delim.IndentTabs = capture.indentTabs
+}
+
+func (p *Parser) currentHeredocStop() *heredocStop {
+	if len(p.hdocStops) == 0 {
+		return nil
+	}
+	return &p.hdocStops[len(p.hdocStops)-1]
+}
+
+func (p *Parser) updateHeredocStop(stop *heredocStop, rawPos, end Pos, rawLine, normalized []byte, indentTabs uint16, eof, hasLine bool) {
+	if stop == nil {
+		return
+	}
+	if !hasLine {
+		if eof {
+			stop.close.eofTerminated = true
+		}
+		return
+	}
+	rawLineText := string(rawLine)
+	raw := p.sourceRange(rawPos, end)
+	if !eof && strings.HasSuffix(raw, "\r") {
+		raw = strings.TrimSuffix(raw, "\r")
+		end = posSubCol(end, 1)
+	}
+	if raw == "" || raw != rawLineText {
+		raw = rawLineText
+		rawPos = posSubCol(end, len(rawLineText))
+	}
+	prefix := bytes.HasPrefix(normalized, stop.word)
+	matched := bytes.Equal(normalized, stop.word)
+	var candidate *HeredocCloseCandidate
+	if prefix || heredocCloseCandidateMayMatch(rawLine, stop.word) {
+		candidate = newHeredocCloseCandidate(rawPos, rawLine, stop.word, p.lang, p.parseExtGlob, p.legacyBashCompat)
+	}
+	if prefix || candidate != nil {
+		close := heredocCloseCapture{
+			pos:           rawPos,
+			end:           end,
+			raw:           raw,
+			candidate:     candidate,
+			matched:       matched,
+			eofTerminated: eof && !matched,
+			indentTabs:    indentTabs,
+		}
+		if prefix {
+			close.trailingText = string(normalized[len(stop.word):])
+		}
+		stop.close = close
+		return
+	}
+	if eof {
+		stop.close.eofTerminated = true
+	}
+}
+
+func heredocCloseCandidateMayMatch(rawLine, delim []byte) bool {
+	if len(rawLine) == 0 || len(delim) == 0 {
+		return false
+	}
+	if bytes.Contains(rawLine, delim) {
+		return true
+	}
+	if bytes.IndexByte(rawLine, delim[0]) < 0 {
+		return false
+	}
+	if len(delim) > 1 && bytes.IndexByte(rawLine, delim[len(delim)-1]) < 0 {
+		return false
+	}
+	return bytes.IndexAny(rawLine, "'\"\\$`") >= 0
+}
+
+func heredocCloseCandidateWordStart(tok token) bool {
+	switch tok {
+	case _Lit, _LitWord,
+		sglQuote, dollSglQuote, dblQuote, dollDblQuote, bckQuote,
+		dollar, dollBrace, dollBrack, dollParen, dollDblParen,
+		cmdIn, assgnParen, cmdOut:
+		return true
+	default:
+		return false
+	}
+}
+
+func newHeredocCloseCandidate(rawPos Pos, rawLine, delim []byte, lang LangVariant, parseExtGlob, legacyBashCompat bool) *HeredocCloseCandidate {
+	if len(rawLine) == 0 || len(delim) == 0 {
+		return nil
+	}
+	candidateParser := NewParser(
+		Variant(lang),
+		ParseExtGlob(parseExtGlob),
+		LegacyBashCompat(legacyBashCompat),
+	)
+	candidateParser.reset()
+	candidateParser.f = &File{}
+	candidateParser.loadReplay(rawPos, rawLine, io.EOF)
+	candidateParser.next()
+	for candidateParser.tok != _EOF {
+		if candidateParser.err != nil {
+			return nil
+		}
+		if !heredocCloseCandidateWordStart(candidateParser.tok) {
+			candidateParser.next()
+			continue
+		}
+		word, raw := candidateParser.getWordRaw()
+		if candidateParser.err != nil {
+			return nil
+		}
+		if word == nil || raw == "" {
+			continue
+		}
+		rawBytes := []byte(raw)
+		rawMismatch := !bytes.Equal(rawBytes, delim)
+		if rawMismatch {
+			unquoted, _ := wordUnquotedBytesRaw(word, rawBytes)
+			if !bytes.Equal(unquoted, delim) {
+				continue
+			}
+		}
+		offset := int(word.Pos().Offset()) - int(rawPos.Offset())
+		if offset < 0 || offset > len(rawLine) {
+			return nil
+		}
+		leadingStart := offset
+		for leadingStart > 0 {
+			switch rawLine[leadingStart-1] {
+			case ' ', '\t':
+				leadingStart--
+			default:
+				return &HeredocCloseCandidate{
+					Pos:               word.Pos(),
+					End:               word.End(),
+					Raw:               raw,
+					DelimOffset:       uint(offset),
+					LeadingWhitespace: string(rawLine[leadingStart:offset]),
+					RawTokenMismatch:  rawMismatch,
+				}
+			}
+		}
+		return &HeredocCloseCandidate{
+			Pos:               word.Pos(),
+			End:               word.End(),
+			Raw:               raw,
+			DelimOffset:       uint(offset),
+			LeadingWhitespace: string(rawLine[leadingStart:offset]),
+			RawTokenMismatch:  rawMismatch,
+		}
+	}
+	return nil
 }
 
 func (p *Parser) doHeredocs() {
@@ -1131,7 +1519,7 @@ func (p *Parser) doHeredocs() {
 		if r.HdocDelim != nil {
 			stop = []byte(r.HdocDelim.Value)
 		}
-		p.hdocStops = append(p.hdocStops, stop)
+		p.hdocStops = append(p.hdocStops, heredocStop{word: stop})
 		if i > 0 && p.r == '\n' {
 			p.rune()
 		}
@@ -1160,13 +1548,21 @@ func (p *Parser) doHeredocs() {
 		if p.err == nil && raw != nil && r.Hdoc == nil {
 			r.Hdoc = raw
 		}
+		if len(p.hdocStops) > 0 {
+			p.setHeredocCloseCapture(r.HdocDelim, p.hdocStops[len(p.hdocStops)-1].close)
+		}
 		if p.err == nil {
-			if stop := p.hdocStops[len(p.hdocStops)-1]; stop != nil {
+			if stop := p.hdocStops[len(p.hdocStops)-1]; !stop.close.matched {
 				if p.lang.in(langBashLike) && heredocNeedsEOFWarning(r.HdocDelim) {
 					p.pendingHeredocWarningPos = r.Pos()
 					p.pendingHeredocWarningWanted = r.HdocDelim.Value
 				} else {
-					p.posErr(r.Pos(), "unclosed here-document %#q", r.HdocDelim.Value)
+					p.posErrWithMetadata(r.Pos(), parseErrorMetadata{
+						kind:       ParseErrorKindUnclosed,
+						construct:  ParseErrorSymbolHereDocument,
+						unexpected: ParseErrorSymbolEOF,
+						expected:   []ParseErrorSymbol{ParseErrorSymbol(r.HdocDelim.Value)},
+					}, "unclosed here-document %#q", r.HdocDelim.Value)
 				}
 			}
 		}
@@ -1351,17 +1747,86 @@ func (t token) Format(f fmt.State, verb rune) {
 	}
 }
 
+func (p *Parser) unexpectedTokenErr(pos Pos, unexpected ParseErrorSymbol, quoted string) {
+	p.posErrWithMetadata(pos, parseErrorMetadata{
+		kind:       ParseErrorKindUnexpected,
+		unexpected: unexpected,
+	}, "syntax error near unexpected token %s", quoted)
+}
+
+func strayReservedWordMetadata(word reservedWord) (parseErrorMetadata, bool) {
+	meta := parseErrorMetadata{
+		kind:       ParseErrorKindUnexpected,
+		unexpected: parseErrorSymbolFromReserved(word),
+	}
+	switch word {
+	case rsrvThen, rsrvElif, rsrvFi:
+		meta.construct = ParseErrorSymbol("if")
+	case rsrvDo, rsrvDone:
+		meta.construct = ParseErrorSymbol("loop")
+	case rsrvEsac:
+		meta.construct = ParseErrorSymbol("case")
+	case rsrvRightBrace:
+		meta.construct = ParseErrorSymbolLeftBrace
+	default:
+		return parseErrorMetadata{}, false
+	}
+	return meta, true
+}
+
+func (p *Parser) strayReservedWordErr(pos Pos, word reservedWord, format string, args ...any) {
+	meta, ok := strayReservedWordMetadata(word)
+	if !ok {
+		p.posErr(pos, format, args...)
+		return
+	}
+	p.posErrWithMetadata(pos, meta, format, args...)
+}
+
 func (p *Parser) followErr(pos Pos, left, right any) {
-	p.posErr(pos, "%#q must be followed by %#q", left, right)
+	meta := parseErrorMetadata{
+		kind:       ParseErrorKindMissing,
+		construct:  parseErrorSymbolFromAny(left),
+		unexpected: p.currentUnexpectedTokenSymbol(),
+		expected:   parseErrorSymbols(right),
+	}
+	if ctx, ok := parseErrorFollowContext(left, right); ok {
+		ctx = withFuncOpenBashToken(ctx, p.currentUnexpectedFuncOpenToken())
+		p.posErrWithMetadataContext(pos, meta, ctx, "%#q must be followed by %#q", left, right)
+		return
+	}
+	p.posErrWithMetadata(pos, meta, "%#q must be followed by %#q", left, right)
 }
 
 func (p *Parser) followErrExp(pos Pos, left any) {
-	p.followErr(pos, left, noQuote("an expression"))
+	p.posErrWithMetadata(pos, parseErrorMetadata{
+		kind:       ParseErrorKindMissing,
+		construct:  parseErrorSymbolFromAny(left),
+		unexpected: p.currentUnexpectedTokenSymbol(),
+		expected:   []ParseErrorSymbol{ParseErrorSymbolExpression},
+	}, "%#q must be followed by %#q", left, noQuote("an expression"))
 }
 
 func (p *Parser) follow(lpos Pos, left string, tok token) {
 	if !p.got(tok) {
 		p.followErr(lpos, left, tok)
+	}
+}
+
+func parseErrorFollowContext(left, right any) (parseErrorContext, bool) {
+	leftText, ok := left.(string)
+	if !ok {
+		return parseErrorContext{}, false
+	}
+	tok, ok := right.(token)
+	if !ok || tok != rightParen {
+		return parseErrorContext{}, false
+	}
+	switch leftText {
+	case "foo(", "function foo(":
+		return parseErrorContext{kind: parseErrorContextFuncOpen}, true
+	default:
+		return parseErrorContext{}, false
 	}
 }
 
@@ -1401,7 +1866,8 @@ func (p *Parser) followStmts(left string, lpos Pos, stops ...reservedWord) ([]*S
 			return []*Stmt{{Position: recoveredPos}}, nil
 		}
 		if p.lang.in(LangBash|LangBats) && p.atRsrv(rsrvFi, rsrvDone) {
-			p.curErr("syntax error near unexpected token %s", p.currentUnexpectedTokenQuote())
+			unexpected, quoted := p.currentUnexpectedTokenDiagnostic()
+			p.unexpectedTokenErr(p.pos, unexpected, quoted)
 			return nil, nil
 		}
 		p.followErr(lpos, left, noQuote("a statement list"))
@@ -1437,17 +1903,33 @@ func (p *Parser) stmtEnd(n Node, start string, end reservedWord) Pos {
 		if p.recoverError() {
 			return recoveredPos
 		}
-		p.posErr(n.Pos(), "%#q statement must end with %#q", start, end)
+		p.posErrWithMetadata(n.Pos(), parseErrorMetadata{
+			kind:       ParseErrorKindMissing,
+			construct:  parseErrorSymbolFromText(start),
+			unexpected: p.currentUnexpectedTokenSymbol(),
+			expected:   []ParseErrorSymbol{parseErrorSymbolFromReserved(end)},
+		}, "%#q statement must end with %#q", start, end)
 	}
 	return pos
 }
 
 func (p *Parser) quoteErr(lpos Pos, quote token) {
-	p.posErr(lpos, "reached %#q without closing quote %#q", p.tok, quote)
+	p.posErrWithMetadata(lpos, parseErrorMetadata{
+		kind:       ParseErrorKindUnclosed,
+		construct:  parseErrorSymbolFromToken(quote),
+		unexpected: p.currentUnexpectedTokenSymbol(),
+		expected:   []ParseErrorSymbol{parseErrorSymbolFromToken(quote)},
+	}, "reached %#q without closing quote %#q", p.tok, quote)
 }
 
 func (p *Parser) matchingErr(lpos Pos, left, right token) {
-	p.posErr(lpos, "reached %#q without matching %#q with %#q", p.tok, left, right)
+	unexpected := p.currentUnexpectedTokenSymbol()
+	p.posErrWithMetadata(lpos, parseErrorMetadata{
+		kind:       missingCloseKind(unexpected),
+		construct:  parseErrorSymbolFromToken(left),
+		unexpected: unexpected,
+		expected:   []ParseErrorSymbol{parseErrorSymbolFromToken(right)},
+	}, "reached %#q without matching %#q with %#q", p.tok, left, right)
 }
 
 func (p *Parser) matched(lpos Pos, left, right token) Pos {
@@ -1531,10 +2013,30 @@ func IsKeyword(word string) bool {
 
 // ParseError represents an error found when parsing a source file, from which
 // the parser cannot recover.
+type parseErrorContextKind uint8
+
+const (
+	parseErrorContextNone parseErrorContextKind = iota
+	parseErrorContextFuncOpen
+	parseErrorContextUnexpectedToken
+	parseErrorContextNearToken
+)
+
+type parseErrorContext struct {
+	kind  parseErrorContextKind
+	token string
+}
+
 type ParseError struct {
 	Filename string
 	Pos      Pos
 	Text     string
+
+	Kind          ParseErrorKind
+	Construct     ParseErrorSymbol
+	Unexpected    ParseErrorSymbol
+	Expected      []ParseErrorSymbol
+	IsRecoverable bool
 
 	Incomplete bool
 
@@ -1557,7 +2059,7 @@ type ParseError struct {
 	bashPrefix               string
 	bashPrefixNoLine         bool
 	noSourceLine             bool
-	recoverable              bool
+	typedContext             parseErrorContext
 }
 
 func (e ParseError) Error() string {
@@ -1579,15 +2081,19 @@ func (e ParseError) bashCompat() ParseError {
 		e.noSourceLine = true
 		return e
 	}
+	if bashText, ok := bashCompatTypedContextText(e, sourceLine); ok {
+		e.bashText = bashText
+		return e
+	}
 	switch {
 	case e.Text == "`for` must be followed by a literal" && strings.HasSuffix(sourceLine, "for"):
-		e.bashText = "syntax error near unexpected token `newline'"
+		e.bashText = bashCompatUnexpectedTokenText("newline")
 	case e.Text == "`case` must be followed by a word" && strings.HasSuffix(sourceLine, "case"):
-		e.bashText = "syntax error near unexpected token `newline'"
+		e.bashText = bashCompatUnexpectedTokenText("newline")
 	case e.Text == "`<` must be followed by a word" && strings.HasSuffix(sourceLine, "<"):
-		e.bashText = "syntax error near unexpected token `newline'"
+		e.bashText = bashCompatUnexpectedTokenText("newline")
 	case e.Text == "`>` must be followed by a word" && strings.HasSuffix(sourceLine, ">"):
-		e.bashText = "syntax error near unexpected token `newline'"
+		e.bashText = bashCompatUnexpectedTokenText("newline")
 	case e.Text == "reached EOF without matching `$(` with `)`":
 		e.bashText = "unexpected EOF while looking for matching `)'"
 		e.SourceLine = ""
@@ -1615,19 +2121,11 @@ func (e ParseError) bashCompat() ParseError {
 		e.bashText = "syntax error near unexpected token `('"
 	case bashCompatUnexpectedFollowError(e.Text):
 		if token, ok := bashCompatUnexpectedTokenAtPos(e); ok {
-			if token == "newline" {
-				e.bashText = "syntax error near unexpected token `newline'"
-			} else {
-				e.bashText = fmt.Sprintf("syntax error near unexpected token %s", bashQuoteString(token))
-			}
+			e.bashText = bashCompatUnexpectedTokenText(token)
 		}
 	case bashCompatFuncOpenError(e.Text):
 		if token, ok := bashCompatFuncOpenToken(sourceLine); ok {
-			if token == "newline" {
-				e.bashText = "syntax error near unexpected token `newline'"
-			} else {
-				e.bashText = fmt.Sprintf("syntax error near unexpected token %s", bashQuoteString(token))
-			}
+			e.bashText = bashCompatUnexpectedTokenText(token)
 		}
 	}
 	return e
@@ -1662,6 +2160,51 @@ func bashCompatUnexpectedEOFText(e ParseError) (string, bool) {
 	}
 	return fmt.Sprintf("syntax error: unexpected end of file from `%s' command on line %d", token, e.Pos.Line()), true
 }
+
+func bashCompatTypedContextText(e ParseError, sourceLine string) (string, bool) {
+	switch e.typedContext.kind {
+	case parseErrorContextFuncOpen:
+		if e.typedContext.token != "" {
+			return bashCompatUnexpectedTokenText(e.typedContext.token), true
+		}
+		token, ok := bashCompatFuncOpenToken(sourceLine)
+		if !ok {
+			return "", false
+		}
+		return bashCompatUnexpectedTokenText(token), true
+	case parseErrorContextUnexpectedToken:
+		if e.typedContext.token == "" {
+			return "", false
+		}
+		return bashCompatUnexpectedTokenText(e.typedContext.token), true
+	case parseErrorContextNearToken:
+		if e.typedContext.token == "" {
+			return "", false
+		}
+		return fmt.Sprintf("syntax error near %s", bashQuoteString(e.typedContext.token)), true
+	default:
+		return "", false
+	}
+}
+
+func bashCompatUnexpectedTokenText(token string) string {
+	if token == "newline" {
+		return "syntax error near unexpected token `newline'"
+	}
+	return fmt.Sprintf("syntax error near unexpected token %s", bashQuoteString(token))
+}
+
+func withFuncOpenBashToken(ctx parseErrorContext, token string) parseErrorContext {
+	if ctx.kind != parseErrorContextFuncOpen || ctx.token != "" {
+		return ctx
+	}
+	if token == "" {
+		token = "newline"
+	}
+	ctx.token = token
+	return ctx
+}
+
 func bashCompatFuncOpenError(text string) bool {
 	switch text {
 	case "`foo(` must be followed by `)`", "`function foo(` must be followed by `)`":
@@ -1859,7 +2402,7 @@ func (e ParseError) WantsSourceLine() bool {
 }
 
 func (e ParseError) Recoverable() bool {
-	return e.recoverable
+	return e.IsRecoverable
 }
 
 func (e ParseError) WithInteractiveCommandStringPrefix(name string) ParseError {
@@ -1879,11 +2422,24 @@ func (e ParseError) WithInteractiveCommandStringPrefix(name string) ParseError {
 type LangError struct {
 	Filename string
 	Pos      Pos
+	// End is the optional exclusive end position of the exact token sequence
+	// that triggered the variant-gated syntax diagnostic.
+	End Pos
 
 	// TODO: consider replacing the Langs slice with a bitset.
 
 	// Feature briefly describes which language feature caused the error.
+	// This compatibility text remains populated for callers matching the old
+	// free-form surface. New code should prefer FeatureID.
 	Feature string
+	// FeatureID identifies the stable variant-gated syntax family.
+	FeatureID FeatureID
+	// FeatureSubtype identifies a more specific stable surface form within
+	// FeatureID when the parser can distinguish it.
+	FeatureSubtype FeatureSubtype
+	// FeatureDetail carries any operator, spelling-specific detail, or other
+	// stable raw fragment associated with FeatureSubtype when rendering Feature.
+	FeatureDetail string
 	// Langs lists some of the language variants which support the feature.
 	Langs []LangVariant
 	// LangUsed is the language variant used which led to the error.
@@ -1891,6 +2447,10 @@ type LangError struct {
 }
 
 func (e LangError) Error() string {
+	feature := e.Feature
+	if feature == "" {
+		feature = e.FeatureID.Format(e.FeatureDetail)
+	}
 	var sb strings.Builder
 	if e.Filename != "" {
 		sb.WriteString(e.Filename)
@@ -1898,8 +2458,8 @@ func (e LangError) Error() string {
 	}
 	sb.WriteString(e.Pos.String())
 	sb.WriteString(": ")
-	sb.WriteString(e.Feature)
-	if strings.HasSuffix(e.Feature, "s") {
+	sb.WriteString(feature)
+	if strings.HasSuffix(feature, "s") {
 		sb.WriteString(" are a ")
 	} else {
 		sb.WriteString(" is a ")
@@ -1915,18 +2475,14 @@ func (e LangError) Error() string {
 	return sb.String()
 }
 
-func (p *Parser) posErr(pos Pos, format string, args ...any) {
-	// for i, arg := range args {
-	// 	if arg, ok := arg.(fmt.Stringer); ok && arg != _EOF {
-	// 		args[i] = quotedToken(arg)
-	// 	}
-	// }
+func (p *Parser) newParseError(pos Pos, text string, meta parseErrorMetadata) ParseError {
 	pe := ParseError{
 		Filename:   p.f.Name,
 		Pos:        pos,
-		Text:       fmt.Sprintf(format, args...),
+		Text:       text,
 		Incomplete: p.tok == _EOF && p.Incomplete(),
 	}
+	meta.apply(&pe)
 	// When a syntax error occurs during alias expansion, use the
 	// expanded alias text as the source line so the error message
 	// shows the problematic expansion rather than the original alias
@@ -1934,52 +2490,83 @@ func (p *Parser) posErr(pos Pos, format string, args ...any) {
 	if p.aliasSource != nil {
 		pe.SourceLine = p.aliasSource.Value
 	}
+	return pe
+}
+
+func (p *Parser) posErrWithMetadata(pos Pos, meta parseErrorMetadata, format string, args ...any) {
+	p.errPass(p.newParseError(pos, fmt.Sprintf(format, args...), meta))
+}
+
+func (p *Parser) posErrWithMetadataContext(pos Pos, meta parseErrorMetadata, ctx parseErrorContext, format string, args ...any) {
+	pe := p.newParseError(pos, fmt.Sprintf(format, args...), meta)
+	pe.typedContext = ctx
 	p.errPass(pe)
 }
 
+func (p *Parser) posErr(pos Pos, format string, args ...any) {
+	p.posErrWithMetadata(pos, parseErrorMetadata{}, format, args...)
+}
+
+func (p *Parser) posErrContext(pos Pos, ctx parseErrorContext, format string, args ...any) {
+	p.posErrWithMetadataContext(pos, parseErrorMetadata{}, ctx, format, args...)
+}
+
 func (p *Parser) posErrSecondary(pos Pos, secondary, format string, args ...any) {
-	p.errPass(ParseError{
-		Filename:      p.f.Name,
-		Pos:           pos,
-		Text:          fmt.Sprintf(format, args...),
-		Incomplete:    p.tok == _EOF && p.Incomplete(),
-		SecondaryText: secondary,
-		SecondaryPos:  pos,
-	})
+	pe := p.newParseError(pos, fmt.Sprintf(format, args...), parseErrorMetadata{})
+	pe.SecondaryText = secondary
+	pe.SecondaryPos = pos
+	p.errPass(pe)
+}
+
+func (p *Parser) posErrSecondaryWithMetadata(pos Pos, meta parseErrorMetadata, secondary, format string, args ...any) {
+	pe := p.newParseError(pos, fmt.Sprintf(format, args...), meta)
+	pe.SecondaryText = secondary
+	pe.SecondaryPos = pos
+	p.errPass(pe)
 }
 
 func (p *Parser) posErrSecondaryDetailed(pos, secondaryPos, sourceLinePos Pos, sourceLine, secondary, format string, args ...any) {
-	p.errPass(ParseError{
-		Filename:      p.f.Name,
-		Pos:           pos,
-		Text:          fmt.Sprintf(format, args...),
-		Incomplete:    p.tok == _EOF && p.Incomplete(),
-		SecondaryText: secondary,
-		SecondaryPos:  secondaryPos,
-		SourceLine:    sourceLine,
-		SourceLinePos: sourceLinePos,
-	})
+	pe := p.newParseError(pos, fmt.Sprintf(format, args...), parseErrorMetadata{})
+	pe.SecondaryText = secondary
+	pe.SecondaryPos = secondaryPos
+	pe.SourceLine = sourceLine
+	pe.SourceLinePos = sourceLinePos
+	p.errPass(pe)
 }
 
 func (p *Parser) posRecoverableErr(pos Pos, format string, args ...any) {
-	p.errPass(ParseError{
-		Filename:    p.f.Name,
-		Pos:         pos,
-		Text:        fmt.Sprintf(format, args...),
-		Incomplete:  p.tok == _EOF && p.Incomplete(),
-		recoverable: true,
-	})
+	p.posErrWithMetadata(pos, parseErrorMetadata{isRecoverable: true}, format, args...)
 }
 
 func (p *Parser) curErr(format string, args ...any) {
 	p.posErr(p.pos, format, args...)
 }
 
+func (p *Parser) curErrContext(ctx parseErrorContext, format string, args ...any) {
+	p.posErrContext(p.pos, ctx, format, args...)
+}
+
 func (p *Parser) curErrSecondary(secondary, format string, args ...any) {
 	p.posErrSecondary(p.pos, secondary, format, args...)
 }
 
-func (p *Parser) checkLang(pos Pos, langSet LangVariant, format string, a ...any) {
+func (p *Parser) checkLang(pos Pos, langSet LangVariant, featureID FeatureID, detail ...string) {
+	p.checkLangSpan(pos, Pos{}, langSet, featureID, detail...)
+}
+
+func (p *Parser) checkLangSpan(pos, end Pos, langSet LangVariant, featureID FeatureID, detail ...string) {
+	featureDetail := ""
+	if len(detail) > 0 {
+		featureDetail = detail[0]
+	}
+	p.checkLangSpanDetailed(pos, end, langSet, featureID, FeatureSubtypeUnknown, featureDetail)
+}
+
+func (p *Parser) checkLangDetailed(pos Pos, langSet LangVariant, featureID FeatureID, featureSubtype FeatureSubtype, featureDetail string) {
+	p.checkLangSpanDetailed(pos, Pos{}, langSet, featureID, featureSubtype, featureDetail)
+}
+
+func (p *Parser) checkLangSpanDetailed(pos, end Pos, langSet LangVariant, featureID FeatureID, featureSubtype FeatureSubtype, featureDetail string) {
 	if p.lang.in(langSet) {
 		return
 	}
@@ -1989,17 +2576,21 @@ func (p *Parser) checkLang(pos Pos, langSet LangVariant, format string, a ...any
 		langSet &^= LangBats
 	}
 	p.errPass(LangError{
-		Filename: p.f.Name,
-		Pos:      pos,
-		Feature:  fmt.Sprintf(format, a...),
-		Langs:    slices.Collect(langSet.bits()),
-		LangUsed: p.lang,
+		Filename:       p.f.Name,
+		Pos:            pos,
+		End:            end,
+		Feature:        featureID.Format(featureDetail),
+		FeatureID:      featureID,
+		FeatureSubtype: featureSubtype,
+		FeatureDetail:  featureDetail,
+		Langs:          slices.Collect(langSet.bits()),
+		LangUsed:       p.lang,
 	})
 }
 
 func (p *Parser) currentUnexpectedTokenQuote() string {
 	switch p.tok {
-	case _Lit, _LitWord:
+	case _Lit, _LitWord, _LitRedir:
 		return bashQuoteString(p.val)
 	case sglQuote, dollSglQuote, dblQuote, dollDblQuote, bckQuote, dollar, dollBrace,
 		dollDblParen, dollParen, dollBrack, cmdIn, assgnParen, cmdOut:
@@ -2008,6 +2599,39 @@ func (p *Parser) currentUnexpectedTokenQuote() string {
 		}
 	}
 	return p.tok.bashQuote()
+}
+
+func (p *Parser) currentUnexpectedFuncOpenToken() string {
+	switch p.tok {
+	case _EOF, _Newl:
+		return "newline"
+	case _Lit, _LitWord, _LitRedir:
+		return p.val
+	case sglQuote, dollSglQuote, dblQuote, dollDblQuote, bckQuote, dollar, dollBrace,
+		dollDblParen, dollParen, dollBrack, cmdIn, assgnParen, cmdOut:
+		if _, raw := p.getWordRaw(); raw != "" {
+			return raw
+		}
+	}
+	return p.tok.String()
+}
+
+func (p *Parser) posCurrentUnexpectedErr(pos Pos) {
+	unexpected, quoted := p.currentUnexpectedTokenDiagnostic()
+	p.unexpectedTokenErr(pos, unexpected, quoted)
+}
+
+func (p *Parser) posCurrentUnexpectedErrContext(pos Pos, ctx parseErrorContext) {
+	unexpected, quoted := p.currentUnexpectedTokenDiagnostic()
+	ctx = withFuncOpenBashToken(ctx, p.currentUnexpectedFuncOpenToken())
+	p.posErrWithMetadataContext(pos, parseErrorMetadata{
+		kind:       ParseErrorKindUnexpected,
+		unexpected: unexpected,
+	}, ctx, "syntax error near unexpected token %s", quoted)
+}
+
+func (p *Parser) curUnexpectedErr() {
+	p.posCurrentUnexpectedErr(p.pos)
 }
 
 func (p *Parser) stmts(yield func(*Stmt, error) bool, stops ...reservedWord) {
@@ -2021,7 +2645,7 @@ loop:
 				break loop
 			}
 			if p.atRsrv(rsrvRightBrace) {
-				p.curErr(`%#q can only be used to close a block`, rightBrace)
+				p.strayReservedWordErr(p.pos, rsrvRightBrace, `%#q can only be used to close a block`, rightBrace)
 			}
 		case rightParen:
 			if p.quote == subCmd {
@@ -2053,6 +2677,9 @@ loop:
 		}
 		gotEnd = s.Semicolon.IsValid()
 		if !yield(s, p.err) {
+			break
+		}
+		if p.err != nil {
 			break
 		}
 		if !start.progressed(p) {
@@ -2097,7 +2724,7 @@ func (p *Parser) stmtList(stops ...reservedWord) ([]*Stmt, []Comment) {
 }
 
 func (p *Parser) invalidStmtStart() {
-	p.curErr("syntax error near unexpected token %s", p.tok.bashQuote())
+	p.curUnexpectedErr()
 }
 
 func (p *Parser) getWord() *Word {
@@ -2121,6 +2748,9 @@ func (p *Parser) getWordRaw() (*Word, string) {
 	}
 	raw := string(p.wordRawBs[:span])
 	p.wordRawBs = p.wordRawBs[:0]
+	if w.raw == "" {
+		w.raw = raw
+	}
 	return w, raw
 }
 
@@ -2138,7 +2768,7 @@ func (p *Parser) stopWordCapture() string {
 
 func (p *Parser) startCandidateCapture() {
 	p.wordRawBs = append(p.wordRawBs[:0], p.currentTokenSource()...)
-	p.wordRawBs = append(p.wordRawBs, p.currentRuneSource()...)
+	p.wordRawBs = append(p.wordRawBs, p.currentRuneBytes()...)
 	p.captureWordRaw = true
 }
 
@@ -2172,15 +2802,75 @@ func (p *Parser) currentTokenSource() string {
 	}
 }
 
-func (p *Parser) currentRuneSource() string {
+func (p *Parser) currentRuneBytes() []byte {
 	if p.r == utf8.RuneSelf || p.w <= 0 {
-		return ""
+		return nil
 	}
 	start := int(p.bsp) - p.w
 	if start < 0 || start > len(p.bs) || int(p.bsp) > len(p.bs) {
-		return ""
+		return nil
 	}
-	return string(p.bs[start:p.bsp])
+	return p.bs[start:p.bsp]
+}
+
+func (p *Parser) currentRuneSource() string {
+	if src := p.currentRuneBytes(); len(src) > 0 {
+		return string(src)
+	}
+	return ""
+}
+
+func (p *Parser) currentSourceTailPrefixed(prefix []byte) ([]byte, error) {
+	tail := make([]byte, 0, len(prefix)+len(p.bs)+p.unreadSourceTailHint())
+	tail = append(tail, prefix...)
+	if src := p.currentRuneBytes(); len(src) > 0 {
+		tail = append(tail, src...)
+	}
+	if idx := int(p.bsp); idx >= 0 && idx <= len(p.bs) {
+		tail = append(tail, p.bs[idx:]...)
+	}
+	return p.unreadSourceTailAppend(tail)
+}
+
+func (p *Parser) currentSourceReplayPrefixed(prefix []byte) *sourceReplayBuffer {
+	initial := make([]byte, 0, len(prefix)+len(p.bs))
+	initial = append(initial, prefix...)
+	if src := p.currentRuneBytes(); len(src) > 0 {
+		initial = append(initial, src...)
+	}
+	if idx := int(p.bsp); idx >= 0 && idx <= len(p.bs) {
+		initial = append(initial, p.bs[idx:]...)
+	}
+	return newSourceReplayBuffer(initial, p.src, p.readErr, p.readEOF)
+}
+
+func sourceTailSuffix(src []byte, prefixLen int) []byte {
+	if prefixLen < 0 || len(src) < prefixLen {
+		return nil
+	}
+	return src[prefixLen:]
+}
+
+func (p *Parser) currentSourceTail() ([]byte, error) {
+	tail := make([]byte, 0, len(p.bs)+p.unreadSourceTailHint())
+	if src := p.currentRuneBytes(); len(src) > 0 {
+		tail = append(tail, src...)
+	}
+	if idx := int(p.bsp); idx >= 0 && idx <= len(p.bs) {
+		tail = append(tail, p.bs[idx:]...)
+	}
+	return p.unreadSourceTailAppend(tail)
+}
+
+func (p *Parser) bufferedSourceTail() string {
+	var b strings.Builder
+	if src := p.currentRuneBytes(); len(src) > 0 {
+		b.Write(src)
+	}
+	if idx := int(p.bsp); idx >= 0 && idx <= len(p.bs) {
+		b.Write(p.bs[idx:])
+	}
+	return b.String()
 }
 
 func (p *Parser) sourceFromPos(pos Pos) string {
@@ -2190,6 +2880,37 @@ func (p *Parser) sourceFromPos(pos Pos) string {
 	}
 	buf, _ := p.sourceBuffer()
 	return string(buf[start:])
+}
+
+func (p *Parser) sourceBytesFromPos(pos Pos) []byte {
+	start, ok := p.bufferIndex(pos.Offset())
+	if !ok {
+		return nil
+	}
+	buf, _ := p.sourceBuffer()
+	return buf[start:]
+}
+
+func (p *Parser) nextBytePos(pos Pos) Pos {
+	if !pos.IsValid() {
+		return Pos{}
+	}
+	tail := p.sourceBytesFromPos(pos)
+	if len(tail) == 0 {
+		return Pos{}
+	}
+	return advancePosBytes(pos, tail[:1])
+}
+
+// bytesToStringView returns a non-owning string view over src.
+//
+// Callers must treat the result as ephemeral and must not retain it after src
+// may be mutated or discarded.
+func bytesToStringView(src []byte) string {
+	if len(src) == 0 {
+		return ""
+	}
+	return unsafe.String(unsafe.SliceData(src), len(src))
 }
 
 func (p *Parser) sourceBetween(left, right Pos) string {
@@ -2266,6 +2987,9 @@ func (p *Parser) sourceRange(start, end Pos) string {
 }
 
 func (p *Parser) sourceBuffer() ([]byte, int64) {
+	if p.sourceReplay != nil {
+		return p.sourceReplay.Bytes(), p.sourceOffs
+	}
 	if p.sourceBs != nil {
 		return p.sourceBs, p.sourceOffs
 	}
@@ -2294,37 +3018,96 @@ func (p *Parser) bufferRange(start, end Pos) (int, int, bool) {
 	return from, to, true
 }
 
-func (p *Parser) currentSourceTail() ([]byte, error) {
-	var tail []byte
-	if src := p.currentRuneSource(); src != "" {
+func (p *Parser) lookaheadSourceTail(limit int, done func([]byte) bool) string {
+	tail := make([]byte, 0, limit)
+	if src := p.currentRuneBytes(); len(src) > 0 {
 		tail = append(tail, src...)
 	}
 	if idx := int(p.bsp); idx >= 0 && idx <= len(p.bs) {
 		tail = append(tail, p.bs[idx:]...)
 	}
-	rest, err := p.unreadSourceTail()
-	tail = append(tail, rest...)
-	return tail, err
+	if limit <= 0 || len(tail) >= limit || done(tail) || p.src == nil || p.readEOF || p.readErr != nil {
+		return string(tail)
+	}
+
+	reader := p.src
+	extra := make([]byte, 0, limit-len(tail))
+	var one [1]byte
+	for len(tail) < limit && !done(tail) {
+		n, err := reader.Read(one[:])
+		if n > 0 {
+			extra = append(extra, one[:n]...)
+			tail = append(tail, one[:n]...)
+		}
+		if err != nil || n == 0 {
+			break
+		}
+	}
+	if len(extra) > 0 {
+		p.src = newPrependReader(extra, reader)
+	}
+	return string(tail)
+}
+
+func paramExpFlagsMetadataTailDone(tail []byte) bool {
+	if len(tail) == 0 || tail[0] != '(' {
+		return true
+	}
+	return bytes.IndexByte(tail[1:], ')') >= 0
+}
+
+func paramExpIndexMetadataTailDone(tail []byte) bool {
+	if len(tail) == 0 || tail[0] != '[' {
+		return true
+	}
+	for _, b := range tail[1:] {
+		switch b {
+		case ' ', '\t', '\r', '\n':
+			continue
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Parser) unreadSourceTail() ([]byte, error) {
+	return p.unreadSourceTailAppend(nil)
+}
+
+func (p *Parser) unreadSourceTailHint() int {
+	if p.readEOF || p.src == nil {
+		return 0
+	}
+	if src, ok := p.src.(lenReader); ok {
+		return src.Len()
+	}
+	return 0
+}
+
+func (p *Parser) unreadSourceTailAppend(dst []byte) ([]byte, error) {
 	switch p.readErr {
 	case nil:
 	case io.EOF:
-		return nil, nil
+		return dst, nil
 	default:
-		return nil, p.readErr
+		return dst, p.readErr
 	}
 	if p.readEOF || p.src == nil {
-		return nil, nil
+		return dst, nil
 	}
-	var buf bytes.Buffer
+	if extra := p.unreadSourceTailHint(); extra > 0 && cap(dst)-len(dst) < extra {
+		grown := make([]byte, len(dst), len(dst)+extra)
+		copy(grown, dst)
+		dst = grown
+	}
+	buf := bytes.NewBuffer(dst)
 	_, err := buf.ReadFrom(p.src)
-	rest := buf.Bytes()
+	dst = buf.Bytes()
 	if err != nil && err != io.EOF {
-		return rest, err
+		return dst, err
 	}
-	return rest, nil
+	return dst, nil
 }
 
 func (p *Parser) loadReplay(pos Pos, src []byte, readErr error) {
@@ -2348,15 +3131,63 @@ func (p *Parser) loadReplay(pos Pos, src []byte, readErr error) {
 	p.bsp = uint(w)
 }
 
+func (p *Parser) loadReplayView(pos Pos, src []byte, readErr error) {
+	p.src = bytes.NewReader(nil)
+	p.bs = src
+	p.offs = int64(pos.Offset())
+	p.line = int64(pos.Line())
+	p.col = int64(pos.Col())
+	p.err = nil
+	p.readErr = readErr
+	p.readEOF = false
+	if len(p.bs) == 0 {
+		p.r = utf8.RuneSelf
+		p.w = 1
+		p.bsp = 1
+		return
+	}
+	r, w := utf8.DecodeRune(p.bs)
+	p.r = r
+	p.w = w
+	p.bsp = uint(w)
+}
+
+func (p *Parser) loadReplayCursorView(pos Pos, src []byte, tail io.Reader) {
+	p.src = tail
+	p.bs = src
+	p.offs = int64(pos.Offset())
+	p.line = int64(pos.Line())
+	p.col = int64(pos.Col())
+	p.err = nil
+	p.readErr = nil
+	p.readEOF = false
+	p.r = 0
+	p.w = 0
+	p.bsp = 0
+	if len(p.bs) == 0 {
+		if p.fill() == 0 {
+			p.r = utf8.RuneSelf
+			p.w = 1
+			p.bsp = 1
+			return
+		}
+	}
+	r, w := utf8.DecodeRune(p.bs)
+	p.r = r
+	p.w = w
+	p.bsp = uint(w)
+}
+
 func parseErrRecoverableInBackquotes(err ParseError) bool {
-	switch err.Text {
-	case "reached EOF without closing quote `\"`",
-		"reached EOF without closing quote `'`",
-		"reached \"`\" without closing quote `\"`",
-		"reached \"`\" without closing quote `'`",
-		"reached EOF without matching `{` with `}`",
-		"reached \"`\" without matching `{` with `}`":
-		return true
+	if err.Unexpected != ParseErrorSymbolEOF && err.Unexpected != ParseErrorSymbolBackquote {
+		return false
+	}
+	switch err.Kind {
+	case ParseErrorKindUnclosed:
+		return len(err.Expected) == 1 && ((err.Expected[0] == ParseErrorSymbolSingleQuote || err.Expected[0] == ParseErrorSymbolDoubleQuote) ||
+			(err.Expected[0] == ParseErrorSymbolRightBrace && err.Construct == ParseErrorSymbolLeftBrace))
+	case ParseErrorKindUnmatched:
+		return len(err.Expected) == 1 && err.Expected[0] == ParseErrorSymbolRightBrace && err.Construct == ParseErrorSymbolLeftBrace
 	default:
 		return false
 	}
@@ -2377,18 +3208,50 @@ func advancePosBytes(pos Pos, src []byte) Pos {
 	return pos
 }
 
-func findClosingBackquote(src []byte) int {
-	for i := 1; i < len(src); i++ {
-		switch src[i] {
-		case '\\':
-			if i+1 < len(src) {
-				i++
-			}
-		case '`':
-			return i
+func findClosingBackquoteTrivia(src []byte, inDoubleQuotes bool) (closeIndex int, backslashCount int) {
+	if len(src) == 0 || src[0] != '`' {
+		return -1, 0
+	}
+	var scan Parser
+	scan.reset()
+	scan.loadReplay(Pos{}, src, io.EOF)
+	scan.openBquotes = 1
+	if inDoubleQuotes {
+		scan.openBquoteDquotes = 1
+	}
+	for {
+		r := scan.rune()
+		if r == utf8.RuneSelf {
+			return -1, 0
+		}
+		if r == '`' {
+			return int(scan.bsp) - scan.w, scan.lastBquoteRawBackslashes
 		}
 	}
-	return -1
+}
+
+func newBackquoteCloseTrivia(close Pos, backslashCount int) *BackquoteCloseTrivia {
+	if !close.IsValid() || backslashCount < 0 {
+		return nil
+	}
+	trivia := &BackquoteCloseTrivia{
+		BackslashPos:   close,
+		BackslashEnd:   close,
+		BackslashCount: uint16(backslashCount),
+	}
+	if backslashCount > 0 {
+		trivia.BackslashPos = posSubCol(close, backslashCount)
+	}
+	return trivia
+}
+
+func backquoteCloseTriviaFromSource(left Pos, src []byte, inDoubleQuotes bool) (*BackquoteCloseTrivia, int) {
+	closeIndex, backslashCount := findClosingBackquoteTrivia(src, inDoubleQuotes)
+	if closeIndex < 0 {
+		return nil, -1
+	}
+	closePos := advancePosBytes(left, src[:closeIndex])
+	return newBackquoteCloseTrivia(closePos, backslashCount), closeIndex
 }
 
 func hasContinuedScriptAfterRecoveredBackquote(src []byte) bool {
@@ -2408,11 +3271,9 @@ func hasContinuedScriptAfterRecoveredBackquote(src []byte) bool {
 
 func (p *Parser) recoverableBackquoteSource(left Pos) ([]byte, error) {
 	if src := p.sourceFromPos(left); src != "" {
-		rest, err := p.unreadSourceTail()
-		full := make([]byte, 0, len(src)+len(rest))
+		full := make([]byte, 0, len(src)+p.unreadSourceTailHint())
 		full = append(full, src...)
-		full = append(full, rest...)
-		return full, err
+		return p.unreadSourceTailAppend(full)
 	}
 	tail, err := p.currentSourceTail()
 	if len(tail) == 0 {
@@ -2434,7 +3295,7 @@ func (p *Parser) recoverBackquoteCmdSubst(cs *CmdSubst, old saveState, src []byt
 		copy(full[1:], src)
 		src = full
 	}
-	closeIndex := findClosingBackquote(src)
+	trivia, closeIndex := backquoteCloseTriviaFromSource(cs.Left, src, old.quote == dblQuotes)
 	if closeIndex < 0 {
 		return false
 	}
@@ -2452,6 +3313,7 @@ func (p *Parser) recoverBackquoteCmdSubst(cs *CmdSubst, old saveState, src []byt
 	cs.Stmts = nil
 	cs.Last = nil
 	cs.Right = advancePosBytes(cs.Left, src[:closeIndex])
+	cs.BackquoteClose = trivia
 	nextPos := advancePosBytes(cs.Left, src[:closeIndex+1])
 	p.loadReplay(nextPos, src[closeIndex+1:], readErr)
 	p.next()
@@ -2459,17 +3321,47 @@ func (p *Parser) recoverBackquoteCmdSubst(cs *CmdSubst, old saveState, src []byt
 }
 
 func (p *Parser) setSourceBuffer(pos Pos, src []byte) {
+	p.sourceReplay = nil
 	p.sourceBs = append(p.sourceBs[:0], src...)
 	p.sourceOffs = int64(pos.Offset())
 }
 
-func cloneByteSlices(src [][]byte) [][]byte {
+func (p *Parser) setSourceBufferView(pos Pos, src []byte) {
+	p.sourceReplay = nil
+	p.sourceBs = src
+	p.sourceOffs = int64(pos.Offset())
+}
+
+func (p *Parser) setSourceReplayView(pos Pos, replay *sourceReplayBuffer) {
+	p.sourceReplay = replay
+	p.sourceBs = nil
+	p.sourceOffs = int64(pos.Offset())
+}
+
+func (p *Parser) detachSourceReplay() {
+	replay := p.sourceReplay
+	if replay == nil {
+		return
+	}
+	cursor, ok := p.src.(*sourceReplayCursor)
+	if ok && cursor.replay == replay {
+		p.src = newPrependReader(replay.buf[cursor.off:], replay.src)
+	}
+	p.sourceReplay = nil
+	p.sourceBs = nil
+	p.sourceOffs = 0
+	p.readErr = nil
+	p.readEOF = false
+}
+
+func cloneHeredocStops(src []heredocStop) []heredocStop {
 	if len(src) == 0 {
 		return nil
 	}
-	dst := make([][]byte, len(src))
-	for i, b := range src {
-		dst[i] = append([]byte(nil), b...)
+	dst := make([]heredocStop, len(src))
+	for i, stop := range src {
+		dst[i] = stop
+		dst[i].word = append([]byte(nil), stop.word...)
 	}
 	return dst
 }
@@ -2494,6 +3386,7 @@ func (p *Parser) parenAmbiguityClone() *Parser {
 	clone.bsp = 0
 	clone.sourceBs = nil
 	clone.sourceOffs = 0
+	clone.sourceReplay = nil
 	clone.r = 0
 	clone.w = 0
 	clone.accComs = nil
@@ -2507,8 +3400,10 @@ func (p *Parser) parenAmbiguityClone() *Parser {
 	clone.pendingArrayWordPos = Pos{}
 	clone.keepComments = false
 	clone.recoveredErrors = 0
+	clone.litBatchAllocSize = parenProbeLitBatchSize
+	clone.wordBatchAllocSize = parenProbeWordBatchSize
 	clone.heredocs = append([]*Redirect(nil), p.heredocs...)
-	clone.hdocStops = cloneByteSlices(p.hdocStops)
+	clone.hdocStops = cloneHeredocStops(p.hdocStops)
 	clone.aliasChain = append([]*AliasExpansion(nil), p.aliasChain...)
 	clone.aliasInputStack = append([]aliasInputState(nil), p.aliasInputStack...)
 	clone.aliasActive = copyAliasActive(p.aliasActive)
@@ -2719,10 +3614,31 @@ func (p *Parser) finishWord(w *Word) *Word {
 	if w == nil || len(w.Parts) == 0 {
 		return w
 	}
+	if w.raw == "" {
+		w.raw = p.sourceRange(w.Pos(), w.End())
+	}
+	w.LeadingEscape = leadingWordEscape(w)
 	if p.braceWordPartsAllowed() {
 		w.Parts = splitBraceWordParts(w.Parts)
 	}
 	return w
+}
+
+func leadingWordEscape(w *Word) *WordLeadingEscape {
+	if w == nil || len(w.Parts) == 0 {
+		return nil
+	}
+	lit, ok := w.Parts[0].(*Lit)
+	if !ok || lit == nil || !lit.ValuePos.IsValid() || lit.Value == "" || lit.Value[0] != '\\' || len(lit.Value) < 2 {
+		return nil
+	}
+	switch lit.Value[1] {
+	case '\n', '\r':
+		return nil
+	default:
+		pos := lit.ValuePos
+		return &WordLeadingEscape{Pos: pos, End: posAddCol(pos, 1)}
+	}
 }
 
 func (p *Parser) braceWordPartsAllowed() bool {
@@ -2778,7 +3694,7 @@ func (p *Parser) arithmWordPartTo(salvageTail bool, tailEnd Pos) *ArithmExp {
 	old := p.preNested(arithmExpr)
 	p.next()
 	if p.got(hash) {
-		p.checkLang(ar.Pos(), LangMirBSDKorn, "unsigned expressions")
+		p.checkLang(ar.Pos(), LangMirBSDKorn, FeatureArithmeticUnsignedExpr)
 		ar.Unsigned = true
 	}
 	ar.X = p.followArithm(left, ar.Left)
@@ -2806,15 +3722,17 @@ func (p *Parser) parenAmbiguityWordPart() WordPart {
 	p.parenAmbiguityProbeDepth++
 	defer func() { p.parenAmbiguityProbeDepth-- }()
 
-	afterToken, err := p.currentSourceTail()
+	prefix := []byte(dollDblParen.String())
+	replay := p.currentSourceReplayPrefixed(prefix)
 	start := p.pos
-	fullSrc := append([]byte(dollDblParen.String()), afterToken...)
-	arithPos := posAddCol(start, len(dollDblParen.String()))
+	fullSrc := replay.Bytes()
+	afterToken := sourceTailSuffix(fullSrc, len(prefix))
+	arithPos := posAddCol(start, len(prefix))
 	arith := p.parenAmbiguityClone()
 	arith.tok = dollDblParen
 	arith.pos = start
-	arith.loadReplay(arithPos, afterToken, err)
-	arith.setSourceBuffer(start, fullSrc)
+	arith.loadReplayCursorView(arithPos, afterToken, replay.cursor(len(fullSrc)))
+	arith.setSourceReplayView(start, replay)
 	part := arith.arithmWordPart(false)
 	arithOK := arith.err == nil
 	arithRight := Pos{}
@@ -2822,29 +3740,36 @@ func (p *Parser) parenAmbiguityWordPart() WordPart {
 		arithRight = part.Right
 	}
 
-	fallbackSrc := append([]byte{'('}, afterToken...)
+	fullSrc = replay.Bytes()
+	fallbackSrc := sourceTailSuffix(fullSrc, len(prefix)-1)
 	fallbackPos := posAddCol(start, len(dollParen.String()))
 	cmd := p.parenAmbiguityClone()
 	cmd.tok = dollParen
 	cmd.pos = start
-	cmd.loadReplay(fallbackPos, fallbackSrc, err)
-	cmd.setSourceBuffer(start, fullSrc)
+	cmd.loadReplayCursorView(fallbackPos, fallbackSrc, replay.cursor(len(fullSrc)))
+	cmd.setSourceReplayView(start, replay)
 	cs := cmd.cmdSubst()
-	fallbackIncomplete := cmd.err != nil && IsIncomplete(cmd.err) && hasInternalNewline(afterToken)
+	fallbackIncomplete := cmd.err != nil && IsIncomplete(cmd.err) && replay.tailHasInternalNewline(len(prefix))
 	if fallbackIncomplete {
 		p.tok = dollParen
 		p.pos = start
-		p.loadReplay(fallbackPos, fallbackSrc, err)
-		p.setSourceBuffer(start, fullSrc)
-		return p.cmdSubst()
+		fullSrc = replay.Bytes()
+		p.loadReplayCursorView(fallbackPos, sourceTailSuffix(fullSrc, len(prefix)-1), replay.cursor(len(fullSrc)))
+		p.setSourceReplayView(start, replay)
+		part := p.cmdSubst()
+		p.detachSourceReplay()
+		return part
 	}
 	fallbackOK := cmd.err == nil && cmd.allowParenAmbiguityFallback(cs.Stmts, cs.Last, cs.Right)
 	if fallbackOK {
 		p.tok = dollParen
 		p.pos = start
-		p.loadReplay(fallbackPos, fallbackSrc, err)
-		p.setSourceBuffer(start, fullSrc)
-		return p.cmdSubst()
+		fullSrc = replay.Bytes()
+		p.loadReplayCursorView(fallbackPos, sourceTailSuffix(fullSrc, len(prefix)-1), replay.cursor(len(fullSrc)))
+		p.setSourceReplayView(start, replay)
+		part := p.cmdSubst()
+		p.detachSourceReplay()
+		return part
 	}
 	arithEndedEarly := false
 	fallbackTailEnd := Pos{}
@@ -2859,18 +3784,28 @@ func (p *Parser) parenAmbiguityWordPart() WordPart {
 
 	p.tok = dollDblParen
 	p.pos = start
-	p.loadReplay(arithPos, afterToken, err)
-	p.setSourceBuffer(start, fullSrc)
+	fullSrc = replay.Bytes()
+	afterToken = sourceTailSuffix(fullSrc, len(prefix))
+	p.loadReplayCursorView(arithPos, afterToken, replay.cursor(len(fullSrc)))
+	p.setSourceReplayView(start, replay)
 	if arithOK && !arithEndedEarly {
-		return p.arithmWordPart(true)
+		part := p.arithmWordPart(true)
+		p.detachSourceReplay()
+		return part
 	}
-	if cmd.err == nil && keepParenAmbiguityArithError(cs.Stmts, cs.Last) && !arithEndedEarly && !hasNestedDblRightParen(afterToken) {
-		return p.arithmWordPart(false)
+	if cmd.err == nil && keepParenAmbiguityArithError(cs.Stmts, cs.Last) && !arithEndedEarly && !replay.tailHasNestedDblRightParen(len(prefix)) {
+		part := p.arithmWordPart(false)
+		p.detachSourceReplay()
+		return part
 	}
-	if cmd.err == nil && fallbackTailEnd.IsValid() && hasNestedDblRightParen(afterToken) {
-		return p.arithmWordPartTo(true, fallbackTailEnd)
+	if cmd.err == nil && fallbackTailEnd.IsValid() && replay.tailHasNestedDblRightParen(len(prefix)) {
+		part := p.arithmWordPartTo(true, fallbackTailEnd)
+		p.detachSourceReplay()
+		return part
 	}
-	return p.arithmWordPart(true)
+	part = p.arithmWordPart(true)
+	p.detachSourceReplay()
+	return part
 }
 
 func (p *Parser) wordPart() WordPart {
@@ -2883,10 +3818,10 @@ func (p *Parser) wordPart() WordPart {
 		p.ensureNoNested(p.pos)
 		switch p.r {
 		case '|':
-			p.checkLang(p.pos, langBashLike|LangMirBSDKorn, "`${|stmts;}`")
+			p.checkLang(p.pos, langBashLike|LangMirBSDKorn, FeatureSubstitutionReplyVarCmdSubst)
 			fallthrough
 		case ' ', '\t', '\n':
-			p.checkLang(p.pos, langBashLike|LangMirBSDKorn, "`${ stmts;}`")
+			p.checkLang(p.pos, langBashLike|LangMirBSDKorn, FeatureSubstitutionTempFileCmdSubst)
 			cs := &CmdSubst{
 				Left:     p.pos,
 				TempFile: p.r != '|',
@@ -2928,7 +3863,7 @@ func (p *Parser) wordPart() WordPart {
 		p.ensureNoNested(pe.Dollar)
 		return pe
 	case assgnParen:
-		p.checkLang(p.pos, LangZsh, `%#q process substitutions`, p.tok)
+		p.checkLang(p.pos, LangZsh, FeatureSubstitutionProcess, fmt.Sprintf("%#q", p.tok))
 		fallthrough
 	case cmdIn, cmdOut:
 		p.ensureNoNested(p.pos)
@@ -3009,7 +3944,8 @@ func (p *Parser) wordPart() WordPart {
 			p.openBquoteDquotes--
 		}
 		p.openBquotes--
-		cs.Right = p.pos
+		closePos := p.pos
+		closeTrivia := newBackquoteCloseTrivia(closePos, p.lastBquoteRawBackslashes)
 
 		// Like above, the lexer didn't call p.rune for us.
 		p.rune()
@@ -3019,7 +3955,11 @@ func (p *Parser) wordPart() WordPart {
 			} else {
 				p.quoteErr(cs.Pos(), bckQuote)
 			}
+			cs.BackquoteClose = nil
+			return cs
 		}
+		cs.Right = closePos
+		cs.BackquoteClose = closeTrivia
 		return cs
 	case leftParen:
 		if p.lang.in(LangZsh) && p.r != ')' {
@@ -3042,7 +3982,7 @@ func (p *Parser) wordPart() WordPart {
 		}
 		return nil
 	case globQuest, globStar, globPlus, globAt, globExcl:
-		p.checkLang(p.pos, langBashLike|LangMirBSDKorn, "extended globs")
+		p.checkLang(p.pos, langBashLike|LangMirBSDKorn, FeaturePatternExtendedGlob)
 		return p.extGlob(GlobOperator(p.tok), p.pos)
 	default:
 		return nil
@@ -3167,11 +4107,37 @@ func trailingExtGlobOp(lit *Lit) (prefix *Lit, op GlobOperator, opPos Pos, ok bo
 }
 
 type rawPatternParser struct {
-	lang LangVariant
+	lang         LangVariant
+	allowExtGlob bool
 }
 
 type rawWordPartParser struct {
 	lang LangVariant
+}
+
+func patternExtGlobEnabled(lang LangVariant, parseExtGlob bool) bool {
+	return parseExtGlob && !lang.in(LangZsh)
+}
+
+func (p *Parser) newRawPatternParser() rawPatternParser {
+	return rawPatternParser{lang: p.lang, allowExtGlob: p.parseExtGlob}
+}
+
+func (p *Parser) newCondPatternParser() rawPatternParser {
+	return rawPatternParser{lang: p.lang, allowExtGlob: p.condPatternExtGlobEnabled()}
+}
+
+func (p *Parser) extGlobEnabled() bool {
+	return patternExtGlobEnabled(p.lang, p.parseExtGlob)
+}
+
+func (p *Parser) condPatternExtGlobEnabled() bool {
+	return patternExtGlobEnabled(p.lang, p.parseExtGlob) ||
+		(p.condPatternExtGlob && p.lang.in(LangBash|LangBats))
+}
+
+func (r rawPatternParser) extGlobEnabled() bool {
+	return patternExtGlobEnabled(r.lang, r.allowExtGlob)
 }
 
 func (r rawWordPartParser) parse(raw string, base Pos) []WordPart {
@@ -3227,20 +4193,25 @@ func (r rawWordPartParser) parse(raw string, base Pos) []WordPart {
 }
 
 func (r rawPatternParser) parse(raw string, base Pos) *Pattern {
-	parts, end, _ := r.parseParts(raw, base, 0, false)
-	return &Pattern{Start: base, EndPos: posAddCol(base, end), Parts: parts}
+	return r.parseWithBareGroups(raw, base, true)
+}
+
+func (r rawPatternParser) parseWithBareGroups(raw string, base Pos, allowBareGroups bool) *Pattern {
+	parts, end, _ := r.parseParts(raw, base, 0, false, allowBareGroups)
+	return &Pattern{
+		Start:  base,
+		EndPos: posAddCol(base, end),
+		Parts:  parts,
+		raw:    raw[:end],
+	}
 }
 
 func (r rawPatternParser) parseList(raw string, base Pos) []*Pattern {
 	patterns := make([]*Pattern, 0, 1)
 	start := 0
 	for {
-		parts, end, delim := r.parseParts(raw, base, start, true)
-		patterns = append(patterns, &Pattern{
-			Start:  posAddCol(base, start),
-			EndPos: posAddCol(base, end),
-			Parts:  parts,
-		})
+		end, delim := r.findPatternListSplit(raw, base, start)
+		patterns = append(patterns, r.parseWithBareGroups(raw[start:end], posAddCol(base, start), false))
 		if delim != '|' {
 			return patterns
 		}
@@ -3248,9 +4219,12 @@ func (r rawPatternParser) parseList(raw string, base Pos) []*Pattern {
 	}
 }
 
-func (r rawPatternParser) parseParts(raw string, base Pos, start int, splitOnBar bool) ([]PatternPart, int, byte) {
+func (r rawPatternParser) parseParts(raw string, base Pos, start int, splitOnBar, allowBareGroups bool) ([]PatternPart, int, byte) {
 	var parts []PatternPart
 	flushLit := func(from, to int) {
+		if from >= to {
+			return
+		}
 		parts = append(parts, splitPatternLit(&Lit{
 			ValuePos: posAddCol(base, from),
 			ValueEnd: posAddCol(base, to),
@@ -3294,8 +4268,21 @@ func (r rawPatternParser) parseParts(raw string, base Pos, start int, splitOnBar
 					continue
 				}
 			}
+		case '(':
+			if allowBareGroups {
+				group, end, ok := r.parsePatternGroup(raw, base, i)
+				if end > i {
+					if ok {
+						flushLit(partStart, i)
+						parts = append(parts, group)
+						partStart = end
+					}
+					i = end
+					continue
+				}
+			}
 		case '?', '*', '+', '@', '!':
-			if i+1 < len(raw) && raw[i+1] == '(' {
+			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
 				flushLit(partStart, i)
 				part, end := r.parseExtGlob(raw, base, i)
 				parts = append(parts, part)
@@ -3335,13 +4322,264 @@ func (r rawPatternParser) parseParts(raw string, base Pos, start int, splitOnBar
 	return parts, len(raw), 0
 }
 
+func trimPatternRawSegment(raw string, start, end int) (int, int) {
+	for start < end {
+		if raw[start] == '\\' && start+1 < end && raw[start+1] == '\n' {
+			start += 2
+			for start < end && (raw[start] == ' ' || raw[start] == '\t') {
+				start++
+			}
+			continue
+		}
+		switch raw[start] {
+		case ' ', '\t', '\n', '\r':
+			start++
+		default:
+			goto trimRight
+		}
+	}
+trimRight:
+	for end > start {
+		switch raw[end-1] {
+		case ' ', '\t', '\n', '\r':
+			end--
+		default:
+			return start, end
+		}
+	}
+	return start, end
+}
+
+func (r rawPatternParser) findInvalidCasePatternOperator(raw string, base Pos) (int, byte) {
+	for i := 0; i < len(raw); {
+		switch raw[i] {
+		case '\\':
+			if i+1 < len(raw) {
+				if raw[i+1] == '\n' {
+					i += 2
+					for i < len(raw) && (raw[i] == ' ' || raw[i] == '\t') {
+						i++
+					}
+				} else {
+					i += 2
+				}
+			} else {
+				i++
+			}
+			continue
+		case '\'', '"', '`', '$':
+			_, consumed, ok := r.parseShellPart(raw[i:], posAddCol(base, i))
+			if ok {
+				i += consumed
+				continue
+			}
+		case '<', '>':
+			if i+1 < len(raw) && raw[i+1] == '(' {
+				_, consumed, ok := r.parseShellPart(raw[i:], posAddCol(base, i))
+				if ok {
+					i += consumed
+					continue
+				}
+			}
+		case '[':
+			i = patternCharClassEnd(raw, i)
+			continue
+		case '(':
+			_, end, _ := r.parsePatternGroup(raw, base, i)
+			if end > i {
+				i = end
+				continue
+			}
+		case '?', '*', '+', '@', '!':
+			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
+				_, end := r.parseExtGlob(raw, base, i)
+				i = end
+				continue
+			}
+		case '&':
+			return i, '&'
+		}
+		i++
+	}
+	return 0, 0
+}
+
+func (r rawPatternParser) findPatternListSplit(raw string, base Pos, start int) (int, byte) {
+	for i := start; i < len(raw); {
+		switch raw[i] {
+		case '\\':
+			if i+1 < len(raw) {
+				i += 2
+			} else {
+				i++
+			}
+			continue
+		case '\'', '"', '`', '$':
+			_, consumed, ok := r.parseShellPart(raw[i:], posAddCol(base, i))
+			if ok {
+				i += consumed
+				continue
+			}
+		case '<', '>':
+			if i+1 < len(raw) && raw[i+1] == '(' {
+				_, consumed, ok := r.parseShellPart(raw[i:], posAddCol(base, i))
+				if ok {
+					i += consumed
+					continue
+				}
+			}
+		case '[':
+			i = patternCharClassEnd(raw, i)
+			continue
+		case '(':
+			_, end, _ := r.parsePatternGroup(raw, base, i)
+			if end > i {
+				i = end
+				continue
+			}
+		case '?', '*', '+', '@', '!':
+			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
+				_, end := r.parseExtGlob(raw, base, i)
+				i = end
+				continue
+			}
+		case '|':
+			return i, '|'
+		}
+		i++
+	}
+	return len(raw), 0
+}
+
+func (r rawPatternParser) hasTopLevelWhitespace(raw string, base Pos) bool {
+	for i := 0; i < len(raw); {
+		switch raw[i] {
+		case ' ', '\t', '\n', '\r':
+			return true
+		case '\\':
+			if i+1 < len(raw) {
+				i += 2
+			} else {
+				i++
+			}
+			continue
+		case '\'', '"', '`', '$':
+			_, consumed, ok := r.parseShellPart(raw[i:], posAddCol(base, i))
+			if ok {
+				i += consumed
+				continue
+			}
+		case '<', '>':
+			if i+1 < len(raw) && raw[i+1] == '(' {
+				_, consumed, ok := r.parseShellPart(raw[i:], posAddCol(base, i))
+				if ok {
+					i += consumed
+					continue
+				}
+			}
+		case '[':
+			i = patternCharClassEnd(raw, i)
+			continue
+		case '(':
+			_, end, _ := r.parsePatternGroup(raw, base, i)
+			if end > i {
+				i = end
+				continue
+			}
+		case '?', '*', '+', '@', '!':
+			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
+				_, end := r.parseExtGlob(raw, base, i)
+				i = end
+				continue
+			}
+		}
+		i++
+	}
+	return false
+}
+
+func (r rawPatternParser) parsePatternGroup(raw string, base Pos, start int) (*PatternGroup, int, bool) {
+	group := &PatternGroup{Lparen: posAddCol(base, start)}
+	innerStart := start + 1
+	i := innerStart
+	armStart := innerStart
+	depth := 1
+	hasTopLevelBar := false
+	appendArm := func(end int) {
+		group.Patterns = append(group.Patterns, r.parseWithBareGroups(raw[armStart:end], posAddCol(base, armStart), true))
+	}
+	for i <= len(raw) {
+		if i >= len(raw) {
+			return nil, len(raw), false
+		}
+		switch raw[i] {
+		case '\\':
+			if i+1 < len(raw) {
+				i += 2
+			} else {
+				i++
+			}
+			continue
+		case '\'', '"', '`', '$':
+			_, consumed, ok := r.parseShellPart(raw[i:], posAddCol(base, i))
+			if ok {
+				i += consumed
+				continue
+			}
+		case '<', '>':
+			if i+1 < len(raw) && raw[i+1] == '(' {
+				_, consumed, ok := r.parseShellPart(raw[i:], posAddCol(base, i))
+				if ok {
+					i += consumed
+					continue
+				}
+			}
+		case '[':
+			i = patternCharClassEnd(raw, i)
+			continue
+		case '?', '*', '+', '@', '!':
+			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
+				_, end := r.parseExtGlob(raw, base, i)
+				i = end
+				continue
+			}
+		case '(':
+			depth++
+			i++
+			continue
+		case '|':
+			if depth == 1 {
+				appendArm(i)
+				armStart = i + 1
+				hasTopLevelBar = true
+			}
+			i++
+			continue
+		case ')':
+			depth--
+			if depth == 0 {
+				if !hasTopLevelBar {
+					return nil, i + 1, false
+				}
+				appendArm(i)
+				group.Rparen = posAddCol(base, i)
+				return group, i + 1, true
+			}
+			i++
+			continue
+		}
+		i++
+	}
+	return nil, len(raw), false
+}
+
 func (r rawPatternParser) parseExtGlob(raw string, base Pos, start int) (*ExtGlob, int) {
 	eg := &ExtGlob{OpPos: posAddCol(base, start), Op: globOperatorFromByte(raw[start])}
 	innerStart := start + 2
 	i := innerStart
 	armStart := innerStart
 	appendArm := func(end int) {
-		eg.Patterns = append(eg.Patterns, r.parse(raw[armStart:end], posAddCol(base, armStart)))
+		eg.Patterns = append(eg.Patterns, r.parseWithBareGroups(raw[armStart:end], posAddCol(base, armStart), false))
 	}
 	for i <= len(raw) {
 		if i >= len(raw) {
@@ -3374,8 +4612,14 @@ func (r rawPatternParser) parseExtGlob(raw string, base Pos, start int) (*ExtGlo
 		case '[':
 			i = patternCharClassEnd(raw, i)
 			continue
+		case '(':
+			_, end, _ := r.parsePatternGroup(raw, base, i)
+			if end > i {
+				i = end
+				continue
+			}
 		case '?', '*', '+', '@', '!':
-			if i+1 < len(raw) && raw[i+1] == '(' {
+			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
 				_, end := r.parseExtGlob(raw, base, i)
 				i = end
 				continue
@@ -3408,10 +4652,29 @@ func (r rawPatternParser) parseShellPart(raw string, base Pos) (PatternPart, int
 }
 
 func parseRawWordPart(raw string, base Pos, lang LangVariant) (WordPart, int, bool) {
-	sub := NewParser(Variant(lang))
+	sub := tempParserPool.Get().(*Parser)
+	scratch := parserScratchPool.Get().(*parserScratch)
+	*sub = Parser{
+		lang:               lang,
+		parseExtGlob:       true,
+		litBatchAllocSize:  rawWordPartLitBatchSize,
+		wordBatchAllocSize: rawWordPartWordBatchSize,
+		scratch:            scratch,
+	}
+	defer func() {
+		sub.litBatch = nil
+		sub.wordBatch = nil
+		sub.scratch = nil
+		*sub = Parser{}
+		tempParserPool.Put(sub)
+		parserScratchPool.Put(scratch)
+	}()
 	sub.reset()
-	sub.f = &File{}
-	sub.src = strings.NewReader(raw)
+	var file File
+	sub.f = &file
+	var reader strings.Reader
+	reader.Reset(raw)
+	sub.src = &reader
 	sub.offs = int64(base.Offset())
 	sub.line = int64(base.Line())
 	sub.col = int64(base.Col())
@@ -3440,6 +4703,41 @@ func parseRawWordPart(raw string, base Pos, lang LangVariant) (WordPart, int, bo
 	return part, consumed, true
 }
 
+func firstPatternGroup(pat *Pattern) *PatternGroup {
+	if pat == nil {
+		return nil
+	}
+	for _, part := range pat.Parts {
+		if group := firstPatternGroupPart(part); group != nil {
+			return group
+		}
+	}
+	return nil
+}
+
+func firstPatternGroupPart(part PatternPart) *PatternGroup {
+	switch part := part.(type) {
+	case *PatternGroup:
+		return part
+	case *ExtGlob:
+		for _, pat := range part.Patterns {
+			if group := firstPatternGroup(pat); group != nil {
+				return group
+			}
+		}
+	}
+	return nil
+}
+
+func firstPatternGroupInList(patterns []*Pattern) *PatternGroup {
+	for _, pat := range patterns {
+		if group := firstPatternGroup(pat); group != nil {
+			return group
+		}
+	}
+	return nil
+}
+
 func (p *Parser) extGlob(op GlobOperator, opPos Pos) *ExtGlob {
 	eg := &ExtGlob{OpPos: opPos, Op: op}
 	lparens := 1
@@ -3466,7 +4764,7 @@ globLoop:
 		p.matchingErr(opPos, token(op), rightParen)
 	}
 	eg.Rparen = rparen
-	eg.Patterns = rawPatternParser{lang: p.lang}.parseList(raw, globStart)
+	eg.Patterns = p.newRawPatternParser().parseList(raw, globStart)
 	p.next()
 	return eg
 }
@@ -3475,6 +4773,7 @@ func (p *Parser) getPattern(stops ...token) *Pattern {
 	if pat := (&Pattern{Parts: p.patternParts(nil, stops...)}); len(pat.Parts) > 0 {
 		pat.Start = pat.Parts[0].Pos()
 		pat.EndPos = pat.Parts[len(pat.Parts)-1].End()
+		pat.raw = p.sourceRange(pat.Pos(), pat.End())
 		return pat
 	}
 	return nil
@@ -3495,6 +4794,7 @@ func (p *Parser) getPatternWithLiteralLeadingSlash(stops ...token) *Pattern {
 		Start:  parts[0].Pos(),
 		EndPos: parts[len(parts)-1].End(),
 		Parts:  parts,
+		raw:    p.sourceRange(parts[0].Pos(), parts[len(parts)-1].End()),
 	}
 }
 
@@ -3522,7 +4822,7 @@ func (p *Parser) patternParts(pps []PatternPart, stops ...token) []PatternPart {
 		case _Lit, _LitWord, _LitRedir:
 			lit := p.lit(p.pos, p.val)
 			p.next()
-			if p.tok == leftParen {
+			if patternExtGlobEnabled(p.lang, p.parseExtGlob) && p.tok == leftParen {
 				if prefix, op, opPos, ok := trailingExtGlobOp(lit); ok {
 					pps = append(pps, splitPatternLit(prefix)...)
 					pps = append(pps, p.extGlob(op, opPos))
@@ -3556,6 +4856,7 @@ func (p *Parser) cmdSubst() *CmdSubst {
 	cs.Stmts, cs.Last = p.stmtList()
 	p.postNested(old)
 	cs.Right = p.matched(cs.Left, dollParen, rightParen)
+	cs.DiagnosticEnd = p.nextBytePos(cs.End())
 	return cs
 }
 
@@ -3596,7 +4897,11 @@ func (p *Parser) paramExp() *ParamExp {
 		Short:  p.tok == dollar,
 	}
 	if !pe.Short && p.r == '(' {
-		p.checkLang(pe.Pos(), LangZsh, `parameter expansion flags`)
+		subtype, detail := FeatureSubtypeParameterExpansionFlag, ""
+		if !p.lang.in(LangZsh) {
+			subtype, detail = p.paramExpFlagsFeatureMetadata()
+		}
+		p.checkLangSpanDetailed(pe.Pos(), posAddCol(p.nextPos(), 1), LangZsh, FeatureParameterExpansionFlags, subtype, detail)
 		// For now, for simplicity, we parse flags as just a literal.
 		// In the future, parsing as a word is better for cases like
 		// `${(ps.$sep.)val}`.
@@ -3624,20 +4929,26 @@ func (p *Parser) paramExp() *ParamExp {
 			}
 		case '%':
 			if r := p.peek(); r == utf8.RuneSelf || singleRuneParam(r) || paramNameRune(r) || r == '"' {
-				p.checkLang(pe.Pos(), LangMirBSDKorn, "`${%%foo}`")
+				p.checkLangSpan(pe.Pos(), posAddCol(p.nextPos(), 1), LangMirBSDKorn, FeatureParameterExpansionWidthPrefix)
 				pe.Width = true
 				p.rune()
 			}
 		case '!':
 			if r := p.peek(); r == utf8.RuneSelf || singleRuneParam(r) || paramNameRune(r) || r == '"' {
-				p.checkLang(pe.Pos(), langBashLike|LangMirBSDKorn, "`${!foo}`")
+				p.checkLangSpan(pe.Pos(), posAddCol(p.nextPos(), 1), langBashLike|LangMirBSDKorn, FeatureParameterExpansionIndirectPrefix)
 				pe.Excl = true
 				p.rune()
 			}
 		case '+':
 			if r := p.peek(); r == utf8.RuneSelf || singleRuneParam(r) || paramNameRune(r) || r == '"' {
-				p.checkLang(pe.Pos(), LangZsh, "`${+foo}`")
+				p.checkLangSpan(pe.Pos(), posAddCol(p.nextPos(), 1), LangZsh, FeatureParameterExpansionIsSetPrefix)
 				pe.IsSet = true
+				p.rune()
+			}
+		case '~':
+			if r := p.peek(); r == utf8.RuneSelf || singleRuneParam(r) || paramNameRune(r) || r == '"' {
+				p.checkLang(pe.Pos(), LangZsh, FeatureParameterExpansionGlobSubstPrefix)
+				pe.GlobSubst = true
 				p.rune()
 			}
 		}
@@ -3666,7 +4977,11 @@ func (p *Parser) paramExp() *ParamExp {
 	// Index expressions like ${foo[1]}. Note that expansion suffixes can be combined,
 	// like ${foo[@]//replace/with}.
 	if p.r == '[' {
-		p.checkLang(p.nextPos(), langBashLike|LangMirBSDKorn|LangZsh, "arrays")
+		subtype, detail := FeatureSubtypeUnknown, ""
+		if !p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
+			subtype, detail = p.paramExpIndexFeatureMetadata()
+		}
+		p.checkLangDetailed(p.nextPos(), langBashLike|LangMirBSDKorn|LangZsh, FeatureArraySyntax, subtype, detail)
 		if pe.Param != nil && !ValidName(pe.Param.Value) {
 			p.posErr(p.nextPos(), "cannot index a special parameter name")
 		}
@@ -3701,7 +5016,7 @@ func (p *Parser) paramExp() *ParamExp {
 	}
 	switch p.tok {
 	case slash, dblSlash: // pattern search and replace
-		p.checkLang(p.pos, langBashLike|LangMirBSDKorn|LangZsh, "search and replace")
+		p.checkLang(p.pos, langBashLike|LangMirBSDKorn|LangZsh, FeatureParameterExpansionSearchReplace)
 		pe.Repl = &Replace{All: p.tok == dblSlash}
 		p.quote = paramExpRepl
 		if p.tok == slash {
@@ -3750,7 +5065,7 @@ func (p *Parser) paramExp() *ParamExp {
 			p.next()
 			return pe
 		}
-		p.checkLang(p.pos, langBashLike|LangMirBSDKorn|LangZsh, "slicing")
+		p.checkLang(p.pos, langBashLike|LangMirBSDKorn|LangZsh, FeatureParameterExpansionSlice)
 		pe.Slice = &Slice{}
 		colonPos := p.pos
 		p.quote = paramExpArithm
@@ -3772,18 +5087,18 @@ func (p *Parser) paramExp() *ParamExp {
 		p.matchedArithm(pe.Dollar, dollBrace, rightBrace)
 		return pe
 	case caret, dblCaret, comma, dblComma: // upper/lower case
-		p.checkLang(p.pos, langBashLike, "this expansion operator")
+		p.checkLang(p.pos, langBashLike, FeatureParameterExpansionCaseOperator)
 		pe.Exp = p.paramExpExp()
 	case at, star:
 		switch {
 		case p.tok == star && !pe.Excl:
 			p.curErr("not a valid parameter expansion operator: %#q", p.tok)
 		case pe.Excl && p.r == '}':
-			p.checkLang(pe.Pos(), langBashLike, "`${!foo%s}`", p.tok)
+			p.checkLang(pe.Pos(), langBashLike, FeatureParameterExpansionNameOperator, p.tok.String())
 			pe.Names = ParNamesOperator(p.tok)
 			p.next()
 		case p.tok == at:
-			p.checkLang(p.pos, langBashLike|LangMirBSDKorn, "this expansion operator")
+			p.checkLang(p.pos, langBashLike|LangMirBSDKorn, FeatureParameterExpansionNameOperator)
 			fallthrough
 		default:
 			pe.Exp = p.paramExpExp()
@@ -3817,6 +5132,119 @@ func (p *Parser) paramExp() *ParamExp {
 		pe.Invalid = p.sourceRange(pe.Dollar, posAddCol(pe.Rbrace, 1))
 	}
 	return pe
+}
+
+func (p *Parser) paramExpFlagsFeatureMetadata() (FeatureSubtype, string) {
+	tail := p.lookaheadSourceTail(256, paramExpFlagsMetadataTailDone)
+	if !strings.HasPrefix(tail, "(") {
+		return FeatureSubtypeParameterExpansionFlag, ""
+	}
+	flags := tail[1:]
+	if end := strings.IndexByte(flags, ')'); end >= 0 {
+		flags = flags[:end]
+	}
+	if paramExpFlagsContainTildeFlag(flags) {
+		return FeatureSubtypeParameterExpansionTildeFlag, flags
+	}
+	return FeatureSubtypeParameterExpansionFlag, flags
+}
+
+type paramExpFlagDelims struct {
+	open  byte
+	close byte
+}
+
+func paramExpFlagDelimiters(b byte) paramExpFlagDelims {
+	switch b {
+	case '(':
+		return paramExpFlagDelims{open: '(', close: ')'}
+	case '{':
+		return paramExpFlagDelims{open: '{', close: '}'}
+	case '[':
+		return paramExpFlagDelims{open: '[', close: ']'}
+	case '<':
+		return paramExpFlagDelims{open: '<', close: '>'}
+	default:
+		return paramExpFlagDelims{open: b, close: b}
+	}
+}
+
+func paramExpConsumeFlagArg(flags string, i int) (paramExpFlagDelims, int, bool) {
+	if i >= len(flags) {
+		return paramExpFlagDelims{}, len(flags), false
+	}
+	delims := paramExpFlagDelimiters(flags[i])
+	next, ok := paramExpConsumeFlagArgWithDelims(flags, i+1, delims)
+	return delims, next, ok
+}
+
+func paramExpConsumeFlagArgWithDelims(flags string, i int, delims paramExpFlagDelims) (int, bool) {
+	for i < len(flags) {
+		switch flags[i] {
+		case '\\':
+			if i+1 < len(flags) {
+				i += 2
+				continue
+			}
+		case delims.close:
+			return i + 1, true
+		}
+		i++
+	}
+	return len(flags), false
+}
+
+func paramExpFlagsContainTildeFlag(flags string) bool {
+	for i := 0; i < len(flags); {
+		switch flags[i] {
+		case '~':
+			return true
+		case 'q':
+			i++
+			if i < len(flags) && (flags[i] == '-' || flags[i] == '+') {
+				i++
+			}
+		case 'g', 'j', 's', 'Z', 'I', '_':
+			_, next, ok := paramExpConsumeFlagArg(flags, i+1)
+			if !ok {
+				return false
+			}
+			i = next
+		case 'l', 'r':
+			delims, next, ok := paramExpConsumeFlagArg(flags, i+1)
+			if !ok {
+				return false
+			}
+			i = next
+			for optional := 0; optional < 2 && i < len(flags) && flags[i] == delims.open; optional++ {
+				next, ok = paramExpConsumeFlagArgWithDelims(flags, i+1, delims)
+				if !ok {
+					return false
+				}
+				i = next
+			}
+		default:
+			i++
+		}
+	}
+	return false
+}
+
+func (p *Parser) paramExpIndexFeatureMetadata() (FeatureSubtype, string) {
+	tail := p.lookaheadSourceTail(64, paramExpIndexMetadataTailDone)
+	if !strings.HasPrefix(tail, "[") {
+		return FeatureSubtypeUnknown, ""
+	}
+	inner := strings.TrimLeft(tail[1:], " \t\r\n")
+	if inner == "" {
+		return FeatureSubtypeUnknown, ""
+	}
+	switch inner[0] {
+	case '\'', '"':
+		return FeatureSubtypeParameterExpansionQuotedIndex, inner[:1]
+	default:
+		return FeatureSubtypeUnknown, ""
+	}
 }
 
 func (p *Parser) invalidParamExp(pe *ParamExp, old quoteState) *ParamExp {
@@ -3858,7 +5286,11 @@ func (p *Parser) nestedParameterStart(pe *ParamExp) (left token, quotePos Pos) {
 	switch p1 := p.peek(); p1 {
 	case '{', '(':
 		p.pos = p.nextPos()
-		p.checkLang(p.pos, LangZsh, "nested parameter expansions")
+		spanEnd := posAddCol(pe.Pos(), 2)
+		if quotePos.IsValid() {
+			spanEnd = posAddCol(quotePos, 1)
+		}
+		p.checkLangSpanDetailed(pe.Pos(), spanEnd, LangZsh, FeatureParameterExpansionNested, FeatureSubtypeParameterExpansionNested, "")
 		if p.err != nil {
 			return illegalTok, Pos{} // xxx given that we overwrite p.tok below
 		}
@@ -3968,7 +5400,7 @@ func (p *Parser) paramExpExp() *Expansion {
 	op := ParExpOperator(p.tok)
 	switch op {
 	case MatchEmpty, ArrayExclude, ArrayIntersect:
-		p.checkLang(p.pos, LangZsh, "${name%sarg}", op)
+		p.checkLang(p.pos, LangZsh, FeatureParameterExpansionMatchOperator, op.String())
 	}
 	p.quote = paramExpExp
 	p.next()
@@ -3980,9 +5412,9 @@ func (p *Parser) paramExpExp() *Expansion {
 		}
 		switch p.val {
 		case "a", "k", "u", "A", "E", "K", "L", "P", "U":
-			p.checkLang(p.pos, langBashLike, "this expansion operator")
+			p.checkLang(p.pos, langBashLike, FeatureParameterExpansionCaseOperator)
 		case "#":
-			p.checkLang(p.pos, LangMirBSDKorn, "this expansion operator")
+			p.checkLang(p.pos, LangMirBSDKorn, FeatureParameterExpansionMatchOperator)
 		case "Q":
 		default:
 			p.curErr("invalid @ expansion operator %#q", p.val)
@@ -4204,20 +5636,72 @@ func (p *Parser) hasValidIdent() bool {
 	if p.tok != _Lit && p.tok != _LitWord {
 		return false
 	}
-	if end := p.validEqlOffs(); end > 0 {
-		if p.val[end-1] == '+' && p.lang.in(langBashLike|LangMirBSDKorn|LangZsh) {
-			end-- // a+=x
-		}
-		if ValidName(p.val[:end]) {
-			return true
-		}
-	} else if !ValidName(p.val) {
+	if p.scalarAssignEqIndex() > 0 {
+		return true
+	}
+	if !ValidName(p.val) {
 		return false // *[i]=x
 	}
 	return p.r == '[' // a[i]=x
 }
 
+func (p *Parser) scalarAssignNameEnd(eqIndex int) int {
+	if eqIndex <= 0 || eqIndex > len(p.val) {
+		return -1
+	}
+	nameEnd := eqIndex
+	if p.val[nameEnd-1] == '+' && p.lang.in(langBashLike|LangMirBSDKorn|LangZsh) {
+		nameEnd-- // a+=x
+	}
+	return nameEnd
+}
+
+func (p *Parser) scalarAssignEqIndex() int {
+	if p.tok != _Lit && p.tok != _LitWord {
+		return -1
+	}
+	eqIndex := p.validEqlOffs()
+	if eqIndex <= 0 {
+		return -1
+	}
+	nameEnd := p.scalarAssignNameEnd(eqIndex)
+	if nameEnd > 0 && ValidName(p.val[:nameEnd]) {
+		return eqIndex
+	}
+	return -1
+}
+
+func (p *Parser) scalarAssignMode(eqIndex int, appendScalarWord bool) *Assign {
+	as := &Assign{}
+	nameEnd := p.scalarAssignNameEnd(eqIndex)
+	if nameEnd <= 0 {
+		return nil
+	}
+	operatorPos := posAddCol(p.pos, eqIndex)
+	operatorWidth := 1
+	if nameEnd != eqIndex {
+		// a+=b
+		as.Append = true
+		operatorPos = posAddCol(p.pos, nameEnd)
+		operatorWidth = 2
+	}
+	as.Ref = &VarRef{Name: p.lit(p.pos, p.val[:nameEnd])}
+	as.Surface = newAssignSurfaceForm(operatorPos, operatorWidth)
+	// since we're not using the entire p.val
+	as.Ref.Name.ValueEnd = posAddCol(as.Ref.Name.ValuePos, nameEnd)
+	left := p.lit(posAddCol(p.pos, 1), p.val[eqIndex+1:])
+	if left.Value != "" {
+		left.ValuePos = posAddCol(left.ValuePos, eqIndex)
+		as.Value = p.wordOne(left)
+	}
+	p.next()
+	return p.finishAssign(as, appendScalarWord)
+}
+
 func (p *Parser) validEqlOffs() int {
+	if p.tok != _Lit && p.tok != _LitWord {
+		return -1
+	}
 	if p.eqlOffs <= 0 || p.eqlOffs >= len(p.val) {
 		return -1
 	}
@@ -4379,6 +5863,31 @@ func varRefRawFromCandidate(candidate string) string {
 	return candidate
 }
 
+func newAssignSurfaceForm(operatorPos Pos, operatorWidth int) *AssignSurfaceForm {
+	if !operatorPos.IsValid() || operatorWidth < 1 {
+		return nil
+	}
+	operatorEnd := posAddCol(operatorPos, operatorWidth)
+	return &AssignSurfaceForm{
+		OperatorPos: operatorPos,
+		OperatorEnd: operatorEnd,
+		ValuePos:    operatorEnd,
+	}
+}
+
+func finalizeAssignSurface(as *Assign) {
+	if as == nil || as.Surface == nil {
+		return
+	}
+	as.Surface.ValuePos = as.Surface.OperatorEnd
+	switch {
+	case as.Array != nil && as.Array.Lparen.IsValid():
+		as.Surface.ValuePos = as.Array.Pos()
+	case as.Value != nil && as.Value.Pos().IsValid():
+		as.Surface.ValuePos = as.Value.Pos()
+	}
+}
+
 func (p *Parser) bracketStartsWithSpace() bool {
 	if p.r != '[' || p.bsp >= uint(len(p.bs)) {
 		return false
@@ -4393,10 +5902,11 @@ func (p *Parser) bracketStartsWithSpace() bool {
 
 func (p *Parser) finishAssign(as *Assign, appendScalarWord bool) *Assign {
 	if p.spaced || p.stopToken() {
+		finalizeAssignSurface(as)
 		return as
 	}
 	if as.Value == nil && p.tok == leftParen {
-		p.checkLang(p.pos, langBashLike|LangMirBSDKorn|LangZsh, "arrays")
+		p.checkLang(p.pos, langBashLike|LangMirBSDKorn|LangZsh, FeatureArraySyntax)
 		as.Array = &ArrayExpr{Lparen: p.pos, Mode: ArrayExprInherit}
 		newQuote := p.quote
 		if p.lang.in(langBashLike | LangZsh) {
@@ -4451,12 +5961,20 @@ func (p *Parser) finishAssign(as *Assign, appendScalarWord bool) *Assign {
 				}
 				switch p.tok {
 				case assgnParen, leftParen:
-					p.posRecoverableErr(p.pos, "syntax error near unexpected token %s", leftParen.bashQuote())
+					p.posErrWithMetadata(p.pos, parseErrorMetadata{
+						kind:          ParseErrorKindUnexpected,
+						unexpected:    ParseErrorSymbolLeftParen,
+						isRecoverable: true,
+					}, "syntax error near unexpected token %s", leftParen.bashQuote())
 					return nil
 				case _Newl, rightParen, leftBrack:
 					// TODO: support [index]=[
 				case and:
-					p.posRecoverableErr(p.pos, "syntax error near unexpected token %s", p.tok.bashQuote())
+					p.posErrWithMetadata(p.pos, parseErrorMetadata{
+						kind:          ParseErrorKindUnexpected,
+						unexpected:    parseErrorSymbolFromToken(p.tok),
+						isRecoverable: true,
+					}, "syntax error near unexpected token %s", p.tok.bashQuote())
 					return nil
 				default:
 					p.curErr("array element values must be words")
@@ -4487,6 +6005,7 @@ func (p *Parser) finishAssign(as *Assign, appendScalarWord bool) *Assign {
 			p.finishWord(as.Value)
 		}
 	}
+	finalizeAssignSurface(as)
 	return as
 }
 
@@ -4497,14 +6016,18 @@ func (p *Parser) getAssignAfterRef(ref *VarRef) *Assign {
 func (p *Parser) getAssignAfterRefMode(ref *VarRef, appendScalarWord bool) *Assign {
 	as := &Assign{Ref: ref}
 	if p.tok == assgnParen {
+		as.Surface = newAssignSurfaceForm(p.pos, 1)
 		// assgnParen consumed both '=' and '(', so rewrite as leftParen for
 		// array parsing below. Bash still parses a[i]=(values...), then rejects
 		// it later during execution.
 		p.tok = leftParen
 		p.pos = posAddCol(p.pos, 1)
 	} else {
+		operatorPos := p.pos
+		operatorWidth := 1
 		if p.val != "" && p.val[0] == '+' {
 			as.Append = true
+			operatorWidth = 2
 			p.val = p.val[1:]
 			p.pos = posAddCol(p.pos, 1)
 		}
@@ -4516,6 +6039,7 @@ func (p *Parser) getAssignAfterRefMode(ref *VarRef, appendScalarWord bool) *Assi
 			}
 			return nil
 		}
+		as.Surface = newAssignSurfaceForm(operatorPos, operatorWidth)
 		p.pos = posAddCol(p.pos, 1)
 		p.val = p.val[1:]
 		if p.val == "" {
@@ -4528,17 +6052,22 @@ func (p *Parser) getAssignAfterRefMode(ref *VarRef, appendScalarWord bool) *Assi
 func (p *Parser) tryAssignAfterRef(ref *VarRef) (*Assign, bool) {
 	as := &Assign{Ref: ref}
 	if p.tok == assgnParen {
+		as.Surface = newAssignSurfaceForm(p.pos, 1)
 		p.tok = leftParen
 		p.pos = posAddCol(p.pos, 1)
 	} else {
+		operatorPos := p.pos
+		operatorWidth := 1
 		if p.val != "" && p.val[0] == '+' {
 			as.Append = true
+			operatorWidth = 2
 			p.val = p.val[1:]
 			p.pos = posAddCol(p.pos, 1)
 		}
 		if len(p.val) < 1 || p.val[0] != '=' {
 			return nil, false
 		}
+		as.Surface = newAssignSurfaceForm(operatorPos, operatorWidth)
 		p.pos = posAddCol(p.pos, 1)
 		p.val = p.val[1:]
 		if p.val == "" {
@@ -4549,10 +6078,10 @@ func (p *Parser) tryAssignAfterRef(ref *VarRef) (*Assign, bool) {
 }
 
 func (p *Parser) tryAssignCandidate(declMode bool) (*Assign, bool) {
-	if eqIndex := p.validEqlOffs(); eqIndex > 0 {
-		return p.getAssign(), true
+	if eqIndex := p.scalarAssignEqIndex(); eqIndex > 0 {
+		return p.scalarAssignMode(eqIndex, true), true
 	}
-	saved := *p
+	saved := p.backtrackSnapshot()
 	start := p.pos
 	p.startCandidateCapture()
 	ref := p.varRef()
@@ -4628,24 +6157,8 @@ func (p *Parser) getAssign() *Assign {
 }
 
 func (p *Parser) getAssignMode(appendScalarWord bool) *Assign {
-	as := &Assign{}
-	if eqIndex := p.validEqlOffs(); eqIndex > 0 { // foo=bar
-		nameEnd := eqIndex
-		if p.lang.in(langBashLike|LangMirBSDKorn|LangZsh) && p.val[eqIndex-1] == '+' {
-			// a+=b
-			as.Append = true
-			nameEnd--
-		}
-		as.Ref = &VarRef{Name: p.lit(p.pos, p.val[:nameEnd])}
-		// since we're not using the entire p.val
-		as.Ref.Name.ValueEnd = posAddCol(as.Ref.Name.ValuePos, nameEnd)
-		left := p.lit(posAddCol(p.pos, 1), p.val[eqIndex+1:])
-		if left.Value != "" {
-			left.ValuePos = posAddCol(left.ValuePos, eqIndex)
-			as.Value = p.wordOne(left)
-		}
-		p.next()
-		return p.finishAssign(as, appendScalarWord)
+	if eqIndex := p.scalarAssignEqIndex(); eqIndex > 0 { // foo=bar
+		return p.scalarAssignMode(eqIndex, appendScalarWord)
 	}
 	ref := p.varRef()
 	if ref == nil {
@@ -4722,7 +6235,7 @@ func (p *Parser) declOperand(allowInvalidAssign bool) DeclOperand {
 	if p.hasValidIdent() {
 		if p.bracketStartsWithSpace() {
 			start := p.pos
-			saved := *p
+			saved := p.backtrackSnapshot()
 			ref := p.varRef()
 			if ref != nil && varRefSubscriptClosed(ref) && varRefSubscriptHasWhitespace(ref) {
 				p.recordPendingArrayWord(start, ref.RawText())
@@ -4790,14 +6303,14 @@ func (p *Parser) doRedirect(s *Stmt) {
 	}
 	r.N = p.getLit()
 	if r.N != nil && r.N.Value[0] == '{' {
-		p.checkLang(r.N.Pos(), langBashLike, "`{varname}` redirects")
+		p.checkLang(r.N.Pos(), langBashLike, FeatureRedirectionNamedFileDescriptor)
 	}
 	r.Op, r.OpPos = RedirOperator(p.tok), p.pos
 	switch r.Op {
 	case RdrAll, AppAll:
-		p.checkLang(p.pos, langBashLike|LangMirBSDKorn|LangZsh, "%#q redirects", r.Op)
+		p.checkLang(p.pos, langBashLike|LangMirBSDKorn|LangZsh, FeatureRedirectionOperator, fmt.Sprintf("%#q", r.Op))
 	case AppClob, RdrAllClob, AppAllClob:
-		p.checkLang(p.pos, LangZsh, "%#q redirects", r.Op)
+		p.checkLang(p.pos, LangZsh, FeatureRedirectionOperator, fmt.Sprintf("%#q", r.Op))
 	}
 	p.next()
 	switch r.Op {
@@ -4806,7 +6319,7 @@ func (p *Parser) doRedirect(s *Stmt) {
 		p.quote = hdocWord
 		p.heredocs = append(p.heredocs, r)
 		w, raw := p.followWordTokRaw(token(r.Op), r.OpPos)
-		r.HdocDelim = p.heredocDelimFromWord(w, raw)
+		r.HdocDelim = p.heredocDelimFromWord(w, raw, r.Op)
 		p.quote, p.forbidNested = oldQuote, oldForbidNested
 		if p.tok == _Newl {
 			if len(p.accComs) > 0 {
@@ -4819,7 +6332,7 @@ func (p *Parser) doRedirect(s *Stmt) {
 			p.doHeredocs()
 		}
 	case WordHdoc:
-		p.checkLang(r.OpPos, langBashLike|LangMirBSDKorn|LangZsh, "herestrings")
+		p.checkLang(r.OpPos, langBashLike|LangMirBSDKorn|LangZsh, FeatureRedirectionHereString)
 		fallthrough
 	default:
 		r.Word = p.followWordTok(token(r.Op), r.OpPos)
@@ -4850,7 +6363,10 @@ func (p *Parser) getStmt(readEnd, binCmd, fnBody bool) *Stmt {
 			p.posErr(s.Pos(), `cannot negate a command multiple times`)
 		}
 	}
-	if s = p.gotStmtPipe(s, false); s == nil || p.err != nil {
+	if s = p.gotStmtPipe(s, false); s == nil {
+		return nil
+	}
+	if p.err != nil && !stmtHasHeredocMetadata(s) {
 		return nil
 	}
 	// instead of using recursion, iterate manually
@@ -4909,6 +6425,26 @@ func (p *Parser) getStmt(readEnd, binCmd, fnBody bool) *Stmt {
 	return s
 }
 
+func stmtHasHeredocMetadata(s *Stmt) bool {
+	if s == nil {
+		return false
+	}
+	for _, r := range s.Redirs {
+		if d := r.HdocDelim; d != nil && (d.ClosePos.IsValid() ||
+			d.CloseEnd.IsValid() ||
+			d.CloseRaw != "" ||
+			d.CloseCandidate != nil ||
+			d.Matched ||
+			d.EOFTerminated ||
+			d.TrailingText != "" ||
+			d.IndentMode != HeredocIndentNone ||
+			d.IndentTabs != 0) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Parser) gotStmtPipe(s *Stmt, binCmd bool) *Stmt {
 	s.Comments, p.accComs = p.accComs, nil
 	for p.peekRedir() {
@@ -4940,37 +6476,37 @@ func (p *Parser) gotStmtPipe(s *Stmt, binCmd bool) *Stmt {
 				p.caseClause(s)
 			// TODO(zsh): { try-list } "always" { always-list }
 			case rsrvRightBrace:
-				p.curErr(`%#q can only be used to close a block`, rightBrace)
+				p.strayReservedWordErr(p.pos, rsrvRightBrace, `%#q can only be used to close a block`, rightBrace)
 			case rsrvThen, rsrvElif:
 				if p.lang.in(LangBash | LangBats) {
-					p.curErr("syntax error near unexpected token %s", bashQuoteString(p.val))
+					p.strayReservedWordErr(p.pos, rsrv, "syntax error near unexpected token %s", bashQuoteString(p.val))
 					break
 				}
-				p.curErr("%#q can only be used in an `if`", p.val)
+				p.strayReservedWordErr(p.pos, rsrv, "%#q can only be used in an `if`", p.val)
 			case rsrvFi:
 				if p.lang.in(LangBash | LangBats) {
-					p.curErr("syntax error near unexpected token %s", bashQuoteString(p.val))
+					p.strayReservedWordErr(p.pos, rsrv, "syntax error near unexpected token %s", bashQuoteString(p.val))
 					break
 				}
-				p.curErr("%#q can only be used to end an `if`", p.val)
+				p.strayReservedWordErr(p.pos, rsrv, "%#q can only be used to end an `if`", p.val)
 			case rsrvDo:
 				if p.lang.in(LangBash | LangBats) {
-					p.curErr("syntax error near unexpected token %s", bashQuoteString(p.val))
+					p.strayReservedWordErr(p.pos, rsrv, "syntax error near unexpected token %s", bashQuoteString(p.val))
 					break
 				}
-				p.curErr(`%#q can only be used in a loop`, p.val)
+				p.strayReservedWordErr(p.pos, rsrv, `%#q can only be used in a loop`, p.val)
 			case rsrvDone:
 				if p.lang.in(LangBash | LangBats) {
-					p.curErr("syntax error near unexpected token %s", bashQuoteString(p.val))
+					p.strayReservedWordErr(p.pos, rsrv, "syntax error near unexpected token %s", bashQuoteString(p.val))
 					break
 				}
-				p.curErr(`%#q can only be used to end a loop`, p.val)
+				p.strayReservedWordErr(p.pos, rsrv, `%#q can only be used to end a loop`, p.val)
 			case rsrvEsac:
 				if p.lang.in(LangBash | LangBats) {
-					p.curErr("syntax error near unexpected token %s", bashQuoteString(p.val))
+					p.strayReservedWordErr(p.pos, rsrv, "syntax error near unexpected token %s", bashQuoteString(p.val))
 					break
 				}
-				p.curErr("%#q can only be used to end a `case`", p.val)
+				p.strayReservedWordErr(p.pos, rsrv, "%#q can only be used to end a `case`", p.val)
 			case "!":
 				if !s.Negated {
 					p.curErr(`%#q can only be used in full statements`, exclMark)
@@ -4982,7 +6518,16 @@ func (p *Parser) gotStmtPipe(s *Stmt, binCmd bool) *Stmt {
 				}
 			case "]]":
 				if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
-					p.curErr(`%#q can only be used to close a test`, dblRightBrack)
+					p.posErrWithMetadataContext(
+						p.pos,
+						parseErrorMetadata{
+							kind:       ParseErrorKindUnexpected,
+							unexpected: p.currentUnexpectedTokenSymbol(),
+						},
+						parseErrorContext{kind: parseErrorContextUnexpectedToken, token: dblRightBrack.String()},
+						`%#q can only be used to close a test`,
+						dblRightBrack,
+					)
 				}
 			case "let":
 				if p.lang.in(langBashLike | LangMirBSDKorn | LangZsh) {
@@ -5055,7 +6600,7 @@ func (p *Parser) gotStmtPipe(s *Stmt, binCmd bool) *Stmt {
 					break
 				}
 				p.next()
-				p.posErr(p.pos, "syntax error near unexpected token %s", p.currentUnexpectedTokenQuote())
+				p.posCurrentUnexpectedErrContext(p.pos, parseErrorContext{kind: parseErrorContextFuncOpen})
 				break
 			}
 			p.callExpr(s, w, false)
@@ -5106,7 +6651,7 @@ func (p *Parser) gotStmtPipe(s *Stmt, binCmd bool) *Stmt {
 				break
 			}
 			p.next()
-			p.posErr(p.pos, "syntax error near unexpected token %s", p.currentUnexpectedTokenQuote())
+			p.posCurrentUnexpectedErrContext(p.pos, parseErrorContext{kind: parseErrorContextFuncOpen})
 			break
 		}
 		if p.got(leftParen) {
@@ -5119,7 +6664,7 @@ func (p *Parser) gotStmtPipe(s *Stmt, binCmd bool) *Stmt {
 			fpos := p.pos
 			p.next()
 			if p.atRsrv(rsrvLeftBrace) {
-				p.checkLang(fpos, LangZsh, "anonymous functions")
+				p.checkLang(fpos, LangZsh, FeatureFunctionAnonymous)
 			}
 			p.funcDecl(s, fpos, false, true)
 			break
@@ -5133,7 +6678,7 @@ func (p *Parser) gotStmtPipe(s *Stmt, binCmd bool) *Stmt {
 	}
 	if redirsStart > 0 && s.Cmd != nil {
 		if _, ok := s.Cmd.(*CallExpr); !ok {
-			p.checkLang(s.Pos(), LangZsh, "redirects before compound commands")
+			p.checkLang(s.Pos(), LangZsh, FeatureRedirectionBeforeCompound)
 		}
 	}
 	for p.peekRedir() {
@@ -5187,7 +6732,7 @@ func (p *Parser) arithmExpCmdWithTailTo(s *Stmt, salvageTail bool, tailEnd Pos) 
 	old := p.preNested(arithmExprCmd)
 	p.next()
 	if p.got(hash) {
-		p.checkLang(ar.Pos(), LangMirBSDKorn, "unsigned expressions")
+		p.checkLang(ar.Pos(), LangMirBSDKorn, FeatureArithmeticUnsignedExpr)
 		ar.Unsigned = true
 	}
 	ar.X = p.followArithm(dblLeftParen, ar.Left)
@@ -5206,15 +6751,17 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 	p.parenAmbiguityProbeDepth++
 	defer func() { p.parenAmbiguityProbeDepth-- }()
 
-	afterToken, err := p.currentSourceTail()
+	prefix := []byte(dblLeftParen.String())
+	replay := p.currentSourceReplayPrefixed(prefix)
 	start := p.pos
-	fullSrc := append([]byte(dblLeftParen.String()), afterToken...)
-	arithPos := posAddCol(start, len(dblLeftParen.String()))
+	fullSrc := replay.Bytes()
+	afterToken := sourceTailSuffix(fullSrc, len(prefix))
+	arithPos := posAddCol(start, len(prefix))
 	arith := p.parenAmbiguityClone()
 	arith.tok = dblLeftParen
 	arith.pos = start
-	arith.loadReplay(arithPos, afterToken, err)
-	arith.setSourceBuffer(start, fullSrc)
+	arith.loadReplayCursorView(arithPos, afterToken, replay.cursor(len(fullSrc)))
+	arith.setSourceReplayView(start, replay)
 	probeStmt := &Stmt{Position: s.Position}
 	arith.arithmExpCmdWithTail(probeStmt, false)
 	arithOK := arith.err == nil
@@ -5223,25 +6770,28 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 		arithRight = arithCmd.Right
 	}
 
-	fallbackSrc := append([]byte{'('}, afterToken...)
+	fullSrc = replay.Bytes()
+	fallbackSrc := sourceTailSuffix(fullSrc, len(prefix)-1)
 	fallbackPos := posAddCol(start, len(leftParen.String()))
 	sub := p.parenAmbiguityClone()
 	sub.tok = leftParen
 	sub.pos = start
-	sub.loadReplay(fallbackPos, fallbackSrc, err)
-	sub.setSourceBuffer(start, fullSrc)
+	sub.loadReplayCursorView(fallbackPos, fallbackSrc, replay.cursor(len(fullSrc)))
+	sub.setSourceReplayView(start, replay)
 	probeStmt = &Stmt{Position: s.Position}
 	sub.subshell(probeStmt)
 	fallbackIncomplete := false
 	if sub.err != nil && IsIncomplete(sub.err) {
-		fallbackIncomplete = hasInternalNewline(afterToken)
+		fallbackIncomplete = replay.tailHasInternalNewline(len(prefix))
 	}
 	if fallbackIncomplete {
 		p.tok = leftParen
 		p.pos = start
-		p.loadReplay(fallbackPos, fallbackSrc, err)
-		p.setSourceBuffer(start, fullSrc)
+		fullSrc = replay.Bytes()
+		p.loadReplayCursorView(fallbackPos, sourceTailSuffix(fullSrc, len(prefix)-1), replay.cursor(len(fullSrc)))
+		p.setSourceReplayView(start, replay)
 		p.subshell(s)
+		p.detachSourceReplay()
 		return
 	}
 	fallbackOK := false
@@ -5250,9 +6800,11 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 			fallbackOK = true
 			p.tok = leftParen
 			p.pos = start
-			p.loadReplay(fallbackPos, fallbackSrc, err)
-			p.setSourceBuffer(start, fullSrc)
+			fullSrc = replay.Bytes()
+			p.loadReplayCursorView(fallbackPos, sourceTailSuffix(fullSrc, len(prefix)-1), replay.cursor(len(fullSrc)))
+			p.setSourceReplayView(start, replay)
 			p.subshell(s)
+			p.detachSourceReplay()
 			return
 		}
 	}
@@ -5274,23 +6826,29 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 
 	p.tok = dblLeftParen
 	p.pos = start
-	p.loadReplay(arithPos, afterToken, err)
-	p.setSourceBuffer(start, fullSrc)
+	fullSrc = replay.Bytes()
+	afterToken = sourceTailSuffix(fullSrc, len(prefix))
+	p.loadReplayCursorView(arithPos, afterToken, replay.cursor(len(fullSrc)))
+	p.setSourceReplayView(start, replay)
 	if arithOK && !arithEndedEarly {
 		p.arithmExpCmdWithTail(s, true)
+		p.detachSourceReplay()
 		return
 	}
 	if sub.err == nil {
-		if outer, ok := probeStmt.Cmd.(*Subshell); ok && keepParenAmbiguityArithError(outer.Stmts, outer.Last) && !arithEndedEarly && !hasNestedDblRightParen(afterToken) {
+		if outer, ok := probeStmt.Cmd.(*Subshell); ok && keepParenAmbiguityArithError(outer.Stmts, outer.Last) && !arithEndedEarly && !replay.tailHasNestedDblRightParen(len(prefix)) {
 			p.arithmExpCmdWithTail(s, false)
+			p.detachSourceReplay()
 			return
 		}
 	}
-	if sub.err == nil && fallbackTailEnd.IsValid() && hasNestedDblRightParen(afterToken) {
+	if sub.err == nil && fallbackTailEnd.IsValid() && replay.tailHasNestedDblRightParen(len(prefix)) {
 		p.arithmExpCmdWithTailTo(s, true, fallbackTailEnd)
+		p.detachSourceReplay()
 		return
 	}
 	p.arithmExpCmdWithTail(s, true)
+	p.detachSourceReplay()
 }
 
 func (p *Parser) arithmExpCmd(s *Stmt) {
@@ -5315,28 +6873,93 @@ func (p *Parser) block(s *Stmt) {
 	s.Cmd = b
 }
 
+func (p *Parser) ifClauseHead(pos Pos, listStart, condLabel string) ([]*Stmt, []Comment, Pos, []*Stmt, []Comment) {
+	cond, condLast := p.followStmts(listStart, pos, rsrvThen, rsrvFi, rsrvElif, rsrvElse)
+	if p.atRsrv(rsrvFi, rsrvElif, rsrvElse) {
+		if p.recoverError() {
+			thenPos := recoveredPos
+			if len(cond) > 1 {
+				if split := p.ifMissingThenSplit(cond); split >= 0 {
+					then, thenLast := cond[split:], condLast
+					return cond[:split], nil, thenPos, then, thenLast
+				}
+			}
+			return cond, condLast, thenPos, []*Stmt{{Position: recoveredPos}}, nil
+		}
+		p.followErr(pos, condLabel, rsrvThen)
+		return cond, condLast, Pos{}, nil, nil
+	}
+	thenPos := p.followRsrv(pos, condLabel, rsrvThen)
+	then, thenLast := p.followStmts("then", thenPos, rsrvFi, rsrvElif, rsrvElse)
+	return cond, condLast, thenPos, then, thenLast
+}
+
+func (p *Parser) ifMissingThenSplit(stmts []*Stmt) int {
+	if len(stmts) < 2 {
+		return -1
+	}
+	for i := 1; i < len(stmts); i++ {
+		if ifMissingThenBoundary(p.sourceBetween(stmts[i-1].End(), stmts[i].Pos())) {
+			return i
+		}
+	}
+	return -1
+}
+
+func ifMissingThenBoundary(src string) bool {
+	backslashes := 0
+	inComment := false
+	for i := 0; i < len(src); i++ {
+		switch src[i] {
+		case '#':
+			if !inComment {
+				inComment = true
+			}
+			backslashes = 0
+		case '\\':
+			if !inComment {
+				backslashes++
+			}
+		case '\r':
+			if !inComment {
+				continue
+			}
+		case '\n':
+			if inComment || backslashes%2 == 0 {
+				return true
+			}
+			backslashes = 0
+		case ' ', '\t':
+			if !inComment {
+				backslashes = 0
+			}
+		default:
+			if !inComment {
+				backslashes = 0
+			}
+		}
+	}
+	return false
+}
+
 func (p *Parser) ifClause(s *Stmt) {
-	rootIf := &IfClause{Position: p.pos}
+	rootIf := &IfClause{Position: p.pos, Kind: IfClauseIf}
 	p.next()
-	rootIf.Cond, rootIf.CondLast = p.followStmts("if", rootIf.Position, rsrvThen)
-	rootIf.ThenPos = p.followRsrv(rootIf.Position, "if <cond>", rsrvThen)
-	rootIf.Then, rootIf.ThenLast = p.followStmts("then", rootIf.ThenPos, rsrvFi, rsrvElif, rsrvElse)
+	rootIf.Cond, rootIf.CondLast, rootIf.ThenPos, rootIf.Then, rootIf.ThenLast = p.ifClauseHead(rootIf.Position, "if", "if <cond>")
 	curIf := rootIf
 	for p.atRsrv(rsrvElif) {
-		elf := &IfClause{Position: p.pos}
+		elf := &IfClause{Position: p.pos, Kind: IfClauseElif}
 		curIf.Last = p.accComs
 		p.accComs = nil
 		p.next()
-		elf.Cond, elf.CondLast = p.followStmts("elif", elf.Position, rsrvThen)
-		elf.ThenPos = p.followRsrv(elf.Position, "elif <cond>", rsrvThen)
-		elf.Then, elf.ThenLast = p.followStmts("then", elf.ThenPos, rsrvFi, rsrvElif, rsrvElse)
+		elf.Cond, elf.CondLast, elf.ThenPos, elf.Then, elf.ThenLast = p.ifClauseHead(elf.Position, "elif", "elif <cond>")
 		curIf.Else = elf
 		curIf = elf
 	}
 	if elsePos, ok := p.gotRsrv(rsrvElse); ok {
 		curIf.Last = p.accComs
 		p.accComs = nil
-		els := &IfClause{Position: elsePos}
+		els := &IfClause{Position: elsePos, Kind: IfClauseElse}
 		els.Then, els.ThenLast = p.followStmts("else", els.Position, rsrvFi)
 		curIf.Else = els
 		curIf = els
@@ -5374,7 +6997,7 @@ func (p *Parser) forClause(s *Stmt) {
 
 	start, end := rsrvDo, rsrvDone
 	if pos, ok := p.gotRsrv(rsrvLeftBrace); ok {
-		p.checkLang(pos, langBashLike|LangMirBSDKorn, "for loops with braces")
+		p.checkLang(pos, langBashLike|LangMirBSDKorn, FeatureLoopBraceFor)
 		fc.DoPos = pos
 		fc.Braces = true
 		start, end = rsrvLeftBrace, rsrvRightBrace
@@ -5392,7 +7015,7 @@ func (p *Parser) forClause(s *Stmt) {
 func (p *Parser) loop(fpos Pos) Loop {
 	switch p.tok {
 	case leftParen, dblLeftParen:
-		p.checkLang(p.pos, langBashLike|LangZsh, "c-style fors")
+		p.checkLang(p.pos, langBashLike|LangZsh, FeatureLoopCStyleFor)
 	}
 	if p.tok == dblLeftParen {
 		cl := &CStyleLoop{Lparen: p.pos}
@@ -5451,6 +7074,400 @@ func (p *Parser) selectClause(s *Stmt) {
 	s.Cmd = fc
 }
 
+type patternScanMode uint8
+
+const (
+	patternScanConditional patternScanMode = iota
+	patternScanCase
+)
+
+type scannedRawPattern struct {
+	start          Pos
+	raw            string
+	firstBareParen Pos
+}
+
+func (p *Parser) patternAllowsBareGroups() bool {
+	return p.lang.in(LangZsh)
+}
+
+func (p *Parser) scanRawPattern(mode patternScanMode) (*scannedRawPattern, bool) {
+scanLeading:
+	for {
+		switch p.r {
+		case escNewl:
+			p.rune()
+		case ' ', '\t', '\n':
+			if mode == patternScanConditional && p.r == '\n' {
+				break scanLeading
+			}
+			p.rune()
+		default:
+			break scanLeading
+		}
+	}
+
+	start := p.nextPos()
+	if p.patternScanBoundary(mode, 0, 0) {
+		p.next()
+		return &scannedRawPattern{start: start}, true
+	}
+	p.newLit(p.r)
+	scanned := &scannedRawPattern{start: start}
+	if !p.scanPatternRaw(start, mode, scanned) {
+		p.litBs = nil
+		return nil, false
+	}
+	scanned.raw = p.endLit()
+	p.next()
+	return scanned, true
+}
+
+func (p *Parser) patternScanBoundary(mode patternScanMode, hardParenDepth, softParenDepth int) bool {
+	switch p.r {
+	case utf8.RuneSelf:
+		return true
+	case ';', '&':
+		return mode == patternScanConditional && hardParenDepth == 0
+	case '\n', ' ', '\t':
+		return mode == patternScanConditional && hardParenDepth == 0
+	case ']':
+		return mode == patternScanConditional && hardParenDepth == 0 && p.peek() == ']'
+	case '|':
+		return mode == patternScanConditional && hardParenDepth == 0 && p.peek() == '|'
+	case ')':
+		return hardParenDepth == 0 && softParenDepth == 0
+	default:
+		return false
+	}
+}
+
+func (p *Parser) scanPatternRaw(start Pos, mode patternScanMode, scanned *scannedRawPattern) bool {
+	parenStack := make([]byte, 0, 8)
+	extglobDepth := 0
+	hardParenDepth := 0
+	softParenDepth := 0
+	allowExtGlob := p.extGlobEnabled()
+	if mode == patternScanConditional {
+		allowExtGlob = p.condPatternExtGlobEnabled()
+	}
+	for {
+		if p.patternScanBoundary(mode, hardParenDepth, softParenDepth) {
+			return true
+		}
+		switch p.r {
+		case escNewl:
+			p.rune()
+		case '<', '>':
+			if p.peek() == '(' {
+				if !p.scanCondRegexProcSubst(start, tokenFromProcSubst(p.r)) {
+					return false
+				}
+				continue
+			}
+			p.rune()
+		case '?', '*', '+', '@', '!':
+			if allowExtGlob && p.peek() == '(' {
+				p.rune()
+				parenStack = append(parenStack, 'e')
+				extglobDepth++
+				hardParenDepth++
+				p.rune()
+				continue
+			}
+			p.rune()
+		case '(':
+			if extglobDepth == 0 && !scanned.firstBareParen.IsValid() {
+				scanned.firstBareParen = p.nextPos()
+			}
+			if extglobDepth == 0 && !p.patternAllowsBareGroups() {
+				parenStack = append(parenStack, 's')
+				softParenDepth++
+			} else {
+				parenStack = append(parenStack, '(')
+				hardParenDepth++
+			}
+			p.rune()
+		case ')':
+			if n := len(parenStack); n > 0 {
+				switch parenStack[n-1] {
+				case 'e':
+					extglobDepth--
+					hardParenDepth--
+				case 's':
+					softParenDepth--
+				default:
+					hardParenDepth--
+				}
+				parenStack = parenStack[:n-1]
+				p.rune()
+				continue
+			}
+			return true
+		case '[':
+			p.scanPatternCharClass()
+		case '\'':
+			if !p.scanCondRegexSingleQuoted(start, sglQuote, false) {
+				return false
+			}
+		case '"':
+			if !p.scanCondRegexDoubleQuoted(start, dblQuote) {
+				return false
+			}
+		case '`':
+			if !p.scanCondRegexBackquote(start) {
+				return false
+			}
+		case '$':
+			if !p.scanCondRegexDollar(start, true) {
+				return false
+			}
+		case '\\':
+			if p.rune() == utf8.RuneSelf {
+				return true
+			}
+			p.rune()
+		default:
+			p.rune()
+		}
+	}
+}
+
+func (p *Parser) scanPatternCharClass() {
+	p.rune()
+	if p.r == '!' || p.r == '^' {
+		p.rune()
+	}
+	if p.r == ']' {
+		p.rune()
+	}
+	for {
+		switch p.r {
+		case utf8.RuneSelf:
+			return
+		case '\\':
+			if p.rune() == utf8.RuneSelf {
+				return
+			}
+			p.rune()
+		case ']':
+			p.rune()
+			return
+		default:
+			p.rune()
+		}
+	}
+}
+
+func (p *Parser) invalidCasePatternParen(pos Pos) {
+	p.posErrWithMetadata(pos, parseErrorMetadata{
+		kind:       ParseErrorKindUnexpected,
+		construct:  ParseErrorSymbolPattern,
+		unexpected: ParseErrorSymbolLeftParen,
+	}, "syntax error near unexpected token %s", bashQuoteString("("))
+}
+
+func patternNearFragment(raw string, pos int) string {
+	if pos < 0 || pos >= len(raw) {
+		return ""
+	}
+	start := pos
+	for start > 0 {
+		switch raw[start-1] {
+		case ' ', '\t', '\n', ';', '&', '|', ')':
+			goto extendRight
+		default:
+			start--
+		}
+	}
+extendRight:
+	end := pos + 1
+	for end < len(raw) {
+		switch raw[end] {
+		case ' ', '\t', '\n', ';', '&', '|', ')', '\\':
+			return raw[start:end]
+		default:
+			end++
+		}
+	}
+	return raw[start:end]
+}
+
+func (p *Parser) invalidCondPatternParen(pos Pos, raw string, start Pos) {
+	near := "("
+	if pos.IsValid() && start.IsValid() {
+		offset := int(pos.Offset() - start.Offset())
+		if frag := patternNearFragment(raw, offset); frag != "" {
+			near = frag
+		}
+	}
+	p.posErrSecondaryWithMetadata(pos, parseErrorMetadata{
+		kind:       ParseErrorKindUnexpected,
+		construct:  ParseErrorSymbolPattern,
+		unexpected: ParseErrorSymbolLeftParen,
+	}, fmt.Sprintf("syntax error near %s", bashQuoteString(near)),
+		"syntax error in conditional expression: unexpected token %s",
+		bashQuoteString("("),
+	)
+}
+
+func (p *Parser) casePatternUsesOptionalOpener() bool {
+	if p.tok != leftParen {
+		return false
+	}
+	tail := p.sourceFromPos(p.pos)
+	if tail == "" || tail[0] != '(' {
+		return true
+	}
+	_, groupEnd, grouped := p.newRawPatternParser().parsePatternGroup(tail, p.pos, 0)
+	if !grouped {
+		return true
+	}
+	_, end := scanPatternText(tail, p.pos, patternScanCase, p.lang, p.parseExtGlob)
+	if !p.readEOF && end == len(tail) {
+		return true
+	}
+	return end <= groupEnd || end >= len(tail) || tail[end] != ')'
+}
+
+func patternTextBoundary(raw string, i int, mode patternScanMode, hardParenDepth, softParenDepth int) bool {
+	if i >= len(raw) {
+		return true
+	}
+	switch raw[i] {
+	case ';', '&':
+		if hardParenDepth != 0 {
+			return false
+		}
+		return mode == patternScanConditional || (mode == patternScanCase && raw[i] == ';')
+	case '\n', ' ', '\t':
+		return mode == patternScanConditional && hardParenDepth == 0
+	case ']':
+		return mode == patternScanConditional && hardParenDepth == 0 &&
+			i+1 < len(raw) && raw[i+1] == ']'
+	case '|':
+		return mode == patternScanConditional && hardParenDepth == 0 &&
+			i+1 < len(raw) && raw[i+1] == '|'
+	case ')':
+		return hardParenDepth == 0 && softParenDepth == 0
+	default:
+		return false
+	}
+}
+
+func scanPatternText(raw string, base Pos, mode patternScanMode, lang LangVariant, parseExtGlob bool) (*scannedRawPattern, int) {
+	start := 0
+	for start < len(raw) {
+		switch raw[start] {
+		case ' ', '\t':
+			start++
+		case '\n':
+			if mode == patternScanConditional {
+				goto scan
+			}
+			start++
+		default:
+			goto scan
+		}
+	}
+scan:
+	scanned := &scannedRawPattern{start: advancePosBytes(base, []byte(raw[:start]))}
+	parenStack := make([]byte, 0, 8)
+	extglobDepth := 0
+	hardParenDepth := 0
+	softParenDepth := 0
+	rawParser := rawPatternParser{lang: lang, allowExtGlob: parseExtGlob}
+	for i := start; ; {
+		if patternTextBoundary(raw, i, mode, hardParenDepth, softParenDepth) {
+			return scanned, i
+		}
+		switch raw[i] {
+		case '\\':
+			if i+1 < len(raw) {
+				i += 2
+			} else {
+				i++
+			}
+		case '<', '>':
+			if i+1 < len(raw) && raw[i+1] == '(' {
+				if _, consumed, ok := rawParser.parseShellPart(raw[i:], posAddCol(base, i)); ok {
+					i += consumed
+					continue
+				}
+			}
+			i++
+		case '?', '*', '+', '@', '!':
+			if rawParser.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
+				parenStack = append(parenStack, 'e')
+				extglobDepth++
+				hardParenDepth++
+				i += 2
+				continue
+			}
+			i++
+		case '(':
+			if extglobDepth == 0 && !scanned.firstBareParen.IsValid() {
+				scanned.firstBareParen = posAddCol(base, i)
+			}
+			if extglobDepth == 0 && !lang.in(LangZsh) {
+				parenStack = append(parenStack, 's')
+				softParenDepth++
+			} else {
+				parenStack = append(parenStack, '(')
+				hardParenDepth++
+			}
+			i++
+		case ')':
+			if n := len(parenStack); n > 0 {
+				switch parenStack[n-1] {
+				case 'e':
+					extglobDepth--
+					hardParenDepth--
+				case 's':
+					softParenDepth--
+				default:
+					hardParenDepth--
+				}
+				parenStack = parenStack[:n-1]
+				i++
+				continue
+			}
+			return scanned, i
+		case '[':
+			i = patternCharClassEnd(raw, i)
+		case '\'', '"', '`', '$':
+			if _, consumed, ok := rawParser.parseShellPart(raw[i:], posAddCol(base, i)); ok {
+				i += consumed
+				continue
+			}
+			i++
+		default:
+			i++
+		}
+	}
+}
+
+func (p *Parser) scanRawPatternSource(start Pos, mode patternScanMode) (*scannedRawPattern, bool) {
+	raw := p.sourceBytesFromPos(start)
+	scanned, end := scanPatternText(bytesToStringView(raw), start, mode, p.lang, p.parseExtGlob)
+	if mode == patternScanCase && !p.readEOF && end == len(raw) {
+		return nil, false
+	}
+	rawStart := int(scanned.start.Offset() - start.Offset())
+	if rawStart < 0 || rawStart > end || end > len(raw) {
+		return nil, false
+	}
+	scanned.raw = string(raw[rawStart:end])
+	boundaryPos := posAddCol(start, end)
+	for p.tok != _EOF && p.pos.Offset() < boundaryPos.Offset() {
+		p.next()
+	}
+	if p.pos.Offset() != boundaryPos.Offset() {
+		p.next()
+	}
+	return scanned, true
+}
+
 func (p *Parser) caseClause(s *Stmt) {
 	cc := &CaseClause{Case: p.pos}
 	p.next()
@@ -5469,7 +7486,7 @@ func (p *Parser) caseClause(s *Stmt) {
 	if pos, ok := p.gotRsrv(rsrvLeftBrace); ok {
 		cc.In = pos
 		cc.Braces = true
-		p.checkLang(cc.Pos(), LangMirBSDKorn, "`case i {`")
+		p.checkLang(cc.Pos(), LangMirBSDKorn, FeatureCaseKornForm)
 		end = rsrvRightBrace
 	} else {
 		cc.In = p.followRsrv(cc.Case, "case x", rsrvIn)
@@ -5485,18 +7502,71 @@ func (p *Parser) caseItems(stop reservedWord) (items []*CaseItem) {
 	for p.tok != _EOF && !p.atRsrv(stop) {
 		ci := &CaseItem{}
 		ci.Comments, p.accComs = p.accComs, nil
-		p.got(leftParen)
-		for p.tok != _EOF {
-			if pat := p.getPattern(or, rightParen); pat == nil {
+		if p.casePatternUsesOptionalOpener() {
+			p.next()
+		}
+		if scanned, ok := p.scanRawPatternSource(p.pos, patternScanCase); ok {
+			rawParser := p.newRawPatternParser()
+			if idx, op := rawParser.findInvalidCasePatternOperator(scanned.raw, scanned.start); op != 0 {
+				pos := posAddCol(scanned.start, idx)
+				if idx == 0 {
+					p.posErr(pos, "case patterns must consist of words")
+				} else {
+					p.posErr(pos, "case patterns must be separated with %#q", or)
+				}
+				return items
+			}
+			start := 0
+			validPatterns := true
+			for {
+				end, delim := rawParser.findPatternListSplit(scanned.raw, scanned.start, start)
+				partStart, partEnd := trimPatternRawSegment(scanned.raw, start, end)
+				partRaw := scanned.raw[partStart:partEnd]
+				partBase := advancePosBytes(scanned.start, []byte(scanned.raw[:partStart]))
+				switch {
+				case partRaw == "":
+					validPatterns = false
+				case rawParser.hasTopLevelWhitespace(partRaw, partBase):
+					validPatterns = false
+				default:
+					ci.Patterns = append(ci.Patterns, rawParser.parse(partRaw, partBase))
+				}
+				if delim != '|' {
+					break
+				}
+				start = end + 1
+			}
+			if group := firstPatternGroupInList(ci.Patterns); group != nil && !p.patternAllowsBareGroups() {
+				if !p.recoverError() {
+					p.invalidCasePatternParen(group.Pos())
+					return items
+				}
+			} else if group == nil && scanned.firstBareParen.IsValid() && !p.patternAllowsBareGroups() {
+				if !p.recoverError() {
+					p.invalidCasePatternParen(scanned.firstBareParen)
+					return items
+				}
+			}
+			if p.tok != rightParen && p.tok != _EOF {
+				p.curErr("syntax error near unexpected token %s", p.tok.bashQuote())
+				return items
+			}
+			if !validPatterns && len(ci.Patterns) > 0 {
 				p.curErr("case patterns must consist of words")
-			} else {
-				ci.Patterns = append(ci.Patterns, pat)
 			}
-			if p.tok == rightParen {
-				break
-			}
-			if !p.got(or) {
-				p.curErr("case patterns must be separated with %#q", or)
+		} else {
+			for p.tok != _EOF {
+				if pat := p.getPattern(or, rightParen); pat == nil {
+					p.curErr("case patterns must consist of words")
+				} else {
+					ci.Patterns = append(ci.Patterns, pat)
+				}
+				if p.tok == rightParen {
+					break
+				}
+				if !p.got(or) {
+					p.curErr("case patterns must be separated with %#q", or)
+				}
 			}
 		}
 		if len(ci.Patterns) == 0 {
@@ -5557,7 +7627,16 @@ func (p *Parser) testClause(s *Stmt) {
 	p.next()
 	if tc.X = p.condExprBinary(false); tc.X == nil {
 		if p.isCondClosingTok() {
-			p.posErr(p.pos, "syntax error near %s", bashQuoteString(dblRightBrack.String()))
+			p.posErrWithMetadataContext(
+				p.pos,
+				parseErrorMetadata{
+					kind:       ParseErrorKindUnexpected,
+					unexpected: p.currentUnexpectedTokenSymbol(),
+				},
+				parseErrorContext{kind: parseErrorContextNearToken, token: dblRightBrack.String()},
+				"syntax error near %s",
+				bashQuoteString(dblRightBrack.String()),
+			)
 		} else if p.tok == rightParen {
 			p.curErrSecondary(
 				fmt.Sprintf("syntax error near %s", p.tok.bashQuote()),
@@ -5666,11 +7745,25 @@ func (p *Parser) followCondVarRefOrWord(tok token, pos Pos, context VarRefContex
 }
 
 func (p *Parser) followCondPattern(tok token, pos Pos) *CondPattern {
-	p.next()
-	pat := p.getPattern()
-	if pat == nil {
+	scanned, ok := p.scanRawPattern(patternScanConditional)
+	if !ok {
+		return nil
+	}
+	if scanned.raw == "" {
 		p.followErr(pos, tok, noQuote("a word"))
 		return nil
+	}
+	pat := p.newCondPatternParser().parse(scanned.raw, scanned.start)
+	if group := firstPatternGroup(pat); group != nil && !p.patternAllowsBareGroups() {
+		if !p.recoverError() {
+			p.invalidCondPatternParen(group.Pos(), scanned.raw, scanned.start)
+			return nil
+		}
+	} else if group == nil && scanned.firstBareParen.IsValid() && !p.patternAllowsBareGroups() {
+		if !p.recoverError() {
+			p.invalidCondPatternParen(scanned.firstBareParen, scanned.raw, scanned.start)
+			return nil
+		}
 	}
 	return &CondPattern{Pattern: pat}
 }
@@ -6389,7 +8482,7 @@ func (p *Parser) condExprBinary(pastAndOr bool) CondExpr {
 			p.followErrExp(b.OpPos, b.Op)
 		}
 	case TsReMatch:
-		p.checkLang(p.pos, langBashLike|LangZsh, "regex tests")
+		p.checkLang(p.pos, langBashLike|LangZsh, FeatureConditionalRegexTest)
 		if b.Y = p.followCondRegex(token(b.Op), b.OpPos); b.Y == nil {
 			return nil
 		}
@@ -6729,7 +8822,7 @@ func (p *Parser) bashFuncDecl(s *Stmt) {
 	switch len(names) {
 	case 0:
 		if hasParens || p.atRsrv(rsrvLeftBrace) {
-			p.checkLang(fpos, LangZsh, "anonymous functions")
+			p.checkLang(fpos, LangZsh, FeatureFunctionAnonymous)
 		} else if !p.lang.in(LangZsh) {
 			p.followErr(fpos, "function", noQuote("a name"))
 		}
@@ -6737,7 +8830,7 @@ func (p *Parser) bashFuncDecl(s *Stmt) {
 	case 1:
 		// allowed in all variants
 	default:
-		p.checkLang(fpos, LangZsh, "multi-name functions")
+		p.checkLang(fpos, LangZsh, FeatureFunctionMultiName)
 	}
 	if hasParens {
 		p.follow(fpos, "function foo(", rightParen)
@@ -6758,12 +8851,8 @@ func (p *Parser) testDecl(s *Stmt) {
 }
 
 func (p *Parser) funcBodyUnexpectedToken() {
-	quote := p.tok.bashQuote()
-	switch p.tok {
-	case _Lit, _LitWord:
-		quote = bashQuoteString(p.val)
-	}
-	p.curErr("syntax error near unexpected token %s", quote)
+	unexpected, quoted := p.currentUnexpectedTokenDiagnostic()
+	p.unexpectedTokenErr(p.pos, unexpected, quoted)
 }
 
 func (p *Parser) funcBodyStmt() *Stmt {
@@ -6798,7 +8887,7 @@ func (p *Parser) funcBodyStmt() *Stmt {
 		}
 	case leftParen:
 		if p.r == ')' {
-			p.curErr("syntax error near unexpected token %s", rightParen.bashQuote())
+			p.unexpectedTokenErr(p.pos, ParseErrorSymbolRightParen, rightParen.bashQuote())
 			return nil
 		}
 		p.subshell(s)
@@ -6822,17 +8911,60 @@ func (p *Parser) funcBodyStmt() *Stmt {
 
 func (p *Parser) callExpr(s *Stmt, w *Word, assign bool) {
 	ce := p.call(w)
+	var separators []CallExprSeparator
+	lastOperand := w != nil
+	boundaryBroken := false
+	appendAssign := func(sep CallExprSeparator, as *Assign) {
+		if as == nil {
+			return
+		}
+		if lastOperand {
+			if boundaryBroken {
+				separators = append(separators, CallExprSeparator{})
+			} else {
+				separators = append(separators, sep)
+			}
+		}
+		ce.Assigns = append(ce.Assigns, as)
+		lastOperand = true
+		boundaryBroken = false
+	}
+	appendArg := func(sep CallExprSeparator, w *Word) {
+		if w == nil {
+			return
+		}
+		if lastOperand {
+			if boundaryBroken {
+				separators = append(separators, CallExprSeparator{})
+			} else {
+				separators = append(separators, sep)
+			}
+		}
+		ce.Args = append(ce.Args, w)
+		lastOperand = true
+		boundaryBroken = false
+	}
+	finish := func() {
+		if len(ce.Args) == 0 {
+			ce.Args = nil
+		}
+		setCallExprSeparators(ce, separators)
+		s.Cmd = ce
+	}
 	if w == nil {
 		ce.Args = ce.Args[:0]
 	}
 	if assign {
-		if as, ok := p.tryAssignCandidate(false); ok {
-			ce.Assigns = append(ce.Assigns, as)
+		sep := p.tokSeparator
+		if eqIndex := p.scalarAssignEqIndex(); eqIndex > 0 {
+			appendAssign(sep, p.scalarAssignMode(eqIndex, true))
+		} else if as, ok := p.tryAssignCandidate(false); ok {
+			appendAssign(sep, as)
 		} else if w := p.takePendingArrayWord(); w != nil {
-			ce.Args = append(ce.Args, w)
+			appendArg(sep, w)
 		} else if p.err != nil {
 			p.normalizeArrayLikeEOFError()
-			s.Cmd = ce
+			finish()
 			return
 		}
 	}
@@ -6844,12 +8976,17 @@ loop:
 			break loop
 		case _LitWord:
 			if len(ce.Args) == 0 && p.hasValidIdent() {
+				sep := p.tokSeparator
+				if eqIndex := p.scalarAssignEqIndex(); eqIndex > 0 {
+					appendAssign(sep, p.scalarAssignMode(eqIndex, true))
+					break
+				}
 				if as, ok := p.tryAssignCandidate(false); ok {
-					ce.Assigns = append(ce.Assigns, as)
+					appendAssign(sep, as)
 					break
 				}
 				if w := p.takePendingArrayWord(); w != nil {
-					ce.Args = append(ce.Args, w)
+					appendArg(sep, w)
 					break
 				}
 				if p.err != nil {
@@ -6867,27 +9004,33 @@ loop:
 			}
 			// Avoid failing later with the confusing "} can only be used to close a block".
 			if p.atRsrv(rsrvLeftBrace) && w != nil && w.Lit() == "function" {
-				p.checkLang(p.pos, langBashLike, `the "function" builtin`)
+				p.checkLang(p.pos, langBashLike, FeatureBuiltinFunctionKeyword)
 			}
 			// Zsh does not require a semicolon to close a block.
 			if p.lang.in(LangZsh) && p.atRsrv(rsrvRightBrace) {
 				break loop
 			}
+			sep := p.tokSeparator
 			w := p.wordOne(p.lit(p.pos, p.val))
 			p.next()
 			if p.lang.in(LangZsh) && !p.spaced {
 				w.Parts = append(w.Parts, p.wordParts(nil)...)
 				p.finishWord(w)
 			}
-			ce.Args = append(ce.Args, w)
+			appendArg(sep, w)
 		case _Lit:
 			if len(ce.Args) == 0 && p.hasValidIdent() {
+				sep := p.tokSeparator
+				if eqIndex := p.scalarAssignEqIndex(); eqIndex > 0 {
+					appendAssign(sep, p.scalarAssignMode(eqIndex, true))
+					break
+				}
 				if as, ok := p.tryAssignCandidate(false); ok {
-					ce.Assigns = append(ce.Assigns, as)
+					appendAssign(sep, as)
 					break
 				}
 				if w := p.takePendingArrayWord(); w != nil {
-					ce.Args = append(ce.Args, w)
+					appendArg(sep, w)
 					break
 				}
 				if p.err != nil {
@@ -6895,7 +9038,8 @@ loop:
 					break loop
 				}
 			}
-			ce.Args = append(ce.Args, p.wordAnyNumber())
+			sep := p.tokSeparator
+			appendArg(sep, p.wordAnyNumber())
 		case bckQuote:
 			if p.backquoteEnd() {
 				break loop
@@ -6904,7 +9048,8 @@ loop:
 		case dollBrace, dollDblParen, dollParen, dollar, cmdIn, assgnParen, cmdOut,
 			sglQuote, dollSglQuote, dblQuote, dollDblQuote, dollBrack,
 			globQuest, globStar, globPlus, globAt, globExcl:
-			ce.Args = append(ce.Args, p.wordAnyNumber())
+			sep := p.tokSeparator
+			appendArg(sep, p.wordAnyNumber())
 		case dblLeftParen:
 			p.curErr("%#q can only be used to open an arithmetic cmd", p.tok)
 		case rightParen:
@@ -6915,21 +9060,19 @@ loop:
 		default:
 			if p.peekRedir() {
 				p.doRedirect(s)
+				boundaryBroken = lastOperand
 				continue
 			}
 			// Note that we'll only keep the first error that happens.
 			if len(ce.Args) > 0 {
 				if cmd := ce.Args[0].Lit(); isBashCompoundCommand(_LitWord, cmd) {
-					p.checkLang(p.pos, langBashLike, "the %#q builtin", cmd)
+					p.checkLang(p.pos, langBashLike, FeatureBuiltinKeywordLike, fmt.Sprintf("%#q", cmd))
 				}
 			}
-			p.curErr("syntax error near unexpected token %s", p.tok.bashQuote())
+			p.curUnexpectedErr()
 		}
 	}
-	if len(ce.Args) == 0 {
-		ce.Args = nil
-	}
-	s.Cmd = ce
+	finish()
 }
 
 func (p *Parser) funcDecl(s *Stmt, pos Pos, long, withParens bool, names ...*Lit) {

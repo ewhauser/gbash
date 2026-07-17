@@ -78,6 +78,7 @@ retry:
 	}
 	if b := p.bs[p.bsp]; b < utf8.RuneSelf {
 		p.bsp++
+		backslashRunBefore := p.rawBackslashRun
 		if p.captureWordRaw {
 			p.wordRawBs = append(p.wordRawBs, b)
 		}
@@ -95,11 +96,13 @@ retry:
 			if p.r == '\\' {
 			} else if p.peek() == '\n' {
 				p.bsp++
+				p.rawBackslashRun = 0
 				p.w, p.r = 1, escNewl
 				return escNewl
 			} else if p1, p2 := p.peekTwo(); p1 == '\r' && p2 == '\n' { // \\\r\n turns into \\\n
 				p.col++
 				p.bsp += 2
+				p.rawBackslashRun = 0
 				p.w, p.r = 2, escNewl
 				return escNewl
 			}
@@ -122,6 +125,12 @@ retry:
 		}
 		if b == '`' {
 			p.lastBquoteEsc = bquotes
+			p.lastBquoteRawBackslashes = backslashRunBefore
+		}
+		if b == '\\' {
+			p.rawBackslashRun = backslashRunBefore + 1
+		} else {
+			p.rawBackslashRun = 0
 		}
 		if p.litBs != nil {
 			p.litBs = append(p.litBs, b)
@@ -145,6 +154,7 @@ decodeRune:
 		p.wordRawBs = append(p.wordRawBs, p.bs[p.bsp:p.bsp+uint(w)]...)
 	}
 	p.bsp += uint(w)
+	p.rawBackslashRun = 0
 	if p.r == utf8.RuneError && w == 1 {
 		p.posErr(p.nextPos(), "invalid UTF-8 encoding")
 	}
@@ -179,11 +189,12 @@ func (p *Parser) fill() (n int) {
 	}
 	p.offs += int64(p.bsp)
 	left := len(p.bs) - int(p.bsp)
-	copy(p.readBuf[:left], p.bs[p.bsp:])
+	scratch := p.ensureScratch()
+	copy(scratch.readBuf[:left], p.bs[p.bsp:])
 readAgain:
 	n, err := 0, p.readErr
 	if err == nil {
-		n, err = p.src.Read(p.readBuf[left:])
+		n, err = p.src.Read(scratch.readBuf[left:])
 		p.readErr = err
 		if err == io.EOF {
 			p.readEOF = true
@@ -198,18 +209,19 @@ readAgain:
 			p.err = err
 		}
 		if left > 0 {
-			p.bs = p.readBuf[:left]
+			p.bs = scratch.readBuf[:left]
 		} else {
 			p.bs = nil
 		}
 	} else {
-		p.bs = p.readBuf[:left+n]
+		p.bs = scratch.readBuf[:left+n]
 	}
 	p.bsp = 0
 	return n
 }
 
 func (p *Parser) nextKeepSpaces() {
+	p.tokSeparator = CallExprSeparator{}
 	r := p.r
 	if p.quote != hdocBody && p.quote != hdocBodyTabs {
 		// Heredocs handle escaped newlines in a special way, but others do not.
@@ -259,6 +271,7 @@ func (p *Parser) nextKeepSpaces() {
 	}
 	p.tokAliasChain = append(p.tokAliasChain[:0], p.aliasChain...)
 	if p.aliasBlankNext {
+		prefixSep := p.tokSeparator
 		if p.expandCommandAlias() {
 			// Continue expanding recursively so nested aliases
 			// (e.g. FOR2→FOR1→for) are fully resolved.
@@ -268,7 +281,8 @@ func (p *Parser) nextKeepSpaces() {
 			// The trailing-blank that triggered this expansion is a
 			// word boundary; restore p.spaced which expandCommandAlias
 			// resets via its internal p.next() call.
-			p.spaced = true
+			p.tokSeparator = combineCallExprSeparators(prefixSep, p.tokSeparator)
+			p.spaced = p.tokSeparator.IsValid()
 			return
 		}
 		// A trailing-blank alias only grants one more token the chance to
@@ -284,15 +298,19 @@ func (p *Parser) next() {
 	if p.r == utf8.RuneSelf {
 		p.tok = _EOF
 		p.tokAliasChain = p.tokAliasChain[:0]
+		p.tokSeparator = CallExprSeparator{}
 		return
 	}
 	p.spaced = false
+	p.tokSeparator = CallExprSeparator{}
 	if p.quote&allKeepSpaces != 0 {
 		p.nextKeepSpaces()
 		return
 	}
 	r := p.r
 	for r == escNewl {
+		p.tokSeparator.valid = true
+		p.tokSeparator.newline = true
 		r = p.rune()
 	}
 skipSpace:
@@ -305,19 +323,33 @@ skipSpace:
 			}
 			p.tok = _EOF
 			p.tokAliasChain = p.tokAliasChain[:0]
+			p.tokSeparator = CallExprSeparator{}
 			return
 		case escNewl:
+			p.tokSeparator.valid = true
+			p.tokSeparator.newline = true
 			r = p.rune()
-		case ' ', '\t':
+		case ' ':
 			p.spaced = true
+			p.tokSeparator.valid = true
+			p.tokSeparator.spaces++
+			r = p.rune()
+		case '\t':
+			p.spaced = true
+			p.tokSeparator.valid = true
+			p.tokSeparator.tabs++
 			r = p.rune()
 		case '\n':
 			if p.tok == _Newl {
 				// merge consecutive newline tokens
+				p.tokSeparator.valid = true
+				p.tokSeparator.newline = true
 				r = p.rune()
 				continue
 			}
 			p.spaced = true
+			p.tokSeparator.valid = true
+			p.tokSeparator.newline = true
 			p.tok = _Newl
 			if p.quote != hdocWord && len(p.heredocs) > p.buriedHdocs {
 				p.doHeredocs()
@@ -442,11 +474,13 @@ skipSpace:
 	}
 	p.tokAliasChain = append(p.tokAliasChain[:0], p.aliasChain...)
 	if p.aliasBlankNext {
+		prefixSep := p.tokSeparator
 		if p.expandCommandAlias() {
 			for p.expandCommandAlias() {
 			}
 			p.aliasBlankNext = false
-			p.spaced = true
+			p.tokSeparator = combineCallExprSeparators(prefixSep, p.tokSeparator)
+			p.spaced = p.tokSeparator.IsValid()
 			return
 		}
 		// A trailing-blank alias only grants one more token the chance to
@@ -1028,21 +1062,22 @@ func (p *Parser) arithmToken(r rune) token {
 }
 
 func (p *Parser) newLit(r rune) {
+	scratch := p.ensureScratch()
 	switch {
 	case r < utf8.RuneSelf:
-		p.litBs = p.litBuf[:1]
+		p.litBs = scratch.litBuf[:1]
 		p.litBs[0] = byte(r)
 	case r > escNewl:
 		w := p.w
 		if w <= 0 || uint(w) > p.bsp {
-			p.litBs = p.litBuf[:0]
+			p.litBs = scratch.litBuf[:0]
 			return
 		}
-		p.litBs = append(p.litBuf[:0], p.bs[p.bsp-uint(w):p.bsp]...)
+		p.litBs = append(scratch.litBuf[:0], p.bs[p.bsp-uint(w):p.bsp]...)
 	default:
 		// don't let r == utf8.RuneSelf go to the second case as [utf8.RuneLen]
 		// would return -1
-		p.litBs = p.litBuf[:0]
+		p.litBs = scratch.litBuf[:0]
 	}
 }
 
@@ -1225,14 +1260,18 @@ func (p *Parser) advanceLitHdoc(r rune) {
 
 	p.tok = _Lit
 	p.newLit(r)
+	lineRawStart := 0
+	lineRawPos := p.pos
+	lineIndentTabs := uint16(0)
 	for p.quote == hdocBodyTabs && r == '\t' {
+		lineIndentTabs++
 		r = p.rune()
 	}
 	lStart := len(p.litBs) - 1
-	var stop []byte
-	if !p.parsingDoc && len(p.hdocStops) > 0 {
-		stop = p.hdocStops[len(p.hdocStops)-1]
+	if r == '\n' || r == utf8.RuneSelf {
+		lStart = len(p.litBs)
 	}
+	stop := p.currentHeredocStop()
 	for ; ; r = p.rune() {
 		switch r {
 		case escNewl, '$':
@@ -1256,27 +1295,36 @@ func (p *Parser) advanceLitHdoc(r rune) {
 			} else if lStart == 0 && lastTok == _Lit {
 				// This line starts right after an escaped
 				// newline, so it should never end the heredoc.
-			} else if lStart >= 0 && len(p.hdocStops) > 0 {
-				// Compare the current line with the stop word.
-				line := p.litBs[lStart:]
-				if r != utf8.RuneSelf && len(line) > 0 {
-					line = line[:len(line)-1] // minus trailing character
+			} else if lStart >= 0 && stop != nil {
+				rawEnd := len(p.litBs)
+				closeEnd := p.nextPos()
+				if r != utf8.RuneSelf && rawEnd > lineRawStart {
+					rawEnd-- // minus trailing newline
 				}
-				if bytes.Equal(line, stop) {
+				matchStart := lStart
+				if matchStart > rawEnd {
+					matchStart = rawEnd
+				}
+				hasLine := r != utf8.RuneSelf || rawEnd > lineRawStart || lineIndentTabs > 0
+				p.updateHeredocStop(stop, lineRawPos, closeEnd, p.litBs[lineRawStart:rawEnd], p.litBs[matchStart:rawEnd], lineIndentTabs, r == utf8.RuneSelf, hasLine)
+				if stop.close.matched {
 					p.tok = _LitWord
-					p.val = p.endLit()[:lStart]
+					p.val = p.endLit()[:matchStart]
 					if p.val == "" {
 						p.tok = _Newl
 					}
-					p.hdocStops[len(p.hdocStops)-1] = nil
 					return
 				}
 			}
 			if r != '\n' {
 				return // hit an unexpected EOF or closing backquote
 			}
+			lineRawStart = len(p.litBs)
+			lineRawPos = NewPos(p.nextPos().Offset()+1, p.nextPos().Line()+1, 1)
+			lineIndentTabs = 0
 			for p.quote == hdocBodyTabs && p.peek() == '\t' {
 				p.rune()
+				lineIndentTabs++
 			}
 			lStart = len(p.litBs)
 		}
@@ -1287,19 +1335,35 @@ func (p *Parser) quotedHdocWord() *Word {
 	r := p.r
 	p.newLit(r)
 	pos := p.nextPos()
-	stop := p.hdocStops[len(p.hdocStops)-1]
-	for ; ; r = p.rune() {
+	lineRawStart := 0
+	lineRawPos := pos
+	lineIndentTabs := uint16(0)
+	for p.quote == hdocBodyTabs && r == '\t' {
+		lineIndentTabs++
+		r = p.rune()
+	}
+	lStart := len(p.litBs) - 1
+	if r == '\n' || r == utf8.RuneSelf {
+		lStart = len(p.litBs)
+	}
+	stop := p.currentHeredocStop()
+	for {
 		if r == utf8.RuneSelf {
+			if stop != nil {
+				rawEnd := len(p.litBs)
+				hasLine := rawEnd > lineRawStart || lineIndentTabs > 0
+				matchStart := lStart
+				if matchStart > rawEnd {
+					matchStart = rawEnd
+				}
+				p.updateHeredocStop(stop, lineRawPos, p.nextPos(), p.litBs[lineRawStart:rawEnd], p.litBs[matchStart:rawEnd], lineIndentTabs, true, hasLine)
+			}
 			val := p.endLit()
 			if val == "" {
 				return nil
 			}
 			return p.wordOne(p.lit(pos, val))
 		}
-		for p.quote == hdocBodyTabs && r == '\t' {
-			r = p.rune()
-		}
-		lStart := len(p.litBs) - 1
 	runeLoop:
 		for {
 			switch r {
@@ -1315,22 +1379,46 @@ func (p *Parser) quotedHdocWord() *Word {
 			}
 			r = p.rune()
 		}
-		if lStart < 0 {
-			continue
+		if lStart >= 0 && stop != nil {
+			rawEnd := len(p.litBs)
+			closeEnd := p.nextPos()
+			if r != utf8.RuneSelf && rawEnd > lineRawStart {
+				rawEnd-- // minus trailing newline
+			}
+			matchStart := lStart
+			if matchStart > rawEnd {
+				matchStart = rawEnd
+			}
+			hasLine := r != utf8.RuneSelf || rawEnd > lineRawStart || lineIndentTabs > 0
+			p.updateHeredocStop(stop, lineRawPos, closeEnd, p.litBs[lineRawStart:rawEnd], p.litBs[matchStart:rawEnd], lineIndentTabs, r == utf8.RuneSelf, hasLine)
+			if stop.close.matched {
+				val := p.endLit()[:matchStart]
+				if val == "" {
+					return nil
+				}
+				return p.wordOne(p.lit(pos, val))
+			}
 		}
-		// Compare the current line with the stop word.
-		line := p.litBs[lStart:]
-		if r != utf8.RuneSelf && len(line) > 0 {
-			line = line[:len(line)-1] // minus \n
-		}
-		if bytes.Equal(line, stop) {
-			p.hdocStops[len(p.hdocStops)-1] = nil
-			val := p.endLit()[:lStart]
+		if r == utf8.RuneSelf {
+			val := p.endLit()
 			if val == "" {
 				return nil
 			}
 			return p.wordOne(p.lit(pos, val))
 		}
+		lineRawStart = len(p.litBs)
+		lineBreakWidth := uint(1)
+		if r == escNewl {
+			lineBreakWidth += uint(p.w)
+		}
+		lineRawPos = NewPos(p.nextPos().Offset()+lineBreakWidth, p.nextPos().Line()+1, 1)
+		lineIndentTabs = 0
+		for p.quote == hdocBodyTabs && p.peek() == '\t' {
+			p.rune()
+			lineIndentTabs++
+		}
+		lStart = len(p.litBs)
+		r = p.rune()
 	}
 }
 

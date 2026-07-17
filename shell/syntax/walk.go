@@ -15,7 +15,7 @@ import (
 // recursively for each of the non-nil children of node, followed by
 // f(nil).
 func Walk(node Node, f func(Node) bool) {
-	if !f(node) {
+	if node == nil || !f(node) {
 		return
 	}
 
@@ -111,6 +111,8 @@ func Walk(node Node, f func(Node) bool) {
 	case *PatternAny:
 	case *PatternSingle:
 	case *PatternCharClass:
+	case *PatternGroup:
+		walkList(node.Patterns, f)
 	case *CmdSubst:
 		walkList(node.Stmts, f)
 		walkComments(node.Last, f)
@@ -337,12 +339,22 @@ func (p *debugPrinter) print(x reflect.Value) {
 		}
 		t := x.Type()
 		p.printf("%s {", t)
+		exported := make([]int, 0, t.NumField())
+		for i := range t.NumField() {
+			if t.Field(i).IsExported() {
+				exported = append(exported, i)
+			}
+		}
+		if len(exported) == 0 {
+			p.printf("}")
+			return
+		}
 		p.level++
 		p.newline()
-		for i := range t.NumField() {
-			p.printf("%s: ", t.Field(i).Name)
-			p.print(x.Field(i))
-			if i == x.NumField()-1 {
+		for i, fieldIndex := range exported {
+			p.printf("%s: ", t.Field(fieldIndex).Name)
+			p.print(x.Field(fieldIndex))
+			if i == len(exported)-1 {
 				p.level--
 			}
 			p.newline()

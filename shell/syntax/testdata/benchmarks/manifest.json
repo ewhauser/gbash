@@ -1,0 +1,14 @@
+{
+  "fixtures": [
+    {
+      "local_filename": "files/nvm.sh",
+      "upstream_repo": "nvm-sh/nvm",
+      "upstream_path": "nvm.sh",
+      "commit": "977563e97ddc66facf3a8e31c6cff01d236f09bd",
+      "source_url": "https://raw.githubusercontent.com/nvm-sh/nvm/977563e97ddc66facf3a8e31c6cff01d236f09bd/nvm.sh",
+      "spdx_license_id": "MIT",
+      "license_filename": "licenses/nvm-LICENSE.md",
+      "byte_size": 150227
+    }
+  ]
+}
