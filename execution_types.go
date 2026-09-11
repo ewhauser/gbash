@@ -31,6 +31,11 @@ type ExecutionRequest struct {
 	Stdin           io.Reader
 	Stdout          io.Writer
 	Stderr          io.Writer
+	// SpillDir optionally enables large-output spilling. When non-empty,
+	// stdout/stderr overflow beyond the policy byte limits is written to temp
+	// files in this directory (see [ExecutionResult.StdoutSpillPath]). Empty
+	// keeps the legacy truncate-and-drop behavior.
+	SpillDir string
 }
 
 // ExecutionResult captures the output, exit status, timing, and optional trace
@@ -50,6 +55,14 @@ type ExecutionResult struct {
 	Events          []trace.Event
 	StdoutTruncated bool
 	StderrTruncated bool
+	// TimedOut reports that execution was stopped by the request timeout
+	// (context deadline), as opposed to the script exiting on its own.
+	TimedOut bool
+	// StdoutSpillPath / StderrSpillPath point at temp files holding the
+	// overflow when the corresponding stream exceeded its byte limit and
+	// spilling was enabled. Empty when nothing was spilled.
+	StdoutSpillPath string
+	StderrSpillPath string
 }
 
 // InteractiveRequest describes an interactive shell session.
@@ -92,6 +105,7 @@ func (req *ExecutionRequest) runtimeRequest() *internalruntime.ExecutionRequest 
 		Stdin:           req.Stdin,
 		Stdout:          req.Stdout,
 		Stderr:          req.Stderr,
+		SpillDir:        req.SpillDir,
 	}
 }
 
@@ -112,6 +126,9 @@ func executionResultFromRuntime(result *internalruntime.ExecutionResult) *Execut
 		Events:          cloneTraceEvents(result.Events),
 		StdoutTruncated: result.StdoutTruncated,
 		StderrTruncated: result.StderrTruncated,
+		TimedOut:        result.TimedOut,
+		StdoutSpillPath: result.StdoutSpillPath,
+		StderrSpillPath: result.StderrSpillPath,
 	}
 }
 
