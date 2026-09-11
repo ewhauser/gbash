@@ -89,8 +89,10 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 	}
 
 	limits := s.cfg.Policy.Limits()
-	stdout := newCaptureBuffer(limits.MaxStdoutBytes)
-	stderr := newCaptureBuffer(limits.MaxStderrBytes)
+	stdout := newSpillingCaptureBuffer(limits.MaxStdoutBytes, req.SpillDir)
+	stderr := newSpillingCaptureBuffer(limits.MaxStderrBytes, req.SpillDir)
+	defer stdout.Close()
+	defer stderr.Close()
 	stdoutWriter := newCapturePassthroughWriter(stdout, req.Stdout)
 	stderrWriter := newCapturePassthroughWriter(stderr, req.Stderr)
 	ctx, execStdin := bindExecutionTTY(ctx, req.Stdin, stdoutWriter)
@@ -140,6 +142,8 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 			Events:          events,
 			StdoutTruncated: stdout.Truncated(),
 			StderrTruncated: stderr.Truncated(),
+			StdoutSpillPath: stdout.SpillPath(),
+			StderrSpillPath: stderr.SpillPath(),
 		}
 		handled := classifyExecutionControlError(ctx, req.Timeout, err, stderr, result)
 		logExecutionOutputs(ctx, s.cfg.Logger, &baseLogEvent, result)
@@ -210,6 +214,8 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 		Events:          events,
 		StdoutTruncated: stdout.Truncated(),
 		StderrTruncated: stderr.Truncated(),
+		StdoutSpillPath: stdout.SpillPath(),
+		StderrSpillPath: stderr.SpillPath(),
 	}
 	if runResult != nil {
 		result.FinalEnv = runResult.FinalEnv
@@ -546,6 +552,7 @@ func classifyExecutionControlError(ctx context.Context, timeout time.Duration, r
 		message := timeoutMessage(timeout)
 		writeExecutionControlMessage(stderr, message)
 		result.ExitCode = 124
+		result.TimedOut = true
 		result.ControlStderr = message
 		result.Stderr = stderr.String()
 		result.StderrTruncated = stderr.Truncated()
