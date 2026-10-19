@@ -177,7 +177,9 @@ The normal CLI entrypoint also accepts filesystem selection flags before the she
 - `gbash --readwrite-root <dir> ...` mounts `<dir>` as sandbox `/` so writes persist back to the host, but only when `<dir>` is inside the system temp directory
 - `gbash --inherit-env <vars> ...` copies the named host environment variables into the runtime base environment without otherwise widening the default environment surface; the value is a comma-separated list of shell variable names
 - `gbash --copy-script ...` stages the positional host regular file into the sandbox before execution instead of requiring it to already exist in the sandbox namespace
-- `gbash --json ...` emits one JSON object for a non-interactive execution with `stdout`, `stderr`, `exitCode`, truncation flags, timing metadata, and optional trace metadata when tracing is enabled
+- `gbash --json ...` emits one JSON object for a non-interactive execution with `stdout`, `stderr`, `exitCode`, truncation flags, timing metadata, and optional trace metadata when tracing is enabled; when a stream is not valid UTF-8, `stdoutBase64` / `stderrBase64` carry its exact bytes and `stdout` / `stderr` hold a lossy U+FFFD copy
+- gbash's own flags are only recognized before the script source: everything after `-c command_string` or a script path is `$0` and the positional parameters, as in bash, so positional args can never inject `--root`, `--readwrite-root`, `--json`, or other gbash flags
+- `--readwrite-root` mounts the symlink-resolved path that passed the system-temp check, so replacing a symlink after startup cannot redirect later server sessions
 - `gbash --dump-ast ...` parses the selected non-interactive input and writes the typed JSON `shell/syntax` AST to stdout without executing the script
 - `gbash --dump-ast --detect ...` chooses the AST parser variant from a leading shebang first, then a positional file extension for file-backed inputs, and otherwise falls back to `bash`; `--detect` is not a standalone reporting mode
 - `gbash --server --socket <path>` serves a long-lived JSON-RPC protocol over a Unix domain socket instead of executing a script
@@ -221,8 +223,15 @@ This matches the agent workflow we care about: a sequence of shell calls operati
 - the server protocol is JSON-RPC 2.0 over either a Unix domain socket or a caller-provided listener such as loopback TCP
 - the protocol is JSON-RPC 2.0 request/response, not a custom streaming transport
 - the shared CLI requires exactly one transport flag: `--socket` or `--listen`
-- the shared CLI restricts `--listen` to loopback hosts because v1 has no authentication layer
-- the Unix socket helper must chmod the socket to `0600`, reject an already-active socket path, and only replace stale socket files; on Unix platforms the socket is bound and chmodded inside a fresh `0700` staging directory and then renamed into place, so it is never connectable by other local users, and any missing parent directory is created `0700`
+- the shared CLI restricts `--listen` to loopback hosts because v1 has no authentication layer; `localhost` binds `127.0.0.1` directly rather than trusting `/etc/hosts` or DNS, and the bound address is re-checked to be loopback
+- loopback TCP is still reachable by every local user and by local processes such as browsers, so any local user can drive a TCP server's sessions; prefer `--socket`, whose `0600` socket limits access to the owning user, on multi-user hosts
+- session ids are 128-bit random values (`sess-<32 hex>`), so a client cannot guess another client's session; `session.list` still reveals ids to anyone who can connect
+- the server caps concurrent sessions (`Config.MaxSessions`, default 256; `session.create` past the cap fails with `SESSION_LIMIT`) and request size (`Config.MaxRequestBytes`, default 16 MiB; an oversized request gets `REQUEST_TOO_LARGE` and the connection is closed); `Config.MaxExecTimeout` optionally caps every `session.exec` timeout, and `timeout_ms` values too large for a Go duration saturate instead of overflowing
+- `session.exec` runs under a per-connection context: when the client disconnects (or half-closes its write side) the in-flight execution is cancelled and its session returns to idle
+- JSON-RPC notifications (requests without an `id` member) are processed but never answered
+- internal errors are logged through the standard library default logger and returned to clients as a generic `INTERNAL` error without details, since they can include host paths
+- `Serve` retries temporary `Accept` errors (such as `EMFILE`) with backoff, and closes every live connection whenever it returns
+- the Unix socket helper must chmod the socket to `0600`, reject an already-active socket path, and only replace stale socket files; on Unix platforms the socket is bound and chmodded inside a fresh `0700` staging directory and then hard-linked into place (falling back to rename on filesystems without hard links), so it is never connectable by other local users and never replaces a socket another server bound concurrently, and any missing parent directory is created `0700`; on shutdown it removes the socket path only if that path still names its own socket, and socket paths longer than the platform `sun_path` limit are rejected with an error naming the requested path
 - `session_id` maps 1:1 to a persistent `Session`
 - filesystem shape is configured once at server startup through the normal runtime options and is not part of the wire protocol
 - the primary remote operation is `session.exec`, which runs one non-interactive `Session.Exec` call and returns the full execution result in one response
@@ -240,6 +249,7 @@ Recommended v1 methods:
 Recommended v1 result shape for `session.exec`:
 
 - `exit_code`, `stdout`, `stderr`
+- `stdout_base64`, `stderr_base64` with the exact bytes, present only when the stream is not valid UTF-8 (`stdout` / `stderr` then hold a lossy U+FFFD copy)
 - `stdout_truncated`, `stderr_truncated`
 - `final_env`, `shell_exited`, `control_stderr`
 - timing metadata such as `started_at`, `finished_at`, and `duration_ms`

@@ -31,7 +31,7 @@ func TestListenUnixSocketSetsSocketPermissions0600(t *testing.T) {
 	t.Parallel()
 	socket := newShortSocketPath(t)
 
-	_, ln, err := listenUnixSocket(t.Context(), socket)
+	ln, err := listenUnixSocket(t.Context(), socket)
 	if err != nil {
 		t.Fatalf("listenUnixSocket(%q) error = %v", socket, err)
 	}
@@ -56,7 +56,7 @@ func TestListenUnixSocketRejectsExistingNonSocketPath(t *testing.T) {
 		t.Fatalf("WriteFile(%q) error = %v", socket, err)
 	}
 
-	_, _, err := listenUnixSocket(t.Context(), socket)
+	_, err := listenUnixSocket(t.Context(), socket)
 	if err == nil {
 		t.Fatal("listenUnixSocket() error = nil, want non-socket path rejection")
 	}
@@ -75,7 +75,7 @@ func TestListenUnixSocketRejectsActiveSocketPath(t *testing.T) {
 	}
 	defer func() { _ = active.Close() }()
 
-	_, _, err = listenUnixSocket(t.Context(), socket)
+	_, err = listenUnixSocket(t.Context(), socket)
 	if err == nil {
 		t.Fatal("listenUnixSocket() error = nil, want active socket rejection")
 	}
@@ -107,7 +107,7 @@ func TestListenUnixSocketRemovesStaleSocket(t *testing.T) {
 		t.Fatalf("Lstat(%q) error = %v", socket, err)
 	}
 
-	_, ln, err := listenUnixSocket(t.Context(), socket)
+	ln, err := listenUnixSocket(t.Context(), socket)
 	if err != nil {
 		t.Fatalf("listenUnixSocket(%q) error = %v", socket, err)
 	}
@@ -124,7 +124,7 @@ func TestListenUnixSocketPrivateDirectoryAndNoStagingLeftovers(t *testing.T) {
 	dir := filepath.Join(base, "d")
 	socket := filepath.Join(dir, "s.sock")
 
-	_, ln, err := listenUnixSocket(t.Context(), socket)
+	ln, err := listenUnixSocket(t.Context(), socket)
 	if err != nil {
 		t.Fatalf("listenUnixSocket(%q) error = %v", socket, err)
 	}
