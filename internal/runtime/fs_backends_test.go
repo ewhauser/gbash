@@ -121,3 +121,58 @@ func TestOverlayFollowsLowerSymlinksForShellReadsAndWrites(t *testing.T) {
 		t.Fatalf("Stderr = %q, want empty", got)
 	}
 }
+
+func TestOverlayRedirectIntoMissingDirectoryFailsWithoutCreatingParents(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{
+		FileSystem: CustomFileSystem(
+			gbfs.Overlay(seededFSFactory{files: map[string]string{
+				"/w/file.txt": "seed\n",
+				"/w/dir/a":    "a\n",
+			}}),
+			defaultHomeDir,
+		),
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:  []string{"/"},
+			WriteRoots: []string{"/"},
+		}),
+	})
+
+	for _, tc := range []struct {
+		script     string
+		wantStderr string
+	}{
+		{script: "echo hi > /w/missing/dir/x\n", wantStderr: "/w/missing/dir/x: No such file or directory\n"},
+		{script: "echo hi >> /w/missing/x\n", wantStderr: "/w/missing/x: No such file or directory\n"},
+		{script: "echo hi > /w/file.txt/x\n", wantStderr: "/w/file.txt/x: Not a directory\n"},
+		{script: "rm -r /w/dir\necho hi > /w/dir/x\n", wantStderr: "/w/dir/x: No such file or directory\n"},
+	} {
+		result, err := rt.Run(context.Background(), &ExecutionRequest{Script: tc.script})
+		if err != nil {
+			t.Fatalf("Run(%q) error = %v", tc.script, err)
+		}
+		if result.ExitCode != 1 {
+			t.Fatalf("Run(%q) ExitCode = %d, want 1; stderr=%q", tc.script, result.ExitCode, result.Stderr)
+		}
+		if got := result.Stderr; got != tc.wantStderr {
+			t.Fatalf("Run(%q) Stderr = %q, want %q", tc.script, got, tc.wantStderr)
+		}
+	}
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "" +
+			"echo hi > /w/missing/x\n" +
+			"if [ -e /w/missing ]; then echo created; else echo absent; fi\n" +
+			"echo new > /w/dir/b\n" +
+			"cat /w/dir/a /w/dir/b\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "absent\na\nnew\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}

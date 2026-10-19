@@ -61,13 +61,16 @@ func (o *OverlayFS) OpenFile(ctx context.Context, name string, flag int, perm st
 
 	missing := overlayMissingNone
 	if flag&os.O_CREATE != 0 {
-		missing = overlayMissingTail
+		missing = overlayMissingFinal
 	}
 	// O_CREATE|O_EXCL never follows a final symlink: an existing link, even a
 	// dangling one, makes the open fail.
 	exclusive := flag&(os.O_CREATE|os.O_EXCL) == os.O_CREATE|os.O_EXCL
 	resolved, info, source, err := o.resolveMergedPath(ctx, abs, !exclusive, missing)
 	if err != nil {
+		if flag&os.O_CREATE != 0 {
+			err = createParentError(err)
+		}
 		return nil, toPathError("open", abs, err)
 	}
 	if exclusive && info != nil {
@@ -203,7 +206,7 @@ func (o *OverlayFS) Symlink(ctx context.Context, target, linkName string) error 
 	requested := o.resolve(linkName)
 	abs, _, _, err := o.resolveMergedPath(ctx, requested, false, overlayMissingFinal)
 	if err != nil {
-		return toPathError("symlink", requested, err)
+		return toPathError("symlink", requested, createParentError(err))
 	}
 	if err := o.upper.Symlink(ctx, target, abs); err != nil {
 		return toPathError("symlink", abs, err)
@@ -222,7 +225,7 @@ func (o *OverlayFS) Link(ctx context.Context, oldName, newName string) error {
 	}
 	newAbs, newInfo, _, err := o.resolveMergedPath(ctx, o.resolve(newName), false, overlayMissingFinal)
 	if err != nil {
-		return toPathError("link", o.resolve(newName), err)
+		return toPathError("link", o.resolve(newName), createParentError(err))
 	}
 	if newInfo != nil {
 		return &os.PathError{Op: "link", Path: newAbs, Err: stdfs.ErrExist}
@@ -355,7 +358,7 @@ func (o *OverlayFS) Mkfifo(ctx context.Context, name string, perm stdfs.FileMode
 	requested := o.resolve(name)
 	abs, info, _, err := o.resolveMergedPath(ctx, requested, false, overlayMissingFinal)
 	if err != nil {
-		return toPathError("mkfifo", requested, err)
+		return toPathError("mkfifo", requested, createParentError(err))
 	}
 	if info != nil {
 		return &os.PathError{Op: "mkfifo", Path: abs, Err: stdfs.ErrExist}
@@ -415,7 +418,7 @@ func (o *OverlayFS) Rename(ctx context.Context, oldName, newName string) error {
 	}
 	newAbs, newInfo, _, err := o.resolveMergedPath(ctx, newRequested, false, overlayMissingFinal)
 	if err != nil {
-		return toPathError("rename", newRequested, err)
+		return toPathError("rename", newRequested, createParentError(err))
 	}
 	if oldAbs == "/" || newAbs == "/" {
 		return &os.PathError{Op: "rename", Path: oldRequested, Err: stdfs.ErrPermission}
@@ -558,11 +561,10 @@ type overlayMissing uint8
 const (
 	// overlayMissingNone reports ErrNotExist for any missing component.
 	overlayMissingNone overlayMissing = iota
-	// overlayMissingFinal accepts a missing final component.
+	// overlayMissingFinal accepts a missing final component. Creating
+	// operations use it so a missing parent fails with ENOENT instead of being
+	// materialized in the upper layer.
 	overlayMissingFinal
-	// overlayMissingTail accepts any missing suffix, matching MemoryFS's
-	// create semantics, which materialize missing parents on demand.
-	overlayMissingTail
 )
 
 // resolveMergedPath resolves abs against the merged view of both layers. Symlinks
@@ -613,14 +615,10 @@ func (o *OverlayFS) resolveMergedDepth(ctx context.Context, abs string, followFi
 			if !errors.Is(err, stdfs.ErrNotExist) {
 				return "", nil, overlaySourceNone, err
 			}
-			switch {
-			case isLast && missing != overlayMissingNone:
+			if isLast && missing == overlayMissingFinal {
 				return next, nil, overlaySourceNone, nil
-			case missing == overlayMissingTail:
-				return Resolve(next, path.Join(parts[i+1:]...)), nil, overlaySourceNone, nil
-			default:
-				return "", nil, overlaySourceNone, stdfs.ErrNotExist
 			}
+			return "", nil, overlaySourceNone, stdfs.ErrNotExist
 		}
 		if info.Mode()&stdfs.ModeSymlink != 0 && (!isLast || followFinal) {
 			target, err := o.readlinkAt(ctx, source, next)
