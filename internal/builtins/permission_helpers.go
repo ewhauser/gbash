@@ -385,6 +385,9 @@ func walkPermissionPath(ctx context.Context, inv *Invocation, abs string, opts p
 		return err
 	}
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		child := path.Join(abs, entry.Name())
 		if err := walkPermissionPath(ctx, inv, child, opts, false, seen, visit); err != nil {
 			return err
