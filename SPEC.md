@@ -838,7 +838,7 @@ Default policy stance for MVP:
 - symlink traversal denied unless a filesystem backend and policy explicitly allow it
 - request-level timeout is opt-in, but when it fires the execution must stop with exit code `124` and set `ExecutionResult.TimedOut`
 - caller-driven cancellation must stop the execution with exit code `130`
-- captured stdout/stderr beyond `MaxStdoutBytes` / `MaxStderrBytes` is dropped by default; when the embedder sets `ExecutionRequest.SpillDir`, the overflow is instead written to a host temp file in that directory (capped by `MaxSpillBytes`, default 64 MiB per stream) and reported via `StdoutSpillPath` / `StderrSpillPath`. These writes go to the host directly, outside the sandbox `FileSystem`; scripts cannot choose or read the spill location, the embedder owns cleanup, and a spill failure falls back to truncation instead of surfacing as a script write error
+- captured stdout/stderr beyond `MaxStdoutBytes` / `MaxStderrBytes` is dropped by default; when the embedder sets `ExecutionRequest.SpillDir`, the overflow is instead written to a host temp file in that directory (capped by `MaxSpillBytes`, default 64 MiB per stream) and reported via `StdoutSpillPath` / `StderrSpillPath`; when the overflow exceeds that cap the file is cut short and `StdoutSpillTruncated` / `StderrSpillTruncated` are set. These writes go to the host directly, outside the sandbox `FileSystem`; scripts cannot choose or read the spill location, the embedder owns cleanup, and a spill failure falls back to truncation instead of surfacing as a script write error
 - no ambient network access; `curl` is absent unless the runtime enables the sandboxed network client
 
 The policy package should be able to answer three questions:

@@ -104,6 +104,58 @@ func TestCaptureBufferSpillCap(t *testing.T) {
 	if got, want := string(data), "efghabcdef"; got != want {
 		t.Fatalf("spill file = %q, want %q", got, want)
 	}
+	if !buf.SpillTruncated() {
+		t.Fatal("SpillTruncated() = false, want true after hitting spillMax")
+	}
+}
+
+// TestCaptureBufferSpillExactlyAtCapNotTruncated asserts overflow that fits
+// the cap exactly is not reported as truncated, while one more byte is.
+func TestCaptureBufferSpillExactlyAtCapNotTruncated(t *testing.T) {
+	t.Parallel()
+	buf := newSpillingCaptureBuffer(4, t.TempDir(), 10)
+	if _, err := buf.Write([]byte("abcd0123456789")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if buf.SpillTruncated() {
+		t.Fatal("SpillTruncated() = true, want false when overflow fits spillMax")
+	}
+	if _, err := buf.Write([]byte("x")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	buf.Close()
+	if !buf.SpillTruncated() {
+		t.Fatal("SpillTruncated() = false, want true once overflow exceeds spillMax")
+	}
+}
+
+// TestExecutionReportsSpillTruncation asserts results flag a spill file that
+// was cut short at MaxSpillBytes, per stream.
+func TestExecutionReportsSpillTruncation(t *testing.T) {
+	t.Parallel()
+	rt := newRuntimeWithLimits(t, policy.Limits{MaxStdoutBytes: 4, MaxStderrBytes: 4})
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script:        "printf '%040d' 0\nprintf 'abcdefgh' >&2\n",
+		SpillDir:      t.TempDir(),
+		MaxSpillBytes: 10,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.StdoutSpillPath == "" || !result.StdoutSpillTruncated {
+		t.Fatalf("stdout spill = (%q, truncated=%t), want truncated spill file", result.StdoutSpillPath, result.StdoutSpillTruncated)
+	}
+	data, err := os.ReadFile(result.StdoutSpillPath)
+	if err != nil {
+		t.Fatalf("read spill file: %v", err)
+	}
+	if len(data) != 10 {
+		t.Fatalf("stdout spill file = %d bytes, want 10", len(data))
+	}
+	if result.StderrSpillPath == "" || result.StderrSpillTruncated {
+		t.Fatalf("stderr spill = (%q, truncated=%t), want complete spill file", result.StderrSpillPath, result.StderrSpillTruncated)
+	}
 }
 
 // TestCaptureBufferNoSpillAfterClose asserts late writes cannot create a new,
@@ -132,7 +184,7 @@ func TestCaptureBufferNoSpillAfterClose(t *testing.T) {
 // from a normal exit via the new TimedOut field.
 func TestExecutionTimeoutSetsTimedOut(t *testing.T) {
 	t.Parallel()
-	rt := newRuntimeWithLimits(t, policy.Limits{})
+	rt := newRuntimeWithLimits(t, unboundedLoopLimits)
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
 		Script:  "while true; do :; done\n",
@@ -153,7 +205,7 @@ func TestExecutionTimeoutSetsTimedOut(t *testing.T) {
 // timeout) leaves TimedOut false.
 func TestExecutionCancelNotTimedOut(t *testing.T) {
 	t.Parallel()
-	rt := newRuntimeWithLimits(t, policy.Limits{})
+	rt := newRuntimeWithLimits(t, unboundedLoopLimits)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
