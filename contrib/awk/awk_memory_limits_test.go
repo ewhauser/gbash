@@ -32,6 +32,9 @@ func runAWKMemoryScript(t *testing.T, rt *gbruntime.Runtime, script string) *gbr
 	return result
 }
 
+// These run through the full runtime with the default policy limits, so
+// they stick to cases that fail before allocating much. The goawk interp
+// package tests cover each bounded operation with small limits.
 func TestAWKBoundsRunawayMemory(t *testing.T) {
 	t.Parallel()
 
@@ -44,26 +47,6 @@ func TestAWKBoundsRunawayMemory(t *testing.T) {
 			name:    "doubling concat",
 			program: `BEGIN { s = "x"; while (1) s = s s }`,
 			want:    awkStringLimitMessage,
-		},
-		{
-			name:    "multi concat",
-			program: `BEGIN { s = "x"; while (1) s = s "-" s }`,
-			want:    awkStringLimitMessage,
-		},
-		{
-			name:    "gsub amplification",
-			program: `BEGIN { s = "x"; while (1) gsub(/x/, "&&", s) }`,
-			want:    awkStringLimitMessage,
-		},
-		{
-			name:    "gsub single huge replacement",
-			program: `BEGIN { s = "x"; for (i = 0; i < 13; i++) s = s s; r = s; gsub(/&/, "\\&", r); gsub(/x/, r, s) }`,
-			want:    awkStringLimitMessage,
-		},
-		{
-			name:    "gensub amplification",
-			program: `BEGIN { s = "x"; while (1) s = gensub("x+", "&&", "g", s) }`,
-			want:    "awk: gensub: string exceeds the 16777216-byte memory limit",
 		},
 		{
 			name:    "sprintf literal widths",
@@ -81,13 +64,10 @@ func TestAWKBoundsRunawayMemory(t *testing.T) {
 			want:    awkStringLimitMessage,
 		},
 		{
-			name:    "distinct large array values",
-			program: `BEGIN { s = "x"; for (i = 0; i < 20; i++) s = s s; while (1) a[n++] = s n }`,
-			want:    awkArrayLimitMessage,
-		},
-		{
-			name:    "many array elements",
-			program: `BEGIN { while (1) a[n++] }`,
+			// Every element shares one 16 MiB string, so the estimate
+			// reaches the array budget while real memory stays small.
+			name:    "shared large array values",
+			program: `BEGIN { s = "x"; for (i = 0; i < 24; i++) s = s s; while (1) a[n++] = s }`,
 			want:    awkArrayLimitMessage,
 		},
 		{
@@ -114,31 +94,23 @@ func TestAWKBoundsRunawayMemory(t *testing.T) {
 	}
 }
 
-func TestAWKMemoryLimitsCreditFreedArrays(t *testing.T) {
+func TestAWKGensubBoundsResult(t *testing.T) {
 	t.Parallel()
 
-	// Each pass holds about 80 MiB of array values and then frees them, so
-	// the passes would add up to far more than the array budget if freed
-	// elements were not credited back.
-	result := runAWKMemoryScript(t, newAWKRuntime(t), `awk '
-function fill(n, local) { for (i = 0; i < 10; i++) local[i] = s i n; return length(local) }
-BEGIN {
-	s = "x"; for (i = 0; i < 23; i++) s = s s
-	for (pass = 0; pass < 10; pass++) {
-		for (i = 0; i < 10; i++) a[i] = s i pass
-		delete a[0]
-		delete a
-		total += fill(pass)
-		total += split(s s, b, "q")
+	target := strings.Repeat("x", 3000)
+	if _, err := awkGensub("x", "&&", "g", target, 4096); err == nil || err.Error() != "gensub: string exceeds the 4096-byte memory limit" {
+		t.Fatalf("awkGensub() error = %v, want memory limit error", err)
 	}
-	print length(s), total
-}'
-`)
-	if result.ExitCode != 0 {
-		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	if _, err := awkGensub("x+", "&&", "g", target, 4096); err == nil {
+		t.Fatalf("awkGensub() with one large match: error = nil, want memory limit error")
 	}
-	if got, want := result.Stdout, "8388608 110\n"; got != want {
-		t.Fatalf("Stdout = %q, want %q", got, want)
+	got, err := awkGensub("x", "&&", "g", target[:2048], 4096)
+	if err != nil || len(got) != 4096 {
+		t.Fatalf("awkGensub() = %d bytes, %v; want 4096 bytes", len(got), err)
+	}
+	got, err = awkGensub("(x)", `[\1]`, "2", "xxx", 4096)
+	if err != nil || got != "x[x]x" {
+		t.Fatalf("awkGensub() = %q, %v; want %q", got, err, "x[x]x")
 	}
 }
 
