@@ -51,6 +51,14 @@ The sandbox contract is owned by gbash, not by `goja_nodejs`.
 - `fs` methods are synchronous wrappers over `Invocation.FS`
 - cancellation interrupts the JS runtime and Go-backed helpers also check context directly
 - script, stdin, and module reads respect `Invocation.Limits.MaxFileBytes`
+- execution stops after 60 seconds when the request has no deadline
+- `String.prototype.repeat`/`padStart`/`padEnd`, `ArrayBuffer`, typed arrays and
+  `Buffer.alloc`/`from`/`concat` reject requests over 64 MiB, and `Array`,
+  `Array.from`, `String.prototype.split` and `Array.prototype` methods reject
+  lengths over 16Mi elements, throwing a catchable `RangeError`
+- a watchdog interrupts the script once the Go heap grows by more than 1 GiB;
+  the heap is measured process-wide, so concurrent heavy work in the same
+  process counts against it
 - monkeypatches and module cache entries do not survive across executions
 
 ## Registering The Command
