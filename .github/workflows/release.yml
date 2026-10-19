@@ -229,6 +229,9 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/export_website_pages.sh "$PWD" "$PAGES_ROOT"
+          # next build rewrites the tracked website/next-env.d.ts. Restore it so
+          # goreleaser sees a clean checkout of the release tag.
+          git checkout -- website/next-env.d.ts
 
       - name: Determine Pages publish state
         id: pages_state
