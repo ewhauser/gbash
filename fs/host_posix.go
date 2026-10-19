@@ -95,7 +95,7 @@ func (h *HostFS) Open(ctx context.Context, name string) (File, error) {
 	return h.OpenFile(ctx, name, os.O_RDONLY, 0)
 }
 
-func (h *HostFS) OpenFile(_ context.Context, name string, flag int, perm stdfs.FileMode) (File, error) {
+func (h *HostFS) OpenFile(ctx context.Context, name string, flag int, perm stdfs.FileMode) (File, error) {
 	abs := h.resolve(name)
 	if hasWriteIntent(flag) {
 		return nil, h.readOnlyError("open", abs)
@@ -109,14 +109,8 @@ func (h *HostFS) OpenFile(_ context.Context, name string, flag int, perm stdfs.F
 		}
 		defer func() { _ = root.Close() }()
 
-		file, err := root.OpenFile(rootRelativeOpenPath(resolved.rel), flag, perm)
+		file, info, err := openHostFile(ctx, root, rootRelativeOpenPath(resolved.rel), flag, perm)
 		if err != nil {
-			return nil, h.pathError("open", abs, err)
-		}
-
-		info, err := file.Stat()
-		if err != nil {
-			_ = file.Close()
 			return nil, h.pathError("open", abs, err)
 		}
 		if err := h.checkFileSize(info); err != nil {

@@ -750,6 +750,8 @@ Important properties:
 - host-backed filesystems must still satisfy policy checks and must never imply host command execution
 - a read-write host-backed filesystem may be enabled explicitly for external test harnesses or advanced embedding, but it is not the default runtime backend
 - host-backed filesystem mutations that create entries, including named pipes, must perform the final host operation relative to a resolved sandbox-confined directory handle rather than reusing a post-check absolute host path
+- host-backed filesystems open host entries with `O_NONBLOCK` so `open(2)` never blocks: host named pipes are served by a handle whose open, reads, and writes wait in bounded polls and give up once the caller's context ends, and host devices, sockets, and other special files are refused with `EPERM`
+- in-memory named pipes bind blocking reads and writes to the context they were opened under, so a FIFO without a peer stops at the execution timeout or cancellation instead of hanging
 - shell redirects and command file access share the same filesystem view
 - symlink support is optional and must default to the safer behavior when policy is ambiguous
 - for backends without symlink creation/traversal support, `Lstat` behaves like `Stat`, `Readlink` fails for non-symlinks, and `Realpath` resolves only existing virtual paths
@@ -768,6 +770,9 @@ Implementation detail for the current runtime:
 - `MemoryFS` may also hold lazy regular-file providers that materialize on first content-sensitive access such as `Open`, `Stat`, `Lstat`, or `DirEntry.Info`
 - `MemoryFS` creating operations (`OpenFile` with `O_CREATE`, `Symlink`, `Link`, `Rename`, `Mkfifo`) never create missing parent directories: a missing parent fails with `ENOENT` and a non-directory parent with `ENOTDIR`, so `echo hi > /missing/dir/x` exits 1 with `No such file or directory` as in bash; only `MkdirAll` and initial-file seeding create parents
 - `MemoryFS.Rename` rejects moving a directory into its own subtree with `EINVAL`, matching `rename(2)` and `OverlayFS`
+- `TrieFS` follows the same creating-operation parent rule and rename-into-own-subtree check as `MemoryFS`, and its `Chmod` keeps setuid, setgid, and sticky bits
+- the in-memory backends store only permission, setuid, setgid, and sticky bits from a caller-supplied `perm` or `Chmod` mode; type bits always come from the operation that creates the node
+- `MemoryFS` and `TrieFS` open file handles are bound to the file's node rather than its path, so like a POSIX descriptor a handle keeps reading and writing the same file after the path is renamed, unlinked, or replaced
 - `OverlayFS` creating operations follow the same parent rule against the merged view of both layers (following symlinked parents and honoring tombstones): a parent missing from both layers fails with `ENOENT` and a non-directory parent with `ENOTDIR`, while a parent that exists only in the lower layer is a valid destination and is materialized in the upper layer on write
 
 Current and planned backends:
@@ -793,7 +798,9 @@ Backend boundary for the current implementation:
 - `OverlayFS` is intended for internal session use and is exposed through `gbfs.Overlay(...)`
 - `OverlayFS` resolves symlinks against the merged view of both layers: each link is read from the layer that currently provides it, and its target may live in either layer; `Stat`, `Open`, `ReadDir`, `Realpath`, `Chdir`, `Chmod`, `Chtimes`, and following `Chown` follow the final link, while `Lstat`, `Readlink`, `Remove`, `Rename`, `Link`, and the entry-creating operations only resolve parent directories
 - writes and metadata changes through a symlink copy up and modify the resolved target, never the link itself; `MkdirAll` follows symlinked directory components; `O_CREATE|O_EXCL` fails on any existing link, including a dangling one
-- every copy-up (writes via `OpenFile`, `Link` of a lower file, and `Chmod`, `Chown`, `Chtimes`, `Lchtimes`) creates missing upper ancestors with their lower mode, ownership, and modification time, so upper directories never shadow lower ones with default metadata
+- every upper write (copy-ups via `OpenFile`, `Link`, `Chmod`, `Chown`, `Chtimes`, `Lchtimes`, and new entries from `OpenFile` with `O_CREATE`, `Symlink`, `Link`, `Mkfifo`, `MkdirAll`, and `Rename`) first creates missing upper ancestors with their lower mode, ownership, and modification time, so upper directories never shadow lower ones with default metadata
+- copying up a lower regular file records its mode, ownership, size, and modification time but defers reading its content until the copy is opened for reading or a non-truncating write, so a file above the lower layer's read cap can still be truncated, renamed, linked, or have its metadata changed, while reading or appending to it fails with `EFBIG` as on the lower layer; `Rename` moves upper nodes instead of copying them
+- the overlay caches the type of lower-layer directory prefixes and assumes the lower directory structure stays stable for the session; metadata copied up is always re-read from the lower layer
 - `Chmod`, `Chown`, `Chtimes`, and `Lchtimes` on a lower-layer directory copy up only that directory node (mode, ownership, and modification time), never its children, so tombstoned children stay hidden and the cost does not grow with the subtree
 - `MountableFS` is an opt-in namespace backend exposed through `gbfs.Mountable(...)` and `gbash.MountableFileSystem(...)`; live `mount` and `unmount` behavior remains a concrete-backend capability rather than part of the core filesystem interface
 - `SnapshotFS` is a read-only backend for deterministic fixtures and direct tests

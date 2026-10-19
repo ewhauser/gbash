@@ -3,6 +3,7 @@ package fs
 import (
 	"context"
 	"errors"
+	"io"
 	stdfs "io/fs"
 	"os"
 	"path"
@@ -24,7 +25,11 @@ type OverlayFS struct {
 	// lowerDirs caches lower-layer directories seen while walking path
 	// prefixes. The lower layer is never mutated through the overlay, so
 	// this spares backends such as HostFS from re-resolving every prefix of
-	// every path.
+	// every path. It assumes the lower directory structure stays stable for
+	// the overlay's lifetime; a live lower such as HostFS can break that if
+	// the host replaces a directory, so entries are only trusted for the type
+	// of a path prefix. Metadata copied up into the upper layer is always
+	// re-read from the lower layer.
 	lowerDirs map[string]stdfs.FileInfo
 }
 
@@ -80,6 +85,9 @@ func (o *OverlayFS) OpenFile(ctx context.Context, name string, flag int, perm st
 	case info == nil:
 		if flag&os.O_CREATE == 0 {
 			return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrNotExist}
+		}
+		if err := o.copyUpAncestors(ctx, resolved); err != nil {
+			return nil, toPathError("open", abs, err)
 		}
 	case source == overlaySourceLower:
 		if info.IsDir() {
@@ -208,6 +216,9 @@ func (o *OverlayFS) Symlink(ctx context.Context, target, linkName string) error 
 	if err != nil {
 		return toPathError("symlink", requested, createParentError(err))
 	}
+	if err := o.copyUpAncestors(ctx, abs); err != nil {
+		return toPathError("symlink", abs, err)
+	}
 	if err := o.upper.Symlink(ctx, target, abs); err != nil {
 		return toPathError("symlink", abs, err)
 	}
@@ -229,6 +240,9 @@ func (o *OverlayFS) Link(ctx context.Context, oldName, newName string) error {
 	}
 	if newInfo != nil {
 		return &os.PathError{Op: "link", Path: newAbs, Err: stdfs.ErrExist}
+	}
+	if err := o.copyUpAncestors(ctx, newAbs); err != nil {
+		return toPathError("link", newAbs, err)
 	}
 
 	switch source {
@@ -335,6 +349,9 @@ func (o *OverlayFS) MkdirAll(ctx context.Context, name string, perm stdfs.FileMo
 		next := joinChildPath(current, part)
 		info, _, err := o.visiblePrefixInfo(ctx, next)
 		if errors.Is(err, stdfs.ErrNotExist) {
+			if err := o.copyUpAncestors(ctx, next); err != nil {
+				return toPathError("mkdir", next, err)
+			}
 			return o.upper.MkdirAll(ctx, Resolve(next, path.Join(parts[i+1:]...)), perm)
 		}
 		if err != nil {
@@ -362,6 +379,9 @@ func (o *OverlayFS) Mkfifo(ctx context.Context, name string, perm stdfs.FileMode
 	}
 	if info != nil {
 		return &os.PathError{Op: "mkfifo", Path: abs, Err: stdfs.ErrExist}
+	}
+	if err := o.copyUpAncestors(ctx, abs); err != nil {
+		return toPathError("mkfifo", abs, err)
 	}
 	if err := o.upper.Mkfifo(ctx, abs, perm); err != nil {
 		return toPathError("mkfifo", abs, err)
@@ -412,7 +432,7 @@ func (o *OverlayFS) Rename(ctx context.Context, oldName, newName string) error {
 	if oldRequested == "/" || newRequested == "/" {
 		return &os.PathError{Op: "rename", Path: oldRequested, Err: stdfs.ErrPermission}
 	}
-	oldAbs, info, _, err := o.resolveMerged(ctx, oldRequested, false)
+	oldAbs, info, source, err := o.resolveMerged(ctx, oldRequested, false)
 	if err != nil {
 		return &os.PathError{Op: "rename", Path: oldRequested, Err: stdfs.ErrNotExist}
 	}
@@ -433,11 +453,48 @@ func (o *OverlayFS) Rename(ctx context.Context, oldName, newName string) error {
 		return &os.PathError{Op: "rename", Path: newAbs, Err: stdfs.ErrInvalid}
 	}
 
-	if err := clonePath(ctx, o, oldAbs, o.upper, newAbs); err != nil {
+	if err := o.copyUpAncestors(ctx, newAbs); err != nil {
+		return toPathError("rename", newAbs, err)
+	}
+	if err := o.moveMerged(ctx, oldAbs, info, source, newAbs); err != nil {
 		return toPathError("rename", oldAbs, err)
 	}
-	if err := o.Remove(ctx, oldAbs, true); err != nil {
+	// Upper entries were moved rather than copied, so oldAbs may already be
+	// gone from the merged view.
+	if err := o.Remove(ctx, oldAbs, true); err != nil && !errors.Is(err, stdfs.ErrNotExist) {
 		return err
+	}
+	return nil
+}
+
+// moveMerged recreates the merged entry at src under dst in the upper layer.
+// Upper non-directories are moved as nodes, keeping their content and hard
+// links. Lower files are copied up lazily, so their content is not read until
+// it is opened. Directories are recreated with their metadata and their merged
+// children are moved recursively.
+func (o *OverlayFS) moveMerged(ctx context.Context, src string, info stdfs.FileInfo, source overlaySource, dst string) error {
+	if !info.IsDir() {
+		if source == overlaySourceUpper {
+			return o.upper.Rename(ctx, src, dst)
+		}
+		return o.copyUpLowerEntry(ctx, src, info, dst)
+	}
+	if err := cloneDirNode(ctx, o.upper, dst, info); err != nil {
+		return err
+	}
+	entries, err := o.ReadDir(ctx, src)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		childSrc := joinChildPath(src, entry.Name())
+		childInfo, childSource, err := o.visibleInfo(ctx, childSrc)
+		if err != nil {
+			return err
+		}
+		if err := o.moveMerged(ctx, childSrc, childInfo, childSource, joinChildPath(dst, entry.Name())); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -478,27 +535,65 @@ const (
 // lower layer, where the merged ReadDir still finds them and tombstones keep
 // deleted ones hidden.
 func (o *OverlayFS) copyUpNode(ctx context.Context, abs string, info stdfs.FileInfo) error {
-	parent := parentDir(abs)
-	if parent != "/" {
-		current := "/"
-		for part := range strings.SplitSeq(strings.TrimPrefix(parent, "/"), "/") {
-			current = joinChildPath(current, part)
-			dirInfo, source, err := o.visiblePrefixInfo(ctx, current)
-			if err != nil {
-				return err
-			}
-			if source == overlaySourceUpper {
-				continue
-			}
-			if err := cloneDirNode(ctx, o.upper, current, dirInfo); err != nil {
-				return err
-			}
-		}
+	if err := o.copyUpAncestors(ctx, abs); err != nil {
+		return err
 	}
 	if info.IsDir() {
 		return cloneDirNode(ctx, o.upper, abs, info)
 	}
-	return clonePathWithInfo(ctx, o.lower, abs, info, o.upper, abs)
+	return o.copyUpLowerEntry(ctx, abs, info, abs)
+}
+
+// copyUpAncestors creates every ancestor of abs that the merged view takes
+// from the lower layer in the upper layer, carrying its lower mode, ownership,
+// and modification time. It runs before anything is written under abs so the
+// upper layer never shadows a lower directory with default metadata. abs must
+// already be resolved against the merged view.
+func (o *OverlayFS) copyUpAncestors(ctx context.Context, abs string) error {
+	parent := parentDir(abs)
+	if parent == "/" {
+		return nil
+	}
+	current := "/"
+	for part := range strings.SplitSeq(strings.TrimPrefix(parent, "/"), "/") {
+		current = joinChildPath(current, part)
+		_, source, err := o.visiblePrefixInfo(ctx, current)
+		if err != nil {
+			return err
+		}
+		if source == overlaySourceUpper {
+			continue
+		}
+		// The prefix cache only vouches for the type, so re-read the metadata.
+		dirInfo, err := o.lower.Lstat(ctx, current)
+		if err != nil {
+			return err
+		}
+		if err := cloneDirNode(ctx, o.upper, current, dirInfo); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// copyUpLowerEntry copies the lower non-directory at src to dst in the upper
+// layer. Regular files become lazy nodes that read the lower content only
+// when opened, so a file the lower layer refuses to read (for example one
+// above HostFS's read cap) can still be truncated, renamed, or have its
+// metadata changed.
+func (o *OverlayFS) copyUpLowerEntry(ctx context.Context, src string, info stdfs.FileInfo, dst string) error {
+	if !info.Mode().IsRegular() {
+		return clonePathWithInfo(ctx, o.lower, src, info, o.upper, dst)
+	}
+	lower := o.lower
+	return cloneLazyFile(o.upper, Clean(dst), info, func(ctx context.Context) ([]byte, error) {
+		file, err := lower.Open(ctx, src)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = file.Close() }()
+		return io.ReadAll(file)
+	})
 }
 
 func (o *OverlayFS) visibleInfo(ctx context.Context, abs string) (stdfs.FileInfo, overlaySource, error) {
