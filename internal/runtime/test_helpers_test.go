@@ -33,6 +33,7 @@ func newSession(t testing.TB, cfg *Config) *Session {
 	return session
 }
 
+//nolint:gocritic // policy.Limits is a small value type passed by value like the rest of the policy API.
 func newRuntimeWithLimits(t testing.TB, limits policy.Limits) *Runtime {
 	t.Helper()
 

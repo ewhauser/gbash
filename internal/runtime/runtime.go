@@ -147,6 +147,7 @@ func (p *limitOverridePolicy) SymlinkMode() policy.SymlinkMode {
 	return p.base.SymlinkMode()
 }
 
+//nolint:gocritic // policy.Limits is a small value type passed by value like the rest of the policy API.
 func mergedLimits(base, overrides policy.Limits) policy.Limits {
 	if overrides.MaxCommandCount != 0 {
 		base.MaxCommandCount = overrides.MaxCommandCount

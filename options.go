@@ -119,6 +119,8 @@ func WithPolicy(p policy.Policy) Option {
 // WithLimitOverrides overrides selected runtime limits without replacing the
 // active policy. Zero-valued fields leave the underlying policy/defaults
 // unchanged.
+//
+//nolint:gocritic // policy.Limits is a small value type passed by value like the rest of the policy API.
 func WithLimitOverrides(overrides policy.Limits) Option {
 	return func(target *Config) error {
 		if updated, ok := overrideMaxFileReadBytes(target.FileSystem, overrides.MaxFileBytes); ok {
@@ -129,6 +131,7 @@ func WithLimitOverrides(overrides policy.Limits) Option {
 	}
 }
 
+//nolint:gocritic // policy.Limits is a small value type passed by value like the rest of the policy API.
 func mergeLimitOverrides(base, overrides policy.Limits) policy.Limits {
 	if overrides.MaxCommandCount != 0 {
 		base.MaxCommandCount = overrides.MaxCommandCount
