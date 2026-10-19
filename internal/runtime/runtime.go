@@ -81,6 +81,7 @@ func New(opts ...Option) (*Runtime, error) {
 		MaxStderrBytes:         1 << 20,
 		MaxFileBytes:           8 << 20,
 		MaxVariableBytes:       32 << 20,
+		MaxTotalVariableBytes:  256 << 20,
 	}, resolved.LimitOverrides)
 	if resolved.Policy == nil {
 		resolved.Policy = policy.NewStatic(&policy.Config{
@@ -176,6 +177,9 @@ func mergedLimits(base, overrides policy.Limits) policy.Limits {
 	}
 	if overrides.MaxVariableBytes != 0 {
 		base.MaxVariableBytes = overrides.MaxVariableBytes
+	}
+	if overrides.MaxTotalVariableBytes != 0 {
+		base.MaxTotalVariableBytes = overrides.MaxTotalVariableBytes
 	}
 	return base
 }

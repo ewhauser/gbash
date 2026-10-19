@@ -41,6 +41,7 @@ type Limits struct {
 	MaxStderrBytes         int64
 	MaxFileBytes           int64
 	MaxVariableBytes       int64
+	MaxTotalVariableBytes  int64
 }
 
 type Policy interface {

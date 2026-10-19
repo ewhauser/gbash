@@ -287,6 +287,7 @@ func (m *core) runnerConfig(exec *Execution, budget *executionBudget) *interp.Ru
 	if exec.Policy != nil {
 		cfg.MaxVariableBytes = exec.Policy.Limits().MaxVariableBytes
 		cfg.MaxBraceExpansionWords = exec.Policy.Limits().MaxBraceExpansionWords
+		cfg.MaxTotalVariableBytes = exec.Policy.Limits().MaxTotalVariableBytes
 		cfg.MaxSubshellDepth = exec.Policy.Limits().MaxSubstitutionDepth
 		cfg.SubshellDepth = exec.subshellDepth
 		cfg.MaxFunctionDepth = exec.Policy.Limits().MaxFunctionDepth

@@ -286,6 +286,9 @@ type Runner struct {
 
 	maxBraceExpansionWords int64
 
+	// maxTotalVariableBytes caps the combined size of all variable values.
+	maxTotalVariableBytes int64
+
 	// maxSubshellDepth caps how deeply command substitutions, subshells and
 	// process substitutions nest; subshellDepth is this shell's level, which
 	// starts at baseSubshellDepth for a shell started from another one.
@@ -620,6 +623,10 @@ type RunnerConfig struct {
 	// one command's arguments. Zero means unlimited.
 	MaxBraceExpansionWords int64
 
+	// MaxTotalVariableBytes caps the combined size of all shell variable
+	// values. Zero means unlimited.
+	MaxTotalVariableBytes int64
+
 	// MaxSubshellDepth caps how deeply command substitutions, subshells and
 	// process substitutions may nest. Zero means unlimited.
 	MaxSubshellDepth int64
@@ -735,6 +742,7 @@ func NewRunner(cfg *RunnerConfig) (*Runner, error) {
 	r.startupHome = cfg.StartupHome
 	r.maxVariableBytes = cfg.MaxVariableBytes
 	r.maxBraceExpansionWords = cfg.MaxBraceExpansionWords
+	r.maxTotalVariableBytes = cfg.MaxTotalVariableBytes
 	r.maxSubshellDepth = cfg.MaxSubshellDepth
 	r.baseSubshellDepth = cfg.SubshellDepth
 	r.maxFunctionDepth = cfg.MaxFunctionDepth
@@ -1272,6 +1280,8 @@ func (r *Runner) Reset() {
 
 		maxBraceExpansionWords: r.maxBraceExpansionWords,
 
+		maxTotalVariableBytes: r.maxTotalVariableBytes,
+
 		maxSubshellDepth:  r.maxSubshellDepth,
 		subshellDepth:     r.baseSubshellDepth,
 		baseSubshellDepth: r.baseSubshellDepth,
@@ -1600,6 +1610,7 @@ func (r *Runner) subshell(_ bool) *Runner {
 		startupHome:               r.startupHome,
 		maxVariableBytes:          r.maxVariableBytes,
 		maxBraceExpansionWords:    r.maxBraceExpansionWords,
+		maxTotalVariableBytes:     r.maxTotalVariableBytes,
 		maxSubshellDepth:          r.maxSubshellDepth,
 		subshellDepth:             r.subshellDepth,
 		baseSubshellDepth:         r.baseSubshellDepth,

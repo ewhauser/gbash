@@ -208,6 +208,7 @@ func collapseEnvironChain(top *overlayEnviron, epoch *envEpoch) expand.WriteEnvi
 			for normalized, vr := range e.values {
 				if _, seen := merged.values[normalized]; !seen {
 					merged.values[normalized] = vr
+					merged.valueBytes += storedVariableBytes(vr.Variable)
 				}
 			}
 		case *shadowWriteEnviron:
@@ -217,6 +218,7 @@ func collapseEnvironChain(top *overlayEnviron, epoch *envEpoch) expand.WriteEnvi
 			normalized := merged.normalize(e.shadowName)
 			if _, seen := merged.values[normalized]; !seen {
 				merged.values[normalized] = namedVariable{e.shadowName, e.shadow}
+				merged.valueBytes += storedVariableBytes(e.shadow)
 			}
 		}
 	}
@@ -245,6 +247,9 @@ type overlayEnviron struct {
 	// valuesShared tracks whether values is shared with another environ and
 	// must be cloned before mutation.
 	valuesShared bool
+	// valueBytes is the total size of the values bound in this layer, per
+	// [storedVariableBytes].
+	valueBytes int64
 
 	// envEpoch tracks visible-binding mutations across a shared overlay chain.
 	envEpoch *envEpoch
@@ -475,6 +480,9 @@ func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 	} else if prev.ReadOnly {
 		return fmt.Errorf("readonly variable")
 	}
+	if inOverlay {
+		o.valueBytes -= storedVariableBytes(prev.Variable)
+	}
 	if !vr.IsSet() { // unsetting
 		// Same-scope unsets keep a local shadow so later lookups don't reveal
 		// the next outer binding inside the same function scope.
@@ -486,6 +494,7 @@ func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 	// modifying the entire variable
 	vr.Local = prev.Local || vr.Local
 	o.values[normalized] = namedVariable{name, vr}
+	o.valueBytes += storedVariableBytes(vr)
 	o.bumpEnvEpoch()
 	return nil
 }
@@ -758,11 +767,13 @@ func deleteCurrentScopeVar(env expand.WriteEnviron, name string) bool {
 			return false
 		}
 		normalized := env.normalize(name)
-		if _, ok := env.values[normalized]; !ok {
+		prev, ok := env.values[normalized]
+		if !ok {
 			return false
 		}
 		env.values = cloneMapOnWrite(env.values, &env.valuesShared)
 		delete(env.values, normalized)
+		env.valueBytes -= storedVariableBytes(prev.Variable)
 		if env.tempScope {
 			env.tempUnset = cloneMapOnWrite(env.tempUnset, &env.tempUnsetShared)
 			if env.tempUnset == nil {
@@ -1226,6 +1237,10 @@ func (r *Runner) setVarObserved(name string, vr expand.Variable, mutation *varMu
 		prev = mutation.previous
 	} else if name != "" {
 		prev = r.lookupVar(name)
+	}
+	if (mutation == nil || !mutation.shellManaged) && vr.Kind != expand.KeepValue && r.totalVariablesTooLarge(vr, prev) {
+		r.totalVariableLimitExceeded(name)
+		return nil
 	}
 	if err := r.writeEnv.Set(name, vr); err != nil {
 		r.errf("%s: %v\n", name, err)
