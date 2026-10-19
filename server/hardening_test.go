@@ -248,9 +248,11 @@ func TestServerRejectsOversizedRequest(t *testing.T) {
 	if resp.Error == nil || resp.Error.Data == nil || resp.Error.Data.Code != "REQUEST_TOO_LARGE" {
 		t.Fatalf("response = %+v, want REQUEST_TOO_LARGE", resp)
 	}
+	// The server closes with unread request bytes queued, which Linux
+	// reports to the peer as a reset rather than a clean EOF.
 	var extra json.RawMessage
-	if err := client.dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		t.Fatalf("Decode after oversized request error = %v, want EOF (connection closed)", err)
+	if err := client.dec.Decode(&extra); !errors.Is(err, io.EOF) && !errors.Is(err, syscall.ECONNRESET) {
+		t.Fatalf("Decode after oversized request error = %v, want EOF or ECONNRESET (connection closed)", err)
 	}
 }
 
