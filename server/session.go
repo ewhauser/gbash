@@ -142,6 +142,30 @@ func (s *serverState) lookupSession(id string) (*serverSession, error) {
 	return session, nil
 }
 
+// acquireSession looks up a session and marks it busy in one step under
+// sessionsMu, so destroySession and reapExpiredSessions (which skip busy
+// sessions under the same lock) cannot remove it before it runs. The caller
+// must call exec on the returned session to release it.
+func (s *serverState) acquireSession(id string) (*serverSession, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, fmt.Errorf("%w: session_id must not be empty", errInvalidArgument)
+	}
+
+	s.reapExpiredSessions(time.Now().UTC())
+
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	session, ok := s.sessions[id]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", errSessionNotFound, id)
+	}
+	if err := session.markBusy(); err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
 func (s *serverState) listSessions() []sessionSummary {
 	s.sessionsMu.Lock()
 	sessions := make([]*serverSession, 0, len(s.sessions))
@@ -230,21 +254,24 @@ func (s *serverSession) expired(now time.Time) bool {
 	return !now.Before(s.idleSince.Add(s.server.cfg.SessionTTL))
 }
 
+func (s *serverSession) markBusy() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.busy {
+		return fmt.Errorf("%w: %s", errSessionBusy, s.id)
+	}
+	s.busy = true
+	s.updatedAt = time.Now().UTC()
+	s.idleSince = time.Time{}
+	return nil
+}
+
+// exec runs a script on a session that the caller has already marked busy
+// via acquireSession, and marks it idle again when the script finishes.
 func (s *serverSession) exec(ctx context.Context, params *sessionExecParams) (*sessionExecResult, error) {
 	if params == nil {
 		params = &sessionExecParams{}
 	}
-
-	s.mu.Lock()
-	if s.busy {
-		s.mu.Unlock()
-		return nil, fmt.Errorf("%w: %s", errSessionBusy, s.id)
-	}
-	started := time.Now().UTC()
-	s.busy = true
-	s.updatedAt = started
-	s.idleSince = time.Time{}
-	s.mu.Unlock()
 
 	result, err := s.shell.Exec(ctx, &gbash.ExecutionRequest{
 		Name:           params.Name,
