@@ -41,13 +41,14 @@ func NewRuntime(tb testing.TB, opts RuntimeOptions) *gbash.Runtime {
 			ReadRoots:  []string{"/"},
 			WriteRoots: []string{"/"},
 			Limits: policy.Limits{
-				MaxCommandCount:      200,
-				MaxGlobOperations:    2000,
-				MaxLoopIterations:    200,
-				MaxSubstitutionDepth: 8,
-				MaxStdoutBytes:       16 << 10,
-				MaxStderrBytes:       16 << 10,
-				MaxFileBytes:         128 << 10,
+				MaxCommandCount:        200,
+				MaxGlobOperations:      2000,
+				MaxBraceExpansionWords: 2000,
+				MaxLoopIterations:      200,
+				MaxSubstitutionDepth:   8,
+				MaxStdoutBytes:         16 << 10,
+				MaxStderrBytes:         16 << 10,
+				MaxFileBytes:           128 << 10,
 			},
 		})
 	}
