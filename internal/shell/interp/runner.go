@@ -295,6 +295,7 @@ func (r *Runner) runProcSubst(ctx context.Context, ps *syntax.ProcSubst, path st
 			*bg.exit = r2.exit
 			close(bg.done)
 		}()
+		defer r2.recoverAsyncPanic()
 
 		release, err := configure(r2)
 		if err != nil {
@@ -1035,10 +1036,13 @@ func (r *Runner) stmt(ctx context.Context, st *syntax.Stmt) {
 		}
 		r.bgProcs = append(r.bgProcs, bg)
 		go func() {
-			r2.Run(ctx, &st2)
+			defer close(bg.done)
+			func() {
+				defer r2.recoverAsyncPanic()
+				r2.Run(ctx, &st2)
+			}()
 			r2.exit.exiting = false // subshells don't exit the parent shell
 			*bg.exit = r2.exit
-			close(bg.done)
 		}()
 		r.setPipeStatuses(0)
 	} else {
