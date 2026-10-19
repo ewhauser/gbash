@@ -726,7 +726,7 @@ func (p *Printer) wordPart(wp, next WordPart) {
 		if nextLit, ok := next.(*Lit); ok && nextLit.Value != "" {
 			litCont = nextLit.Value[:1]
 		}
-		if p.minify && !wp.Short && wp.simple() {
+		if p.minify && !wp.Short && wp.Invalid == "" && wp.Param != nil && wp.simple() {
 			name := wp.Param.Value
 			switch {
 			case len(name) > 1 && !ValidName(name): // ${10}
@@ -850,6 +850,12 @@ func omitReplacementSeparator(repl *Replace) bool {
 }
 
 func (p *Printer) paramExp(pe *ParamExp) {
+	if pe.Invalid != "" {
+		// A bad substitution such as ${%} may lack a parameter; keep its
+		// source so that it still fails the same way when run.
+		p.w.WriteString(pe.Invalid)
+		return
+	}
 	if pe.nakedIndex() { // arr[x]
 		p.writeLit(pe.Param.Value)
 		p.wroteIndex(pe.Index)

@@ -62,6 +62,9 @@ func invalidParamExpansion(pe *syntax.ParamExp) error {
 	if pe == nil {
 		return nil
 	}
+	if pe.Invalid != "" {
+		return badSubstitution(pe)
+	}
 	if pe.Slice != nil && pe.Slice.MissingOffset {
 		return badSubstitution(pe)
 	}
