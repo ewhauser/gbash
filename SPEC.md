@@ -771,6 +771,10 @@ Backend boundary for the current implementation:
 - `HostFS` is an opt-in lower-layer backend exposed through `gbfs.Host(...)`; it is intended to sit underneath `gbfs.Overlay(...)`, not to replace the default in-memory runtime path
 - `ReadWriteFS` is an opt-in mutable backend exposed through `gbfs.ReadWrite(...)`; it is intended for developer tooling, external test harnesses, and embedders that explicitly want host mutations
 - `OverlayFS` is intended for internal session use and is exposed through `gbfs.Overlay(...)`
+- `OverlayFS` resolves symlinks against the merged view of both layers: each link is read from the layer that currently provides it, and its target may live in either layer; `Stat`, `Open`, `ReadDir`, `Realpath`, `Chdir`, `Chmod`, `Chtimes`, and following `Chown` follow the final link, while `Lstat`, `Readlink`, `Remove`, `Rename`, `Link`, and the entry-creating operations only resolve parent directories
+- writes and metadata changes through a symlink copy up and modify the resolved target, never the link itself; `MkdirAll` follows symlinked directory components; `O_CREATE|O_EXCL` fails on any existing link, including a dangling one
+- every copy-up (writes via `OpenFile`, `Link` of a lower file, and `Chmod`, `Chown`, `Chtimes`, `Lchtimes`) creates missing upper ancestors with their lower mode, ownership, and modification time, so upper directories never shadow lower ones with default metadata
+- `Chmod`, `Chown`, `Chtimes`, and `Lchtimes` on a lower-layer directory copy up only that directory node (mode, ownership, and modification time), never its children, so tombstoned children stay hidden and the cost does not grow with the subtree
 - `MountableFS` is an opt-in namespace backend exposed through `gbfs.Mountable(...)` and `gbash.MountableFileSystem(...)`; live `mount` and `unmount` behavior remains a concrete-backend capability rather than part of the core filesystem interface
 - `SnapshotFS` is a read-only backend for deterministic fixtures and direct tests
 - `SnapshotFS` is not the default `runtime` session backend because session bootstrap still creates the sandbox layout and command stubs
@@ -819,10 +823,16 @@ The policy package should be able to answer three questions:
 
 Network policy for the current runtime is enforced by the dedicated `network/` layer rather than by generic shell evaluation. Commands never receive host `http.Client` access directly; they only receive the runtime-owned sandboxed `network.Client`. The default sandboxed HTTP client must not inherit host proxy environment variables, and private-range blocking must be enforced during the actual dial using the same resolver surface used by the preflight URL check.
 
+Allowlist path matching operates on a normalized path. Before matching, the client applies RFC 3986 `remove_dot_segments` to the escaped request path (and to each configured allowlist prefix), and it sends exactly that normalized URL, so `https://api.example.com/v1/a/../b` is checked and sent as `/v1/b`. Paths that would still contain a `.` or `..` segment once a server percent-decodes them (`%2e%2e`), splits on encoded or backslash separators (`..%2f`, `..%5c`, `..\`), or strips `;` path parameters (`..;`) are denied rather than guessed at; an allowlist prefix with such a segment is an invalid config. The same rule applies to every redirect target.
+
+`DenyPrivateRanges` blocks every non-globally-reachable destination, not just RFC 1918 space: unspecified addresses (`0.0.0.0/8`, `::`), loopback, private, link-local, multicast, shared/CGNAT (`100.64.0.0/10`), IETF/benchmarking/documentation/reserved ranges, deprecated IPv4-compatible and site-local IPv6, and NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`) addresses whose embedded IPv4 destination is itself non-public. IPv4-mapped IPv6 addresses are classified by their IPv4 form.
+
 Path-policy enforcement rule for the current runtime:
 
 - the lexical path the user asked for is checked first
 - if the backend resolves that path through a symlink, the resolved target path is checked before backend access
+- remove, rename, lstat, and readlink checks resolve symlinks in every parent component but leave the final entry itself unresolved
+- write and mkdir checks resolve through the deepest existing ancestor and follow dangling symlinks, because creating operations may materialize missing components behind them
 - in `SymlinkDeny` mode, any attempted traversal through a symlink fails even if both lexical and resolved paths would otherwise be allowed
 
 ## 13. Trace Model
