@@ -57,10 +57,11 @@ type memoryFIFOFile struct {
 	writable bool
 	closed   atomic.Bool
 
-	// ctx is the context the FIFO was opened under. Blocking reads and writes
-	// give up with its error once it is done, so a FIFO without a peer cannot
-	// outlive the execution timeout or cancellation.
-	ctx      context.Context
+	// ctxErr reports the error of the context the FIFO was opened under.
+	// Blocking reads and writes give up with it once that context is done, so
+	// a FIFO without a peer cannot outlive the execution timeout or
+	// cancellation.
+	ctxErr   func() error
 	stopWake func() bool
 
 	readerEpoch uint64
@@ -70,18 +71,16 @@ type memoryFIFOFile struct {
 }
 
 func newMemoryFIFOFile(ctx context.Context, fs *MemoryFS, path string, fifo *memoryFIFO, flag int) *memoryFIFOFile {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	file := &memoryFIFOFile{
 		fs:       fs,
 		path:     path,
 		fifo:     fifo,
 		readable: canRead(flag),
 		writable: canWrite(flag),
-		ctx:      ctx,
+		ctxErr:   func() error { return nil },
 	}
-	if ctx.Done() != nil {
+	if ctx != nil && ctx.Done() != nil {
+		file.ctxErr = ctx.Err
 		// Wake blocked waiters when the context ends; they re-check ctx.Err()
 		// under the lock before waiting again.
 		file.stopWake = context.AfterFunc(ctx, func() {
@@ -137,7 +136,7 @@ func (f *memoryFIFOFile) Read(p []byte) (int, error) {
 			return 0, io.EOF
 		}
 		f.sawWriter = f.sawWriter || f.fifo.writers > 0
-		if err := f.ctx.Err(); err != nil {
+		if err := f.ctxErr(); err != nil {
 			return 0, &os.PathError{Op: "read", Path: f.path, Err: err}
 		}
 		f.fifo.cond.Wait()
@@ -171,7 +170,7 @@ func (f *memoryFIFOFile) Write(p []byte) (int, error) {
 		if f.sawReader || f.fifo.readerEpoch != f.readerEpoch {
 			return 0, &os.PathError{Op: "write", Path: f.path, Err: io.ErrClosedPipe}
 		}
-		if err := f.ctx.Err(); err != nil {
+		if err := f.ctxErr(); err != nil {
 			return 0, &os.PathError{Op: "write", Path: f.path, Err: err}
 		}
 		f.fifo.cond.Wait()

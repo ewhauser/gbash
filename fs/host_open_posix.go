@@ -26,9 +26,6 @@ const hostFIFOPollInterval = 20 * time.Millisecond
 // a handle whose reads and writes poll and give up once ctx is done. Devices,
 // sockets, and other special files are refused.
 func openHostFile(ctx context.Context, root *os.Root, rel string, flag int, perm stdfs.FileMode) (File, stdfs.FileInfo, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	// Refuse devices and sockets before open(2) can run a driver's open hook.
 	// The fstat below still catches a node swapped in after this check.
 	if info, err := root.Lstat(rel); err == nil && !hostOpenableMode(info.Mode()) {
@@ -124,8 +121,11 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 type hostFIFOFile struct {
 	file *os.File
 	rc   syscall.RawConn
-	ctx  context.Context
 	flag int
+
+	// ctxErr reports the error of the context the FIFO was opened under;
+	// blocking reads and writes give up with it.
+	ctxErr func() error
 
 	// sawWriter records that a writer has been attached at some point. A
 	// non-blocking read returns 0 both at end of stream and before any writer
@@ -138,7 +138,7 @@ func newHostFIFOFile(ctx context.Context, file *os.File, flag int) (*hostFIFOFil
 	if err != nil {
 		return nil, err
 	}
-	return &hostFIFOFile{file: file, rc: rc, ctx: ctx, flag: flag}, nil
+	return &hostFIFOFile{file: file, rc: rc, flag: flag, ctxErr: ctx.Err}, nil
 }
 
 func (f *hostFIFOFile) Read(p []byte) (int, error) {
@@ -221,7 +221,7 @@ func (f *hostFIFOFile) Write(p []byte) (int, error) {
 // wait polls the FIFO for events for at most hostFIFOPollInterval and reports
 // whether the peer hung up. It returns ctx's error once ctx is done.
 func (f *hostFIFOFile) wait(events int16) (bool, error) {
-	if err := f.ctx.Err(); err != nil {
+	if err := f.ctxErr(); err != nil {
 		return false, err
 	}
 	var (
@@ -238,7 +238,7 @@ func (f *hostFIFOFile) wait(events int16) (bool, error) {
 	if opErr != nil && !errors.Is(opErr, unix.EINTR) {
 		return false, opErr
 	}
-	if err := f.ctx.Err(); err != nil {
+	if err := f.ctxErr(); err != nil {
 		return false, err
 	}
 	return revents&unix.POLLHUP != 0, nil

@@ -162,7 +162,8 @@ func TestHostBackendsRefuseSockets(t *testing.T) {
 				t.Fatalf("MkdirTemp() error = %v", err)
 			}
 			t.Cleanup(func() { _ = os.RemoveAll(root) })
-			listener, err := net.Listen("unix", filepath.Join(root, "sock"))
+			var lc net.ListenConfig
+			listener, err := lc.Listen(context.Background(), "unix", filepath.Join(root, "sock"))
 			if err != nil {
 				t.Skipf("unix socket unavailable: %v", err)
 			}
