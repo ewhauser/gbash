@@ -11,6 +11,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	gosqlite "github.com/ncruces/go-sqlite3"
@@ -81,7 +82,39 @@ func (e *sqliteSQLContinueError) Unwrap() error {
 	return e.Err
 }
 
-type SQLite3 struct{}
+type SQLite3 struct {
+	// maxDuration overrides sqliteDefaultMaxDuration; tests set it.
+	maxDuration time.Duration
+}
+
+// sqliteDefaultMaxDuration bounds SQL execution when the request has no
+// deadline. SQLite never consults the shell's loop or command budgets, so an
+// unbounded recursive CTE would otherwise run forever.
+const sqliteDefaultMaxDuration = 60 * time.Second
+
+var errSQLiteTimeLimit = errors.New("sqlite3: execution exceeded the time limit")
+
+// sqliteExecContext adds the fallback duration to ctx when it has no
+// deadline. Stdin is read before this context is derived, so time spent
+// waiting on a slow producer does not count.
+func sqliteExecContext(ctx context.Context, maxDuration time.Duration) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	if maxDuration <= 0 {
+		maxDuration = sqliteDefaultMaxDuration
+	}
+	return context.WithTimeoutCause(ctx, maxDuration, errSQLiteTimeLimit)
+}
+
+// sqliteContextError reports why ctx stopped: the fallback time limit as a
+// command failure, or the request's own cancellation or timeout as is.
+func sqliteContextError(ctx context.Context, inv *commands.Invocation) error {
+	if errors.Is(context.Cause(ctx), errSQLiteTimeLimit) {
+		return exitf(inv, "sqlite3: execution exceeded the %s time limit", sqliteDefaultMaxDuration)
+	}
+	return ctx.Err()
+}
 
 func NewSQLite3() *SQLite3 {
 	return &SQLite3{}
@@ -137,7 +170,9 @@ func (c *SQLite3) Run(ctx context.Context, inv *commands.Invocation) error {
 	if parsed.options.readonly && parsed.database != ":memory:" && !exists {
 		return exitf(inv, "sqlite3: %s: No such file or directory", parsed.database)
 	}
-	return runSQLiteDatabase(ctx, inv, &parsed, dbPath, exists)
+	execCtx, cancel := sqliteExecContext(ctx, c.maxDuration)
+	defer cancel()
+	return runSQLiteDatabase(execCtx, inv, &parsed, dbPath, exists)
 }
 
 // sqliteOOMMessage is the panic value ncruces/go-sqlite3 raises when SQLite
@@ -600,8 +635,8 @@ func executeSQLiteStatement(ctx context.Context, inv *commands.Invocation, stmt 
 		if out != nil {
 			_ = out.Abort()
 		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return false, ctxErr
+		if ctx.Err() != nil {
+			return false, sqliteContextError(ctx, inv)
 		}
 		sqlErr := fmt.Errorf("sqlite3: %w", err)
 		if inv.Stderr != nil {

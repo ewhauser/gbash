@@ -620,3 +620,194 @@ func TestClientBlocksUnspecifiedAddressesDuringDial(t *testing.T) {
 		}
 	}
 }
+
+type recordedRequest struct {
+	Method        string
+	Authorization string
+	Cookie        string
+	ProxyAuth     string
+	ContentType   string
+	Custom        string
+	Body          string
+}
+
+func recordRequest(r *http.Request) recordedRequest {
+	body, _ := io.ReadAll(r.Body)
+	return recordedRequest{
+		Method:        r.Method,
+		Authorization: r.Header.Get("Authorization"),
+		Cookie:        r.Header.Get("Cookie"),
+		ProxyAuth:     r.Header.Get("Proxy-Authorization"),
+		ContentType:   r.Header.Get("Content-Type"),
+		Custom:        r.Header.Get("X-Trace"),
+		Body:          string(body),
+	}
+}
+
+func credentialedPost(target string) *Request {
+	return &Request{
+		Method: "POST",
+		URL:    target,
+		Headers: map[string]string{
+			"Authorization":       "Bearer secret-token",
+			"Cookie":              "session=secret",
+			"Proxy-Authorization": "Basic secret",
+			"Content-Type":        "application/json",
+			"X-Trace":             "abc",
+		},
+		Body:            []byte(`{"password":"hunter2"}`),
+		FollowRedirects: true,
+	}
+}
+
+func TestClientRedirectToOtherOriginDropsCredentialsAndBody(t *testing.T) {
+	t.Parallel()
+	var got recordedRequest
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = recordRequest(r)
+	}))
+	defer other.Close()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/landing", http.StatusSeeOther)
+	}))
+	defer origin.Close()
+
+	client, err := New(&Config{
+		AllowedURLPrefixes: []string{origin.URL, other.URL},
+		AllowedMethods:     []Method{MethodGet, MethodPost},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := client.Do(context.Background(), credentialedPost(origin.URL+"/login")); err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	want := recordedRequest{Method: "GET", Custom: "abc"}
+	if got != want {
+		t.Fatalf("redirected request = %+v, want %+v", got, want)
+	}
+}
+
+func TestClientRedirectPreservesMethodAndBodyFor307And308(t *testing.T) {
+	t.Parallel()
+	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		var got recordedRequest
+		var server *httptest.Server
+		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/login" {
+				http.Redirect(w, r, server.URL+"/landing", status)
+				return
+			}
+			got = recordRequest(r)
+		}))
+
+		client, err := New(&Config{
+			AllowedURLPrefixes: []string{server.URL},
+			AllowedMethods:     []Method{MethodGet, MethodPost},
+		})
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if _, err := client.Do(context.Background(), credentialedPost(server.URL+"/login")); err != nil {
+			t.Fatalf("Do() error = %v", err)
+		}
+		server.Close()
+		want := recordedRequest{
+			Method:        "POST",
+			Authorization: "Bearer secret-token",
+			Cookie:        "session=secret",
+			ProxyAuth:     "Basic secret",
+			ContentType:   "application/json",
+			Custom:        "abc",
+			Body:          `{"password":"hunter2"}`,
+		}
+		if got != want {
+			t.Fatalf("status %d: redirected request = %+v, want %+v", status, got, want)
+		}
+	}
+}
+
+func TestClientRedirect307ToOtherOriginKeepsBodyButDropsCredentials(t *testing.T) {
+	t.Parallel()
+	var got recordedRequest
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = recordRequest(r)
+	}))
+	defer other.Close()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/landing", http.StatusTemporaryRedirect)
+	}))
+	defer origin.Close()
+
+	client, err := New(&Config{
+		AllowedURLPrefixes: []string{origin.URL, other.URL},
+		AllowedMethods:     []Method{MethodGet, MethodPost},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := client.Do(context.Background(), credentialedPost(origin.URL+"/login")); err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	want := recordedRequest{
+		Method:      "POST",
+		ContentType: "application/json",
+		Custom:      "abc",
+		Body:        `{"password":"hunter2"}`,
+	}
+	if got != want {
+		t.Fatalf("redirected request = %+v, want %+v", got, want)
+	}
+}
+
+func TestClientRedirect302SameOriginSwitchesToGetKeepingCredentials(t *testing.T) {
+	t.Parallel()
+	var got recordedRequest
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			http.Redirect(w, r, server.URL+"/landing", http.StatusFound)
+			return
+		}
+		got = recordRequest(r)
+	}))
+	defer server.Close()
+
+	client, err := New(&Config{
+		AllowedURLPrefixes: []string{server.URL},
+		AllowedMethods:     []Method{MethodGet, MethodPost},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if _, err := client.Do(context.Background(), credentialedPost(server.URL+"/login")); err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	want := recordedRequest{
+		Method:        "GET",
+		Authorization: "Bearer secret-token",
+		Cookie:        "session=secret",
+		ProxyAuth:     "Basic secret",
+		Custom:        "abc",
+	}
+	if got != want {
+		t.Fatalf("redirected request = %+v, want %+v", got, want)
+	}
+}
+
+func TestURLOriginNormalizesDefaultPorts(t *testing.T) {
+	t.Parallel()
+	parse := func(raw string) *url.URL {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("url.Parse(%q) error = %v", raw, err)
+		}
+		return u
+	}
+	if a, b := urlOrigin(parse("https://Example.com/a")), urlOrigin(parse("https://example.com:443/b")); a != b {
+		t.Fatalf("urlOrigin mismatch: %q vs %q", a, b)
+	}
+	if a, b := urlOrigin(parse("https://example.com/")), urlOrigin(parse("http://example.com/")); a == b {
+		t.Fatalf("urlOrigin(%q) should differ across schemes", a)
+	}
+}

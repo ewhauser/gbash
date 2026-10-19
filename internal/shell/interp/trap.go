@@ -418,21 +418,28 @@ func (r *Runner) runTrap(ctx context.Context, id trapID, line uint, status uint8
 }
 
 func (r *Runner) runPendingSignalTraps(ctx context.Context) {
+	r.traps.pendingMu.Lock()
 	if len(r.traps.pending) == 0 {
+		r.traps.pendingMu.Unlock()
 		return
 	}
 	pending := append([]pendingSignalTrap(nil), r.traps.pending...)
 	r.traps.pending = r.traps.pending[:0]
+	r.traps.pendingMu.Unlock()
 	for _, trap := range pending {
-		_ = r.runTrap(ctx, trap.id, trap.line, trap.status)
+		// The trap sees the status of the command that ran before it, read
+		// here on the shell's own goroutine rather than by the sender.
+		_ = r.runTrap(ctx, trap.id, trap.line, r.exit.code)
 	}
 }
 
+// queueSignalTrap may run on any goroutine.
 func (r *Runner) queueSignalTrap(id trapID) {
+	r.traps.pendingMu.Lock()
+	defer r.traps.pendingMu.Unlock()
 	r.traps.pending = append(r.traps.pending, pendingSignalTrap{
-		id:     id,
-		status: r.exit.code,
-		line:   1,
+		id:   id,
+		line: 1,
 	})
 }
 

@@ -531,6 +531,9 @@ func (f *formatter) applySpec(spec *formatSpec) bool {
 	if spec.widthSet && f.overLimit(spec.width) {
 		return true
 	}
+	if spec.precisionSet && numericVerb(spec.verb) && f.overLimit(spec.precision) {
+		return true
+	}
 	arg, present := f.nextArg()
 	switch spec.verb {
 	case 's':
@@ -587,6 +590,12 @@ func (f *formatter) applySpec(spec *formatSpec) bool {
 		f.out.WriteString(text)
 	}
 	return false
+}
+
+// numericVerb reports whether precision sets a minimum output size for verb;
+// for %s, %b, and %q it truncates instead.
+func numericVerb(verb byte) bool {
+	return strings.IndexByte("diuoxXeEfFgG", verb) >= 0
 }
 
 func gnuAllowsQuoteFlag(verb byte) bool {
@@ -749,6 +758,9 @@ func (f *formatter) applyGNUSpec(spec *formatSpec, cycleBase int) bool {
 	}
 
 	if spec.widthSet && f.overLimit(spec.width) {
+		return true
+	}
+	if spec.precisionSet && numericVerb(spec.verb) && f.overLimit(spec.precision) {
 		return true
 	}
 	arg, present := f.gnuArgAt(cycleBase, spec.argSlot)

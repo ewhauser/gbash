@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -25,6 +26,15 @@ const (
 	minReaperTick  = 100 * time.Millisecond
 	maxReaperTick  = time.Second
 
+	minAcceptRetryDelay = 5 * time.Millisecond
+	maxAcceptRetryDelay = time.Second
+
+	// DefaultMaxSessions is the session cap used when Config.MaxSessions is zero.
+	DefaultMaxSessions = 256
+	// DefaultMaxRequestBytes is the per-request size cap used when
+	// Config.MaxRequestBytes is zero.
+	DefaultMaxRequestBytes = 16 << 20
+
 	rpcParseError     = -32700
 	rpcInvalidRequest = -32600
 	rpcMethodNotFound = -32601
@@ -33,7 +43,10 @@ const (
 
 	rpcSessionNotFound = -32010
 	rpcSessionBusy     = -32011
+	rpcSessionLimit    = -32012
 )
+
+var errRequestTooLarge = errors.New("request too large")
 
 // Config configures the shared gbash server mode.
 type Config struct {
@@ -41,37 +54,80 @@ type Config struct {
 	Name       string
 	Version    string
 	SessionTTL time.Duration
+
+	// MaxSessions caps how many sessions may exist at once. Zero uses
+	// DefaultMaxSessions and a negative value disables the cap.
+	MaxSessions int
+	// MaxRequestBytes caps the encoded size of one JSON-RPC request. Zero
+	// uses DefaultMaxRequestBytes and a negative value disables the cap.
+	MaxRequestBytes int64
+	// MaxExecTimeout, when positive, caps every session.exec call: requests
+	// without a timeout_ms, or with a longer one, run with this timeout.
+	MaxExecTimeout time.Duration
 }
 
 // ListenAndServeUnix serves the gbash JSON-RPC protocol on a Unix domain socket.
 func ListenAndServeUnix(ctx context.Context, socketPath string, cfg Config) error {
-	socketPath, ln, err := listenUnixSocket(ctx, socketPath)
+	ln, err := listenUnixSocket(ctx, socketPath)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = ln.Close()
-		_ = os.Remove(socketPath)
-	}()
+	defer func() { _ = ln.Close() }()
 	return Serve(ctx, ln, cfg)
 }
 
-func listenUnixSocket(ctx context.Context, socketPath string) (string, net.Listener, error) {
+// ownedUnixListener removes its socket path on Close, but only while the path
+// still names the socket this listener bound, so it never deletes a socket
+// another server has since bound at the same path.
+type ownedUnixListener struct {
+	net.Listener
+	path string
+	info os.FileInfo
+	once sync.Once
+}
+
+func (l *ownedUnixListener) Close() error {
+	err := l.Listener.Close()
+	l.once.Do(func() {
+		if current, statErr := os.Lstat(l.path); statErr == nil && os.SameFile(current, l.info) {
+			_ = os.Remove(l.path)
+		}
+	})
+	return err
+}
+
+func listenUnixSocket(ctx context.Context, socketPath string) (net.Listener, error) {
 	socketPath = strings.TrimSpace(socketPath)
 	if socketPath == "" {
-		return "", nil, fmt.Errorf("server: socket path must not be empty")
+		return nil, fmt.Errorf("server: socket path must not be empty")
 	}
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
-		return "", nil, fmt.Errorf("server: create socket directory: %w", err)
+		return nil, fmt.Errorf("server: create socket directory: %w", err)
 	}
 	if err := removeStaleUnixSocket(ctx, socketPath); err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	ln, err := listenPrivateUnixSocket(ctx, socketPath)
+	ln, info, err := listenPrivateUnixSocket(ctx, socketPath)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	return socketPath, ln, nil
+	return &ownedUnixListener{Listener: ln, path: socketPath, info: info}, nil
+}
+
+func unwrapOpError(err error) error {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Err != nil {
+		return opErr.Err
+	}
+	return err
+}
+
+func unwrapPathError(err error) error {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err
+	}
+	return err
 }
 
 // Serve serves the gbash JSON-RPC protocol on an existing listener.
@@ -84,6 +140,11 @@ func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 		return fmt.Errorf("server: runtime is nil")
 	}
 
+	// Canceling the server context on any exit also cancels every
+	// connection context and the executions running under them.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	srv := &serverState{
 		ctx:       ctx,
 		cfg:       cfg,
@@ -93,7 +154,10 @@ func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 	}
 
 	done := make(chan struct{})
-	defer close(done)
+	defer func() {
+		close(done)
+		srv.closeConnections()
+	}()
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -104,22 +168,60 @@ func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 	}()
 	go srv.reapLoop(done)
 
+	var retryDelay time.Duration
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
 				return nil
 			}
+			if isTemporaryAcceptError(err) {
+				retryDelay = nextAcceptRetryDelay(retryDelay)
+				srv.logf("server: accept error: %v; retrying in %v", err, retryDelay)
+				timer := time.NewTimer(retryDelay)
+				select {
+				case <-timer.C:
+				case <-ctx.Done():
+					timer.Stop()
+					return nil
+				}
+				continue
+			}
 			return fmt.Errorf("server: accept: %w", err)
 		}
+		retryDelay = 0
 		srv.addConn(conn)
 	}
+}
+
+// isTemporaryAcceptError reports whether an Accept failure is transient, such
+// as running out of file descriptors, so the server should retry instead of
+// shutting down every session.
+func isTemporaryAcceptError(err error) bool {
+	var temporary interface{ Temporary() bool }
+	if errors.As(err, &temporary) && temporary.Temporary() {
+		return true
+	}
+	for _, errno := range []syscall.Errno{syscall.EMFILE, syscall.ENFILE, syscall.ENOBUFS, syscall.ENOMEM, syscall.ECONNABORTED, syscall.EINTR} {
+		if errors.Is(err, errno) {
+			return true
+		}
+	}
+	return false
+}
+
+func nextAcceptRetryDelay(prev time.Duration) time.Duration {
+	if prev <= 0 {
+		return minAcceptRetryDelay
+	}
+	return min(prev*2, maxAcceptRetryDelay)
 }
 
 type serverState struct {
 	ctx       context.Context //nolint:containedctx // intentional: server-scoped lifetime context
 	cfg       Config
 	transport string
+	errorLog  *log.Logger // nil uses log.Default(); overridden in tests
 
 	nextID atomic.Uint64
 
@@ -136,10 +238,50 @@ type clientConn struct {
 	conn   net.Conn
 	enc    *json.Encoder
 	dec    *json.Decoder
+	limit  *requestLimitReader
+
+	// ctx is canceled when the connection closes or the client goes away,
+	// which cancels any session.exec running for this connection.
+	ctx    context.Context //nolint:containedctx // intentional: connection-scoped lifetime context
+	cancel context.CancelFunc
 
 	writeMu sync.Mutex
-	closed  chan struct{}
 	once    sync.Once
+}
+
+// decodedRequest is one framed message read off a connection, or the error
+// that ended reading.
+type decodedRequest struct {
+	raw json.RawMessage
+	err error
+}
+
+// requestLimitReader bounds how many bytes the JSON decoder may pull from the
+// connection for one message. The decoder reads ahead, so one message is
+// bounded by its buffered remainder plus max.
+type requestLimitReader struct {
+	r         io.Reader
+	max       int64
+	remaining int64
+}
+
+func (l *requestLimitReader) reset() {
+	l.remaining = l.max
+}
+
+func (l *requestLimitReader) Read(p []byte) (int, error) {
+	if l.max <= 0 {
+		return l.r.Read(p)
+	}
+	if l.remaining <= 0 {
+		return 0, errRequestTooLarge
+	}
+	if int64(len(p)) > l.remaining {
+		p = p[:l.remaining]
+	}
+	n, err := l.r.Read(p)
+	l.remaining -= int64(n)
+	return n, err
 }
 
 type rpcRequest struct {
@@ -184,7 +326,23 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.Version == "" {
 		cfg.Version = "dev"
 	}
+	if cfg.MaxSessions == 0 {
+		cfg.MaxSessions = DefaultMaxSessions
+	}
+	if cfg.MaxRequestBytes == 0 {
+		cfg.MaxRequestBytes = DefaultMaxRequestBytes
+	}
 	return cfg
+}
+
+// logf records details the server does not send to clients, such as
+// internal errors, through the standard library's default logger.
+func (s *serverState) logf(format string, args ...any) {
+	logger := s.errorLog
+	if logger == nil {
+		logger = log.Default()
+	}
+	logger.Printf(format, args...)
 }
 
 func listenerTransport(ln net.Listener) string {
@@ -254,13 +412,17 @@ func (s *serverState) reapLoop(done <-chan struct{}) {
 }
 
 func (s *serverState) addConn(nc net.Conn) {
+	limit := &requestLimitReader{r: nc, max: s.cfg.MaxRequestBytes}
+	ctx, cancel := context.WithCancel(s.ctx)
 	conn := &clientConn{
 		server: s,
 		id:     s.nextIDValue("conn"),
 		conn:   nc,
 		enc:    json.NewEncoder(nc),
-		dec:    json.NewDecoder(nc),
-		closed: make(chan struct{}),
+		dec:    json.NewDecoder(limit),
+		limit:  limit,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 
 	s.connsMu.Lock()
@@ -293,20 +455,36 @@ func (s *serverState) nextIDValue(prefix string) string {
 	return fmt.Sprintf("%s-%06d", prefix, s.nextID.Add(1))
 }
 
+// readLoop handles one connection's requests in order. A separate goroutine
+// decodes them so that a client disconnect is noticed, and cancels the
+// connection context, even while a session.exec is still running.
 func (c *clientConn) readLoop() {
 	defer c.close()
 
+	requests := make(chan decodedRequest)
+	go c.decodeLoop(requests)
+
 	for {
-		var raw json.RawMessage
-		if err := c.dec.Decode(&raw); err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+		var item decodedRequest
+		select {
+		case <-c.ctx.Done():
+			return
+		case item = <-requests:
+		}
+
+		if item.err != nil {
+			if errors.Is(item.err, errRequestTooLarge) {
+				_ = c.writeResponse(newRPCErrorResponse(nil, rpcInvalidRequest, "request too large", &rpcErrorData{
+					Code:    "REQUEST_TOO_LARGE",
+					Details: fmt.Sprintf("requests are limited to %d bytes", c.server.cfg.MaxRequestBytes),
+				}))
 				return
 			}
 			_ = c.writeResponse(newRPCErrorResponse(nil, rpcParseError, "parse error", nil))
 			return
 		}
 
-		req, errResp := parseRPCRequest(raw)
+		req, notification, errResp := parseRPCRequest(item.raw)
 		if errResp != nil {
 			if err := c.writeResponse(errResp); err != nil {
 				return
@@ -315,7 +493,8 @@ func (c *clientConn) readLoop() {
 		}
 
 		resp := c.handleRequest(req)
-		if resp == nil {
+		if resp == nil || notification {
+			// JSON-RPC 2.0: the server must not reply to a notification.
 			continue
 		}
 		if err := c.writeResponse(resp); err != nil {
@@ -324,41 +503,75 @@ func (c *clientConn) readLoop() {
 	}
 }
 
-func parseRPCRequest(raw json.RawMessage) (*rpcRequest, *rpcResponse) {
+// decodeLoop reads framed messages off the connection. When the client goes
+// away it cancels the connection context; malformed or oversized input is
+// handed to readLoop so its error reply follows any in-flight response.
+func (c *clientConn) decodeLoop(out chan<- decodedRequest) {
+	for {
+		c.limit.reset()
+		var raw json.RawMessage
+		err := c.dec.Decode(&raw)
+		if err != nil && !isClientInputError(err) {
+			c.cancel()
+			return
+		}
+		select {
+		case out <- decodedRequest{raw: raw, err: err}:
+		case <-c.ctx.Done():
+			return
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func isClientInputError(err error) bool {
+	if errors.Is(err, errRequestTooLarge) {
+		return true
+	}
+	var syntaxErr *json.SyntaxError
+	return errors.As(err, &syntaxErr)
+}
+
+// parseRPCRequest validates one request object. notification is true for a
+// well-formed request without an id member, which must not get a response.
+func parseRPCRequest(raw json.RawMessage) (req *rpcRequest, notification bool, errResp *rpcResponse) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
-		return nil, newRPCErrorResponse(nil, rpcInvalidRequest, "invalid request", nil)
+		return nil, false, newRPCErrorResponse(nil, rpcInvalidRequest, "invalid request", nil)
 	}
 	if trimmed[0] == '[' {
-		return nil, newRPCErrorResponse(nil, rpcInvalidRequest, "batch requests are not supported", nil)
+		return nil, false, newRPCErrorResponse(nil, rpcInvalidRequest, "batch requests are not supported", nil)
 	}
 
-	var req rpcRequest
-	if err := json.Unmarshal(trimmed, &req); err != nil {
-		return nil, newRPCErrorResponse(nil, rpcInvalidRequest, "invalid request", &rpcErrorData{
+	var parsed rpcRequest
+	if err := json.Unmarshal(trimmed, &parsed); err != nil {
+		return nil, false, newRPCErrorResponse(nil, rpcInvalidRequest, "invalid request", &rpcErrorData{
 			Code:    "INVALID_REQUEST",
 			Details: err.Error(),
 		})
 	}
-	if req.JSONRPC != jsonRPCVersion {
-		return nil, newRPCErrorResponse(validResponseID(req.ID), rpcInvalidRequest, "invalid request", &rpcErrorData{
+	if parsed.JSONRPC != jsonRPCVersion {
+		return nil, false, newRPCErrorResponse(validResponseID(parsed.ID), rpcInvalidRequest, "invalid request", &rpcErrorData{
 			Code:    "INVALID_REQUEST",
 			Details: "jsonrpc must be \"2.0\"",
 		})
 	}
-	if len(req.ID) == 0 || !validRequestID(req.ID) {
-		return nil, newRPCErrorResponse(nil, rpcInvalidRequest, "invalid request", &rpcErrorData{
+	notification = len(parsed.ID) == 0
+	if !notification && !validRequestID(parsed.ID) {
+		return nil, false, newRPCErrorResponse(nil, rpcInvalidRequest, "invalid request", &rpcErrorData{
 			Code:    "INVALID_REQUEST",
 			Details: "id must be a string, number, or null",
 		})
 	}
-	if strings.TrimSpace(req.Method) == "" {
-		return nil, newRPCErrorResponse(validResponseID(req.ID), rpcInvalidRequest, "invalid request", &rpcErrorData{
+	if strings.TrimSpace(parsed.Method) == "" {
+		return nil, false, newRPCErrorResponse(validResponseID(parsed.ID), rpcInvalidRequest, "invalid request", &rpcErrorData{
 			Code:    "INVALID_REQUEST",
 			Details: "method must not be empty",
 		})
 	}
-	return &req, nil
+	return &parsed, notification, nil
 }
 
 func validRequestID(id json.RawMessage) bool {
@@ -415,7 +628,7 @@ func (c *clientConn) handleRequest(req *rpcRequest) *rpcResponse {
 		}
 		session, err := c.server.createSession()
 		if err != nil {
-			return internalErrorResponse(req.ID, err)
+			return c.server.appErrorResponse(req.ID, err)
 		}
 		return newRPCResultResponse(req.ID, sessionCreateResult{Session: session.summary()})
 	case "session.get":
@@ -425,7 +638,7 @@ func (c *clientConn) handleRequest(req *rpcRequest) *rpcResponse {
 		}
 		session, err := c.server.lookupSession(params.SessionID)
 		if err != nil {
-			return appErrorResponse(req.ID, err)
+			return c.server.appErrorResponse(req.ID, err)
 		}
 		return newRPCResultResponse(req.ID, sessionGetResult{Session: session.summary()})
 	case "session.list":
@@ -441,7 +654,7 @@ func (c *clientConn) handleRequest(req *rpcRequest) *rpcResponse {
 		}
 		session, err := c.server.destroySession(params.SessionID)
 		if err != nil {
-			return appErrorResponse(req.ID, err)
+			return c.server.appErrorResponse(req.ID, err)
 		}
 		return newRPCResultResponse(req.ID, sessionGetResult{Session: session.summary()})
 	case "session.exec":
@@ -451,11 +664,11 @@ func (c *clientConn) handleRequest(req *rpcRequest) *rpcResponse {
 		}
 		session, err := c.server.acquireSession(params.SessionID)
 		if err != nil {
-			return appErrorResponse(req.ID, err)
+			return c.server.appErrorResponse(req.ID, err)
 		}
-		result, err := session.exec(c.server.ctx, &params)
+		result, err := session.exec(c.ctx, &params)
 		if err != nil {
-			return appErrorResponse(req.ID, err)
+			return c.server.appErrorResponse(req.ID, err)
 		}
 		return newRPCResultResponse(req.ID, result)
 	default:
@@ -474,7 +687,7 @@ func (c *clientConn) writeResponse(resp *rpcResponse) error {
 
 func (c *clientConn) close() {
 	c.once.Do(func() {
-		close(c.closed)
+		c.cancel()
 		_ = c.conn.Close()
 		c.server.removeConn(c.id)
 	})
@@ -514,18 +727,16 @@ func invalidParamsResponse(id json.RawMessage, err error) *rpcResponse {
 	})
 }
 
-func internalErrorResponse(id json.RawMessage, err error) *rpcResponse {
-	details := ""
-	if err != nil {
-		details = err.Error()
-	}
+// internalErrorResponse logs err and returns a generic error, since internal
+// failures can carry host details such as absolute paths.
+func (s *serverState) internalErrorResponse(id json.RawMessage, err error) *rpcResponse {
+	s.logf("server: internal error: %v", err)
 	return newRPCErrorResponse(id, rpcInternalError, "internal error", &rpcErrorData{
-		Code:    "INTERNAL",
-		Details: details,
+		Code: "INTERNAL",
 	})
 }
 
-func appErrorResponse(id json.RawMessage, err error) *rpcResponse {
+func (s *serverState) appErrorResponse(id json.RawMessage, err error) *rpcResponse {
 	switch {
 	case errors.Is(err, errInvalidArgument):
 		return invalidParamsResponse(id, err)
@@ -539,8 +750,13 @@ func appErrorResponse(id json.RawMessage, err error) *rpcResponse {
 			Code:    "SESSION_BUSY",
 			Details: err.Error(),
 		})
+	case errors.Is(err, errSessionLimit):
+		return newRPCErrorResponse(id, rpcSessionLimit, "session limit reached", &rpcErrorData{
+			Code:    "SESSION_LIMIT",
+			Details: err.Error(),
+		})
 	default:
-		return internalErrorResponse(id, err)
+		return s.internalErrorResponse(id, err)
 	}
 }
 

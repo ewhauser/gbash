@@ -4,6 +4,7 @@ package python
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 
@@ -65,9 +66,9 @@ func TestPythonNoArgsStartsREPLOnTTY(t *testing.T) {
 	t.Parallel()
 
 	session := newPythonSession(t)
-	stdout, stderr, err := runPythonCommand(t, session, map[string]string{
-		"TTY": "/dev/tty",
-	}, strings.NewReader("def double(x):\n    return x * 2\ndouble(21)\nexit()\n"))
+	stdout, stderr, err := runPythonCommand(t, session, nil, ttyRedirectReader{
+		Reader: strings.NewReader("def double(x):\n    return x * 2\ndouble(21)\nexit()\n"),
+	})
 	if err != nil {
 		t.Fatalf("Run() error = %v; stdout=%q stderr=%q", err, stdout, stderr)
 	}
@@ -78,6 +79,15 @@ func TestPythonNoArgsStartsREPLOnTTY(t *testing.T) {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
+
+// ttyRedirectReader stands in for stdin redirected from a terminal device.
+type ttyRedirectReader struct {
+	io.Reader
+}
+
+func (ttyRedirectReader) RedirectPath() string  { return "/dev/tty" }
+func (ttyRedirectReader) RedirectFlags() int    { return 0 }
+func (ttyRedirectReader) RedirectOffset() int64 { return 0 }
 
 func TestPythonNoArgsUsesTerminalFallbackInsideInteractiveShell(t *testing.T) {
 	t.Parallel()

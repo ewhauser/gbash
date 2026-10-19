@@ -2,13 +2,18 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ewhauser/gbash"
 )
@@ -17,6 +22,7 @@ var (
 	errInvalidArgument = errors.New("invalid argument")
 	errSessionNotFound = errors.New("session not found")
 	errSessionBusy     = errors.New("session is busy")
+	errSessionLimit    = errors.New("session limit reached")
 )
 
 type helloResult struct {
@@ -73,10 +79,15 @@ type sessionExecParams struct {
 }
 
 type sessionExecResult struct {
-	SessionID       string            `json:"session_id"`
-	ExitCode        int               `json:"exit_code"`
-	Stdout          string            `json:"stdout"`
-	Stderr          string            `json:"stderr"`
+	SessionID string `json:"session_id"`
+	ExitCode  int    `json:"exit_code"`
+	Stdout    string `json:"stdout"`
+	Stderr    string `json:"stderr"`
+	// StdoutBase64 and StderrBase64 carry the exact bytes, base64-encoded,
+	// only when the stream is not valid UTF-8; Stdout and Stderr then hold a
+	// lossy copy with invalid bytes replaced by U+FFFD.
+	StdoutBase64    string            `json:"stdout_base64,omitempty"`
+	StderrBase64    string            `json:"stderr_base64,omitempty"`
 	StdoutTruncated bool              `json:"stdout_truncated"`
 	StderrTruncated bool              `json:"stderr_truncated"`
 	FinalEnv        map[string]string `json:"final_env,omitempty"`
@@ -104,6 +115,17 @@ type serverSession struct {
 func (s *serverState) createSession() (*serverSession, error) {
 	s.reapExpiredSessions(time.Now().UTC())
 
+	// Check the cap before building a session so a full server does not pay
+	// for one, and again on insert since creates can race.
+	if err := s.checkSessionLimit(); err != nil {
+		return nil, err
+	}
+
+	id, err := newSessionID()
+	if err != nil {
+		return nil, fmt.Errorf("create session id: %w", err)
+	}
+
 	sessionShell, err := s.cfg.Runtime.NewSession(s.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("create gbash session: %w", err)
@@ -112,7 +134,7 @@ func (s *serverState) createSession() (*serverSession, error) {
 	now := time.Now().UTC()
 	session := &serverSession{
 		server:    s,
-		id:        s.nextIDValue("sess"),
+		id:        id,
 		shell:     sessionShell,
 		createdAt: now,
 		updatedAt: now,
@@ -120,9 +142,36 @@ func (s *serverState) createSession() (*serverSession, error) {
 	}
 
 	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	if err := s.checkSessionLimitLocked(); err != nil {
+		return nil, err
+	}
 	s.sessions[session.id] = session
-	s.sessionsMu.Unlock()
 	return session, nil
+}
+
+func (s *serverState) checkSessionLimit() error {
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	return s.checkSessionLimitLocked()
+}
+
+func (s *serverState) checkSessionLimitLocked() error {
+	if limit := s.cfg.MaxSessions; limit > 0 && len(s.sessions) >= limit {
+		return fmt.Errorf("%w: at most %d sessions may exist at once", errSessionLimit, limit)
+	}
+	return nil
+}
+
+// newSessionID returns an unguessable session id. Session ids are the only
+// handle on a session, so a client must not be able to predict another
+// client's id.
+func newSessionID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return "sess-" + hex.EncodeToString(raw[:]), nil
 }
 
 func (s *serverState) lookupSession(id string) (*serverSession, error) {
@@ -174,13 +223,17 @@ func (s *serverState) listSessions() []sessionSummary {
 	}
 	s.sessionsMu.Unlock()
 
+	// Session ids are random, so list in creation order.
+	slices.SortFunc(sessions, func(a, b *serverSession) int {
+		if c := a.createdAt.Compare(b.createdAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.id, b.id)
+	})
 	out := make([]sessionSummary, 0, len(sessions))
 	for _, session := range sessions {
 		out = append(out, session.summary())
 	}
-	slices.SortFunc(out, func(a, b sessionSummary) int {
-		return strings.Compare(a.SessionID, b.SessionID)
-	})
 	return out
 }
 
@@ -281,7 +334,7 @@ func (s *serverSession) exec(ctx context.Context, params *sessionExecParams) (*s
 		StartupOptions: append([]string(nil), params.StartupOptions...),
 		Env:            copyStringMap(params.Env),
 		WorkDir:        params.WorkDir,
-		Timeout:        durationFromMillis(params.TimeoutMs),
+		Timeout:        s.execTimeout(params.TimeoutMs),
 		ReplaceEnv:     params.ReplaceEnv,
 	})
 
@@ -306,6 +359,8 @@ func (s *serverSession) exec(ctx context.Context, params *sessionExecParams) (*s
 		ExitCode:        result.ExitCode,
 		Stdout:          result.Stdout,
 		Stderr:          result.Stderr,
+		StdoutBase64:    base64IfNotUTF8(result.Stdout),
+		StderrBase64:    base64IfNotUTF8(result.Stderr),
 		StdoutTruncated: result.StdoutTruncated,
 		StderrTruncated: result.StderrTruncated,
 		FinalEnv:        copyStringMap(result.FinalEnv),
@@ -318,11 +373,35 @@ func (s *serverSession) exec(ctx context.Context, params *sessionExecParams) (*s
 	}, nil
 }
 
+// execTimeout applies the server's MaxExecTimeout cap to a requested
+// timeout_ms value.
+func (s *serverSession) execTimeout(ms int64) time.Duration {
+	timeout := durationFromMillis(ms)
+	if limit := s.server.cfg.MaxExecTimeout; limit > 0 && (timeout <= 0 || timeout > limit) {
+		return limit
+	}
+	return timeout
+}
+
+// durationFromMillis converts a timeout_ms value, saturating instead of
+// overflowing so a huge value never becomes a tiny or negative timeout.
 func durationFromMillis(ms int64) time.Duration {
 	if ms <= 0 {
 		return 0
 	}
+	if ms > math.MaxInt64/int64(time.Millisecond) {
+		return time.Duration(math.MaxInt64)
+	}
 	return time.Duration(ms) * time.Millisecond
+}
+
+// base64IfNotUTF8 returns the base64 encoding of text when JSON encoding
+// would otherwise replace invalid UTF-8 bytes, and "" when text is valid.
+func base64IfNotUTF8(text string) string {
+	if utf8.ValidString(text) {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString([]byte(text))
 }
 
 func durationMilliseconds(d time.Duration) float64 {

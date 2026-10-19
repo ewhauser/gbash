@@ -653,13 +653,21 @@ func processJQInputs(ctx context.Context, inv *commands.Invocation, code *gojq.C
 }
 
 func runJQQuery(ctx context.Context, inv *commands.Invocation, code *gojq.Code, input any, variableValues []any, formatter *jqFormatter, hadOutput *bool, lastValue *any) (bool, error) {
-	iter := code.RunWithContext(ctx, input, variableValues...)
+	evalCtx, cancel := jqEvalContext(ctx)
+	defer cancel()
+	iter := code.RunWithContext(evalCtx, input, variableValues...)
 	for {
 		value, ok := iter.Next()
 		if !ok {
 			return false, nil
 		}
 		if err, ok := value.(error); ok {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return false, ctxErr
+			}
+			if limitErr := jqEvalLimitError(evalCtx); limitErr != nil {
+				return false, exitf(inv, 5, "jq: %v", limitErr)
+			}
 			var haltErr *gojq.HaltError
 			if errors.As(err, &haltErr) && haltErr.Value() == nil {
 				return true, nil
@@ -679,6 +687,9 @@ func runJQQuery(ctx context.Context, inv *commands.Invocation, code *gojq.Code, 
 			}
 			if depthErr, ok := errors.AsType[*gojq.DepthLimitError](err); ok {
 				return false, exitf(inv, 5, "jq: %v", depthErr)
+			}
+			if sizeErr, ok := errors.AsType[*gojq.SizeLimitError](err); ok {
+				return false, exitf(inv, 5, "jq: %v", sizeErr)
 			}
 			return false, &commands.ExitError{Code: 5, Err: err}
 		}

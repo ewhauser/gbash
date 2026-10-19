@@ -408,7 +408,7 @@ func TestRunCLIJSONOutputEncodesExecutionResult(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), []string{"-c", "printf 'hello\\n'; printf 'warn\\n' >&2", "--json"}, strings.NewReader(""), &stdout, &stderr, false)
+	exitCode, err := runCLI(context.Background(), []string{"--json", "-c", "printf 'hello\\n'; printf 'warn\\n' >&2"}, strings.NewReader(""), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
@@ -445,7 +445,7 @@ func TestRunCLIJSONOutputEncodesCLIError(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), []string{"-c", "pwd", "--json", "--root", "/", "--readwrite-root", "/"}, strings.NewReader(""), &stdout, &stderr, false)
+	exitCode, err := runCLI(context.Background(), []string{"--json", "--root", "/", "--readwrite-root", "/", "-c", "pwd"}, strings.NewReader(""), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
@@ -513,6 +513,37 @@ func TestRunCLIReadWriteRootPreservesLocaleForExecedExpr(t *testing.T) {
 	}
 	if got := stderr.String(); got != "" {
 		t.Fatalf("stderr = %q, want empty", got)
+	}
+}
+
+func TestRunCLICompatHostRootRemapsOnlyWhenConfigured(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+
+	run := func(args ...string) (int, string) {
+		t.Helper()
+		var stdout strings.Builder
+		var stderr strings.Builder
+		exitCode, err := runCLI(context.Background(), args, strings.NewReader(""), &stdout, &stderr, false)
+		if err != nil {
+			t.Fatalf("runCLI() error = %v", err)
+		}
+		return exitCode, stdout.String() + stderr.String()
+	}
+
+	// A script-visible env var must not enable the remap.
+	if code, out := run("--readwrite-root", root, "-c", "export GBASH_COMPAT_ROOT="+root+"; mkdir -p "+root+"/viaenv"); code != 0 {
+		t.Fatalf("exitCode = %d, want 0; output=%q", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "viaenv")); err == nil {
+		t.Fatalf("GBASH_COMPAT_ROOT from the script remapped %s/viaenv onto the sandbox root", root)
+	}
+
+	if code, out := run("--readwrite-root", root, "--compat-host-root", root, "-c", "mkdir -p "+root+"/viaflag"); code != 0 {
+		t.Fatalf("exitCode = %d, want 0; output=%q", code, out)
+	}
+	if info, err := os.Stat(filepath.Join(root, "viaflag")); err != nil || !info.IsDir() {
+		t.Fatalf("Stat(viaflag) = %v, %v; want remapped directory", info, err)
 	}
 }
 

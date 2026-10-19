@@ -7,7 +7,6 @@ import (
 	"io"
 	stdfs "io/fs"
 	"path"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -274,44 +273,28 @@ func commandSearchDirs(inv *Invocation, env map[string]string, dir string) []str
 	return dirs
 }
 
+// remapCompatHostPath lexically maps host-absolute paths under the
+// embedder-configured compat roots onto the sandbox root. It never consults
+// the host filesystem and ignores script-visible environment variables.
 func remapCompatHostPath(inv *Invocation, name string) string {
-	if inv == nil || inv.Env == nil || !strings.HasPrefix(name, "/") {
+	if inv == nil || !strings.HasPrefix(name, "/") {
 		return name
 	}
-	candidates := compatHostPathCandidates(name)
-	for _, key := range []string{"GBASH_COMPAT_ROOT", "abs_top_builddir", "abs_top_srcdir"} {
-		root := strings.TrimSpace(inv.Env[key])
+	for _, root := range inv.CompatHostRoots() {
+		root = strings.TrimSpace(root)
 		if root == "" || !strings.HasPrefix(root, "/") {
 			continue
 		}
-		for _, prefix := range compatHostPathCandidates(root) {
-			for _, candidate := range candidates {
-				rel, ok := trimCompatHostPrefix(candidate, prefix)
-				if !ok {
-					continue
-				}
-				if rel == "" {
-					return "/"
-				}
-				return path.Join("/", rel)
-			}
+		rel, ok := trimCompatHostPrefix(name, root)
+		if !ok {
+			continue
 		}
+		if rel == "" {
+			return "/"
+		}
+		return path.Join("/", rel)
 	}
 	return name
-}
-
-func compatHostPathCandidates(name string) []string {
-	out := []string{path.Clean(name)}
-	resolved, err := filepath.EvalSymlinks(filepath.FromSlash(name))
-	if err != nil {
-		return out
-	}
-	resolved = filepath.ToSlash(resolved)
-	resolved = path.Clean(resolved)
-	if resolved != out[0] {
-		out = append(out, resolved)
-	}
-	return out
 }
 
 func trimCompatHostPrefix(name, root string) (string, bool) {

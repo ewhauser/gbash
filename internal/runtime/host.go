@@ -155,11 +155,16 @@ func (v *virtualHost) Platform() host.Platform {
 	return v.platform
 }
 
+// virtualProcessGroup is the process group reported by the virtual host. The
+// virtual shell is PID 1 and leads its own group, so no host process-group id
+// leaks into the sandbox.
+const virtualProcessGroup = 1
+
 func (*virtualHost) ExecutionMeta(context.Context) (host.ExecutionMeta, error) {
 	return host.ExecutionMeta{
 		PID:          1,
 		PPID:         0,
-		ProcessGroup: currentVirtualProcessGroup(),
+		ProcessGroup: virtualProcessGroup,
 	}, nil
 }
 

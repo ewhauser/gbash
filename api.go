@@ -83,12 +83,14 @@ type Config struct {
 	Registry commands.CommandRegistry
 
 	// Policy governs path access, command limits, and other sandbox checks.
-	// When nil, the default static policy is used.
+	// When nil, the default static policy is used. Limits fields a custom
+	// policy leaves at zero inherit the runtime defaults; set a field to
+	// [policy.Unlimited] to disable that limit.
 	Policy policy.Policy
 
 	// LimitOverrides overrides selected runtime limits without replacing the
 	// active policy. Zero-valued fields leave the underlying policy/defaults
-	// unchanged.
+	// unchanged, and [policy.Unlimited] disables a limit.
 	LimitOverrides policy.Limits
 
 	// BaseEnv provides the base environment visible to each execution before any
@@ -122,6 +124,14 @@ type Config struct {
 	// interpreter. The observer is installed at runtime construction time and
 	// applies to both non-interactive and interactive shell execution.
 	AnalysisObserver analysis.Observer
+
+	// CompatHostRoots lists host directories whose absolute paths builtins
+	// remap lexically onto the sandbox root (for example "/tmp/work/src/cp"
+	// becomes "/src/cp" when "/tmp/work" is listed). It exists for
+	// compatibility harnesses that run host-generated scripts inside a
+	// directory-backed sandbox. The remap never consults the host filesystem
+	// and cannot be changed from inside the sandbox. Empty disables it.
+	CompatHostRoots []string
 }
 
 // FileSystemConfig describes how gbash provisions a session filesystem.
@@ -272,6 +282,7 @@ func (cfg *Config) runtimeConfig() *internalruntime.Config {
 		Tracing:          cfg.Tracing,
 		Logger:           cfg.Logger,
 		AnalysisObserver: cfg.AnalysisObserver,
+		CompatHostRoots:  append([]string(nil), cfg.CompatHostRoots...),
 	}
 }
 
@@ -459,7 +470,7 @@ func (r *Runtime) NewSession(ctx context.Context) (*Session, error) {
 	if r == nil || r.inner == nil {
 		return nil, fmt.Errorf("gbash: runtime is nil")
 	}
-	session, err := r.inner.NewSession(withHostProcessGroup(ctx))
+	session, err := r.inner.NewSession(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +485,7 @@ func (r *Runtime) Run(ctx context.Context, req *ExecutionRequest) (*ExecutionRes
 	if r == nil || r.inner == nil {
 		return nil, fmt.Errorf("gbash: runtime is nil")
 	}
-	result, err := r.inner.Run(withHostProcessGroup(ctx), req.runtimeRequest())
+	result, err := r.inner.Run(ctx, req.runtimeRequest())
 	return executionResultFromRuntime(result), err
 }
 
@@ -487,7 +498,7 @@ func (s *Session) Exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 	if s == nil || s.inner == nil {
 		return nil, fmt.Errorf("gbash: session is nil")
 	}
-	result, err := s.inner.Exec(withHostProcessGroup(ctx), req.runtimeRequest())
+	result, err := s.inner.Exec(ctx, req.runtimeRequest())
 	return executionResultFromRuntime(result), err
 }
 
@@ -496,7 +507,7 @@ func (s *Session) Interact(ctx context.Context, req *InteractiveRequest) (*Inter
 	if s == nil || s.inner == nil {
 		return nil, fmt.Errorf("gbash: session is nil")
 	}
-	result, err := s.inner.Interact(withHostProcessGroup(ctx), req.runtimeRequest())
+	result, err := s.inner.Interact(ctx, req.runtimeRequest())
 	return interactiveResultFromRuntime(result), err
 }
 

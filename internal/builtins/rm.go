@@ -309,6 +309,9 @@ func rmRemoveDirectoryRecursive(ctx context.Context, inv *Invocation, display, v
 	result := rmResult{}
 	hasUnremovedChild := false
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return rmResult{}, err
+		}
 		childDisplay := rmJoinChildDisplay(display, entry.Name())
 		childAbs := joinChildPath(abs, entry.Name())
 

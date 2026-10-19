@@ -110,6 +110,28 @@ type findCommandOptions struct {
 	minDepth    int
 	hasMinDepth bool
 	depthFirst  bool
+	symlinks    findSymlinkMode
+}
+
+// findSymlinkMode mirrors GNU find's -P (default), -H and -L options.
+type findSymlinkMode uint8
+
+const (
+	findSymlinkNever findSymlinkMode = iota
+	findSymlinkRoots
+	findSymlinkAlways
+)
+
+// follows reports whether find dereferences symlinks at depth.
+func (o findCommandOptions) follows(depth int) bool {
+	switch o.symlinks {
+	case findSymlinkAlways:
+		return true
+	case findSymlinkRoots:
+		return depth == 0
+	default:
+		return false
+	}
 }
 
 type findRequirements struct {
@@ -135,6 +157,7 @@ type findEvalContext struct {
 	metadataAvailable bool
 	isDir             bool
 	isFile            bool
+	isSymlink         bool
 	isEmpty           bool
 	mtime             time.Time
 	size              int64

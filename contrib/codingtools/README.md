@@ -12,7 +12,7 @@ It is a public helper module, not a shell-command bundle:
 
 - provider-neutral tool metadata via `ToolDefinition`
 - request parsers for provider payloads
-- structured text and image responses
+- structured text and image responses (images are capped at `MaxImageBytes`, 5 MiB)
 - upstream-style truncation and exact-text edit semantics
 - path resolution that stays agnostic to in-memory vs host-backed filesystems
 - per-toolset mutation serialization for `edit` and `write`

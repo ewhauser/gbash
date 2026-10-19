@@ -18,6 +18,8 @@ const arrayElementOverheadBytes = 16
 
 const variableLimitHint = ", increase policy.Limits.MaxVariableBytes"
 
+const totalVariableLimitHint = ", increase policy.Limits.MaxTotalVariableBytes"
+
 // variableValueBytes approximates the memory a variable's value holds.
 func variableValueBytes(vr expand.Variable) int64 {
 	switch vr.Kind {
@@ -38,6 +40,60 @@ func variableValueBytes(vr expand.Variable) int64 {
 	default:
 		return 0
 	}
+}
+
+// storedVariableBytes is the size a bound variable counts toward
+// MaxTotalVariableBytes; unset bindings hold no value.
+func storedVariableBytes(vr expand.Variable) int64 {
+	if !vr.IsSet() {
+		return 0
+	}
+	return variableValueBytes(vr)
+}
+
+// environValueBytes totals the values bound in every layer of env, counting a
+// shadowed binding as well as the one that hides it, since both are held.
+func environValueBytes(env expand.Environ) int64 {
+	var total int64
+	for env != nil {
+		switch e := env.(type) {
+		case *overlayEnviron:
+			total += e.valueBytes
+			env = e.parent
+		case *shadowWriteEnviron:
+			if e.shadowSet {
+				total += storedVariableBytes(e.shadow)
+			}
+			env = e.parent
+		default:
+			return total
+		}
+	}
+	return total
+}
+
+// totalVariablesTooLarge reports whether replacing prev with vr would take the
+// shell's variables past MaxTotalVariableBytes.
+func (r *Runner) totalVariablesTooLarge(vr, prev expand.Variable) bool {
+	if r.maxTotalVariableBytes <= 0 || !vr.IsSet() {
+		return false
+	}
+	growth := storedVariableBytes(vr) - storedVariableBytes(prev)
+	if growth <= 0 {
+		return false
+	}
+	return environValueBytes(r.writeEnv)+growth > r.maxTotalVariableBytes
+}
+
+// totalVariableLimitExceeded reports a write that would take the shell's
+// variables past MaxTotalVariableBytes, and stops the shell like
+// [Runner.variableLimitExceeded].
+func (r *Runner) totalVariableLimitExceeded(name string) {
+	if !r.variableLimitHit {
+		r.errf("%s: total variable size too large (limit %d bytes)%s\n", name, r.maxTotalVariableBytes, totalVariableLimitHint)
+	}
+	r.variableLimitHit = true
+	r.applyVariableLimitExit()
 }
 
 // wordListTooLarge reports whether expanded words, such as a command's
@@ -74,12 +130,7 @@ func (r *Runner) variableLimitExceeded(name string) {
 }
 
 func (r *Runner) applyVariableLimitExit() {
-	r.exit.code = 126
-	if r.interactive {
-		r.commandAborted = true
-	} else {
-		r.exit.exiting = true
-	}
+	r.applyLimitExit()
 }
 
 // reassertVariableLimitExit restores the limit status after a command whose

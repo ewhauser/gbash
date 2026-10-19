@@ -61,6 +61,8 @@ func clampSigned64(value *big.Int) int64 {
 	}
 }
 
+// resolveLocation returns the zone named by the sandbox TZ, or UTC when TZ
+// is unset or invalid. It never consults the host's local zone.
 func resolveLocation(opts Options) *time.Location {
 	if opts.LookupEnv != nil {
 		if value, ok := opts.LookupEnv("TZ"); ok && strings.TrimSpace(value) != "" {
@@ -69,7 +71,7 @@ func resolveLocation(opts Options) *time.Location {
 			}
 		}
 	}
-	return time.Local
+	return time.UTC
 }
 
 func shellStartTime(opts Options) time.Time {

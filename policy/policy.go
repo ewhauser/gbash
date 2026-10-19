@@ -30,16 +30,25 @@ const (
 	SymlinkFollow SymlinkMode = "follow"
 )
 
+// Unlimited disables a single [Limits] field when the policy is used by the
+// gbash runtime.
+const Unlimited int64 = -1
+
+// Limits are per-execution resource caps. When the gbash runtime enforces a
+// policy, a zero field inherits the runtime default for that limit (including
+// for custom policies), and a negative field such as [Unlimited] disables it.
 type Limits struct {
 	MaxCommandCount        int64
 	MaxGlobOperations      int64
 	MaxBraceExpansionWords int64
 	MaxLoopIterations      int64
 	MaxSubstitutionDepth   int64
+	MaxFunctionDepth       int64
 	MaxStdoutBytes         int64
 	MaxStderrBytes         int64
 	MaxFileBytes           int64
 	MaxVariableBytes       int64
+	MaxTotalVariableBytes  int64
 }
 
 type Policy interface {

@@ -17,7 +17,12 @@ type Find struct{}
 const findHelpText = `find - search for files in a directory hierarchy
 
 Usage:
-  find [path ...] [expression]
+  find [-H] [-L] [-P] [path ...] [expression]
+
+Symlink options:
+  -P                  never follow symbolic links (default)
+  -H                  follow symbolic links named as starting points
+  -L                  follow all symbolic links (-follow is a synonym)
 
 Supported predicates:
   -name PATTERN       file name matches shell pattern
@@ -26,7 +31,7 @@ Supported predicates:
   -ipath PATTERN      case-insensitive displayed path match
   -regex PATTERN      displayed path matches regular expression
   -iregex PATTERN     case-insensitive regular expression match
-  -type f|d           filter by file or directory
+  -type f|d|l         filter by file, directory or symbolic link
   -empty              match empty files and empty directories
   -mtime N            match modification age in days (+N, -N, N)
   -newer FILE         match files newer than FILE
@@ -51,6 +56,10 @@ Supported predicates:
 type findTraversalState struct {
 	results   []string
 	printData []findPrintData
+	// activeDirs holds the canonical paths of the directories currently being
+	// walked under -L so symlink loops are reported instead of followed.
+	activeDirs map[string]string
+	exitCode   int
 }
 
 func NewFind() *Find {
@@ -115,7 +124,20 @@ func (c *Find) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCo
 		if strings.HasPrefix(root, "/") {
 			rootAbs = root
 		}
-		rootInfo, rootResolved, exists, err := statMaybe(ctx, inv, rootAbs)
+		var (
+			rootInfo     stdfs.FileInfo
+			rootResolved string
+			exists       bool
+		)
+		if opts.follows(0) {
+			rootInfo, rootResolved, exists, err = statMaybe(ctx, inv, rootAbs)
+			if err == nil && !exists {
+				// Like GNU find, a dangling symlink root is reported as itself.
+				rootInfo, rootResolved, exists, err = lstatMaybe(ctx, inv, rootAbs)
+			}
+		} else {
+			rootInfo, rootResolved, exists, err = lstatMaybe(ctx, inv, rootAbs)
+		}
 		if err != nil {
 			return err
 		}
@@ -132,6 +154,9 @@ func (c *Find) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCo
 		}
 	}
 
+	if state.exitCode > exitCode {
+		exitCode = state.exitCode
+	}
 	actionExitCode, err := c.runActions(ctx, inv, actions, state)
 	if err != nil {
 		return err
@@ -165,6 +190,10 @@ func (c *Find) walk(
 	state *findTraversalState,
 	hasExplicitPrint bool,
 ) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	follow := opts.follows(depth)
 	info := currentInfo
 	displayPath := walkDisplayPath(rootArg, rootAbs, currentAbs)
 	entryName := ""
@@ -187,7 +216,7 @@ func (c *Find) walk(
 		followedIsDir = info.IsDir()
 		followedIsFile = info.Mode().IsRegular()
 		followedIsDirKnown = true
-	} else if currentEntry != nil && entryTypeKnown && !entryIsSymlink {
+	} else if currentEntry != nil && entryTypeKnown && (!entryIsSymlink || !follow) {
 		followedIsDir = entryIsDir
 		followedIsFile = currentEntry.Type().IsRegular()
 		followedIsDirKnown = true
@@ -197,7 +226,7 @@ func (c *Find) walk(
 		if info != nil {
 			return info, nil
 		}
-		entryInfo, err := loadFindInfo(ctx, inv, currentEntry, currentAbs, entryTypeKnown, entryIsSymlink)
+		entryInfo, err := loadFindInfo(ctx, inv, currentEntry, currentAbs, entryTypeKnown, entryIsSymlink, follow)
 		if err != nil {
 			return nil, err
 		}
@@ -266,6 +295,7 @@ func (c *Find) walk(
 	if requirements.needsType {
 		matchCtx.isDir = followedIsDir
 		matchCtx.isFile = followedIsFile
+		matchCtx.isSymlink = (info != nil && info.Mode()&stdfs.ModeSymlink != 0) || (info == nil && entryIsSymlink && !follow)
 	}
 	if requirements.needsEmpty {
 		matchCtx.isEmpty = isEmpty
@@ -308,6 +338,16 @@ func (c *Find) walk(
 		}
 	}
 
+	if followedIsDir && canDescend && !eval.pruned && follow {
+		loop, release, err := c.enterFollowedDir(ctx, inv, state, currentAbs, displayPath)
+		if err != nil {
+			return err
+		}
+		defer release()
+		if loop {
+			entries = nil
+		}
+	}
 	if followedIsDir && canDescend && !eval.pruned {
 		for _, entry := range entries {
 			childAbs := joinChildPath(currentAbs, entry.Name())
@@ -325,6 +365,26 @@ func (c *Find) walk(
 	return nil
 }
 
+// enterFollowedDir records a directory reached while dereferencing symlinks
+// and reports a GNU-style loop diagnostic when it is already being walked.
+func (c *Find) enterFollowedDir(ctx context.Context, inv *Invocation, state *findTraversalState, currentAbs, displayPath string) (loop bool, release func(), err error) {
+	release = func() {}
+	resolved, err := inv.FS.Realpath(ctx, currentAbs)
+	if err != nil {
+		return false, release, err
+	}
+	if state.activeDirs == nil {
+		state.activeDirs = make(map[string]string)
+	}
+	if ancestor, ok := state.activeDirs[resolved]; ok {
+		_, _ = fmt.Fprintf(inv.Stderr, "find: File system loop detected; %s is part of the same file system loop as %s.\n", quoteGNUOperand(displayPath), quoteGNUOperand(ancestor))
+		state.exitCode = 1
+		return true, release, nil
+	}
+	state.activeDirs[resolved] = displayPath
+	return false, func() { delete(state.activeDirs, resolved) }, nil
+}
+
 func findDirEntryTypeUnknown(mode stdfs.FileMode) bool {
 	return mode == ^stdfs.FileMode(0)
 }
@@ -334,14 +394,26 @@ func loadFindInfo(
 	inv *Invocation,
 	currentEntry stdfs.DirEntry,
 	currentAbs string,
-	entryTypeKnown, entryIsSymlink bool,
+	entryTypeKnown, entryIsSymlink, follow bool,
 ) (stdfs.FileInfo, error) {
 	if currentEntry != nil && entryTypeKnown && !entryIsSymlink {
 		if entryInfo, err := currentEntry.Info(); err == nil {
 			return entryInfo, nil
 		}
 	}
-	entryInfo, _, err := statPath(ctx, inv, currentAbs)
+	var (
+		entryInfo stdfs.FileInfo
+		err       error
+	)
+	if follow {
+		entryInfo, _, err = statPath(ctx, inv, currentAbs)
+		if errors.Is(err, stdfs.ErrNotExist) && entryIsSymlink {
+			// GNU find -L reports a dangling symlink as the link itself.
+			entryInfo, _, err = lstatPath(ctx, inv, currentAbs)
+		}
+	} else {
+		entryInfo, _, err = lstatPath(ctx, inv, currentAbs)
+	}
 	if err != nil {
 		return nil, err
 	}

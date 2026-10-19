@@ -69,9 +69,11 @@ type Execution struct {
 	SetTime            func(time.Time) error
 	Exec               func(context.Context, *commands.ExecutionRequest) (*commands.ExecutionResult, error)
 	Interact           func(context.Context, *commands.InteractiveRequest) (*commands.InteractiveResult, error)
+	CompatHostRoots    []string
 	activeShellVariant shellvariant.ShellVariant
 	activeLangVariant  syntax.LangVariant
 	procSubst          *procSubstManager
+	subshellDepth      int64
 }
 
 type RunResult struct {
@@ -167,6 +169,16 @@ func (m *core) Run(ctx context.Context, exec *Execution) (result *RunResult, run
 	effectiveExec := *exec
 	if err := resolveExecutionVariant(&effectiveExec); err != nil {
 		return nil, err
+	}
+	if parent, ok := ctx.Value(nestedExecutionKey{}).(nestedExecution); ok {
+		// A shell started by a command such as bash -c shares its parent's
+		// budgets, so nesting shells cannot reset them, and counts as one
+		// more level of subshell nesting.
+		budget = parent.budget
+		effectiveExec.subshellDepth = parent.subshellDepth
+		if limit := executionSubstitutionDepthLimit(exec); limit > 0 && parent.subshellDepth > limit {
+			return &RunResult{}, shellFailureToWriter(ctx, exec.Stderr, 126, "%v", interp.SubshellDepthLimitError{Limit: limit})
+		}
 	}
 	cleanupProcSubst := withProcSubstScope(&effectiveExec)
 	defer cleanupProcSubst()
@@ -276,6 +288,10 @@ func (m *core) runnerConfig(exec *Execution, budget *executionBudget) *interp.Ru
 	if exec.Policy != nil {
 		cfg.MaxVariableBytes = exec.Policy.Limits().MaxVariableBytes
 		cfg.MaxBraceExpansionWords = exec.Policy.Limits().MaxBraceExpansionWords
+		cfg.MaxTotalVariableBytes = exec.Policy.Limits().MaxTotalVariableBytes
+		cfg.MaxSubshellDepth = exec.Policy.Limits().MaxSubstitutionDepth
+		cfg.SubshellDepth = exec.subshellDepth
+		cfg.MaxFunctionDepth = exec.Policy.Limits().MaxFunctionDepth
 	}
 	cfg.StartupHome = exec.StartupHome
 	cfg.Dir = exec.Dir
@@ -785,6 +801,10 @@ func (m *core) execHandler(exec *Execution, budget *executionBudget) interp.Exec
 			Internal:      internal,
 			FromBootstrap: fromBootstrap,
 			PrepareInvoke: func(callCtx context.Context) context.Context {
+				callCtx = context.WithValue(callCtx, nestedExecutionKey{}, nestedExecution{
+					budget:        budget,
+					subshellDepth: hc.SubshellDepth() + 1,
+				})
 				callCtx = shellstate.WithShellVarAssignments(callCtx, shellVars)
 				callCtx = shellstate.WithShellVarLookup(callCtx, shellVarLookup)
 				callCtx = shellstate.WithSignalDispatcher(callCtx, hc.DispatchSignal)
@@ -823,20 +843,21 @@ func invokeResolvedCommand(
 		invocationArgs = append(invocationArgs, argv[1:]...)
 	}
 	invocation := commands.NewInvocation(&commands.InvocationOptions{
-		Args:       invocationArgs,
-		Env:        currentEnv,
-		Cwd:        virtualWD,
-		Stdin:      stdin,
-		Stdout:     stdout,
-		Stderr:     stderr,
-		Now:        exec.Now,
-		SetTime:    exec.SetTime,
-		FileSystem: exec.FS,
-		Network:    exec.Network,
-		Policy:     exec.Policy,
-		Trace:      exec.Trace,
-		Exec:       subexecInvoker(exec.Exec, currentEnv, virtualWD),
-		Interact:   interactiveInvoker(exec.Interact, currentEnv, virtualWD),
+		Args:            invocationArgs,
+		Env:             currentEnv,
+		Cwd:             virtualWD,
+		Stdin:           stdin,
+		Stdout:          stdout,
+		Stderr:          stderr,
+		Now:             exec.Now,
+		SetTime:         exec.SetTime,
+		FileSystem:      exec.FS,
+		Network:         exec.Network,
+		Policy:          exec.Policy,
+		Trace:           exec.Trace,
+		Exec:            subexecInvoker(exec.Exec, currentEnv, virtualWD),
+		Interact:        interactiveInvoker(exec.Interact, currentEnv, virtualWD),
+		CompatHostRoots: exec.CompatHostRoots,
 		GetRegisteredCommands: func() []string {
 			if exec.Registry == nil {
 				return nil
@@ -1782,6 +1803,22 @@ func fileMutationAction(flag int) string {
 		return "append"
 	}
 	return "write"
+}
+
+// nestedExecutionKey carries a [nestedExecution] from a shell to the commands
+// it runs, so a shell they start in turn (bash -c, sh -c) inherits it.
+type nestedExecutionKey struct{}
+
+type nestedExecution struct {
+	budget        *executionBudget
+	subshellDepth int64
+}
+
+func executionSubstitutionDepthLimit(exec *Execution) int64 {
+	if exec == nil || exec.Policy == nil {
+		return 0
+	}
+	return exec.Policy.Limits().MaxSubstitutionDepth
 }
 
 type executionBudget struct {

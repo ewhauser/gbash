@@ -37,6 +37,9 @@ type nodeSource struct {
 
 type interruptSignal struct {
 	err error
+	// limit marks an interrupt raised by a sandbox resource limit rather
+	// than by the request context.
+	limit bool
 }
 
 type processExitSignal struct {
@@ -208,17 +211,8 @@ func newNodeRuntime(ctx context.Context, inv *commands.Invocation, source nodeSo
 }
 
 func (rt *nodeRuntime) run() error {
-	done := make(chan struct{})
-	if rt.ctx != nil {
-		go func() {
-			select {
-			case <-rt.ctx.Done():
-				rt.vm.Interrupt(interruptSignal{err: rt.ctx.Err()})
-			case <-done:
-			}
-		}()
-	}
-	defer close(done)
+	stop := rt.watchExecution()
+	defer stop()
 
 	_, err := rt.req.Require(rt.source.entryPath)
 	if err == nil {
@@ -229,6 +223,9 @@ func (rt *nodeRuntime) run() error {
 
 func (rt *nodeRuntime) installGlobals() error {
 	gojabuffer.Enable(rt.vm)
+	if err := rt.installAllocLimits(); err != nil {
+		return err
+	}
 
 	consoleObj, err := rt.consoleModule()
 	if err != nil {
@@ -467,6 +464,12 @@ func (rt *nodeRuntime) normalizeRunError(err error) error {
 		case processExitSignal:
 			return &commands.ExitError{Code: value.code}
 		case interruptSignal:
+			if value.limit {
+				if rt.inv != nil && rt.inv.Stderr != nil {
+					_, _ = fmt.Fprintf(rt.inv.Stderr, "nodejs: %v\n", value.err)
+				}
+				return &commands.ExitError{Code: 1, Err: value.err}
+			}
 			if value.err != nil {
 				return value.err
 			}

@@ -3,6 +3,7 @@ package builtins
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -125,14 +126,18 @@ func factorRenderHelp(w io.Writer, spec *CommandSpec) error {
 }
 
 func factorReadStdin(ctx context.Context, inv *Invocation, writer *bufio.Writer, printExponents bool) (bool, error) {
-	reader := bufio.NewReader(inv.Stdin)
+	reader := newBoundedLineReader(inv, inv.Stdin)
 	hadWarning := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return hadWarning, err
 		}
 
-		line, err := reader.ReadBytes('\n')
+		line, err := reader.ReadLine('\n')
+		var exitErr *ExitError
+		if errors.As(err, &exitErr) {
+			return hadWarning, err
+		}
 		if len(line) > 0 && line[len(line)-1] == '\n' {
 			line = line[:len(line)-1]
 		}
@@ -146,7 +151,7 @@ func factorReadStdin(ctx context.Context, inv *Invocation, writer *bufio.Writer,
 			return hadWarning, lineErr
 		}
 
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return hadWarning, nil
 		}
 		if err != nil {

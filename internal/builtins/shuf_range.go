@@ -1,6 +1,18 @@
 package builtins
 
-import "math"
+import (
+	"errors"
+	"math"
+)
+
+// shufSparseMaxEntries bounds the sparse Fisher-Yates swap map. Each
+// output from a range too wide to materialize adds at most one entry, so
+// this caps how many distinct values one invocation may draw from it.
+const shufSparseMaxEntries = 1 << 21
+
+// errShufSparseRangeExhausted reports that a wide range would need more swap
+// entries than shufSparseMaxEntries allows.
+var errShufSparseRangeExhausted = errors.New("shuf: sparse range limit reached")
 
 type shufInputRange struct {
 	start uint64
@@ -78,7 +90,14 @@ func (it *shufNonrepeatingRangeIterator) Next() (uint64, bool, error) {
 			return 0, false, nil
 		}
 		if len(it.sparseValues) >= it.sparseCapacity {
-			it.promoteSparseToFull()
+			// Materializing the rest of the range is only safe once it is
+			// as small as a range we would have materialized up front;
+			// otherwise keep the sparse map, bounded by its own cap.
+			if it.sparseEnd-it.sparseStart < shufFullRangeMaxItems {
+				it.promoteSparseToFull()
+			} else if len(it.sparseValues) >= shufSparseMaxEntries {
+				return 0, false, errShufSparseRangeExhausted
+			}
 		}
 	}
 

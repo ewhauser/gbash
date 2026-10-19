@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	stdfs "io/fs"
+	"math"
 	"os"
 	"path"
 	"strconv"
@@ -147,7 +148,7 @@ func (rt *nodeRuntime) readDirSync(call goja.FunctionCall) goja.Value {
 
 	name := rt.stringArg(call, 0, "path")
 	if options := call.Argument(1); !goja.IsUndefined(options) && !goja.IsNull(options) {
-		if options.ToObject(rt.vm).Get("withFileTypes").ToBoolean() {
+		if optionValue(options.ToObject(rt.vm), "withFileTypes").ToBoolean() {
 			rt.throw(fmt.Errorf("nodejs: fs.readdirSync with withFileTypes is not supported"))
 		}
 	}
@@ -208,10 +209,16 @@ func (rt *nodeRuntime) mkdirSync(call goja.FunctionCall) goja.Value {
 		switch value := arg.Export().(type) {
 		case bool:
 			recursive = value
+		case int64, float64, string:
+			parsed, err := parseUintMode(arg)
+			if err != nil {
+				rt.throw(fmt.Errorf("nodejs: invalid mkdir mode: %w", err))
+			}
+			mode = parsed
 		default:
 			obj := arg.ToObject(rt.vm)
-			recursive = obj.Get("recursive").ToBoolean()
-			parsed, err := parseUintMode(obj.Get("mode"))
+			recursive = optionValue(obj, "recursive").ToBoolean()
+			parsed, err := parseUintMode(optionValue(obj, "mode"))
 			if err != nil {
 				rt.throw(fmt.Errorf("nodejs: invalid mkdir mode: %w", err))
 			}
@@ -250,8 +257,8 @@ func (rt *nodeRuntime) rmSync(call goja.FunctionCall) goja.Value {
 	recursive, force := false, false
 	if arg := call.Argument(1); !goja.IsUndefined(arg) && !goja.IsNull(arg) {
 		obj := arg.ToObject(rt.vm)
-		recursive = obj.Get("recursive").ToBoolean()
-		force = obj.Get("force").ToBoolean()
+		recursive = optionValue(obj, "recursive").ToBoolean()
+		force = optionValue(obj, "force").ToBoolean()
 	}
 
 	if err := rt.inv.FS.Remove(rt.ctx, name, recursive); err != nil {
@@ -281,7 +288,7 @@ func (rt *nodeRuntime) rmdirSync(call goja.FunctionCall) goja.Value {
 		case bool:
 			recursive = value
 		default:
-			recursive = arg.ToObject(rt.vm).Get("recursive").ToBoolean()
+			recursive = optionValue(arg.ToObject(rt.vm), "recursive").ToBoolean()
 		}
 	}
 	if err := rt.inv.FS.Remove(rt.ctx, name, recursive); err != nil {
@@ -429,7 +436,7 @@ func (rt *nodeRuntime) readEncodingOption(value goja.Value) (encoding string, pr
 		return normalizeEncoding(exported), true, validateEncoding(exported)
 	default:
 		obj := value.ToObject(rt.vm)
-		encoding := obj.Get("encoding")
+		encoding := optionValue(obj, "encoding")
 		if goja.IsUndefined(encoding) || goja.IsNull(encoding) {
 			return "", false, nil
 		}
@@ -523,19 +530,38 @@ func (rt *nodeRuntime) throw(value any) {
 	}
 }
 
+// optionValue reads one property of a Node options object. goja returns a Go
+// nil for a missing property, so map it to undefined before callers convert
+// it.
+func optionValue(obj *goja.Object, name string) goja.Value {
+	if obj == nil {
+		return goja.Undefined()
+	}
+	if value := obj.Get(name); value != nil {
+		return value
+	}
+	return goja.Undefined()
+}
+
+// parseUintMode converts a Node mode option into permission bits. Only the
+// low twelve Unix mode bits are honored, so a numeric mode can never set file
+// type bits such as os.ModeSymlink.
 func parseUintMode(value goja.Value) (os.FileMode, error) {
-	if goja.IsUndefined(value) || goja.IsNull(value) {
+	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
 		return 0o755, nil
 	}
+	var bits uint64
 	switch exported := value.Export().(type) {
 	case int64:
-		return os.FileMode(exported), nil
-	case int32:
-		return os.FileMode(exported), nil
-	case int:
-		return os.FileMode(exported), nil
+		if exported < 0 {
+			return 0, fmt.Errorf("mode must be a non-negative integer, got %d", exported)
+		}
+		bits = uint64(exported)
 	case float64:
-		return os.FileMode(int64(exported)), nil
+		if exported < 0 || exported != math.Trunc(exported) || math.IsInf(exported, 0) || exported > math.MaxUint32 {
+			return 0, fmt.Errorf("mode must be a non-negative integer, got %v", exported)
+		}
+		bits = uint64(exported)
 	case string:
 		trimmed := strings.TrimSpace(exported)
 		if trimmed == "" {
@@ -545,8 +571,23 @@ func parseUintMode(value goja.Value) (os.FileMode, error) {
 		if err != nil {
 			return 0, err
 		}
-		return os.FileMode(parsed), nil
+		bits = parsed
 	default:
 		return 0o755, nil
 	}
+	return unixModeBits(bits), nil
+}
+
+func unixModeBits(bits uint64) os.FileMode {
+	mode := os.FileMode(bits & 0o777)
+	if bits&0o4000 != 0 {
+		mode |= os.ModeSetuid
+	}
+	if bits&0o2000 != 0 {
+		mode |= os.ModeSetgid
+	}
+	if bits&0o1000 != 0 {
+		mode |= os.ModeSticky
+	}
+	return mode
 }

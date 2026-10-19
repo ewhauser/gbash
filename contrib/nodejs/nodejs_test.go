@@ -244,7 +244,7 @@ func TestNodeJSShebangViaEnvWorks(t *testing.T) {
 		"#!/usr/bin/env nodejs\n"+
 		"console.log('shebang');\n"))
 
-	result := mustExecNodeSession(t, session, "/home/agent/tool.js\n")
+	result := mustExecNodeSession(t, session, "chmod +x /home/agent/tool.js\n/home/agent/tool.js\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}

@@ -252,6 +252,7 @@ type ddFileWriter struct {
 	pending  []byte
 	data     []byte
 	cursor   int
+	maxBytes int64
 }
 
 type ddRedirectedFileWriter struct {
@@ -269,6 +270,7 @@ type ddSeekableWriter struct {
 	}
 	obs        int
 	buffered   bool
+	maxBytes   int64
 	pending    []byte
 	targetSize int64
 }
@@ -539,7 +541,7 @@ func parseDdBlockSize(inv *Invocation, label, raw string) (int, error) {
 	if value == 0 {
 		return 0, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(raw))
 	}
-	if value > math.MaxInt {
+	if value > math.MaxInt || value > uint64(allocationLimit(inv)) {
 		return 0, exitf(inv, 1, "dd: %s=N cannot fit into memory", label)
 	}
 	return int(value), nil
@@ -743,7 +745,7 @@ func runDdWithIO(ctx context.Context, inv *Invocation, settings *ddSettings, inp
 
 		writeUpdate, writeErr := ddWriteOutputBlock(output, transformed, settings)
 		if writeErr != nil {
-			return &ExitError{Code: 1, Err: writeErr}
+			return ddWriteError(inv, settings, writeErr)
 		}
 		writeStats.add(writeUpdate)
 
@@ -758,6 +760,9 @@ func runDdWithIO(ctx context.Context, inv *Invocation, settings *ddSettings, inp
 	}
 
 	for ddBelowCount(settings.count, readStats) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		requestSize := settings.ibs
 		if settings.count != nil && settings.count.bytes {
 			remaining := settings.count.value - readStats.bytesTotal
@@ -827,7 +832,7 @@ func runDdWithIO(ctx context.Context, inv *Invocation, settings *ddSettings, inp
 		if len(transformed) > 0 {
 			writeUpdate, writeErr := ddWriteOutputBlock(output, transformed, settings)
 			if writeErr != nil {
-				return &ExitError{Code: 1, Err: writeErr}
+				return ddWriteError(inv, settings, writeErr)
 			}
 			writeStats.add(writeUpdate)
 		}
@@ -835,7 +840,7 @@ func runDdWithIO(ctx context.Context, inv *Invocation, settings *ddSettings, inp
 
 	flushStats, err := output.Flush()
 	if err != nil {
-		return &ExitError{Code: 1, Err: err}
+		return ddWriteError(inv, settings, err)
 	}
 	writeStats.add(flushStats)
 	if err := output.Sync(); err != nil {
@@ -852,6 +857,17 @@ func runDdWithIO(ctx context.Context, inv *Invocation, settings *ddSettings, inp
 		return &ExitError{Code: 1}
 	}
 	return nil
+}
+
+func ddWriteError(inv *Invocation, settings *ddSettings, err error) error {
+	if !errors.Is(err, errFileTooLarge) {
+		return &ExitError{Code: 1, Err: err}
+	}
+	label := "standard output"
+	if settings != nil && settings.outfileSet {
+		label = settings.outfile
+	}
+	return exitf(inv, 1, "dd: error writing %s: %v", quoteGNUOperand(label), err)
 }
 
 func ddBelowCount(count *ddNumber, stats ddReadStats) bool {
@@ -1122,7 +1138,11 @@ func openDdOutput(ctx context.Context, inv *Invocation, settings *ddSettings) (d
 			if seekBytes > math.MaxInt64 {
 				return nil, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(strconv.FormatUint(seekBytes, 10)))
 			}
+			if exceedsFileSizeLimit(inv, seekBytes) {
+				return nil, exitf(inv, 1, "dd: %s: cannot seek: %v", quoteGNUOperand("standard output"), errFileTooLarge)
+			}
 			if writer, ok := openDdSeekableWriter(inv.Stdout, settings, int64(seekBytes)); ok {
+				writer.maxBytes = fileSizeLimit(inv)
 				return writer, nil
 			}
 			if !ddHandleIsRegularFile(ctx, inv, inv.Stdout, path) {
@@ -1220,6 +1240,9 @@ func openDdPathOutput(ctx context.Context, inv *Invocation, settings *ddSettings
 	if cursor64 > math.MaxInt {
 		return nil, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(strconv.FormatInt(cursor64, 10)))
 	}
+	if cursor64 > allocationLimit(inv) {
+		return nil, exitf(inv, 1, "dd: failed to truncate to %d bytes in output file %s: %v", cursor64, quoteGNUOperand(target), errFileTooLarge)
+	}
 
 	cursor := int(cursor64)
 	var data []byte
@@ -1251,6 +1274,7 @@ func openDdPathOutput(ctx context.Context, inv *Invocation, settings *ddSettings
 		buffered: settings.buffered,
 		data:     data,
 		cursor:   cursor,
+		maxBytes: allocationLimit(inv),
 	}, nil
 }
 
@@ -1652,6 +1676,9 @@ func (w *ddSeekableWriter) SkipZeros(size int) (ddWriteStats, error) {
 			return ddWriteStats{}, err
 		}
 	}
+	if w.exceedsLimit(size) {
+		return ddWriteStats{}, errFileTooLarge
+	}
 	if _, err := w.seeker.Seek(int64(size), io.SeekCurrent); err != nil {
 		return ddWriteStats{}, err
 	}
@@ -1659,7 +1686,14 @@ func (w *ddSeekableWriter) SkipZeros(size int) (ddWriteStats, error) {
 	return ddCountWriteStats(size, w.obs), nil
 }
 
+func (w *ddSeekableWriter) exceedsLimit(grow int) bool {
+	return w.maxBytes > 0 && w.targetSize+int64(grow) > w.maxBytes
+}
+
 func (w *ddSeekableWriter) writeChunks(data []byte) (ddWriteStats, error) {
+	if w.exceedsLimit(len(data)) {
+		return ddWriteStats{}, errFileTooLarge
+	}
 	stats, err := ddWriteChunks(w.writer, data, w.obs)
 	if err != nil {
 		return stats, err
@@ -1674,12 +1708,22 @@ func (w *ddFileWriter) SkipZeros(size int) (ddWriteStats, error) {
 			return ddWriteStats{}, err
 		}
 	}
+	if w.exceedsLimit(size) {
+		return ddWriteStats{}, errFileTooLarge
+	}
 	w.cursor += size
 	w.ensureSize()
 	return ddCountWriteStats(size, w.obs), nil
 }
 
+func (w *ddFileWriter) exceedsLimit(grow int) bool {
+	return w.maxBytes > 0 && int64(w.cursor)+int64(grow) > w.maxBytes
+}
+
 func (w *ddFileWriter) writeChunks(data []byte) (ddWriteStats, error) {
+	if w.exceedsLimit(len(data)) {
+		return ddWriteStats{}, errFileTooLarge
+	}
 	stats := ddCountWriteStats(len(data), w.obs)
 	for len(data) > 0 {
 		chunkLen := minInt(len(data), w.obs)

@@ -85,9 +85,20 @@ func forkEnvironWithEpoch(parent expand.Environ, epoch *envEpoch) expand.Environ
 	return parent
 }
 
+// maxForkChainLayers bounds how many environ layers a fork clones one by one.
+// Every subshell and function call adds a layer, so cloning the whole chain on
+// each fork would cost memory quadratic in the nesting depth; longer chains
+// are collapsed instead.
+const maxForkChainLayers = 32
+
 func forkWriteEnvironWithEpoch(parent expand.WriteEnviron, epoch *envEpoch) expand.WriteEnviron {
 	switch parent := parent.(type) {
 	case *overlayEnviron:
+		if environChainExceeds(parent, maxForkChainLayers) {
+			if collapsed := collapseEnvironChain(parent, epoch); collapsed != nil {
+				return collapsed
+			}
+		}
 		clone := *parent
 		clone.parent = forkEnvironWithEpoch(parent.parent, epoch)
 		clone.valuesShared = shareMapForSubshell(parent.values, &parent.valuesShared)
@@ -123,6 +134,105 @@ func forkWriteEnvironWithEpoch(parent expand.WriteEnviron, epoch *envEpoch) expa
 	}
 }
 
+// environChainExceeds reports whether env stacks more than limit overlay and
+// shadow layers.
+func environChainExceeds(env expand.Environ, limit int) bool {
+	for layers := 0; ; layers++ {
+		if layers > limit {
+			return true
+		}
+		switch e := env.(type) {
+		case *overlayEnviron:
+			env = e.parent
+		case *shadowWriteEnviron:
+			env = e.parent
+		default:
+			return false
+		}
+	}
+}
+
+// collapseEnvironChain forks a long environ chain as two layers: a clone of
+// the global (bottom) overlay, and one overlay holding every binding the
+// layers above it make visible. The merged layer is a function scope when any
+// merged layer was, so local declarations and declare -g still reach the
+// right scope. It returns nil when the chain does not end in an overlay.
+func collapseEnvironChain(top *overlayEnviron, epoch *envEpoch) expand.WriteEnviron {
+	var upper []expand.WriteEnviron
+	var global *overlayEnviron
+	var env expand.WriteEnviron = top
+	for global == nil {
+		switch e := env.(type) {
+		case *overlayEnviron:
+			next, ok := e.parent.(expand.WriteEnviron)
+			if !ok {
+				global = e
+				continue
+			}
+			switch next.(type) {
+			case *overlayEnviron, *shadowWriteEnviron:
+				upper = append(upper, e)
+				env = next
+			default:
+				global = e
+			}
+		case *shadowWriteEnviron:
+			upper = append(upper, e)
+			env = e.parent
+		default:
+			return nil
+		}
+	}
+
+	globalClone := *global
+	globalClone.parent = forkEnvironWithEpoch(global.parent, epoch)
+	globalClone.valuesShared = shareMapForSubshell(global.values, &global.valuesShared)
+	globalClone.tempUnsetShared = shareMapForSubshell(global.tempUnset, &global.tempUnsetShared)
+	globalClone.envEpoch = epoch
+	globalClone.visibleCache = nil
+	globalClone.visibleCacheEpoch = 0
+	globalClone.visibleCacheReady = false
+
+	merged := &overlayEnviron{
+		parent:          &globalClone,
+		caseInsensitive: top.caseInsensitive,
+		values:          make(map[string]namedVariable),
+		envEpoch:        epoch,
+	}
+	// Walk from the innermost layer out so the first binding seen for a name,
+	// including an unset shadow, is the one that stays visible.
+	for _, layer := range upper {
+		switch e := layer.(type) {
+		case *overlayEnviron:
+			merged.funcScope = merged.funcScope || e.funcScope
+			for normalized, vr := range e.values {
+				if _, seen := merged.values[normalized]; !seen {
+					merged.values[normalized] = vr
+					merged.valueBytes += storedVariableBytes(vr.Variable)
+				}
+			}
+		case *shadowWriteEnviron:
+			if !e.shadowSet {
+				continue
+			}
+			normalized := merged.normalize(e.shadowName)
+			if _, seen := merged.values[normalized]; !seen {
+				merged.values[normalized] = namedVariable{e.shadowName, e.shadow}
+				merged.valueBytes += storedVariableBytes(e.shadow)
+			}
+		}
+	}
+	if owner, _, ok := visibleBindingWriteEnv(top, "OPTIND"); ok && owner != expand.WriteEnviron(global) {
+		if state := getoptsStateForEnv(owner); state != nil {
+			merged.optState = *state
+		}
+	}
+	if owner, _, ok := visibleSecondsBinding(top); ok && owner != expand.WriteEnviron(global) {
+		merged.secondsStartTime, merged.secondsStartSet = secondsStartTimeForEnv(owner)
+	}
+	return merged
+}
+
 // overlayEnviron is our main implementation of [expand.WriteEnviron].
 type overlayEnviron struct {
 	// parent is non-nil if [values] is an overlay over a parent environment
@@ -137,6 +247,9 @@ type overlayEnviron struct {
 	// valuesShared tracks whether values is shared with another environ and
 	// must be cloned before mutation.
 	valuesShared bool
+	// valueBytes is the total size of the values bound in this layer, per
+	// [storedVariableBytes].
+	valueBytes int64
 
 	// envEpoch tracks visible-binding mutations across a shared overlay chain.
 	envEpoch *envEpoch
@@ -329,9 +442,9 @@ func (o *overlayEnviron) Get(name string) expand.Variable {
 func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 	normalized := o.normalize(name)
 	prev, inOverlay := o.values[normalized]
-	if !inOverlay && o.parent != nil {
-		prev.Variable = o.parent.Get(name)
-	}
+	// Decide on pass-through before looking the name up in the parent: the
+	// parent's Set repeats that lookup, so doing it here too would make a
+	// write from deep inside nested functions quadratic in their depth.
 	if o.funcScope && !vr.Local && !inOverlay {
 		// Functions use dynamic scope: writes to non-local names should walk
 		// outward until they reach the defining scope, including caller locals.
@@ -350,6 +463,9 @@ func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 		// recaptured by the temp overlay.
 		return o.parent.(expand.WriteEnviron).Set(name, vr)
 	}
+	if !inOverlay && o.parent != nil {
+		prev.Variable = o.parent.Get(name)
+	}
 
 	o.values = cloneMapOnWrite(o.values, &o.valuesShared)
 	if o.values == nil {
@@ -364,6 +480,9 @@ func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 	} else if prev.ReadOnly {
 		return fmt.Errorf("readonly variable")
 	}
+	if inOverlay {
+		o.valueBytes -= storedVariableBytes(prev.Variable)
+	}
 	if !vr.IsSet() { // unsetting
 		// Same-scope unsets keep a local shadow so later lookups don't reveal
 		// the next outer binding inside the same function scope.
@@ -375,6 +494,7 @@ func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 	// modifying the entire variable
 	vr.Local = prev.Local || vr.Local
 	o.values[normalized] = namedVariable{name, vr}
+	o.valueBytes += storedVariableBytes(vr)
 	o.bumpEnvEpoch()
 	return nil
 }
@@ -647,11 +767,13 @@ func deleteCurrentScopeVar(env expand.WriteEnviron, name string) bool {
 			return false
 		}
 		normalized := env.normalize(name)
-		if _, ok := env.values[normalized]; !ok {
+		prev, ok := env.values[normalized]
+		if !ok {
 			return false
 		}
 		env.values = cloneMapOnWrite(env.values, &env.valuesShared)
 		delete(env.values, normalized)
+		env.valueBytes -= storedVariableBytes(prev.Variable)
 		if env.tempScope {
 			env.tempUnset = cloneMapOnWrite(env.tempUnset, &env.tempUnsetShared)
 			if env.tempUnset == nil {
@@ -1115,6 +1237,10 @@ func (r *Runner) setVarObserved(name string, vr expand.Variable, mutation *varMu
 		prev = mutation.previous
 	} else if name != "" {
 		prev = r.lookupVar(name)
+	}
+	if (mutation == nil || !mutation.shellManaged) && vr.Kind != expand.KeepValue && r.totalVariablesTooLarge(vr, prev) {
+		r.totalVariableLimitExceeded(name)
+		return nil
 	}
 	if err := r.writeEnv.Set(name, vr); err != nil {
 		r.errf("%s: %v\n", name, err)

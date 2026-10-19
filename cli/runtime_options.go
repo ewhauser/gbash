@@ -21,6 +21,7 @@ type runtimeOptions struct {
 	root            string
 	readWriteRoot   string
 	inheritEnv      []string
+	compatHostRoots []string
 	copyScript      bool
 	cwd             string
 	maxFileBytes    int64
@@ -36,13 +37,23 @@ type runtimeOptions struct {
 
 func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
 	var opts runtimeOptions
-	rest := make([]string, 0, len(args))
+	rest := make([]string, 0, len(args)+1)
 	pendingShellValues := 0
+	commandStringPending := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if pendingShellValues > 0 {
 			rest = append(rest, arg)
 			pendingShellValues--
+			if pendingShellValues == 0 && commandStringPending {
+				// Like bash, everything after `-c command_string` is $0 and
+				// the positional parameters, never gbash or shell options.
+				// The inserted `--` keeps the invocation parser from
+				// treating them as flags either.
+				rest = append(rest, "--")
+				rest = append(rest, args[i+1:]...)
+				return opts, rest, nil
+			}
 			continue
 		}
 
@@ -79,6 +90,14 @@ func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
 				return opts, nil, err
 			}
 			opts.inheritEnv = appendUniqueStrings(opts.inheritEnv, names...)
+		case arg == "--compat-host-root":
+			if i+1 >= len(args) {
+				return opts, nil, fmt.Errorf("--compat-host-root requires a path")
+			}
+			i++
+			opts.compatHostRoots = appendUniqueStrings(opts.compatHostRoots, args[i])
+		case strings.HasPrefix(arg, "--compat-host-root="):
+			opts.compatHostRoots = appendUniqueStrings(opts.compatHostRoots, strings.TrimPrefix(arg, "--compat-host-root="))
 		case arg == "--copy-script":
 			opts.copyScript = true
 		case arg == "--cwd":
@@ -155,6 +174,9 @@ func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
 				return opts, rest, nil
 			}
 			pendingShellValues += bashInvocationValueCount(arg)
+			if bashInvocationHasCommandString(arg) {
+				commandStringPending = true
+			}
 		}
 	}
 	return opts, rest, nil
@@ -173,6 +195,13 @@ func bashInvocationValueCount(arg string) int {
 		}
 	}
 	return count
+}
+
+func bashInvocationHasCommandString(arg string) bool {
+	if len(arg) < 2 || !strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "--") {
+		return false
+	}
+	return strings.ContainsRune(arg[1:], 'c')
 }
 
 func parseMaxFileBytes(value string) (int64, error) {
@@ -290,11 +319,15 @@ func (opts *runtimeOptions) gbashOptions() ([]gbash.Option, error) {
 		if err != nil {
 			return nil, fmt.Errorf("resolve --readwrite-root: %w", err)
 		}
-		if err := ensureReadWriteRootIsTemporary(root, opts.systemTempRoots); err != nil {
+		// Mount the canonical path that was validated, not the original one:
+		// the factory resolves its root again for every new session, so a
+		// symlink swapped after startup must not redirect later mounts.
+		canonicalRoot, err := ensureReadWriteRootIsTemporary(root, opts.systemTempRoots)
+		if err != nil {
 			return nil, err
 		}
 		runtimeOpts = append(runtimeOpts,
-			gbash.WithFileSystem(gbash.ReadWriteDirectoryFileSystem(root, gbash.ReadWriteDirectoryOptions{
+			gbash.WithFileSystem(gbash.ReadWriteDirectoryFileSystem(canonicalRoot, gbash.ReadWriteDirectoryOptions{
 				MaxFileReadBytes: opts.maxFileBytes,
 			})),
 		)
@@ -302,6 +335,16 @@ func (opts *runtimeOptions) gbashOptions() ([]gbash.Option, error) {
 		if cwdValue == "" {
 			cwdValue = "/"
 		}
+	}
+	if len(opts.compatHostRoots) > 0 {
+		roots := make([]string, 0, len(opts.compatHostRoots))
+		for _, root := range opts.compatHostRoots {
+			if !filepath.IsAbs(root) {
+				return nil, fmt.Errorf("--compat-host-root must be an absolute path: %s", root)
+			}
+			roots = append(roots, filepath.ToSlash(filepath.Clean(root)))
+		}
+		runtimeOpts = append(runtimeOpts, gbash.WithCompatHostRoots(roots...))
 	}
 	baseEnv = inheritSelectedEnv(baseEnv, opts.inheritEnv)
 	if baseEnv != nil {
@@ -371,22 +414,24 @@ func inheritSelectedEnv(baseEnv map[string]string, names []string) map[string]st
 	return out
 }
 
-func ensureReadWriteRootIsTemporary(root string, systemTempRoots []string) error {
+// ensureReadWriteRootIsTemporary checks that root resolves inside a trusted
+// system temp directory and returns the resolved, symlink-free path.
+func ensureReadWriteRootIsTemporary(root string, systemTempRoots []string) (string, error) {
 	tempRoots, err := trustedSystemTempRoots(systemTempRoots)
 	if err != nil {
-		return err
+		return "", err
 	}
 	canonicalRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return fmt.Errorf("resolve --readwrite-root: %w", err)
+		return "", fmt.Errorf("resolve --readwrite-root: %w", err)
 	}
 	canonicalRoot = filepath.Clean(canonicalRoot)
 	for _, tempRoot := range tempRoots {
 		if pathWithinRoot(canonicalRoot, tempRoot) {
-			return nil
+			return canonicalRoot, nil
 		}
 	}
-	return fmt.Errorf("--readwrite-root must be inside the system temp directory")
+	return "", fmt.Errorf("--readwrite-root must be inside the system temp directory")
 }
 
 func trustedSystemTempRoots(systemTempRoots []string) ([]string, error) {
@@ -609,6 +654,8 @@ func renderHelp(w io.Writer, name string) error {
 		"  --cwd DIR             set the initial sandbox working directory\n"+
 		"  --readwrite-root DIR  mount DIR as sandbox / with writes persisted back to the host filesystem\n"+
 		"  --inherit-env VARS    copy comma-separated host env var names into the runtime base environment\n"+
+		"  --compat-host-root DIR\n"+
+		"                        lexically remap absolute host paths under DIR onto sandbox / (repeatable)\n"+
 		"  --copy-script         copy the positional host script into the sandbox before execution\n"+
 		"  --max-file-bytes N    override the sandbox file-size/read-size limit in bytes\n"+
 		"\nCLI output options:\n"+

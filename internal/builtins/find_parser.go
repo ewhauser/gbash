@@ -38,6 +38,14 @@ type findToken struct {
 }
 
 func parseFindCommandArgs(inv *Invocation, args []string) ([]string, findCommandOptions, findExpr, []findAction, error) {
+	symlinks := findSymlinkNever
+	for ; len(args) > 0; args = args[1:] {
+		mode, ok := findSymlinkOption(args[0])
+		if !ok {
+			break
+		}
+		symlinks = mode
+	}
 	paths := make([]string, 0, len(args))
 	for len(args) > 0 && !findStartsExpression(args[0]) {
 		paths = append(paths, args[0])
@@ -51,7 +59,23 @@ func parseFindCommandArgs(inv *Invocation, args []string) ([]string, findCommand
 	if err != nil {
 		return nil, findCommandOptions{}, nil, nil, err
 	}
+	if opts.symlinks == findSymlinkNever {
+		opts.symlinks = symlinks
+	}
 	return paths, opts, expr, actions, nil
+}
+
+func findSymlinkOption(arg string) (findSymlinkMode, bool) {
+	switch arg {
+	case "-P":
+		return findSymlinkNever, true
+	case "-H":
+		return findSymlinkRoots, true
+	case "-L":
+		return findSymlinkAlways, true
+	default:
+		return 0, false
+	}
 }
 
 func findStartsExpression(arg string) bool {
@@ -122,7 +146,7 @@ func parseFindExpressionArgs(inv *Invocation, args []string) (findCommandOptions
 				return findCommandOptions{}, nil, nil, exitf(inv, 1, "find: missing argument to -type")
 			}
 			i++
-			if args[i] != "f" && args[i] != "d" {
+			if args[i] != "f" && args[i] != "d" && args[i] != "l" {
 				return findCommandOptions{}, nil, nil, exitf(inv, 1, "find: Unknown argument to -type: %s", args[i])
 			}
 			tokens = append(tokens, findToken{kind: findTokenExpr, expr: &findTypeExpr{fileType: args[i][0]}})
@@ -190,6 +214,8 @@ func parseFindExpressionArgs(inv *Invocation, args []string) (findCommandOptions
 			opts.hasMinDepth = true
 		case "-depth":
 			opts.depthFirst = true
+		case "-follow":
+			opts.symlinks = findSymlinkAlways
 		case "-a", "-and":
 			tokens = append(tokens, findToken{kind: findTokenOp, op: findCompareExact})
 		case "-o", "-or":

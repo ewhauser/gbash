@@ -271,8 +271,28 @@ func parseODMatches(inv *Invocation, matches *ParsedCommand) (odOptions, error) 
 		_, _ = fmt.Fprintf(inv.Stderr, "od: warning: invalid width %d; using %d instead\n", opts.lineBytes, maxSize)
 		opts.lineBytes = maxSize
 	}
+	if err := checkODLineWidth(inv, &opts); err != nil {
+		return odOptions{}, err
+	}
 
 	return opts, nil
+}
+
+// checkODLineWidth rejects -w values whose rendered line would exceed the
+// padded field cap. Each output line is built in memory, so an unchecked width
+// such as -w200000000000000 would exhaust memory before any byte is printed.
+func checkODLineWidth(inv *Invocation, opts *odOptions) error {
+	if fieldWidthTooLarge(inv, int64(opts.lineBytes)) {
+		return fieldWidthError(inv, "od")
+	}
+	limit := maxFieldBytes(inv)
+	for _, format := range opts.formats {
+		perByte := int64(format.printWidth+1)/int64(format.byteSize) + 1
+		if int64(opts.lineBytes) > limit/perByte {
+			return fieldWidthError(inv, "od")
+		}
+	}
+	return nil
 }
 
 func applyODAddressRadix(opts *odOptions, value string) error {
@@ -616,6 +636,7 @@ func runODDump(inv *Invocation, data []byte, opts *odOptions) error {
 	offset := odInputOffset{radix: opts.radix, bytePos: opts.skipBytes, label: opts.label}
 
 	var previous []byte
+	padded := make([]byte, info.lineBytes)
 	duplicate := false
 	wroteLine := false
 	for len(data) > 0 {
@@ -637,7 +658,7 @@ func runODDump(inv *Invocation, data []byte, opts *odOptions) error {
 		if lineLen == info.lineBytes {
 			previous = append(previous[:0], line...)
 		}
-		if err := writeODLine(inv.Stdout, offset.format(), line, lineLen, info, opts.byteOrder); err != nil {
+		if err := writeODLine(inv.Stdout, offset.format(), line, padded, lineLen, info, opts.byteOrder); err != nil {
 			return &ExitError{Code: 1, Err: err}
 		}
 		wroteLine = true
@@ -758,9 +779,8 @@ func odAlignment(format odFormat, blockSize, blockWidth int) [16]int {
 	return spacing
 }
 
-func writeODLine(w io.Writer, prefix string, raw []byte, lineLen int, info odOutputInfo, order binary.ByteOrder) error {
-	padded := make([]byte, info.lineBytes)
-	copy(padded, raw)
+func writeODLine(w io.Writer, prefix string, raw, padded []byte, lineLen int, info odOutputInfo, order binary.ByteOrder) error {
+	clear(padded[copy(padded, raw):])
 	displayPrefix := prefix
 	first := true
 	for i := range info.formats {

@@ -240,7 +240,10 @@ func mktempParamsFromOptions(opts mktempOptions) (mktempParams, error) {
 	}
 
 	combined := mktempJoinVisible(opts.tmpdir, prefixFromTemplate)
-	directory, prefix := mktempSplitVisiblePrefix(combined, strings.HasSuffix(prefixFromTemplate, "/"))
+	// An empty prefix (an all-X template) keeps the tmpdir as the directory
+	// rather than treating its last component as the name prefix.
+	trailingSlash := strings.HasSuffix(prefixFromTemplate, "/") || (prefixFromTemplate == "" && opts.tmpdir != "")
+	directory, prefix := mktempSplitVisiblePrefix(combined, trailingSlash)
 
 	return mktempParams{
 		directory: directory,

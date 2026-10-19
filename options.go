@@ -59,6 +59,9 @@ func WithConfig(cfg *Config) Option {
 		if cfg.AnalysisObserver != nil {
 			target.AnalysisObserver = cfg.AnalysisObserver
 		}
+		if len(cfg.CompatHostRoots) > 0 {
+			target.CompatHostRoots = append([]string(nil), cfg.CompatHostRoots...)
+		}
 		return nil
 	}
 }
@@ -119,6 +122,8 @@ func WithPolicy(p policy.Policy) Option {
 // WithLimitOverrides overrides selected runtime limits without replacing the
 // active policy. Zero-valued fields leave the underlying policy/defaults
 // unchanged.
+//
+//nolint:gocritic // policy.Limits is a small value type passed by value like the rest of the policy API.
 func WithLimitOverrides(overrides policy.Limits) Option {
 	return func(target *Config) error {
 		if updated, ok := overrideMaxFileReadBytes(target.FileSystem, overrides.MaxFileBytes); ok {
@@ -129,6 +134,7 @@ func WithLimitOverrides(overrides policy.Limits) Option {
 	}
 }
 
+//nolint:gocritic // policy.Limits is a small value type passed by value like the rest of the policy API.
 func mergeLimitOverrides(base, overrides policy.Limits) policy.Limits {
 	if overrides.MaxCommandCount != 0 {
 		base.MaxCommandCount = overrides.MaxCommandCount
@@ -145,6 +151,9 @@ func mergeLimitOverrides(base, overrides policy.Limits) policy.Limits {
 	if overrides.MaxSubstitutionDepth != 0 {
 		base.MaxSubstitutionDepth = overrides.MaxSubstitutionDepth
 	}
+	if overrides.MaxFunctionDepth != 0 {
+		base.MaxFunctionDepth = overrides.MaxFunctionDepth
+	}
 	if overrides.MaxStdoutBytes != 0 {
 		base.MaxStdoutBytes = overrides.MaxStdoutBytes
 	}
@@ -157,6 +166,9 @@ func mergeLimitOverrides(base, overrides policy.Limits) policy.Limits {
 	if overrides.MaxVariableBytes != 0 {
 		base.MaxVariableBytes = overrides.MaxVariableBytes
 	}
+	if overrides.MaxTotalVariableBytes != 0 {
+		base.MaxTotalVariableBytes = overrides.MaxTotalVariableBytes
+	}
 	return base
 }
 
@@ -164,6 +176,14 @@ func mergeLimitOverrides(base, overrides policy.Limits) policy.Limits {
 func WithBaseEnv(env map[string]string) Option {
 	return func(target *Config) error {
 		target.BaseEnv = copyStringMap(env)
+		return nil
+	}
+}
+
+// WithCompatHostRoots sets [Config.CompatHostRoots].
+func WithCompatHostRoots(roots ...string) Option {
+	return func(target *Config) error {
+		target.CompatHostRoots = append([]string(nil), roots...)
 		return nil
 	}
 }

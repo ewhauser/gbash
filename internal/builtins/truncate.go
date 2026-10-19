@@ -537,6 +537,9 @@ func (c *Truncate) truncatePath(ctx context.Context, inv *Invocation, raw string
 	if !ok {
 		return exitf(inv, 1, "truncate: division by zero")
 	}
+	if targetSize > uint64(allocationLimit(inv)) {
+		return exitf(inv, 1, "truncate: failed to truncate %s at %d bytes: %v", quoteGNUOperand(raw), targetSize, errFileTooLarge)
+	}
 
 	if native, ok := file.(interface{ Truncate(int64) error }); ok {
 		if targetSize > math.MaxInt64 {
@@ -625,7 +628,7 @@ func (c *Truncate) truncateFallback(ctx context.Context, inv *Invocation, raw, a
 		if info != nil {
 			remaining -= currentSize
 		}
-		if err := truncateWriteZeros(file, remaining); err != nil {
+		if err := truncateWriteZeros(ctx, file, remaining); err != nil {
 			return truncateOpenError(inv, raw, err)
 		}
 	}
@@ -648,13 +651,16 @@ func truncateRewriteFile(ctx context.Context, inv *Invocation, abs string, data 
 	return err
 }
 
-func truncateWriteZeros(w io.Writer, remaining uint64) error {
+func truncateWriteZeros(ctx context.Context, w io.Writer, remaining uint64) error {
 	if remaining == 0 {
 		return nil
 	}
 
 	zeros := make([]byte, 32*1024)
 	for remaining > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		chunkSize := len(zeros)
 		if uint64(chunkSize) > remaining {
 			chunkSize = int(remaining)

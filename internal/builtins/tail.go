@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	stdfs "io/fs"
+	"math"
 	"math/big"
 	"os"
 	"reflect"
@@ -566,10 +567,21 @@ func seekTailFileStart(file gbfs.File) error {
 
 func parseTailSleepInterval(raw string) (time.Duration, error) {
 	value, err := strconv.ParseFloat(raw, 64)
-	if err != nil || value < 0 {
+	if err != nil || value < 0 || math.IsNaN(value) {
 		return 0, fmt.Errorf("invalid interval")
 	}
-	return time.Duration(value * float64(time.Second)), nil
+	// time.NewTicker panics on a zero interval, so -s 0 polls at the
+	// smallest supported period; huge values saturate instead of overflowing.
+	const minInterval = time.Millisecond
+	seconds := value * float64(time.Second)
+	switch {
+	case seconds < float64(minInterval):
+		return minInterval, nil
+	case seconds >= float64(math.MaxInt64):
+		return time.Duration(math.MaxInt64), nil
+	default:
+		return time.Duration(seconds), nil
+	}
 }
 
 func tailOptionsFromParsed(inv *Invocation, matches *ParsedCommand) (tailOptions, error) {

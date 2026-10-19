@@ -1,0 +1,81 @@
+package builtins
+
+import (
+	"io"
+	"math"
+	"strings"
+)
+
+// defaultMaxFieldBytes is the padded-field cap used when an invocation carries
+// no MaxVariableBytes limit. It matches the runtime's default variable limit.
+const defaultMaxFieldBytes = 32 << 20
+
+// maxFieldBytes reports the largest padded field, line width, or repeat count
+// a text builtin may build from a user-supplied width. It follows printf's
+// MaxVariableBytes pre-check so that widths such as `nl -w 4294967296` fail
+// before allocating instead of exhausting memory.
+func maxFieldBytes(inv *Invocation) int64 {
+	if inv == nil || inv.Limits.MaxVariableBytes <= 0 || inv.Limits.MaxVariableBytes == math.MaxInt64 {
+		return defaultMaxFieldBytes
+	}
+	return inv.Limits.MaxVariableBytes
+}
+
+// fieldWidthTooLarge reports whether width exceeds the invocation's padded
+// field cap. Negative widths are treated as overflowed values.
+func fieldWidthTooLarge(inv *Invocation, width int64) bool {
+	return width < 0 || width > maxFieldBytes(inv)
+}
+
+// fieldWidthError is the shared diagnostic for widths rejected by
+// fieldWidthTooLarge.
+func fieldWidthError(inv *Invocation, name string) error {
+	return exitf(inv, 1, "%s: field width too large (limit %d bytes), increase policy.Limits.MaxVariableBytes", name, maxFieldBytes(inv))
+}
+
+// checkFieldWidth returns fieldWidthError when width exceeds the padded field
+// cap and nil otherwise.
+func checkFieldWidth(inv *Invocation, name string, width int64) error {
+	if fieldWidthTooLarge(inv, width) {
+		return fieldWidthError(inv, name)
+	}
+	return nil
+}
+
+// writePadding writes n copies of pad to w in fixed-size chunks so wide
+// fields neither allocate n bytes nor issue n one-byte writes.
+func writePadding(w io.Writer, pad byte, n int) error {
+	if n <= 0 {
+		return nil
+	}
+	var chunk [4096]byte
+	fill := min(n, len(chunk))
+	for i := range fill {
+		chunk[i] = pad
+	}
+	for n > 0 {
+		step := min(n, fill)
+		if _, err := w.Write(chunk[:step]); err != nil {
+			return err
+		}
+		n -= step
+	}
+	return nil
+}
+
+// padFieldLeft right-aligns value in a field of width bytes. Unlike
+// fmt's %*s it has no 1e6 width ceiling, so callers must bound width first.
+func padFieldLeft(value string, width int, pad byte) string {
+	if width <= len(value) {
+		return value
+	}
+	return strings.Repeat(string(pad), width-len(value)) + value
+}
+
+// padFieldRight left-aligns value in a field of width bytes.
+func padFieldRight(value string, width int) string {
+	if width <= len(value) {
+		return value
+	}
+	return value + strings.Repeat(" ", width-len(value))
+}

@@ -480,7 +480,7 @@ func TestLazyAWKStdinReadsOnDemand(t *testing.T) {
 		Policy:     policy.NewStatic(&policy.Config{}),
 	})
 
-	reader := newLazyAWKStdin(context.Background(), inv)
+	reader := newLazyAWKStdin(context.Background(), inv, &awkTimeBudget{})
 	if stdin.reads != 0 {
 		t.Fatalf("stdin reads before use = %d, want 0", stdin.reads)
 	}
