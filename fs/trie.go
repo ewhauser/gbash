@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -20,6 +21,10 @@ import (
 // This backend is intended for explicit opt-in use in static or read-mostly
 // compositions. It is not the default runtime backend, and it is not the
 // recommended path for live host-backed workspace helpers.
+//
+// Like MemoryFS, creating operations (OpenFile with O_CREATE, Symlink, Link,
+// Rename) require the destination's parent directory to exist: a missing
+// parent fails with ENOENT and a non-directory parent with ENOTDIR.
 type TrieFS struct {
 	mu         sync.RWMutex
 	cwd        string
@@ -282,6 +287,9 @@ func (f *TrieFS) OpenFile(ctx context.Context, name string, flag int, perm stdfs
 	if (flag&os.O_TRUNC == 0 || !canWrite(flag)) && flag&(os.O_CREATE|os.O_EXCL) != (os.O_CREATE|os.O_EXCL) {
 		if _, err := f.materializePath(ctx, name, true); err != nil {
 			if flag&os.O_CREATE == 0 || !errors.Is(err, stdfs.ErrNotExist) {
+				if flag&os.O_CREATE != 0 {
+					err = createParentError(err)
+				}
 				return nil, &os.PathError{Op: "open", Path: Resolve(f.Getwd(), name), Err: err}
 			}
 		}
@@ -299,7 +307,7 @@ func (f *TrieFS) OpenFile(ctx context.Context, name string, flag int, perm stdfs
 	if flag&os.O_CREATE != 0 {
 		abs, err = f.resolveCreatePathLocked(requested, 0)
 		if err != nil {
-			return nil, &os.PathError{Op: "open", Path: requested, Err: err}
+			return nil, &os.PathError{Op: "open", Path: requested, Err: createParentError(err)}
 		}
 		entry, _ = f.lookupAbsNoFollowLocked(abs)
 	} else {
@@ -312,17 +320,13 @@ func (f *TrieFS) OpenFile(ctx context.Context, name string, flag int, perm stdfs
 		if flag&os.O_CREATE == 0 {
 			return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrNotExist}
 		}
-		if err := f.mkdirAllLocked(parentDir(abs), 0o755); err != nil {
+		parentEntry, err := f.createParentLocked("open", abs)
+		if err != nil {
 			return nil, err
 		}
 		perm &= storedPermBits
 		if perm == 0 {
 			perm = 0o644
-		}
-		parentAbs := parentDir(abs)
-		_, parentEntry, err := f.resolveAbsLocked(parentAbs, true, false, 0)
-		if err != nil {
-			return nil, &os.PathError{Op: "open", Path: parentAbs, Err: err}
 		}
 		entry = &trieDentry{
 			name:   path.Base(abs),
@@ -482,7 +486,7 @@ func (f *TrieFS) Symlink(_ context.Context, target, linkName string) error {
 	case errors.Is(err, stdfs.ErrNotExist):
 		parentAbs, parentErr := f.resolveCreatePathLocked(parentDir(requested), 0)
 		if parentErr != nil {
-			return &os.PathError{Op: "symlink", Path: requested, Err: parentErr}
+			return &os.PathError{Op: "symlink", Path: requested, Err: createParentError(parentErr)}
 		}
 		abs = Resolve(parentAbs, path.Base(requested))
 	default:
@@ -491,11 +495,7 @@ func (f *TrieFS) Symlink(_ context.Context, target, linkName string) error {
 	if entry, _ := f.lookupAbsNoFollowLocked(abs); entry != nil {
 		return &os.PathError{Op: "symlink", Path: abs, Err: stdfs.ErrExist}
 	}
-	if err := f.mkdirAllLocked(parentDir(abs), 0o755); err != nil {
-		return err
-	}
-	parentAbs := parentDir(abs)
-	_, parentEntry, err := f.resolveAbsLocked(parentAbs, true, false, 0)
+	parentEntry, err := f.createParentLocked("symlink", abs)
 	if err != nil {
 		return err
 	}
@@ -531,16 +531,14 @@ func (f *TrieFS) Link(_ context.Context, oldName, newName string) error {
 		return &os.PathError{Op: "link", Path: oldAbs, Err: stdfs.ErrInvalid}
 	}
 
-	newAbs := Resolve(f.cwd, newName)
-	if _, existing, err := f.resolvePathLocked(newName, false, true); err == nil && existing != nil {
+	newAbs, existing, err := f.resolvePathLocked(newName, false, true)
+	if err != nil {
+		return &os.PathError{Op: "link", Path: Resolve(f.cwd, newName), Err: createParentError(err)}
+	}
+	if existing != nil {
 		return &os.PathError{Op: "link", Path: newAbs, Err: stdfs.ErrExist}
-	} else if err != nil && !errors.Is(err, stdfs.ErrNotExist) {
-		return &os.PathError{Op: "link", Path: newAbs, Err: err}
 	}
-	if err := f.mkdirAllLocked(parentDir(newAbs), 0o755); err != nil {
-		return err
-	}
-	_, parentEntry, err := f.resolveAbsLocked(parentDir(newAbs), true, false, 0)
+	parentEntry, err := f.createParentLocked("link", newAbs)
 	if err != nil {
 		return err
 	}
@@ -579,8 +577,7 @@ func (f *TrieFS) Chmod(_ context.Context, name string, mode stdfs.FileMode) erro
 	if err != nil {
 		return &os.PathError{Op: "chmod", Path: Resolve(f.cwd, name), Err: err}
 	}
-	typeBits := entry.inode.mode &^ stdfs.ModePerm
-	entry.inode.mode = typeBits | mode.Perm()
+	entry.inode.mode = entry.inode.mode&^storedPermBits | mode&storedPermBits
 	entry.inode.modTime = time.Now().UTC()
 	_ = abs
 	return nil
@@ -644,19 +641,18 @@ func (f *TrieFS) Rename(_ context.Context, oldName, newName string) error {
 	}
 	newAbs, newEntry, err := f.resolvePathLocked(newName, false, true)
 	if err != nil {
-		return &os.PathError{Op: "rename", Path: Resolve(f.cwd, newName), Err: err}
+		return &os.PathError{Op: "rename", Path: Resolve(f.cwd, newName), Err: createParentError(err)}
 	}
 	if newEntry != nil {
 		return &os.PathError{Op: "rename", Path: newAbs, Err: stdfs.ErrExist}
 	}
-	if err := f.mkdirAllLocked(parentDir(newAbs), 0o755); err != nil {
-		return err
-	}
-	_, newParent, err := f.resolveAbsLocked(parentDir(newAbs), true, false, 0)
+	newParent, err := f.createParentLocked("rename", newAbs)
 	if err != nil {
 		return err
 	}
 	if oldEntry.inode.mode.IsDir() && trieIsAncestor(oldEntry, newParent) {
+		// Moving a directory into its own subtree would detach it from the
+		// tree; rename(2) reports EINVAL.
 		return &os.PathError{Op: "rename", Path: newAbs, Err: stdfs.ErrInvalid}
 	}
 
@@ -908,6 +904,20 @@ func (f *TrieFS) mkdirAllLocked(name string, perm stdfs.FileMode) error {
 		currentAbs = nextAbs
 	}
 	return nil
+}
+
+// createParentLocked returns the parent directory of abs, a resolved path about
+// to be created. A missing parent fails with ENOENT and a non-directory parent
+// with ENOTDIR; parents are never created implicitly.
+func (f *TrieFS) createParentLocked(op, abs string) (*trieDentry, error) {
+	parent, ok := f.lookupAbsNoFollowLocked(parentDir(abs))
+	if !ok || parent == nil {
+		return nil, &os.PathError{Op: op, Path: abs, Err: syscall.ENOENT}
+	}
+	if !parent.inode.mode.IsDir() {
+		return nil, &os.PathError{Op: op, Path: abs, Err: syscall.ENOTDIR}
+	}
+	return parent, nil
 }
 
 func (f *TrieFS) attachChildLocked(parent, child *trieDentry) {
