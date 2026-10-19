@@ -888,6 +888,7 @@ Implementation detail for the current runtime:
 - the core runtime does not adopt OpenTelemetry as its event schema or transport contract
 - tracing is disabled by default; `ExecutionResult.Events` is empty unless the embedder enables tracing
 - `TraceRedacted` is the recommended default and redacts secret-bearing argv values before events are returned or emitted
+  - redaction is best-effort and command-agnostic: it strips URL userinfo, secret-looking query keys, values of `-u`/`--user`/`--token`-style flags (separate, attached `-uuser:pass`, or ending a short-flag group such as `-su`), headers whose name contains a secret-looking word (`token`, `secret`, `auth`, `cookie`, `key`, ...) or whose value is a `Bearer`/`Basic` credential, and secret-looking `key=value` pairs or JSON string members in `-d`/`--data*`/`-F`/`--form`/`--json` bodies
 - `TraceRaw` preserves full argv and path metadata and is unsafe unless the embedder controls sinks and retention
 - interactive executions only emit trace callbacks; they do not return events
 - every event carries `session_id` and `execution_id`

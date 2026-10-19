@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/ewhauser/gbash/trace"
@@ -229,16 +230,26 @@ func redactArgv(argv []string) ([]string, bool) {
 		arg := out[i]
 
 		if i > 0 {
-			if redacted, ok := redactFlagValue(out[i-1], arg); ok {
-				if redacted != arg {
-					out[i] = redacted
-					changed = true
+			if kind := pendingFlagValueKind(argv[i-1]); kind != flagValueNone {
+				if redacted, ok := redactFlagValue(kind, arg); ok {
+					if redacted != arg {
+						out[i] = redacted
+						changed = true
+					}
+					continue
 				}
-				continue
 			}
 		}
 
 		if redacted, ok := redactInlineFlagValue(arg); ok {
+			if redacted != arg {
+				out[i] = redacted
+				changed = true
+			}
+			continue
+		}
+
+		if redacted, ok := redactAttachedShortFlagValue(arg); ok {
 			if redacted != arg {
 				out[i] = redacted
 				changed = true
@@ -257,15 +268,99 @@ func redactArgv(argv []string) ([]string, bool) {
 	return out, changed
 }
 
-func redactFlagValue(flag, value string) (string, bool) {
+// flagValueKind classifies how the value of a flag is redacted.
+type flagValueKind int
+
+const (
+	flagValueNone flagValueKind = iota
+	// flagValueSecret values are always redacted (-u user:pass, --token).
+	flagValueSecret
+	// flagValueHeader values are "Name: value" headers (-H).
+	flagValueHeader
+	// flagValueData values are request bodies whose key=value pairs or JSON
+	// members are redacted when the key looks secret (-d, --form).
+	flagValueData
+)
+
+var longFlagValueKinds = map[string]flagValueKind{
+	"--header":         flagValueHeader,
+	"--proxy-header":   flagValueHeader,
+	"--user":           flagValueSecret,
+	"--proxy-user":     flagValueSecret,
+	"--oauth2-bearer":  flagValueSecret,
+	"--password":       flagValueSecret,
+	"--passwd":         flagValueSecret,
+	"--token":          flagValueSecret,
+	"--access-token":   flagValueSecret,
+	"--data":           flagValueData,
+	"--data-ascii":     flagValueData,
+	"--data-binary":    flagValueData,
+	"--data-raw":       flagValueData,
+	"--data-urlencode": flagValueData,
+	"--form":           flagValueData,
+	"--form-string":    flagValueData,
+	"--json":           flagValueData,
+}
+
+// shortFlagValueKind maps short flags whose value may carry secrets. These
+// follow curl's spelling; short flags may be grouped (-su) or take an
+// attached value (-uuser:pass).
+func shortFlagValueKind(flag byte) flagValueKind {
 	switch flag {
-	case "-H", "--header", "--proxy-header":
-		return redactHeaderValue(value)
-	case "-u", "--user", "--oauth2-bearer", "--password", "--passwd", "--token", "--access-token":
-		return redactedValue, true
+	case 'u', 'U':
+		return flagValueSecret
+	case 'H':
+		return flagValueHeader
+	case 'd', 'F':
+		return flagValueData
 	default:
-		return redactStandaloneArg(value)
+		return flagValueNone
 	}
+}
+
+// pendingFlagValueKind reports how the argument following flag should be
+// redacted, recognizing long flags and short-flag groups ending in a
+// value-taking flag (-H, -su).
+func pendingFlagValueKind(flag string) flagValueKind {
+	if kind, ok := longFlagValueKinds[flag]; ok {
+		return kind
+	}
+	if !isShortFlagGroup(flag) {
+		return flagValueNone
+	}
+	return shortFlagValueKind(flag[len(flag)-1])
+}
+
+func isShortFlagGroup(arg string) bool {
+	if len(arg) < 2 || arg[0] != '-' || arg[1] == '-' {
+		return false
+	}
+	for i := 1; i < len(arg); i++ {
+		if !isASCIILetter(arg[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIILetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func redactFlagValue(kind flagValueKind, value string) (string, bool) {
+	switch kind {
+	case flagValueSecret:
+		return redactedValue, true
+	case flagValueHeader:
+		if redacted, ok := redactHeaderValue(value); ok {
+			return redacted, true
+		}
+	case flagValueData:
+		if redacted, ok := redactDataValue(value); ok {
+			return redacted, true
+		}
+	}
+	return redactStandaloneArg(value)
 }
 
 func redactInlineFlagValue(arg string) (string, bool) {
@@ -274,8 +369,40 @@ func redactInlineFlagValue(arg string) (string, bool) {
 		return "", false
 	}
 
-	if redacted, changed := redactFlagValue(prefix, value); changed {
+	if redacted, changed := redactFlagValue(longFlagValueKinds[prefix], value); changed {
 		return prefix + "=" + redacted, true
+	}
+	return "", false
+}
+
+// redactAttachedShortFlagValue handles values attached to a short flag,
+// optionally after other grouped flags: -uuser:pass, -sHAuthorization:...,
+// -dpassword=x. The first value-taking flag in the group consumes the rest.
+func redactAttachedShortFlagValue(arg string) (string, bool) {
+	if len(arg) < 3 || arg[0] != '-' || arg[1] == '-' {
+		return "", false
+	}
+	for i := 1; i < len(arg)-1; i++ {
+		if !isASCIILetter(arg[i]) {
+			return "", false
+		}
+		kind := shortFlagValueKind(arg[i])
+		if kind == flagValueNone {
+			continue
+		}
+		prefix, value := arg[:i+1], arg[i+1:]
+		if kind == flagValueSecret {
+			// "user:pass" is the secret-bearing form; requiring the colon
+			// keeps grouped flags such as "sort -ur" readable.
+			if !strings.Contains(value, ":") {
+				return "", false
+			}
+			return prefix + redactedValue, true
+		}
+		if redacted, ok := redactFlagValue(kind, value); ok {
+			return prefix + redacted, true
+		}
+		return "", false
 	}
 	return "", false
 }
@@ -299,20 +426,77 @@ func redactHeaderValue(value string) (string, bool) {
 		return "", false
 	}
 
-	normalizedName := strings.ToLower(strings.TrimSpace(name))
-	if !isSensitiveHeaderName(normalizedName) && !looksSensitiveHeaderValue(headerValue) {
+	normalizedName := strings.TrimSpace(name)
+	if !isHeaderName(normalizedName) {
 		return "", false
 	}
-	return strings.TrimSpace(name) + ": " + redactedValue, true
+	if !isSensitiveName(normalizedName) && !looksSensitiveHeaderValue(headerValue) {
+		return "", false
+	}
+	return normalizedName + ": " + redactedValue, true
 }
 
-func isSensitiveHeaderName(name string) bool {
-	switch name {
-	case "authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token":
-		return true
-	default:
+// isHeaderName reports whether name is an HTTP header field name token, so
+// that URLs ("https://...") and other colon-bearing args are not mistaken
+// for headers.
+func isHeaderName(name string) bool {
+	if name == "" {
 		return false
 	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if isASCIILetter(c) || (c >= '0' && c <= '9') || strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0 {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// sensitiveNameFragments mark a header, query, or form key as secret when
+// they appear anywhere in it (PRIVATE-TOKEN, client_secret, X-Auth-User).
+var sensitiveNameFragments = []string{
+	"token",
+	"secret",
+	"passw",
+	"auth",
+	"cookie",
+	"credential",
+	"signature",
+	"apikey",
+	"session",
+}
+
+// sensitiveNameComponents mark a key as secret when they appear as a whole
+// "-", "_", or "." separated component (X-Api-Key, api_key, sig).
+var sensitiveNameComponents = map[string]struct{}{
+	"key": {},
+	"sig": {},
+	"pwd": {},
+	"jwt": {},
+}
+
+func isSensitiveName(name string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "" {
+		return false
+	}
+	if _, ok := sensitiveQueryKeys[normalized]; ok {
+		return true
+	}
+	for _, fragment := range sensitiveNameFragments {
+		if strings.Contains(normalized, fragment) {
+			return true
+		}
+	}
+	for component := range strings.FieldsFuncSeq(normalized, func(r rune) bool {
+		return r == '-' || r == '_' || r == '.'
+	}) {
+		if _, ok := sensitiveNameComponents[component]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func looksSensitiveHeaderValue(value string) bool {
@@ -343,17 +527,30 @@ func redactURLValue(value string) (string, bool) {
 	if parsed.Scheme == "" && parsed.Host == "" {
 		return "", false
 	}
-	if parsed.RawQuery == "" {
-		return "", false
-	}
 
-	redactedQuery, changed := redactRawQuery(parsed.RawQuery)
+	changed := false
+	hadUserinfo := parsed.User != nil && parsed.Host != ""
+	if hadUserinfo {
+		parsed.User = nil
+		changed = true
+	}
+	if parsed.RawQuery != "" {
+		if redactedQuery, queryChanged := redactRawQuery(parsed.RawQuery); queryChanged {
+			parsed.RawQuery = redactedQuery
+			changed = true
+		}
+	}
 	if !changed {
 		return "", false
 	}
 
-	parsed.RawQuery = redactedQuery
-	return parsed.String(), true
+	out := parsed.String()
+	if hadUserinfo {
+		// url.Userinfo would percent-encode the brackets, so splice the
+		// marker in after the authority's "//".
+		out = strings.Replace(out, "//", "//"+redactedValue+"@", 1)
+	}
+	return out, true
 }
 
 func redactRawQuery(raw string) (string, bool) {
@@ -373,7 +570,7 @@ func redactRawQuery(raw string) (string, bool) {
 		if err != nil {
 			decodedKey = key
 		}
-		if !isSensitiveQueryKey(decodedKey) {
+		if !isSensitiveName(decodedKey) {
 			continue
 		}
 
@@ -386,7 +583,28 @@ func redactRawQuery(raw string) (string, bool) {
 	return strings.Join(parts, "&"), changed
 }
 
-func isSensitiveQueryKey(key string) bool {
-	_, ok := sensitiveQueryKeys[strings.ToLower(strings.TrimSpace(key))]
-	return ok
+// jsonStringMember matches a "key": "value" member of a JSON object body.
+var jsonStringMember = regexp.MustCompile(`"((?:[^"\\]|\\.)*)"(\s*:\s*)"(?:[^"\\]|\\.)*"`)
+
+// redactDataValue redacts secret-looking fields of a request body passed to
+// -d/--data/--form: key=value pairs separated by "&" and string members of a
+// JSON object.
+func redactDataValue(value string) (string, bool) {
+	trimmed := strings.TrimSpace(value)
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		changed := false
+		out := jsonStringMember.ReplaceAllStringFunc(value, func(member string) string {
+			match := jsonStringMember.FindStringSubmatch(member)
+			if !isSensitiveName(match[1]) {
+				return member
+			}
+			changed = true
+			return `"` + match[1] + `"` + match[2] + `"` + redactedValue + `"`
+		})
+		return out, changed
+	}
+	if !strings.Contains(value, "=") {
+		return "", false
+	}
+	return redactRawQuery(value)
 }
