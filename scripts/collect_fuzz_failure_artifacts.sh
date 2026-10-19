@@ -2,11 +2,19 @@
 
 set -euo pipefail
 
-artifact_dir="${1:-${RUNNER_TEMP:-}/fuzz-failure-artifacts}"
-if [ -z "${artifact_dir}" ]; then
-  echo "artifact directory is required" >&2
-  exit 1
+# The directory is removed and recreated below, so never fall back to a path
+# rooted at / when neither an argument nor RUNNER_TEMP is set.
+if [ -n "${1:-}" ]; then
+  artifact_dir="$1"
+else
+  artifact_dir="${RUNNER_TEMP:?artifact directory argument or RUNNER_TEMP is required}/fuzz-failure-artifacts"
 fi
+case "${artifact_dir}" in
+  "" | / | // | /. | /..)
+    echo "refusing to use artifact directory: ${artifact_dir}" >&2
+    exit 1
+    ;;
+esac
 
 output_file="${GITHUB_OUTPUT:-}"
 summary_file="${GITHUB_STEP_SUMMARY:-}"
