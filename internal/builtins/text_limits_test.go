@@ -237,3 +237,11 @@ func TestFileOperandBuiltinsCapCombinedInput(t *testing.T) {
 		}
 	}
 }
+
+func TestBasencBase58CapsInputSize(t *testing.T) {
+	t.Parallel()
+	result := execWithDeadline(t, nil, "head -c 300000 /dev/zero | basenc --base58\n")
+	assertExitStderr(t, result, 1, "basenc: base58 input too large (limit 262144 bytes)")
+	result = execWithDeadline(t, nil, "head -c 400000 /dev/zero | tr '\\0' 2 | basenc --base58 -d\n")
+	assertExitStderr(t, result, 1, "basenc: base58 input too large (limit 393216 bytes)")
+}
