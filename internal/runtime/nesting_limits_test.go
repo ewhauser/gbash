@@ -121,3 +121,52 @@ func TestFunctionDepthCountsAcrossSubshells(t *testing.T) {
 		t.Fatalf("Stderr = %q, want %q", result.Stderr, want)
 	}
 }
+
+func TestNestedShellsShareCommandBudget(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	// Each bash -c used to start with a fresh budget, so six of them ran
+	// 54,000 commands under the default limit of 10,000.
+	result := runNestingScript(t, rt, `for j in 1 2 3 4 5 6; do bash -c "for i in {1..9000}; do :; done"; echo "j=$j"; done`+"\n")
+	if result.ExitCode != 126 {
+		t.Fatalf("ExitCode = %d, want 126; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "j=1\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+	if want := "too many commands executed (>10000)"; !strings.Contains(result.Stderr, want) {
+		t.Fatalf("Stderr = %q, want %q", result.Stderr, want)
+	}
+}
+
+func TestNestedShellsCountTowardSubshellDepth(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	// This used to recurse for minutes while memory grew past a gigabyte.
+	start := time.Now()
+	result := runNestingScript(t, rt, `export x='bash -c "$x"'; bash -c "$x"; echo "after $?"`+"\n")
+	if got, want := result.Stdout, "after 126\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
+	}
+	if want := subshellDepthMessage + "50)"; !strings.Contains(result.Stderr, want) {
+		t.Fatalf("Stderr = %q, want %q", result.Stderr, want)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("recursive bash -c took %v, want well under 10s", elapsed)
+	}
+}
+
+func TestNestedShellDepthIncludesCallerSubshells(t *testing.T) {
+	t.Parallel()
+	rt := newRuntimeWithLimits(t, policy.Limits{MaxSubstitutionDepth: 3})
+
+	result := runNestingScript(t, rt, `echo $(echo $(bash -c 'echo ok')); echo $( ( ( bash -c 'echo deep' ) ) ); echo "after $?"`+"\n")
+	if got, want := result.Stdout, "ok\n\nafter 0\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
+	}
+	if want := subshellDepthMessage + "3)"; !strings.Contains(result.Stderr, want) {
+		t.Fatalf("Stderr = %q, want %q", result.Stderr, want)
+	}
+}
