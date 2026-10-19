@@ -28,6 +28,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 
 	tracingEnabled := r.opts[optXTrace]
 	trace := r.tracer()
+	defer r.reassertVariableLimitExit()
 
 	switch cm := cm.(type) {
 	case *syntax.Block:
@@ -88,6 +89,10 @@ func (r *Runner) cmdCall(ctx context.Context, cm *syntax.CallExpr, tracingEnable
 	args := cm.Args
 	r.lastExpandExit = exitStatus{}
 	fields, decl := r.resolveCallExprArgs(args)
+	if r.wordListTooLarge(fields) {
+		r.variableLimitExceeded("argument list")
+		return
+	}
 	if decl != nil {
 		if r.posixSpecialBuiltinActive(decl.Variant.Value) {
 			restores := r.runSpecialCallAssigns(cm.Assigns)
@@ -399,6 +404,10 @@ func (r *Runner) cmdFor(ctx context.Context, cm *syntax.ForClause, trace *tracer
 		if inToken {
 			items = r.fields(y.Items...) // for i in ...; do ...
 			if r.stmtAborted() {
+				return
+			}
+			if r.wordListTooLarge(items) {
+				r.variableLimitExceeded("for word list")
 				return
 			}
 		}
@@ -746,6 +755,7 @@ func (r *Runner) declOperandCommandFields(operand syntax.DeclOperand) ([]string,
 }
 
 func (r *Runner) declClauseCommandFields(cm *syntax.DeclClause) ([]string, bool) {
+	defer r.braceExpansionScope()()
 	fields := []string{cm.Variant.Value}
 	for _, operand := range r.mergeDeclOperands(cm.Variant.Value, cm.Operands) {
 		operandFields, ok := r.declOperandCommandFields(operand)
@@ -822,6 +832,7 @@ func (r *Runner) resolveCallExprArgs(args []*syntax.Word) ([]string, *syntax.Dec
 	if len(args) == 0 {
 		return nil, nil
 	}
+	defer r.braceExpansionScope()()
 	fields := make([]string, 0, len(args))
 	leading := make([]string, 0, len(args))
 	canDetectDecl := true

@@ -68,6 +68,30 @@ func clonePathWithInfo(ctx context.Context, src FileSystem, srcName string, info
 	return cloneFile(ctx, src, srcName, dst, absDst, info.Mode())
 }
 
+// cloneDirNode creates dstName as a directory carrying info's mode,
+// ownership, and modification time, without copying any of its children.
+func cloneDirNode(ctx context.Context, dst *MemoryFS, dstName string, info stdfs.FileInfo) error {
+	if !info.IsDir() {
+		return &os.PathError{Op: "mkdir", Path: dstName, Err: stdfs.ErrInvalid}
+	}
+	if err := dst.MkdirAll(ctx, dstName, info.Mode().Perm()); err != nil {
+		return err
+	}
+	// Chmod carries the setuid/setgid/sticky bits that MkdirAll drops.
+	if err := dst.Chmod(ctx, dstName, info.Mode()); err != nil {
+		return err
+	}
+	if ownership, ok := OwnershipFromFileInfo(info); ok {
+		if err := dst.Chown(ctx, dstName, ownership.UID, ownership.GID, false); err != nil {
+			return err
+		}
+	}
+	if mtime := info.ModTime(); !mtime.IsZero() {
+		return dst.Lchtimes(ctx, dstName, mtime, mtime)
+	}
+	return nil
+}
+
 func joinChildPath(parent, child string) string {
 	if parent == "/" {
 		return "/" + child

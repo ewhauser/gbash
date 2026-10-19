@@ -81,9 +81,10 @@ type compiledParamPattern struct {
 }
 
 type compiledParamReplacer struct {
-	rx   *compiledParamPattern
-	with string
-	all  bool
+	rx    *compiledParamPattern
+	with  string
+	all   bool
+	limit int64 // max result bytes; zero means unlimited
 }
 
 func encodeByteLocaleString(str string) (string, map[int]int) {
@@ -381,48 +382,98 @@ func (cfg *Config) compileParamReplacer(pat, with string, all bool, anchor synta
 		all = false
 	}
 	return &compiledParamReplacer{
-		rx:   cfg.compileParamPattern(expr),
-		with: with,
-		all:  all,
+		rx:    cfg.compileParamPattern(expr),
+		with:  with,
+		all:   all,
+		limit: cfg.MaxVariableBytes,
 	}, nil
 }
 
-func (r *compiledParamReplacer) replace(name string) (string, bool) {
+// fitsLimit reports whether replacing every possible match in name (at most
+// one per byte boundary) still fits r.limit, so no match counting is needed.
+func (r *compiledParamReplacer) fitsLimit(name string) bool {
+	if r.limit <= 0 || len(r.with) == 0 {
+		return true
+	}
+	n := int64(len(name))
+	return (r.limit-n)/(n+1) >= int64(len(r.with))
+}
+
+// checkSize fails before building the result of replacing the given matches
+// in name with r.with when that result would grow past r.limit.
+func (r *compiledParamReplacer) checkSize(name string, locs [][]int) error {
+	if r.limit <= 0 {
+		return nil
+	}
+	size := int64(len(name))
+	for _, loc := range locs {
+		size += int64(len(r.with)) - int64(loc[1]-loc[0])
+	}
+	if size > r.limit && size > int64(len(name)) {
+		return VariableSizeLimitError{What: "pattern substitution", Limit: r.limit}
+	}
+	return nil
+}
+
+func (r *compiledParamReplacer) replace(name string) (string, bool, error) {
 	if !r.all {
 		loc := r.rx.findStringIndex(name)
 		if loc == nil {
-			return name, false
+			return name, false, nil
 		}
-		return replaceParamPatternAt(name, r.with, loc), true
+		if err := r.checkSize(name, [][]int{loc}); err != nil {
+			return "", false, err
+		}
+		return replaceParamPatternAt(name, r.with, loc), true, nil
 	}
 	if !r.rx.byteLocale {
 		loc := r.rx.rx.FindStringIndex(name)
 		if loc == nil {
-			return name, false
+			return name, false, nil
 		}
 		if r.rx.rx.FindStringIndex(name[loc[1]:]) == nil {
-			return replaceParamPatternAt(name, r.with, loc), true
+			if err := r.checkSize(name, [][]int{loc}); err != nil {
+				return "", false, err
+			}
+			return replaceParamPatternAt(name, r.with, loc), true, nil
 		}
-		return r.rx.rx.ReplaceAllLiteralString(name, r.with), true
+		if r.fitsLimit(name) {
+			return r.rx.rx.ReplaceAllLiteralString(name, r.with), true, nil
+		}
+		locs := r.rx.rx.FindAllStringIndex(name, -1)
+		if err := r.checkSize(name, locs); err != nil {
+			return "", false, err
+		}
+		return replaceParamPatternAll(name, r.with, locs), true, nil
 	}
 	locs := r.rx.findAllStringIndex(name, 2)
 	switch len(locs) {
 	case 0:
-		return name, false
+		return name, false, nil
 	case 1:
-		return replaceParamPatternAt(name, r.with, locs[0]), true
+		if err := r.checkSize(name, locs); err != nil {
+			return "", false, err
+		}
+		return replaceParamPatternAt(name, r.with, locs[0]), true, nil
 	}
 	locs = r.rx.findAllStringIndex(name, -1)
+	if err := r.checkSize(name, locs); err != nil {
+		return "", false, err
+	}
+	return replaceParamPatternAll(name, r.with, locs), true, nil
+}
+
+func replaceParamPatternAll(name, with string, locs [][]int) string {
 	sb := strings.Builder{}
 	sb.Grow(len(name))
 	last := 0
 	for _, loc := range locs {
 		sb.WriteString(name[last:loc[0]])
-		sb.WriteString(r.with)
+		sb.WriteString(with)
 		last = loc[1]
 	}
 	sb.WriteString(name[last:])
-	return sb.String(), true
+	return sb.String()
 }
 
 func (cfg *Config) replaceParamPattern(pat, name, with string, all bool, anchor syntax.ReplaceAnchor) (string, error) {
@@ -430,8 +481,8 @@ func (cfg *Config) replaceParamPattern(pat, name, with string, all bool, anchor 
 	if err != nil {
 		return "", err
 	}
-	replaced, _ := replacer.replace(name)
-	return replaced, nil
+	replaced, _, err := replacer.replace(name)
+	return replaced, err
 }
 
 func (cfg *Config) associativeSubscriptKey(sub *syntax.Subscript) (string, error) {
@@ -1225,7 +1276,10 @@ func (cfg *Config) transformArrayElems(pe *syntax.ParamExp, state paramExpState,
 		}
 		var transformed []string
 		for i, elem := range elems {
-			replaced, changed := replacer.replace(elem)
+			replaced, changed, err := replacer.replace(elem)
+			if err != nil {
+				return nil, err
+			}
 			if !changed {
 				continue
 			}

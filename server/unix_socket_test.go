@@ -113,3 +113,57 @@ func TestListenUnixSocketRemovesStaleSocket(t *testing.T) {
 	}
 	_ = ln.Close()
 }
+
+func TestListenUnixSocketPrivateDirectoryAndNoStagingLeftovers(t *testing.T) {
+	t.Parallel()
+	base, err := os.MkdirTemp("", "gbd-")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+	dir := filepath.Join(base, "d")
+	socket := filepath.Join(dir, "s.sock")
+
+	_, ln, err := listenUnixSocket(t.Context(), socket)
+	if err != nil {
+		t.Fatalf("listenUnixSocket(%q) error = %v", socket, err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("Stat(%q) error = %v", dir, err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o700); got != want {
+		t.Fatalf("socket directory mode = %o, want %o", got, want)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%q) error = %v", dir, err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "s.sock" {
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+		t.Fatalf("socket directory entries = %v, want [s.sock]", names)
+	}
+
+	accepted := make(chan error, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err == nil {
+			_ = conn.Close()
+		}
+		accepted <- err
+	}()
+	conn, err := net.Dial("unix", socket) //nolint:noctx // test helper
+	if err != nil {
+		t.Fatalf("Dial(%q) error = %v", socket, err)
+	}
+	_ = conn.Close()
+	if err := <-accepted; err != nil {
+		t.Fatalf("Accept() error = %v", err)
+	}
+}

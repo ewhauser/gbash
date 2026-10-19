@@ -1095,11 +1095,20 @@ type varMutation struct {
 	previous    expand.Variable
 	hasPrevious bool
 	appendValue bool
+	// shellManaged marks values the shell derives from data that is already
+	// bounded, such as $_ from the last argument, which skip MaxVariableBytes.
+	shellManaged bool
 }
 
 func (r *Runner) setVarObserved(name string, vr expand.Variable, mutation *varMutation) error {
 	if vr.IsSet() && r.opts[optAllExport] {
 		vr.Exported = true
+	}
+	if (mutation == nil || !mutation.shellManaged) && vr.Kind != expand.KeepValue && r.variableTooLarge(vr) {
+		// Skip the write; callers see success, but the shell stops with
+		// status 126 once the current command finishes.
+		r.variableLimitExceeded(name)
+		return nil
 	}
 	prev := expand.Variable{}
 	if mutation != nil && mutation.hasPrevious {
@@ -1161,7 +1170,13 @@ func (r *Runner) setExportedVarString(name, value string) {
 }
 
 func (r *Runner) setSpecialUnderscore(value string) {
-	r.setVarString("_", value)
+	r.setShellManagedVar("_", expand.Variable{Set: true, Kind: expand.String, Str: value})
+}
+
+// setShellManagedVar sets a special variable whose value the shell derives
+// from data that is already bounded, so it skips MaxVariableBytes.
+func (r *Runner) setShellManagedVar(name string, vr expand.Variable) {
+	_ = r.setVarObserved(name, vr, &varMutation{shellManaged: true})
 }
 
 func (r *Runner) setSpecialUnderscoreFromFields(fields []string) {
@@ -1536,6 +1551,7 @@ func (r *Runner) resolvedCompoundArrayTarget(prev expand.Variable, ref *syntax.V
 }
 
 func (r *Runner) expandCompoundArrayElems(elems []*syntax.ArrayElem) []expandedArrayElem {
+	defer r.braceExpansionScope()()
 	expanded := make([]expandedArrayElem, 0, len(elems))
 	for _, elem := range elems {
 		item := expandedArrayElem{
@@ -1715,7 +1731,14 @@ func (r *Runner) assignArray(prev expand.Variable, as *syntax.Assign, valType st
 		switch elem.kind {
 		case syntax.ArrayElemSequential:
 			for _, field := range elem.fields {
-				shadowEnv.shadow = shadowEnv.shadow.IndexedSet(nextIndex, field, false)
+				if shadow := &shadowEnv.shadow; shadow.Indices == nil && nextIndex == len(shadow.List) {
+					// Dense tail append: compoundArrayBase gave this
+					// assignment its own list, so grow it in place
+					// instead of copying it for every element.
+					shadow.List = append(shadow.List, field)
+				} else {
+					shadowEnv.shadow = shadowEnv.shadow.IndexedSet(nextIndex, field, false)
+				}
 				nextIndex++
 			}
 		case syntax.ArrayElemKeyed, syntax.ArrayElemKeyedAppend:

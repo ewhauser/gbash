@@ -222,12 +222,13 @@ This matches the agent workflow we care about: a sequence of shell calls operati
 - the protocol is JSON-RPC 2.0 request/response, not a custom streaming transport
 - the shared CLI requires exactly one transport flag: `--socket` or `--listen`
 - the shared CLI restricts `--listen` to loopback hosts because v1 has no authentication layer
-- the Unix socket helper must chmod the socket to `0600`, reject an already-active socket path, and only replace stale socket files
+- the Unix socket helper must chmod the socket to `0600`, reject an already-active socket path, and only replace stale socket files; on Unix platforms the socket is bound and chmodded inside a fresh `0700` staging directory and then renamed into place, so it is never connectable by other local users, and any missing parent directory is created `0700`
 - `session_id` maps 1:1 to a persistent `Session`
 - filesystem shape is configured once at server startup through the normal runtime options and is not part of the wire protocol
 - the primary remote operation is `session.exec`, which runs one non-interactive `Session.Exec` call and returns the full execution result in one response
 - multiple sessions may be active concurrently across multiple client connections
 - a single session permits at most one active `session.exec` call at a time because `Session.Exec` is serialized
+- `session.exec` looks up and marks its session busy atomically with respect to the session registry, so `session.destroy` and TTL reaping cannot remove a session that is about to run or is running
 - clients are expected to reconnect or open a second socket when they need concurrent requests; v1 does not require multiplexed event streams on one connection
 
 Recommended v1 methods:
@@ -681,6 +682,8 @@ Implementation detail for the current runtime:
 - commands inside subshells and pipelines count toward the same execution budget
 - loop iteration limits are enforced by AST instrumentation that prepends an internal guard command to loop bodies before execution
 - command substitution depth and glob-operation budgets are enforced from the shell-core compile pipeline, and glob-operation counts accumulate across all parsed chunks in one execution
+- the variable-size budget is checked in the interpreter's single variable-write path rather than at each assignment form, and a command substitution whose output overflows it is cancelled right away so producers that ignore write errors stop
+- the brace-expansion word budget is counted while words are expanded rather than estimated at compile time, so the actual generated word count is what is bounded, including inside `eval` and `source`
 - request-level timeouts and caller cancellation are enforced via execution contexts and normalized into shell-style exit codes
 - a panic while running a command is recovered rather than crashing the host process: in the foreground shell it ends the execution with exit status `2`, and in goroutine-run subshells (pipeline left-hand sides, `&` background jobs, and process substitutions) only that subshell fails with exit status `2`; both report a sanitized message on stderr
 
@@ -773,6 +776,10 @@ Backend boundary for the current implementation:
 - `HostFS` is an opt-in lower-layer backend exposed through `gbfs.Host(...)`; it is intended to sit underneath `gbfs.Overlay(...)`, not to replace the default in-memory runtime path
 - `ReadWriteFS` is an opt-in mutable backend exposed through `gbfs.ReadWrite(...)`; it is intended for developer tooling, external test harnesses, and embedders that explicitly want host mutations
 - `OverlayFS` is intended for internal session use and is exposed through `gbfs.Overlay(...)`
+- `OverlayFS` resolves symlinks against the merged view of both layers: each link is read from the layer that currently provides it, and its target may live in either layer; `Stat`, `Open`, `ReadDir`, `Realpath`, `Chdir`, `Chmod`, `Chtimes`, and following `Chown` follow the final link, while `Lstat`, `Readlink`, `Remove`, `Rename`, `Link`, and the entry-creating operations only resolve parent directories
+- writes and metadata changes through a symlink copy up and modify the resolved target, never the link itself; `MkdirAll` follows symlinked directory components; `O_CREATE|O_EXCL` fails on any existing link, including a dangling one
+- every copy-up (writes via `OpenFile`, `Link` of a lower file, and `Chmod`, `Chown`, `Chtimes`, `Lchtimes`) creates missing upper ancestors with their lower mode, ownership, and modification time, so upper directories never shadow lower ones with default metadata
+- `Chmod`, `Chown`, `Chtimes`, and `Lchtimes` on a lower-layer directory copy up only that directory node (mode, ownership, and modification time), never its children, so tombstoned children stay hidden and the cost does not grow with the subtree
 - `MountableFS` is an opt-in namespace backend exposed through `gbfs.Mountable(...)` and `gbash.MountableFileSystem(...)`; live `mount` and `unmount` behavior remains a concrete-backend capability rather than part of the core filesystem interface
 - `SnapshotFS` is a read-only backend for deterministic fixtures and direct tests
 - `SnapshotFS` is not the default `runtime` session backend because session bootstrap still creates the sandbox layout and command stubs
@@ -795,6 +802,7 @@ Initial policy surface:
 - maximum loop iterations
 - maximum command substitution depth
 - maximum glob operations
+- maximum variable value size
 - symlink policy
 - cancellation and timeout handling
 - network disabled unless a sandboxed network client is explicitly configured
@@ -808,6 +816,8 @@ Default policy stance for MVP:
 - maximum loop iterations default to `10000` per loop
 - maximum command substitution depth defaults to `50` per execution
 - maximum glob operations default to `100000` per execution
+- maximum variable value size defaults to `32 MiB` (`MaxVariableBytes`), with headroom over the `8 MiB` `MaxFileBytes` default so a whole file still fits in one variable. The cap applies to every shell variable write (plain and `+=` assignments, array and associative element writes, array literals and appends, `declare`/`local`/`export`/`readonly`, `read`, `printf -v`, `mapfile`/`readarray`, `${x:=...}`, and `for` variables), where an array counts its element bytes plus 16 bytes per element. It also caps the intermediate values that one step can grow without bound: command substitution output (measured before trailing newlines are stripped), `${x//pattern/replacement}` results, and `printf` output (both the shell builtin and the `printf` command, checked before a padded field is built). A command's expanded argument list and a `for` loop's word list are sized like an indexed array and held to the same cap, which bounds positional parameters and argv doubled with `"$@" "$@"`. `read` and `mapfile` stop buffering input once a value would exceed the cap. Going over prints `NAME: value too large (limit N bytes), increase policy.Limits.MaxVariableBytes`, leaves the variable unchanged, and exits the current shell with status `126` (interactive shells abort only the command). Values the shell derives from already-bounded data (`$_`, `BASH_EXECUTION_STRING`, `BASH_REMATCH`) are exempt. Bash itself only stops when allocation fails, so this is a deliberate sandbox divergence.
+- maximum brace-expansion words default to `100000` per command; the cap covers every word of one command's arguments, array assignment, or declaration operands together, and exceeding it prints `brace expansion: too many words (limit N), increase policy.Limits.MaxBraceExpansionWords` and exits the current shell with status `126`. Bash itself only stops when allocation fails, so this is a deliberate sandbox divergence. Brace sequences stop stepping before they would overflow `int`, so ranges ending at the integer bounds terminate.
 - symlink traversal denied unless a filesystem backend and policy explicitly allow it
 - request-level timeout is opt-in, but when it fires the execution must stop with exit code `124`
 - caller-driven cancellation must stop the execution with exit code `130`
@@ -821,10 +831,16 @@ The policy package should be able to answer three questions:
 
 Network policy for the current runtime is enforced by the dedicated `network/` layer rather than by generic shell evaluation. Commands never receive host `http.Client` access directly; they only receive the runtime-owned sandboxed `network.Client`. The default sandboxed HTTP client must not inherit host proxy environment variables, and private-range blocking must be enforced during the actual dial using the same resolver surface used by the preflight URL check.
 
+Allowlist path matching operates on a normalized path. Before matching, the client applies RFC 3986 `remove_dot_segments` to the escaped request path (and to each configured allowlist prefix), and it sends exactly that normalized URL, so `https://api.example.com/v1/a/../b` is checked and sent as `/v1/b`. Paths that would still contain a `.` or `..` segment once a server percent-decodes them (`%2e%2e`), splits on encoded or backslash separators (`..%2f`, `..%5c`, `..\`), or strips `;` path parameters (`..;`) are denied rather than guessed at; an allowlist prefix with such a segment is an invalid config. The same rule applies to every redirect target.
+
+`DenyPrivateRanges` blocks every non-globally-reachable destination, not just RFC 1918 space: unspecified addresses (`0.0.0.0/8`, `::`), loopback, private, link-local, multicast, shared/CGNAT (`100.64.0.0/10`), IETF/benchmarking/documentation/reserved ranges, deprecated IPv4-compatible and site-local IPv6, and NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`) addresses whose embedded IPv4 destination is itself non-public. IPv4-mapped IPv6 addresses are classified by their IPv4 form.
+
 Path-policy enforcement rule for the current runtime:
 
 - the lexical path the user asked for is checked first
 - if the backend resolves that path through a symlink, the resolved target path is checked before backend access
+- remove, rename, lstat, and readlink checks resolve symlinks in every parent component but leave the final entry itself unresolved
+- write and mkdir checks resolve through the deepest existing ancestor and follow dangling symlinks, because creating operations may materialize missing components behind them
 - in `SymlinkDeny` mode, any attempted traversal through a symlink fails even if both lexical and resolved paths would otherwise be allowed
 
 ## 13. Trace Model
