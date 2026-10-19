@@ -56,6 +56,12 @@ type Config struct {
 	// need startup-sensitive tilde semantics.
 	StartupHome string
 
+	// MaxVariableBytes caps values that one expansion step can grow without
+	// bound: command substitution output and pattern substitution results.
+	// Exceeding it fails the expansion with a [VariableSizeLimitError]. Zero
+	// means unlimited.
+	MaxVariableBytes int64
+
 	// LangVariant controls shell-variant-sensitive reparsing and quoting
 	// helpers used during expansion. The zero value behaves like Bash.
 	LangVariant syntax.LangVariant
@@ -1939,7 +1945,17 @@ func (cfg *Config) wordField(wps []syntax.WordPart, ql quoteLevel) ([]fieldPart,
 
 func (cfg *Config) cmdSubst(cs *syntax.CmdSubst) (string, error) {
 	sb := cfg.strBuilder()
-	if err := cfg.runCmdSubst(sb, cs); err != nil {
+	if cfg.MaxVariableBytes > 0 {
+		w := &limitedStringWriter{b: sb, limit: cfg.MaxVariableBytes}
+		err := cfg.runCmdSubst(w, cs)
+		if w.exceeded {
+			sb.Reset()
+			return "", VariableSizeLimitError{What: "command substitution", Limit: cfg.MaxVariableBytes}
+		}
+		if err != nil {
+			return "", err
+		}
+	} else if err := cfg.runCmdSubst(sb, cs); err != nil {
 		return "", err
 	}
 	out := sb.String()

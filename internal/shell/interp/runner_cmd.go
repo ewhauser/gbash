@@ -28,6 +28,7 @@ func (r *Runner) cmd(ctx context.Context, cm syntax.Command) {
 
 	tracingEnabled := r.opts[optXTrace]
 	trace := r.tracer()
+	defer r.reassertVariableLimitExit()
 
 	switch cm := cm.(type) {
 	case *syntax.Block:

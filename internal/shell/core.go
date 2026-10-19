@@ -273,6 +273,9 @@ func (m *core) runnerConfig(exec *Execution, budget *executionBudget) *interp.Ru
 	if exec == nil {
 		return cfg
 	}
+	if exec.Policy != nil {
+		cfg.MaxVariableBytes = exec.Policy.Limits().MaxVariableBytes
+	}
 	cfg.StartupHome = exec.StartupHome
 	cfg.Dir = exec.Dir
 	cfg.VisibleDir = exec.VisiblePWD

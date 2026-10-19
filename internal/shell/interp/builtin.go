@@ -998,6 +998,10 @@ func (r *Runner) readBuiltin(ctx context.Context, args []string) (exit exitStatu
 	}
 
 	chars, err := r.readBuiltinInput(ctx, fd, opts)
+	if errors.Is(err, errVariableSizeLimit) {
+		r.variableLimitExceeded("read")
+		return exitStatus{code: 126}
+	}
 	record := readBuiltinCharsString(chars)
 	switch {
 	case opts.arrayName != "":
@@ -1307,14 +1311,20 @@ func (r *Runner) mapfileBuiltin(name string, args []string) exitStatus {
 	nextIndex := opts.origin
 	skipped := 0
 	stored := 0
+	var size int64
+	ownsList := false // whether target.List may be appended to in place
 	for {
 		if opts.maxLines > 0 && stored >= opts.maxLines {
 			break
 		}
-		record, err := mapfileBuiltinReadRecord(fd, opts.delimiter)
+		record, err := mapfileBuiltinReadRecord(fd, opts.delimiter, r.maxVariableBytes)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
+			}
+			if errors.Is(err, errVariableSizeLimit) {
+				r.variableLimitExceeded(name)
+				return exitStatus{code: 126}
 			}
 			if firstRead && mapfileBuiltinSuppressReadError(err) {
 				break
@@ -1324,13 +1334,33 @@ func (r *Runner) mapfileBuiltin(name string, args []string) exitStatus {
 		firstRead = false
 		if !initialized {
 			target = mapfileBuiltinTargetVar(r.lookupVar(arrayName), opts.hasOrigin)
+			size = variableValueBytes(target)
 			initialized = true
 		}
 		if skipped < opts.skipLines {
 			skipped++
 			continue
 		}
-		target = target.IndexedSet(nextIndex, mapfileBuiltinRecordValue(record, opts.delimiter, opts.stripDelimiter), false)
+		value := mapfileBuiltinRecordValue(record, opts.delimiter, opts.stripDelimiter)
+		// Overwritten elements are counted twice, which only errs toward
+		// stopping early.
+		size += int64(len(value)) + arrayElementOverheadBytes
+		if r.maxVariableBytes > 0 && size > r.maxVariableBytes {
+			r.variableLimitExceeded(arrayName)
+			return exitStatus{code: 126}
+		}
+		if target.Indices == nil && nextIndex == len(target.List) {
+			// Dense tail append: copy a list shared with the existing
+			// variable once, then grow it instead of copying per record.
+			if !ownsList {
+				target.List = slices.Clone(target.List)
+				ownsList = true
+			}
+			target.List = append(target.List, value)
+		} else {
+			target = target.IndexedSet(nextIndex, value, false)
+			ownsList = true
+		}
 		nextIndex++
 		stored++
 	}
@@ -1450,7 +1480,9 @@ func parseMapfileBuiltinArgs(name string, args []string) (mapfileBuiltinOptions,
 	return opts, nil, nil
 }
 
-func mapfileBuiltinReadRecord(fd *shellFD, delim byte) ([]byte, error) {
+// mapfileBuiltinReadRecord reads one delimited record, failing with
+// errVariableSizeLimit once it grows past limit bytes (zero means unlimited).
+func mapfileBuiltinReadRecord(fd *shellFD, delim byte, limit int64) ([]byte, error) {
 	if fd == nil || fd.reader == nil {
 		return nil, errors.New("bad file descriptor")
 	}
@@ -1469,6 +1501,9 @@ func mapfileBuiltinReadRecord(fd *shellFD, delim byte) ([]byte, error) {
 		buf = append(buf, b)
 		if b == delim {
 			return buf, nil
+		}
+		if limit > 0 && int64(len(buf)) > limit {
+			return nil, errVariableSizeLimit
 		}
 	}
 }
@@ -1790,6 +1825,9 @@ func (r *Runner) readBuiltinInput(ctx context.Context, fd *shellFD, opts readBui
 			if b == '\n' {
 				continue
 			}
+			if r.maxVariableBytes > 0 && int64(len(chars)) >= r.maxVariableBytes {
+				return chars, errVariableSizeLimit
+			}
 			chars = append(chars, expand.ReadFieldChar{Value: b, Escaped: true})
 			continue
 		}
@@ -1802,6 +1840,9 @@ func (r *Runner) readBuiltinInput(ctx context.Context, fd *shellFD, opts readBui
 		}
 		if b == 0 {
 			continue
+		}
+		if r.maxVariableBytes > 0 && int64(len(chars)) >= r.maxVariableBytes {
+			return chars, errVariableSizeLimit
 		}
 		chars = append(chars, expand.ReadFieldChar{Value: b})
 	}

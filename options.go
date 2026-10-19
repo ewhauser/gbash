@@ -151,6 +151,9 @@ func mergeLimitOverrides(base, overrides policy.Limits) policy.Limits {
 	if overrides.MaxFileBytes != 0 {
 		base.MaxFileBytes = overrides.MaxFileBytes
 	}
+	if overrides.MaxVariableBytes != 0 {
+		base.MaxVariableBytes = overrides.MaxVariableBytes
+	}
 	return base
 }
 

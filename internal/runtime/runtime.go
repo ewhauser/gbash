@@ -78,6 +78,7 @@ func New(opts ...Option) (*Runtime, error) {
 		MaxStdoutBytes:       1 << 20,
 		MaxStderrBytes:       1 << 20,
 		MaxFileBytes:         8 << 20,
+		MaxVariableBytes:     32 << 20,
 	}, resolved.LimitOverrides)
 	if resolved.Policy == nil {
 		resolved.Policy = policy.NewStatic(&policy.Config{
@@ -88,7 +89,7 @@ func New(opts ...Option) (*Runtime, error) {
 			SymlinkMode:     policy.SymlinkDeny,
 		})
 	} else if resolved.LimitOverrides != (policy.Limits{}) {
-		resolved.Policy = limitOverridePolicy{
+		resolved.Policy = &limitOverridePolicy{
 			base:   resolved.Policy,
 			limits: mergedLimits(resolved.Policy.Limits(), resolved.LimitOverrides),
 		}
@@ -123,23 +124,23 @@ type limitOverridePolicy struct {
 	limits policy.Limits
 }
 
-func (p limitOverridePolicy) AllowCommand(ctx context.Context, name string, argv []string) error {
+func (p *limitOverridePolicy) AllowCommand(ctx context.Context, name string, argv []string) error {
 	return p.base.AllowCommand(ctx, name, argv)
 }
 
-func (p limitOverridePolicy) AllowBuiltin(ctx context.Context, name string, argv []string) error {
+func (p *limitOverridePolicy) AllowBuiltin(ctx context.Context, name string, argv []string) error {
 	return p.base.AllowBuiltin(ctx, name, argv)
 }
 
-func (p limitOverridePolicy) AllowPath(ctx context.Context, action policy.FileAction, target string) error {
+func (p *limitOverridePolicy) AllowPath(ctx context.Context, action policy.FileAction, target string) error {
 	return p.base.AllowPath(ctx, action, target)
 }
 
-func (p limitOverridePolicy) Limits() policy.Limits {
+func (p *limitOverridePolicy) Limits() policy.Limits {
 	return p.limits
 }
 
-func (p limitOverridePolicy) SymlinkMode() policy.SymlinkMode {
+func (p *limitOverridePolicy) SymlinkMode() policy.SymlinkMode {
 	return p.base.SymlinkMode()
 }
 
@@ -164,6 +165,9 @@ func mergedLimits(base, overrides policy.Limits) policy.Limits {
 	}
 	if overrides.MaxFileBytes != 0 {
 		base.MaxFileBytes = overrides.MaxFileBytes
+	}
+	if overrides.MaxVariableBytes != 0 {
+		base.MaxVariableBytes = overrides.MaxVariableBytes
 	}
 	return base
 }

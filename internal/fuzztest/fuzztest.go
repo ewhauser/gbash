@@ -48,6 +48,7 @@ func NewRuntime(tb testing.TB, opts RuntimeOptions) *gbash.Runtime {
 				MaxStdoutBytes:       16 << 10,
 				MaxStderrBytes:       16 << 10,
 				MaxFileBytes:         128 << 10,
+				MaxVariableBytes:     256 << 10,
 			},
 		})
 	}

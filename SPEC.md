@@ -679,6 +679,7 @@ Implementation detail for the current runtime:
 - commands inside subshells and pipelines count toward the same execution budget
 - loop iteration limits are enforced by AST instrumentation that prepends an internal guard command to loop bodies before execution
 - command substitution depth and glob-operation budgets are enforced from the shell-core compile pipeline, and glob-operation counts accumulate across all parsed chunks in one execution
+- the variable-size budget is checked in the interpreter's single variable-write path rather than at each assignment form, and a command substitution whose output overflows it is cancelled right away so producers that ignore write errors stop
 - request-level timeouts and caller cancellation are enforced via execution contexts and normalized into shell-style exit codes
 
 ### 9.6 Command execution
@@ -792,6 +793,7 @@ Initial policy surface:
 - maximum loop iterations
 - maximum command substitution depth
 - maximum glob operations
+- maximum variable value size
 - symlink policy
 - cancellation and timeout handling
 - network disabled unless a sandboxed network client is explicitly configured
@@ -805,6 +807,7 @@ Default policy stance for MVP:
 - maximum loop iterations default to `10000` per loop
 - maximum command substitution depth defaults to `50` per execution
 - maximum glob operations default to `100000` per execution
+- maximum variable value size defaults to `32 MiB` (`MaxVariableBytes`), with headroom over the `8 MiB` `MaxFileBytes` default so a whole file still fits in one variable. The cap applies to every shell variable write (plain and `+=` assignments, array and associative element writes, array literals and appends, `declare`/`local`/`export`/`readonly`, `read`, `printf -v`, `mapfile`/`readarray`, `${x:=...}`, and `for` variables), where an array counts its element bytes plus 16 bytes per element. It also caps the intermediate values that one expansion step can grow without bound: command substitution output (measured before trailing newlines are stripped) and `${x//pattern/replacement}` results. `read` and `mapfile` stop buffering input once a value would exceed the cap. Going over prints `NAME: value too large (limit N bytes), increase policy.Limits.MaxVariableBytes`, leaves the variable unchanged, and exits the current shell with status `126` (interactive shells abort only the command). Values the shell derives from already-bounded data (`$_`, `BASH_EXECUTION_STRING`, `BASH_REMATCH`) are exempt. Positional parameters and argv are not covered. Bash itself only stops when allocation fails, so this is a deliberate sandbox divergence.
 - symlink traversal denied unless a filesystem backend and policy explicitly allow it
 - request-level timeout is opt-in, but when it fires the execution must stop with exit code `124`
 - caller-driven cancellation must stop the execution with exit code `130`
