@@ -288,7 +288,7 @@ The runtime treats the runner's virtual directory plus shell-visible `PWD` as th
 
 Sandbox-facing machine metadata is also runtime-owned: `HOSTNAME`, `hostname`, `OSTYPE`, variant-exposed `BASHPID`, and `PPID` must resolve from sandbox metadata and runner state rather than from host uname or host process inspection.
 
-That metadata now has a supported public adapter boundary. `gbash.Config.Host` and `gbash.WithHost(host.Adapter)` select the logical host implementation, while the public `host` package owns typed platform identity, per-execution PID/PPID/process-group seeds, and the pipe primitive used for pipelines and process substitution. The default adapter remains internal and virtual so zero-config sandbox behavior stays unchanged.
+That metadata now has a supported public adapter boundary. `gbash.Config.Host` and `gbash.WithHost(host.Adapter)` select the logical host implementation, while the public `host` package owns typed platform identity, per-execution PID/PPID/process-group seeds, and the pipe primitive used for pipelines and process substitution. The default adapter remains internal and virtual so zero-config sandbox behavior stays unchanged: it reports PID `1`, PPID `0`, and process group `1`, and never the host's process-group id. Only `host.NewSystem()` exposes the real host PID, PPID, and process group.
 
 Signal identity is part of that runtime-owned metadata. Stable `$$` values, per-shell `BASHPID`, shell-family `PPID`, virtual background job IDs, and internal signal delivery for shell-managed `kill` targets must be derived from runner state rather than host PIDs.
 
