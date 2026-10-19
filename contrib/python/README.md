@@ -34,6 +34,9 @@ not supported.
 - relative paths resolve from the gbash working directory
 - print output goes to gbash stdout
 - command execution never escapes to the host OS
+- each run is capped at a 256 MiB heap, recursion depth 1000, and the request
+  deadline (60 seconds when the request has none, measured across the whole
+  session for the REPL); cancellation returns control immediately
 
 `gomonty` is cgo-backed and requires a supported target archive. When the
 native bindings are unavailable, the command exits non-zero with the bundled
