@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"net"
 	"strings"
 	"testing"
 )
@@ -40,5 +41,25 @@ func TestValidateLoopbackListenAddress(t *testing.T) {
 				t.Fatalf("validateLoopbackListenAddress(%q) error = %v, want substring %q", tt.addr, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestListenLoopbackTCPBindsLoopbackForLocalhost(t *testing.T) {
+	t.Parallel()
+
+	for _, addr := range []string{"localhost:0", "LOCALHOST:0", "127.0.0.1:0"} {
+		ln, err := listenLoopbackTCP(t.Context(), addr)
+		if err != nil {
+			t.Fatalf("listenLoopbackTCP(%q) error = %v", addr, err)
+		}
+		tcpAddr, ok := ln.Addr().(*net.TCPAddr)
+		_ = ln.Close()
+		if !ok || !tcpAddr.IP.Equal(net.IPv4(127, 0, 0, 1)) {
+			t.Fatalf("listenLoopbackTCP(%q) bound %v, want 127.0.0.1", addr, ln.Addr())
+		}
+	}
+
+	if _, err := listenLoopbackTCP(t.Context(), "0.0.0.0:0"); err == nil || !strings.Contains(err.Error(), "loopback host") {
+		t.Fatalf("listenLoopbackTCP(0.0.0.0:0) error = %v, want loopback rejection", err)
 	}
 }

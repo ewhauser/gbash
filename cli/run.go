@@ -163,12 +163,39 @@ func serveServer(ctx context.Context, rt *gbash.Runtime, name, version string, r
 	if socketPath != "" {
 		return gbserver.ListenAndServeUnix(ctx, socketPath, cfg)
 	}
-	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", listenAddr)
+	ln, err := listenLoopbackTCP(ctx, listenAddr)
 	if err != nil {
-		return fmt.Errorf("listen on tcp address: %w", err)
+		return err
 	}
 	defer func() { _ = ln.Close() }()
 	return gbserver.Serve(ctx, ln, cfg)
+}
+
+// listenLoopbackTCP binds a validated --listen address. "localhost" binds
+// 127.0.0.1 directly instead of trusting /etc/hosts or DNS, and the bound
+// address is checked again so the unauthenticated protocol is never exposed
+// beyond loopback.
+func listenLoopbackTCP(ctx context.Context, listenAddr string) (net.Listener, error) {
+	if err := validateLoopbackListenAddress(listenAddr); err != nil {
+		return nil, err
+	}
+	host, port, err := net.SplitHostPort(strings.TrimSpace(listenAddr))
+	if err != nil {
+		return nil, fmt.Errorf("parse --listen: %w", err)
+	}
+	if strings.EqualFold(host, "localhost") {
+		host = "127.0.0.1"
+	}
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", net.JoinHostPort(host, port))
+	if err != nil {
+		return nil, fmt.Errorf("listen on tcp address: %w", err)
+	}
+	tcpAddr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok || !tcpAddr.IP.IsLoopback() {
+		_ = ln.Close()
+		return nil, fmt.Errorf("--listen bound non-loopback address %s", ln.Addr())
+	}
+	return ln, nil
 }
 
 func validateLoopbackListenAddress(addr string) error {
