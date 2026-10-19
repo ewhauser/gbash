@@ -100,6 +100,8 @@ func (r *Runner) ExpandCmdSubst(w io.Writer, cs *syntax.CmdSubst) error {
 	if r.expandBaseFDs != nil {
 		r2.shareFDTableSnapshot(r.expandBaseFDs)
 	}
+	ctx, w, cancel := r.cmdSubstLimitContext(ctx, w)
+	defer cancel(nil)
 	r2.opts[optVerbose] = false
 	r2.setStandardFDs(standardFDUpdate{stdout: w, setStdout: true})
 	r2.stmts(ctx, cs.Stmts)
@@ -122,6 +124,8 @@ func (r *Runner) expandDeferredBackquote(ctx context.Context, w io.Writer, cs *s
 	if r.expandBaseFDs != nil {
 		r2.shareFDTableSnapshot(r.expandBaseFDs)
 	}
+	ctx, w, cancel := r.cmdSubstLimitContext(ctx, w)
+	defer cancel(nil)
 	r2.opts[optVerbose] = false
 	r2.setStandardFDs(standardFDUpdate{stdout: w, setStdout: true})
 	err := r2.runShellReader(ctx, strings.NewReader(src), "`", nil)
@@ -206,6 +210,8 @@ func (r *Runner) fillExpandConfig(ctx context.Context) {
 	r.ecfg.LangVariant = r.parserLangVariant()
 	r.ecfg.TildeEnv = tildeExpandEnv{r}
 	r.ecfg.StartupHome = r.startupHome
+	r.ecfg.MaxVariableBytes = r.maxVariableBytes
+	r.ecfg.MaxBraceExpansionWords = r.maxBraceExpansionWords
 	r.ecfg.PreferStartupHomeForArgTilde = r.platform.OS == host.OSDarwin
 	r.updateExpandOpts()
 	r.ecfgInit = true
@@ -295,6 +301,7 @@ func (r *Runner) runProcSubst(ctx context.Context, ps *syntax.ProcSubst, path st
 			*bg.exit = r2.exit
 			close(bg.done)
 		}()
+		defer r2.recoverAsyncPanic()
 
 		release, err := configure(r2)
 		if err != nil {
@@ -389,6 +396,8 @@ func (r *Runner) expandErr(err error) {
 		failGlobErr    expand.FailGlobError
 		arithSyntaxErr expand.ArithmSyntaxError
 		arithDiagErr   *expand.ArithmDiagnosticError
+		varSizeErr     expand.VariableSizeLimitError
+		braceLimitErr  expand.BraceExpansionLimitError
 	)
 	if errors.As(err, &unsetErr) && unsetErr.Node != nil {
 		if file := r.currentExecFile(); file != "" {
@@ -401,8 +410,27 @@ func (r *Runner) expandErr(err error) {
 			errMsg = name + ": " + errMsg
 		}
 	}
+	if errors.As(err, &varSizeErr) {
+		errMsg += variableLimitHint
+	}
+	if errors.As(err, &braceLimitErr) {
+		errMsg += ", increase policy.Limits.MaxBraceExpansionWords"
+	}
 	fmt.Fprintln(r.stderr, errMsg)
 	switch {
+	case errors.As(err, &varSizeErr):
+		r.variableLimitHit = true
+		r.applyVariableLimitExit()
+	case errors.As(err, &braceLimitErr):
+		// A sandbox resource limit: exit the current shell with the same 126
+		// status as the other policy budgets, or just abort the command when
+		// interactive.
+		r.exit.code = 126
+		if r.interactive {
+			r.commandAborted = true
+		} else {
+			r.exit.exiting = true
+		}
 	case errors.As(err, &cmdArithErr):
 		r.exit.code = 1
 	case errors.As(err, &unboundVarErr):
@@ -548,6 +576,14 @@ func (r *Runner) fields(words ...*syntax.Word) []string {
 	strs, err := expand.Fields(&r.ecfg, words...)
 	r.expandErr(err)
 	return strs
+}
+
+// braceExpansionScope makes the brace-expansion word cap cover every
+// r.fields call until the returned func runs, so a command whose words are
+// expanded one at a time is bounded as a whole.
+func (r *Runner) braceExpansionScope() func() {
+	r.ecfg.BeginBraceExpansionScope()
+	return r.ecfg.EndBraceExpansionScope
 }
 
 func (r *Runner) literal(word *syntax.Word) string {
@@ -1003,6 +1039,7 @@ func (r *Runner) stmt(ctx context.Context, st *syntax.Stmt) {
 	line := st.Pos().Line()
 	if r.stmtDepth == 0 {
 		r.commandAborted = false
+		r.variableLimitHit = false
 	}
 	if r.skipStmtLine != 0 {
 		switch {
@@ -1035,10 +1072,13 @@ func (r *Runner) stmt(ctx context.Context, st *syntax.Stmt) {
 		}
 		r.bgProcs = append(r.bgProcs, bg)
 		go func() {
-			r2.Run(ctx, &st2)
+			defer close(bg.done)
+			func() {
+				defer r2.recoverAsyncPanic()
+				r2.Run(ctx, &st2)
+			}()
 			r2.exit.exiting = false // subshells don't exit the parent shell
 			*bg.exit = r2.exit
-			close(bg.done)
 		}()
 		r.setPipeStatuses(0)
 	} else {
@@ -1638,6 +1678,7 @@ func (r *Runner) renderInlineArrayValue(expr *syntax.ArrayExpr) string {
 	if expr == nil {
 		return ""
 	}
+	defer r.braceExpansionScope()()
 	var b strings.Builder
 	b.WriteByte('(')
 	first := true

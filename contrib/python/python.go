@@ -31,6 +31,16 @@ const (
 	pythonReplDisplayEntry       = ".gbash-python-repl-display.py"
 	pythonReplPrompt             = ">>> "
 	pythonReplContinuationPrompt = "... "
+
+	// pythonMaxMemory caps the Monty heap so oversized allocations raise
+	// MemoryError instead of aborting the host process.
+	pythonMaxMemory = 256 << 20
+	// pythonMaxRecursionDepth matches CPython's default recursion limit.
+	pythonMaxRecursionDepth = 1000
+	// pythonDefaultMaxDuration bounds script execution when the request has no
+	// deadline. Monty cannot observe context cancellation while it executes
+	// bytecode, so an explicit duration is the only way to stop a runaway loop.
+	pythonDefaultMaxDuration = 60 * time.Second
 )
 
 type Python struct {
@@ -139,19 +149,68 @@ func (c *Python) runSource(ctx context.Context, inv *commands.Invocation, source
 		return pythonExit(inv, err)
 	}
 
+	limits, hasDeadline := pythonResourceLimits(ctx, pythonDefaultMaxDuration)
 	_, err = runner.Run(ctx, monty.RunOptions{
-		Print: monty.WriterPrintCallback(inv.Stdout),
-		OS:    pythonOSHandler(ctx, inv),
+		Print:  monty.WriterPrintCallback(inv.Stdout),
+		OS:     pythonOSHandler(ctx, inv),
+		Limits: limits,
 	})
 	if err != nil {
+		if ctxErr := pythonDeadlineError(ctx, err, hasDeadline); ctxErr != nil {
+			return ctxErr
+		}
 		return pythonExit(inv, err)
 	}
 	return nil
 }
 
+// pythonResourceLimits derives Monty limits for one execution. The duration
+// tracks the request deadline when there is one, so the runtime timeout stops
+// Python; otherwise fallback applies (zero leaves the duration unbounded).
+func pythonResourceLimits(ctx context.Context, fallback time.Duration) (*monty.ResourceLimits, bool) {
+	limits := &monty.ResourceLimits{
+		MaxMemory:         pythonMaxMemory,
+		MaxRecursionDepth: pythonMaxRecursionDepth,
+		MaxDuration:       fallback,
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return limits, false
+	}
+	// Monty treats a zero duration as unlimited, so keep at least 1ns.
+	limits.MaxDuration = max(time.Until(deadline), time.Nanosecond)
+	return limits, true
+}
+
+// pythonDeadlineError reports the request context error when Monty stopped
+// because the request was canceled or its deadline-derived time limit expired,
+// so the runtime classifies the failure as a timeout or cancellation.
+func pythonDeadlineError(ctx context.Context, err error, hasDeadline bool) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	var runtimeErr *monty.RuntimeError
+	if !hasDeadline || !errors.As(err, &runtimeErr) || !strings.HasPrefix(runtimeErr.Error(), "TimeoutError") {
+		return nil
+	}
+	// Monty's clock can run slightly ahead of the context timer.
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func (c *Python) runRepl(ctx context.Context, inv *commands.Invocation, source pythonSource) error {
+	// REPL time limits accumulate from construction, so only an absolute
+	// request deadline bounds them; an interactive session has no fallback.
+	limits, hasDeadline := pythonResourceLimits(ctx, 0)
 	repl, err := monty.NewRepl(monty.ReplOptions{
 		ScriptName: source.entryPath,
+		Limits:     limits,
 	})
 	if err != nil {
 		return pythonExit(inv, err)
@@ -219,6 +278,9 @@ func (c *Python) runRepl(ctx context.Context, inv *commands.Invocation, source p
 			OS:    handler,
 		})
 		if err != nil {
+			if ctxErr := pythonDeadlineError(ctx, err, hasDeadline); ctxErr != nil {
+				return ctxErr
+			}
 			if pythonReplNeedsContinuation(err, line) && !errors.Is(readErr, io.EOF) {
 				prompt = pythonReplContinuationPrompt
 				continue
@@ -510,10 +572,12 @@ func pythonReplValueString(ctx context.Context, displayRunner *monty.Runner, val
 	if displayRunner == nil {
 		return pythonFallbackValueString(value), nil
 	}
+	limits, _ := pythonResourceLimits(ctx, pythonDefaultMaxDuration)
 	repr, err := displayRunner.Run(ctx, monty.RunOptions{
 		Inputs: map[string]monty.Value{
 			"_gbash_repl_value": value,
 		},
+		Limits: limits,
 	})
 	if err != nil {
 		return "", err
