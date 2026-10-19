@@ -83,12 +83,14 @@ type Config struct {
 	Registry commands.CommandRegistry
 
 	// Policy governs path access, command limits, and other sandbox checks.
-	// When nil, the default static policy is used.
+	// When nil, the default static policy is used. Limits fields a custom
+	// policy leaves at zero inherit the runtime defaults; set a field to
+	// [policy.Unlimited] to disable that limit.
 	Policy policy.Policy
 
 	// LimitOverrides overrides selected runtime limits without replacing the
 	// active policy. Zero-valued fields leave the underlying policy/defaults
-	// unchanged.
+	// unchanged, and [policy.Unlimited] disables a limit.
 	LimitOverrides policy.Limits
 
 	// BaseEnv provides the base environment visible to each execution before any

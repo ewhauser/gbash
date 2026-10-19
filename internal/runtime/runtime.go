@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"maps"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -70,29 +71,18 @@ func New(opts ...Option) (*Runtime, error) {
 			return nil, err
 		}
 	}
-	defaultLimits := mergedLimits(policy.Limits{
-		MaxCommandCount:        10000,
-		MaxGlobOperations:      100000,
-		MaxBraceExpansionWords: 100000,
-		MaxLoopIterations:      10000,
-		MaxSubstitutionDepth:   50,
-		MaxStdoutBytes:         1 << 20,
-		MaxStderrBytes:         1 << 20,
-		MaxFileBytes:           8 << 20,
-		MaxVariableBytes:       32 << 20,
-	}, resolved.LimitOverrides)
 	if resolved.Policy == nil {
 		resolved.Policy = policy.NewStatic(&policy.Config{
 			AllowedCommands: resolved.Registry.Names(),
 			ReadRoots:       []string{"/"},
 			WriteRoots:      []string{"/"},
-			Limits:          defaultLimits,
+			Limits:          effectiveLimits(policy.Limits{}, resolved.LimitOverrides),
 			SymlinkMode:     policy.SymlinkDeny,
 		})
-	} else if resolved.LimitOverrides != (policy.Limits{}) {
-		resolved.Policy = &limitOverridePolicy{
-			base:   resolved.Policy,
-			limits: mergedLimits(resolved.Policy.Limits(), resolved.LimitOverrides),
+	} else {
+		resolved.Policy = &limitDefaultsPolicy{
+			base:      resolved.Policy,
+			overrides: resolved.LimitOverrides,
 		}
 	}
 	if resolved.Host == nil {
@@ -120,60 +110,80 @@ func New(opts ...Option) (*Runtime, error) {
 	}, nil
 }
 
-type limitOverridePolicy struct {
-	base   policy.Policy
-	limits policy.Limits
+// defaultLimits are the runtime's resource limits. They apply to the default
+// policy and fill every zero-valued field of a custom policy's Limits.
+func defaultLimits() policy.Limits {
+	return policy.Limits{
+		MaxCommandCount:        10000,
+		MaxGlobOperations:      100000,
+		MaxBraceExpansionWords: 100000,
+		MaxLoopIterations:      10000,
+		MaxSubstitutionDepth:   50,
+		MaxStdoutBytes:         1 << 20,
+		MaxStderrBytes:         1 << 20,
+		MaxFileBytes:           8 << 20,
+		MaxVariableBytes:       32 << 20,
+	}
 }
 
-func (p *limitOverridePolicy) AllowCommand(ctx context.Context, name string, argv []string) error {
+// effectiveLimits layers a policy's limits and the runtime overrides over
+// defaultLimits. Zero fields inherit the layer below; negative fields
+// (policy.Unlimited) disable that limit and are reported as zero, which is
+// how limit consumers spell "no limit".
+func effectiveLimits(base, overrides policy.Limits) policy.Limits {
+	return normalizedLimits(mergedLimits(mergedLimits(defaultLimits(), base), overrides))
+}
+
+// limitDefaultsPolicy wraps a custom policy so that limits it leaves at zero
+// fall back to the runtime defaults instead of silently disabling the limit.
+// Limits are resolved on every call so dynamic policies keep working.
+type limitDefaultsPolicy struct {
+	base      policy.Policy
+	overrides policy.Limits
+}
+
+func (p *limitDefaultsPolicy) AllowCommand(ctx context.Context, name string, argv []string) error {
 	return p.base.AllowCommand(ctx, name, argv)
 }
 
-func (p *limitOverridePolicy) AllowBuiltin(ctx context.Context, name string, argv []string) error {
+func (p *limitDefaultsPolicy) AllowBuiltin(ctx context.Context, name string, argv []string) error {
 	return p.base.AllowBuiltin(ctx, name, argv)
 }
 
-func (p *limitOverridePolicy) AllowPath(ctx context.Context, action policy.FileAction, target string) error {
+func (p *limitDefaultsPolicy) AllowPath(ctx context.Context, action policy.FileAction, target string) error {
 	return p.base.AllowPath(ctx, action, target)
 }
 
-func (p *limitOverridePolicy) Limits() policy.Limits {
-	return p.limits
+func (p *limitDefaultsPolicy) Limits() policy.Limits {
+	return effectiveLimits(p.base.Limits(), p.overrides)
 }
 
-func (p *limitOverridePolicy) SymlinkMode() policy.SymlinkMode {
+func (p *limitDefaultsPolicy) SymlinkMode() policy.SymlinkMode {
 	return p.base.SymlinkMode()
 }
 
+// mergedLimits returns base with every non-zero field of overrides applied.
+// It walks the struct reflectively so new policy.Limits fields are merged
+// without having to be listed here.
 func mergedLimits(base, overrides policy.Limits) policy.Limits {
-	if overrides.MaxCommandCount != 0 {
-		base.MaxCommandCount = overrides.MaxCommandCount
-	}
-	if overrides.MaxGlobOperations != 0 {
-		base.MaxGlobOperations = overrides.MaxGlobOperations
-	}
-	if overrides.MaxBraceExpansionWords != 0 {
-		base.MaxBraceExpansionWords = overrides.MaxBraceExpansionWords
-	}
-	if overrides.MaxLoopIterations != 0 {
-		base.MaxLoopIterations = overrides.MaxLoopIterations
-	}
-	if overrides.MaxSubstitutionDepth != 0 {
-		base.MaxSubstitutionDepth = overrides.MaxSubstitutionDepth
-	}
-	if overrides.MaxStdoutBytes != 0 {
-		base.MaxStdoutBytes = overrides.MaxStdoutBytes
-	}
-	if overrides.MaxStderrBytes != 0 {
-		base.MaxStderrBytes = overrides.MaxStderrBytes
-	}
-	if overrides.MaxFileBytes != 0 {
-		base.MaxFileBytes = overrides.MaxFileBytes
-	}
-	if overrides.MaxVariableBytes != 0 {
-		base.MaxVariableBytes = overrides.MaxVariableBytes
+	dst := reflect.ValueOf(&base).Elem()
+	src := reflect.ValueOf(overrides)
+	for i := range src.NumField() {
+		if field := src.Field(i); !field.IsZero() {
+			dst.Field(i).Set(field)
+		}
 	}
 	return base
+}
+
+// normalizedLimits maps negative (disabled) integer limits to zero.
+func normalizedLimits(limits policy.Limits) policy.Limits {
+	for _, field := range reflect.ValueOf(&limits).Elem().Fields() {
+		if field.CanInt() && field.Int() < 0 {
+			field.SetInt(0)
+		}
+	}
+	return limits
 }
 
 func (r *Runtime) NewSession(ctx context.Context) (*Session, error) {

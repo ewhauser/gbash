@@ -822,6 +822,8 @@ Initial policy surface:
 - cancellation and timeout handling
 - network disabled unless a sandboxed network client is explicitly configured
 
+The runtime's default limits (below) also back custom policies: any `policy.Limits` field a custom `Policy` leaves at zero inherits the runtime default, so a policy built only to change roots or allowlists keeps every resource cap. A negative field (`policy.Unlimited`) explicitly disables that one limit, for custom policies and for `LimitOverrides` alike; the effective limits reported by `Session.Limits()` and `Invocation.Limits` show a disabled limit as `0`.
+
 Default policy stance for MVP:
 
 - command allowlist derived from the registered command set
