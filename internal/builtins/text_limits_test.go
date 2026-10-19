@@ -140,3 +140,27 @@ func TestNLWidePaddingWithinLimit(t *testing.T) {
 		t.Fatalf("ExitCode = %d, Stdout = %q, want 0 %q; stderr=%q", result.ExitCode, got, want, result.Stderr)
 	}
 }
+
+func TestPrintfAndNumfmtHonorWidePrecision(t *testing.T) {
+	t.Parallel()
+	result := execWithDeadline(t, nil, "printf '%.300000000f' 1\n")
+	assertExitStderr(t, result, 126, "printf: value too large (limit 33554432 bytes)")
+
+	result = execWithDeadline(t, nil, strings.Join([]string{
+		"printf '%.2000000f' 1.25 | wc -c",
+		"printf '%02000000d' -5 | head -c 3; echo",
+		"numfmt --format=%.2000000f 1 | wc -c",
+		"numfmt --format=%.400f 2.5 | head -c 4; echo",
+		"numfmt --format=%010f 5",
+		"",
+	}, "\n"))
+	if result.ExitCode != 0 || strings.Contains(result.Stdout, "%!") {
+		t.Fatalf("ExitCode = %d, Stdout = %q; stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
+	}
+	if got, want := result.Stdout, "2000002\n-00\n2000003\n2.50\n0000000005\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+
+	result = execWithDeadline(t, nil, "numfmt --format=%.40000000f 1\n")
+	assertExitStderr(t, result, 1, "numfmt: "+fieldTooLargeMessage)
+}

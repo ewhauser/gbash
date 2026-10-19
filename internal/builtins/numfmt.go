@@ -234,6 +234,9 @@ func (c *Numfmt) RunParsed(ctx context.Context, inv *Invocation, matches *Parsed
 	if err != nil {
 		return numfmtExit(inv, err)
 	}
+	if err := checkNumfmtFieldWidths(inv, &opts); err != nil {
+		return err
+	}
 
 	args := matches.Args("number")
 	if opts.debug {
@@ -269,6 +272,27 @@ func (c *Numfmt) RunParsed(ctx context.Context, inv *Invocation, matches *Parsed
 	}
 	if hadFail {
 		return &ExitError{Code: 2}
+	}
+	return nil
+}
+
+// checkNumfmtFieldWidths rejects --padding and --format widths or precisions
+// past the padded field cap before any number is formatted.
+func checkNumfmtFieldWidths(inv *Invocation, opts *numfmtOptions) error {
+	widths := []int{opts.padding}
+	if opts.format.padding != nil {
+		widths = append(widths, *opts.format.padding)
+	}
+	if opts.format.precision != nil {
+		widths = append(widths, *opts.format.precision)
+	}
+	for _, width := range widths {
+		if width < 0 {
+			width = -width
+		}
+		if err := checkFieldWidth(inv, "numfmt", int64(width)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1039,7 +1063,7 @@ func numfmtFormatString(source string, opts *numfmtOptions, implicitPadding *int
 	switch {
 	case padding == 0:
 	case padding > 0 && opts.format.zeroPadding:
-		zeroPadded := fmt.Sprintf("%0*s", padding, number)
+		zeroPadded := padFieldLeft(number, padding, '0')
 		outerPadding := opts.padding
 		if implicitPadding != nil {
 			outerPadding = *implicitPadding
@@ -1048,14 +1072,14 @@ func numfmtFormatString(source string, opts *numfmtOptions, implicitPadding *int
 		case outerPadding == 0:
 			padded = zeroPadded
 		case outerPadding > 0:
-			padded = fmt.Sprintf("%*s", outerPadding, zeroPadded)
+			padded = padFieldLeft(zeroPadded, outerPadding, ' ')
 		default:
-			padded = fmt.Sprintf("%-*s", -outerPadding, zeroPadded)
+			padded = padFieldRight(zeroPadded, -outerPadding)
 		}
 	case padding > 0:
-		padded = fmt.Sprintf("%*s", padding, number)
+		padded = padFieldLeft(number, padding, ' ')
 	default:
-		padded = fmt.Sprintf("%-*s", -padding, number)
+		padded = padFieldRight(number, -padding)
 	}
 
 	return opts.format.prefix + padded + opts.format.suffix, nil
@@ -1097,13 +1121,13 @@ func numfmtTransformTo(value float64, opts *numfmtTransformOptions, round numfmt
 
 	if suffix == nil {
 		rounded := numfmtRoundWithPrecision(scaled, round, precision)
-		return fmt.Sprintf("%.*f", precision, rounded), nil
+		return strconv.FormatFloat(rounded, 'f', precision, 64), nil
 	}
 
 	displaySuffix := numfmtDisplaySuffix(*suffix, opts.to)
 	switch {
 	case precision > 0:
-		return fmt.Sprintf("%.*f%s%s", precision, scaled, unitSeparator, displaySuffix), nil
+		return strconv.FormatFloat(scaled, 'f', precision, 64) + unitSeparator + displaySuffix, nil
 	case math.Abs(scaled) < 10:
 		return fmt.Sprintf("%.1f%s%s", scaled, unitSeparator, displaySuffix), nil
 	default:
@@ -1334,7 +1358,13 @@ func numfmtDivRound(numerator, denominator float64, method numfmtRoundMethod) fl
 
 func numfmtRoundWithPrecision(value float64, method numfmtRoundMethod, precision int) float64 {
 	power := math.Pow(10, float64(precision))
-	return numfmtApplyRound(method, value*power) / power
+	scaled := value * power
+	if math.IsInf(scaled, 0) && !math.IsInf(value, 0) {
+		// Past float64's range the value has no digits left to round at
+		// this precision, so keep it rather than producing NaN.
+		return value
+	}
+	return numfmtApplyRound(method, scaled) / power
 }
 
 func numfmtApplyRound(method numfmtRoundMethod, value float64) float64 {

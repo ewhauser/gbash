@@ -3,6 +3,7 @@ package builtins
 import (
 	"io"
 	"math"
+	"strings"
 )
 
 // defaultMaxFieldBytes is the padded-field cap used when an invocation carries
@@ -60,4 +61,21 @@ func writePadding(w io.Writer, pad byte, n int) error {
 		n -= step
 	}
 	return nil
+}
+
+// padFieldLeft right-aligns value in a field of width bytes. Unlike
+// fmt's %*s it has no 1e6 width ceiling, so callers must bound width first.
+func padFieldLeft(value string, width int, pad byte) string {
+	if width <= len(value) {
+		return value
+	}
+	return strings.Repeat(string(pad), width-len(value)) + value
+}
+
+// padFieldRight left-aligns value in a field of width bytes.
+func padFieldRight(value string, width int) string {
+	if width <= len(value) {
+		return value
+	}
+	return value + strings.Repeat(" ", width-len(value))
 }
