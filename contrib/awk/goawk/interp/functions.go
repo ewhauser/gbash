@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/ewhauser/gbash/contrib/awk/goawk/internal/resolver"
@@ -244,6 +245,28 @@ func validNativeType(typ reflect.Type) bool {
 
 // Guts of the split() function
 func (p *interp) split(s string, scope resolver.Scope, index int, fs string, mode IOMode) (int, error) {
+	arrayIndex := p.arrayIndex(scope, index)
+	var oldBytes int64
+	maxParts := -1
+	if p.maxArrayBytes > 0 {
+		// Refuse before materializing parts that could never fit.
+		oldBytes = arrayBytes(p.arrays[arrayIndex])
+		maxParts = int((p.maxArrayBytes-p.arrayBytes+oldBytes)/arrayEntryOverhead) + 1
+		count := -1
+		switch {
+		case mode == CSVMode || mode == TSVMode:
+		case fs == " ":
+			count = countFields(s)
+		case s == "":
+		case fs == "":
+			count = utf8.RuneCountInString(s)
+		case utf8.RuneCountInString(fs) == 1:
+			count = strings.Count(s, fs) + 1
+		}
+		if count > maxParts {
+			return 0, p.growArrays(int64(count) * arrayEntryOverhead)
+		}
+	}
 	var parts []string
 	switch {
 	case mode == CSVMode || mode == TSVMode:
@@ -275,13 +298,23 @@ func (p *interp) split(s string, scope resolver.Scope, index int, fs string, mod
 		if err != nil {
 			return 0, err
 		}
-		parts = re.Split(s, -1)
+		parts = re.Split(s, maxParts)
+	}
+	if p.maxArrayBytes > 0 {
+		var newBytes int64
+		for i, part := range parts {
+			newBytes += arrayEntryOverhead + int64(decimalLen(i+1)+len(part))
+		}
+		err := p.growArrays(newBytes - oldBytes)
+		if err != nil {
+			return 0, err
+		}
 	}
 	array := make(map[string]value, len(parts))
 	for i, part := range parts {
 		array[strconv.Itoa(i+1)] = numStr(part)
 	}
-	p.arrays[p.arrayIndex(scope, index)] = array
+	p.arrays[arrayIndex] = array
 	return len(array), nil
 }
 
@@ -292,9 +325,17 @@ func (p *interp) sub(regex, repl, in string, global bool) (out string, num int, 
 		return "", 0, err
 	}
 	count := 0
+	size := len(in)
+	amps := strings.Count(repl, "&")
+	var limitErr error
 	out = re.ReplaceAllStringFunc(in, func(s string) string {
 		// Only do the first replacement for sub(), or all for gsub()
-		if !global && count > 0 {
+		if limitErr != nil || (!global && count > 0) {
+			return s
+		}
+		// Each byte of repl adds at most one byte, and each & adds the match.
+		if err := p.checkStringLen(size - len(s) + len(repl) + amps*len(s)); err != nil {
+			limitErr = err
 			return s
 		}
 		count++
@@ -322,42 +363,60 @@ func (p *interp) sub(regex, repl, in string, global bool) (out string, num int, 
 				r = append(r, repl[i])
 			}
 		}
+		size += len(r) - len(s)
 		return string(r)
 	})
+	if limitErr != nil {
+		return "", 0, limitErr
+	}
 	return out, count, nil
 }
 
 type cachedFormat struct {
 	format string
 	types  []byte
+	pad    int   // upper bound on padding from literal widths and precisions
+	stars  []int // indexes into types of "*" width and precision arguments
 }
 
 // Parse given sprintf format string into Go format string, along with
 // type conversion specifiers. Output is memoized in a simple cache
 // for performance.
-func (p *interp) parseFmtTypes(s string) (format string, types []byte, err error) {
+func (p *interp) parseFmtTypes(s string) (cachedFormat, error) {
 	if item, ok := p.formatCache[s]; ok {
-		return item.format, item.types, nil
+		return item, nil
 	}
 
+	var types []byte
+	var stars []int
+	pad := 0
 	out := []byte(s)
 	for i := 0; i < len(s); i++ {
 		if s[i] == '%' {
 			i++
 			if i >= len(s) {
-				return "", nil, errors.New("expected type specifier after %")
+				return cachedFormat{}, errors.New("expected type specifier after %")
 			}
 			if s[i] == '%' {
 				continue
 			}
+			n := 0
 			for i < len(s) && bytes.IndexByte([]byte(" .-+*#0123456789"), s[i]) >= 0 {
+				if s[i] >= '0' && s[i] <= '9' {
+					n = min(n*10+int(s[i]-'0'), maxFormatPad+1)
+				} else {
+					pad += formatPadBound(n)
+					n = 0
+				}
 				if s[i] == '*' {
+					stars = append(stars, len(types))
 					types = append(types, 'd')
 				}
 				i++
 			}
+			pad += formatPadBound(n)
 			if i >= len(s) {
-				return "", nil, errors.New("expected type specifier after %")
+				return cachedFormat{}, errors.New("expected type specifier after %")
 			}
 			var t byte
 			switch s[i] {
@@ -385,36 +444,46 @@ func (p *interp) parseFmtTypes(s string) (format string, types []byte, err error
 				t = 'c'
 				out[i] = 's'
 			default:
-				return "", nil, fmt.Errorf("invalid format type %q", s[i])
+				return cachedFormat{}, fmt.Errorf("invalid format type %q", s[i])
 			}
 			types = append(types, t)
 		}
 	}
 
 	// Dumb, non-LRU cache: just cache the first N formats
-	format = string(out)
+	item := cachedFormat{format: string(out), types: types, pad: pad, stars: stars}
 	if len(p.formatCache) < maxCachedFormats {
-		p.formatCache[s] = cachedFormat{format, types}
+		p.formatCache[s] = item
 	}
-	return format, types, nil
+	return item, nil
 }
 
 // Guts of sprintf() function (also used by "printf" statement)
 func (p *interp) sprintf(format string, args []value) (string, error) {
-	format, types, err := p.parseFmtTypes(format)
+	parsed, err := p.parseFmtTypes(format)
 	if err != nil {
 		return "", newError("format error: %s", err)
 	}
+	types := parsed.types
 	if len(types) > len(args) {
 		return "", newError("format error: got %d args, expected %d", len(args), len(types))
 	}
+	// Upper bound on the formatted length, checked before formatting.
+	size := len(parsed.format) + parsed.pad
+	stars := parsed.stars
 	converted := make([]any, 0, 7) // up to 7 args won't require heap allocation
 	for i, t := range types {
 		a := args[i]
+		if len(stars) > 0 && stars[0] == i {
+			size += starPadBound(a.num())
+			stars = stars[1:]
+		}
 		var v any
 		switch t {
 		case 's':
-			v = p.toString(a)
+			sv := p.toString(a)
+			size += len(sv)
+			v = sv
 		case 'd':
 			v = int64(a.num())
 		case 'f':
@@ -445,9 +514,41 @@ func (p *interp) sprintf(format string, args []value) (string, error) {
 			}
 			v = c
 		}
+		if t != 's' {
+			size += maxFormattedNumber
+		}
 		converted = append(converted, v)
 	}
-	return fmt.Sprintf(format, converted...), nil
+	err = p.checkStringLen(size)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(parsed.format, converted...), nil
+}
+
+// countFields returns len(strings.Fields(s)) without building the fields.
+func countFields(s string) int {
+	n := 0
+	inField := false
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			inField = false
+		} else if !inField {
+			inField = true
+			n++
+		}
+	}
+	return n
+}
+
+// decimalLen returns the length of strconv.Itoa(n) for n > 0.
+func decimalLen(n int) int {
+	digits := 1
+	for n >= 10 {
+		n /= 10
+		digits++
+	}
+	return digits
 }
 
 func substrChars(s string, pos int) string {

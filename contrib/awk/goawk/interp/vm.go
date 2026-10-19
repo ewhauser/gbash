@@ -115,7 +115,10 @@ func (p *interp) execute(code []compiler.Opcode) error {
 			ip++
 			array := p.arrays[arrayIndex]
 			index := p.toString(p.peekTop())
-			v := arrayGet(array, index)
+			v, err := p.arrayGet(array, index)
+			if err != nil {
+				return err
+			}
 			p.replaceTop(v)
 
 		case compiler.ArrayLocal:
@@ -123,7 +126,10 @@ func (p *interp) execute(code []compiler.Opcode) error {
 			ip++
 			array := p.localArray(int(arrayIndex))
 			index := p.toString(p.peekTop())
-			v := arrayGet(array, index)
+			v, err := p.arrayGet(array, index)
+			if err != nil {
+				return err
+			}
 			p.replaceTop(v)
 
 		case compiler.InGlobal:
@@ -175,14 +181,20 @@ func (p *interp) execute(code []compiler.Opcode) error {
 			ip++
 			array := p.arrays[arrayIndex]
 			v, index := p.popTwo()
-			array[p.toString(index)] = v
+			err := p.arraySet(array, p.toString(index), v)
+			if err != nil {
+				return err
+			}
 
 		case compiler.AssignArrayLocal:
 			arrayIndex := code[ip]
 			ip++
 			array := p.localArray(int(arrayIndex))
 			v, index := p.popTwo()
-			array[p.toString(index)] = v
+			err := p.arraySet(array, p.toString(index), v)
+			if err != nil {
+				return err
+			}
 
 		case compiler.Delete:
 			arrayScope := code[ip]
@@ -190,16 +202,14 @@ func (p *interp) execute(code []compiler.Opcode) error {
 			ip += 2
 			array := p.array(resolver.Scope(arrayScope), int(arrayIndex))
 			index := p.toString(p.pop())
-			delete(array, index)
+			p.arrayDelete(array, index)
 
 		case compiler.DeleteAll:
 			arrayScope := code[ip]
 			arrayIndex := code[ip+1]
 			ip += 2
 			array := p.array(resolver.Scope(arrayScope), int(arrayIndex))
-			for k := range array {
-				delete(array, k)
-			}
+			p.arrayClear(array)
 
 		case compiler.IncrField:
 			amount := code[ip]
@@ -242,7 +252,10 @@ func (p *interp) execute(code []compiler.Opcode) error {
 			ip += 2
 			array := p.arrays[arrayIndex]
 			index := p.toString(p.pop())
-			array[index] = num(array[index].num() + float64(amount))
+			err := p.arraySet(array, index, num(array[index].num()+float64(amount)))
+			if err != nil {
+				return err
+			}
 
 		case compiler.IncrArrayLocal:
 			amount := code[ip]
@@ -250,7 +263,10 @@ func (p *interp) execute(code []compiler.Opcode) error {
 			ip += 2
 			array := p.localArray(int(arrayIndex))
 			index := p.toString(p.pop())
-			array[index] = num(array[index].num() + float64(amount))
+			err := p.arraySet(array, index, num(array[index].num()+float64(amount)))
+			if err != nil {
+				return err
+			}
 
 		case compiler.AugAssignField:
 			operation := compiler.AugOp(code[ip])
@@ -313,7 +329,10 @@ func (p *interp) execute(code []compiler.Opcode) error {
 			if err != nil {
 				return err
 			}
-			array[index] = v
+			err = p.arraySet(array, index, v)
+			if err != nil {
+				return err
+			}
 
 		case compiler.AugAssignArrayLocal:
 			operation := compiler.AugOp(code[ip])
@@ -326,7 +345,10 @@ func (p *interp) execute(code []compiler.Opcode) error {
 			if err != nil {
 				return err
 			}
-			array[index] = v
+			err = p.arraySet(array, index, v)
+			if err != nil {
+				return err
+			}
 
 		case compiler.Regex:
 			// Stand-alone /regex/ is equivalent to: $0 ~ /regex/
@@ -349,6 +371,10 @@ func (p *interp) execute(code []compiler.Opcode) error {
 			indices := make([]string, 0, 3) // up to 3-dimensional indices won't require heap allocation
 			for _, v := range values {
 				indices = append(indices, p.toString(v))
+			}
+			err := p.checkJoinLen(indices, p.subscriptSep)
+			if err != nil {
+				return err
 			}
 			p.push(str(strings.Join(indices, p.subscriptSep)))
 
@@ -446,18 +472,25 @@ func (p *interp) execute(code []compiler.Opcode) error {
 
 		case compiler.Concat:
 			l, r := p.peekPop()
-			p.replaceTop(str(p.toString(l) + p.toString(r)))
+			s, err := p.concat(p.toString(l), p.toString(r))
+			if err != nil {
+				return err
+			}
+			p.replaceTop(str(s))
 
 		case compiler.ConcatMulti:
 			numValues := int(code[ip])
 			ip++
 			values := p.popSlice(numValues)
-			var sb strings.Builder
-
+			strs := make([]string, 0, 7) // up to 7 values won't require heap allocation
 			for _, v := range values {
-				sb.WriteString(p.toString(v))
+				strs = append(strs, p.toString(v))
 			}
-			p.push(str(sb.String()))
+			err := p.checkJoinLen(strs, "")
+			if err != nil {
+				return err
+			}
+			p.push(str(strings.Join(strs, "")))
 
 		case compiler.Match:
 			l, r := p.peekPop()
@@ -742,6 +775,10 @@ func (p *interp) execute(code []compiler.Opcode) error {
 			p.popSlice(f.NumScalars)
 			p.frame = oldFrame
 			p.localArrays = p.localArrays[:len(p.localArrays)-1]
+			for _, array := range p.arrays[oldArraysLen:] {
+				p.releaseArray(array)
+			}
+			clear(p.arrays[oldArraysLen:])
 			p.arrays = p.arrays[:oldArraysLen]
 
 			if r, ok := err.(returnValue); ok {
@@ -759,6 +796,10 @@ func (p *interp) execute(code []compiler.Opcode) error {
 
 			args := p.popSlice(numArgs)
 			r, err := p.callNative(funcIndex, args)
+			if err != nil {
+				return err
+			}
+			err = p.checkStringLen(len(r.s))
 			if err != nil {
 				return err
 			}
@@ -922,7 +963,10 @@ func (p *interp) execute(code []compiler.Opcode) error {
 			index := p.toString(p.peekTop())
 			if ret == 1 {
 				array := p.array(resolver.Scope(arrayScope), int(arrayIndex))
-				array[index] = numStr(line)
+				err := p.arraySet(array, index, numStr(line))
+				if err != nil {
+					return err
+				}
 			}
 			p.replaceTop(num(ret))
 		}
@@ -1152,18 +1196,6 @@ func (p *interp) callBuiltin(builtinOp compiler.BuiltinOp) error {
 	}
 
 	return nil
-}
-
-// Fetch the value at the given index from array. This handles the strange
-// POSIX behavior of creating a null entry for non-existent array elements.
-// Per the POSIX spec, "Any other reference to a nonexistent array element
-// [apart from "in" expressions] shall automatically create it."
-func arrayGet(array map[string]value, index string) value {
-	v, ok := array[index]
-	if !ok {
-		array[index] = v
-	}
-	return v
 }
 
 // Stack operations follow. These should be inlined. Instead of just push and
