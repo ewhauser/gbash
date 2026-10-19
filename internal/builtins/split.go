@@ -1316,7 +1316,7 @@ func parseSplitSuffixLength(raw string) (int, error) {
 		return 0, fmt.Errorf("invalid suffix length")
 	}
 	value, err := strconv.ParseUint(raw, 10, 64)
-	if err != nil || value > uint64(math.MaxInt) {
+	if err != nil || value > maxOutputNameWidth {
 		return 0, fmt.Errorf("invalid suffix length")
 	}
 	return int(value), nil

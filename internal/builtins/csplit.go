@@ -1,7 +1,6 @@
 package builtins
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -296,7 +295,7 @@ func parseCsplitOptions(matches *ParsedCommand) (csplitOptions, error) {
 	digits := 2
 	if value := matches.Value("digits"); value != "" {
 		n, err := strconv.Atoi(value)
-		if err != nil || n < 0 {
+		if err != nil || n < 0 || n > maxOutputNameWidth {
 			return csplitOptions{}, &csplitError{kind: csplitErrInvalidNumber, number: value}
 		}
 		digits = n
@@ -337,23 +336,24 @@ func readCsplitLines(ctx context.Context, inv *Invocation, name string) ([]strin
 		reader = file
 	}
 
-	buf := bufio.NewReader(reader)
-	lines := make([]string, 0, 64)
-	for {
-		line, err := buf.ReadBytes('\n')
-		if len(line) > 0 {
-			if !utf8.Valid(line) {
-				return nil, errors.New("read error: stream did not contain valid UTF-8")
-			}
-			lines = append(lines, string(line))
-		}
-		if err == nil {
-			continue
-		}
-		if errors.Is(err, io.EOF) {
-			break
-		}
+	// csplit keeps every line in memory, so read through the shared bounded
+	// reader to stop at MaxFileBytes and the request deadline.
+	data, err := readAllReader(ctx, inv, reader)
+	if err != nil {
 		return nil, fmt.Errorf("read error: %s", csplitIOMessage(err))
+	}
+	lines := make([]string, 0, 64)
+	for len(data) > 0 {
+		end := bytes.IndexByte(data, '\n') + 1
+		if end == 0 {
+			end = len(data)
+		}
+		line := data[:end]
+		if !utf8.Valid(line) {
+			return nil, errors.New("read error: stream did not contain valid UTF-8")
+		}
+		lines = append(lines, string(line))
+		data = data[end:]
 	}
 	return lines, nil
 }
@@ -901,7 +901,10 @@ func parseCsplitSuffixFormat(raw string, digits int) (csplitSuffixFormat, error)
 			for i < len(raw) && csplitIsASCIIDigit(raw[i]) {
 				i++
 			}
-			value, _ := strconv.Atoi(raw[start:i])
+			value, err := strconv.Atoi(raw[start:i])
+			if err != nil || value > maxOutputNameWidth {
+				return csplitSuffixFormat{}, &csplitError{kind: csplitErrSuffixFormatIncorrect}
+			}
 			out.width = value
 			out.hasW = true
 		}
@@ -914,7 +917,10 @@ func parseCsplitSuffixFormat(raw string, digits int) (csplitSuffixFormat, error)
 			if start == i {
 				return csplitSuffixFormat{}, &csplitError{kind: csplitErrSuffixFormatIncorrect}
 			}
-			value, _ := strconv.Atoi(raw[start:i])
+			value, err := strconv.Atoi(raw[start:i])
+			if err != nil || value > maxOutputNameWidth {
+				return csplitSuffixFormat{}, &csplitError{kind: csplitErrSuffixFormatIncorrect}
+			}
 			out.prec = value
 			out.hasP = true
 		}
