@@ -3,9 +3,9 @@ module github.com/ewhauser/gbash/examples
 go 1.26.0
 
 require (
-	github.com/ewhauser/gbash v0.0.38
-	github.com/ewhauser/gbash/contrib/bashtool v0.0.38
-	github.com/ewhauser/gbash/contrib/extras v0.0.38
+	github.com/ewhauser/gbash v0.0.39
+	github.com/ewhauser/gbash/contrib/bashtool v0.0.39
+	github.com/ewhauser/gbash/contrib/extras v0.0.39
 	github.com/google/jsonschema-go v0.4.2
 	github.com/klauspost/compress v1.18.4
 	github.com/ncruces/go-sqlite3 v0.31.1
@@ -18,7 +18,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.40.0
 	go.opentelemetry.io/otel/sdk/log v0.16.0
 	go.opentelemetry.io/otel/trace v1.40.0
-	golang.org/x/term v0.40.0
+	golang.org/x/term v0.46.0
 	google.golang.org/adk v0.6.0
 	google.golang.org/genai v1.49.0
 )
@@ -38,12 +38,12 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/elliotchance/orderedmap v1.8.0 // indirect
-	github.com/ewhauser/gbash/contrib/awk v0.0.38 // indirect
-	github.com/ewhauser/gbash/contrib/htmltomarkdown v0.0.38 // indirect
-	github.com/ewhauser/gbash/contrib/jq v0.0.38 // indirect
-	github.com/ewhauser/gbash/contrib/python v0.0.38 // indirect
-	github.com/ewhauser/gbash/contrib/sqlite3 v0.0.38 // indirect
-	github.com/ewhauser/gbash/contrib/yq v0.0.38 // indirect
+	github.com/ewhauser/gbash/contrib/awk v0.0.39 // indirect
+	github.com/ewhauser/gbash/contrib/htmltomarkdown v0.0.39 // indirect
+	github.com/ewhauser/gbash/contrib/jq v0.0.39 // indirect
+	github.com/ewhauser/gbash/contrib/python v0.0.39 // indirect
+	github.com/ewhauser/gbash/contrib/sqlite3 v0.0.39 // indirect
+	github.com/ewhauser/gbash/contrib/yq v0.0.39 // indirect
 	github.com/ewhauser/gomonty v0.0.13 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -85,13 +85,13 @@ require (
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.63.0 // indirect
 	go.opentelemetry.io/otel/metric v1.40.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.3 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
-	golang.org/x/mod v0.33.0 // indirect
-	golang.org/x/net v0.51.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
-	golang.org/x/tools v0.41.0 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/tools v0.49.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260128011058-8636f8732409 // indirect
 	google.golang.org/grpc v1.78.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
