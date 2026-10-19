@@ -424,6 +424,8 @@ type ExecutionRequest struct {
     Stdin           io.Reader
     Stdout          io.Writer
     Stderr          io.Writer
+    SpillDir        string
+    MaxSpillBytes   int64
 }
 
 type ExecutionResult struct {
@@ -438,6 +440,9 @@ type ExecutionResult struct {
     Events          []trace.Event
     StdoutTruncated bool
     StderrTruncated bool
+    TimedOut        bool
+    StdoutSpillPath string
+    StderrSpillPath string
 }
 
 type TraceMode uint8
@@ -829,8 +834,9 @@ Default policy stance for MVP:
 - maximum variable value size defaults to `32 MiB` (`MaxVariableBytes`), with headroom over the `8 MiB` `MaxFileBytes` default so a whole file still fits in one variable. The cap applies to every shell variable write (plain and `+=` assignments, array and associative element writes, array literals and appends, `declare`/`local`/`export`/`readonly`, `read`, `printf -v`, `mapfile`/`readarray`, `${x:=...}`, and `for` variables), where an array counts its element bytes plus 16 bytes per element. It also caps the intermediate values that one step can grow without bound: command substitution output (measured before trailing newlines are stripped), `${x//pattern/replacement}` results, and `printf` output (both the shell builtin and the `printf` command, checked before a padded field is built). A command's expanded argument list and a `for` loop's word list are sized like an indexed array and held to the same cap, which bounds positional parameters and argv doubled with `"$@" "$@"`. `read` and `mapfile` stop buffering input once a value would exceed the cap. Going over prints `NAME: value too large (limit N bytes), increase policy.Limits.MaxVariableBytes`, leaves the variable unchanged, and exits the current shell with status `126` (interactive shells abort only the command). Values the shell derives from already-bounded data (`$_`, `BASH_EXECUTION_STRING`, `BASH_REMATCH`) are exempt. Bash itself only stops when allocation fails, so this is a deliberate sandbox divergence.
 - maximum brace-expansion words default to `100000` per command; the cap covers every word of one command's arguments, array assignment, or declaration operands together, and exceeding it prints `brace expansion: too many words (limit N), increase policy.Limits.MaxBraceExpansionWords` and exits the current shell with status `126`. Bash itself only stops when allocation fails, so this is a deliberate sandbox divergence. Brace sequences stop stepping before they would overflow `int`, so ranges ending at the integer bounds terminate.
 - symlink traversal denied unless a filesystem backend and policy explicitly allow it
-- request-level timeout is opt-in, but when it fires the execution must stop with exit code `124`
+- request-level timeout is opt-in, but when it fires the execution must stop with exit code `124` and set `ExecutionResult.TimedOut`
 - caller-driven cancellation must stop the execution with exit code `130`
+- captured stdout/stderr beyond `MaxStdoutBytes` / `MaxStderrBytes` is dropped by default; when the embedder sets `ExecutionRequest.SpillDir`, the overflow is instead written to a host temp file in that directory (capped by `MaxSpillBytes`, default 64 MiB per stream) and reported via `StdoutSpillPath` / `StderrSpillPath`. These writes go to the host directly, outside the sandbox `FileSystem`; scripts cannot choose or read the spill location, the embedder owns cleanup, and a spill failure falls back to truncation instead of surfacing as a script write error
 - no ambient network access; `curl` is absent unless the runtime enables the sandboxed network client
 
 The policy package should be able to answer three questions:
