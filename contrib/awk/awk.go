@@ -112,8 +112,15 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 		CurrentRecordHook: nativeState.setCurrentRecord,
 		Funcs:             funcs,
 	}
-	status, err := interp.ExecProgram(compiled, config)
+	program, err := interp.New(compiled)
 	if err != nil {
+		return exitf(inv, "awk: %v", err)
+	}
+	status, err := program.ExecuteContext(ctx, config)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		return exitf(inv, "awk: %v", err)
 	}
 	if status != 0 {
