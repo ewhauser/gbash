@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -151,5 +153,45 @@ func TestReadWriteRootSymlinkSwapDoesNotRedirectLaterSessions(t *testing.T) {
 	}
 	if got, want := string(data), "marker\n"; got != want {
 		t.Fatalf("marker = %q, want %q", got, want)
+	}
+}
+
+func TestRunJSONReportsNonUTF8OutputAsBase64(t *testing.T) {
+	t.Parallel()
+
+	exitCode, stdout, stderr, err := runCLI(t, []string{"--json", "-c", `printf '\377ok'; printf 'caf\303\251' >&2`}, "")
+	if err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("exitCode = %d, stderr = %q", exitCode, stderr)
+	}
+	var payload struct {
+		Stdout       string  `json:"stdout"`
+		StdoutBase64 *string `json:"stdoutBase64"`
+		Stderr       string  `json:"stderr"`
+		StderrBase64 *string `json:"stderrBase64"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("Unmarshal(%q) error = %v", stdout, err)
+	}
+	if payload.StdoutBase64 == nil {
+		t.Fatalf("stdoutBase64 missing; raw=%s", stdout)
+	}
+	raw, err := base64.StdEncoding.DecodeString(*payload.StdoutBase64)
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v", err)
+	}
+	if got, want := string(raw), "\xffok"; got != want {
+		t.Fatalf("stdout bytes = %q, want %q", got, want)
+	}
+	if got, want := payload.Stdout, "�ok"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+	if payload.StderrBase64 != nil {
+		t.Fatalf("stderrBase64 = %q, want omitted for valid UTF-8", *payload.StderrBase64)
+	}
+	if got, want := payload.Stderr, "café"; got != want {
+		t.Fatalf("stderr = %q, want %q", got, want)
 	}
 }
