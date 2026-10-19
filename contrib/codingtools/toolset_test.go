@@ -319,6 +319,32 @@ func TestReadImageResponse(t *testing.T) {
 	}
 }
 
+func TestReadRejectsOversizedImage(t *testing.T) {
+	t.Parallel()
+
+	const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII="
+	header, err := base64.StdEncoding.DecodeString(pngBase64)
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v", err)
+	}
+
+	fsys := gbfs.NewMemory()
+	mustWriteVirtualBytes(t, fsys, "/workspace/huge.png", append(header, make([]byte, MaxImageBytes)...))
+	mustWriteVirtualBytes(t, fsys, "/workspace/max.png", append(header, make([]byte, MaxImageBytes-len(header))...))
+	tools := New(Config{FS: fsys, WorkingDir: "/workspace"})
+
+	if _, err := tools.Read(context.Background(), ReadRequest{Path: "huge.png"}); err == nil || !strings.Contains(err.Error(), "image file exceeds") {
+		t.Fatalf("Read(huge.png) error = %v, want image size error", err)
+	}
+	resp, err := tools.Read(context.Background(), ReadRequest{Path: "max.png"})
+	if err != nil {
+		t.Fatalf("Read(max.png) error = %v", err)
+	}
+	if len(resp.Content) != 2 || resp.Content[1].Type != "image" {
+		t.Fatalf("Read(max.png) content = %d blocks, want an image block", len(resp.Content))
+	}
+}
+
 func TestReadPathFallbackVariants(t *testing.T) {
 	t.Parallel()
 
