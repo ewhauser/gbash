@@ -327,7 +327,17 @@ func (p *Parser) StmtsSeq(r io.Reader) iter.Seq2[*Stmt, error] {
 	return func(yield func(*Stmt, error) bool) {
 		p.rune()
 		p.next()
-		p.stmts(yield)
+		stopped := false
+		p.stmts(func(s *Stmt, err error) bool {
+			if !yield(s, err) {
+				stopped = true
+				return false
+			}
+			return true
+		})
+		if stopped {
+			return
+		}
 		if p.err == nil {
 			// EOF immediately after heredoc word so no newline to
 			// trigger the parsing error.
@@ -483,6 +493,11 @@ func (p *Parser) WordsSeq(r io.Reader) iter.Seq2[*Word, error] {
 				}
 				return
 			}
+			p.checkTreeDepth(w)
+			if p.err != nil {
+				yield(nil, p.err)
+				return
+			}
 			if !yield(w, nil) {
 				return
 			}
@@ -513,6 +528,7 @@ func (p *Parser) document(r io.Reader, start Pos) (*Word, error) {
 	p.parsingDoc = true
 	p.next()
 	w := p.getWord()
+	p.checkTreeDepth(w)
 	return w, p.err
 }
 
@@ -526,6 +542,7 @@ func (p *Parser) Arithmetic(r io.Reader) (ArithmExpr, error) {
 	p.rune()
 	p.next()
 	expr := p.arithmExpr(false)
+	p.checkTreeDepth(expr)
 	if p.err == nil && p.tok != _EOF {
 		switch p.tok {
 		case _Lit, _LitWord:
@@ -557,6 +574,7 @@ func (p *Parser) VarRef(r io.Reader) (*VarRef, error) {
 	p.rune()
 	p.next()
 	ref := p.varRef()
+	p.checkTreeDepth(ref)
 	if p.err == nil && p.tok != _EOF {
 		p.curErr("unexpected token in variable reference: %#q", p.tok)
 	}
@@ -572,6 +590,7 @@ func (p *Parser) DeclOperand(r io.Reader) (DeclOperand, error) {
 	p.rune()
 	p.next()
 	op := p.declOperand(false)
+	p.checkTreeDepth(op)
 	if p.err == nil && p.tok != _EOF {
 		p.curErr("unexpected token in declaration operand: %#q", p.tok)
 	}
@@ -682,6 +701,16 @@ type Parser struct {
 	// so malformed arithmetic words cannot recurse without consuming input.
 	parenAmbiguityDisabled   bool
 	parenAmbiguityProbeDepth int
+
+	// nestDepth is how many nested constructs are open; see [MaxNestingDepth].
+	// nestBase is where it starts on reset, set for sub-parsers.
+	nestDepth, nestBase int
+	// nestPeak and chainLinks decide whether checkTreeDepth must walk the
+	// finished tree: the deepest nesting seen and the number of operators
+	// that deepened a loop-built chain.
+	nestPeak, chainLinks int
+	// nestingFailed reports that err is a nesting-limit error.
+	nestingFailed bool
 
 	pendingHeredocWarningPos    Pos
 	pendingHeredocWarningWanted string
@@ -1017,6 +1046,8 @@ func (p *Parser) reset() {
 	p.pendingHeredocWarningPos = Pos{}
 	p.pendingHeredocWarningWanted = ""
 	p.parenAmbiguityProbeDepth = 0
+	p.nestDepth, p.nestPeak, p.chainLinks = p.nestBase, 0, 0
+	p.nestingFailed = false
 	if p.aliasActive != nil {
 		clear(p.aliasActive)
 	}
@@ -1538,7 +1569,9 @@ func (p *Parser) doHeredocs() {
 				bodyParser.parenAmbiguityDisabled = true
 				bodyParser.parenAmbiguityProbeDepth = p.parenAmbiguityProbeDepth
 			}
+			p.subParserNesting(bodyParser)
 			r.Hdoc, p.err = bodyParser.document(strings.NewReader(raw.Lit()), bodyStart)
+			p.absorbSubParserNesting(bodyParser)
 			if p.err == nil && r.Hdoc != nil {
 				setWordEnd(r.Hdoc, raw.End())
 			}
@@ -2676,6 +2709,9 @@ loop:
 			break
 		}
 		gotEnd = s.Semicolon.IsValid()
+		if p.nestDepth == p.nestBase {
+			p.checkTreeDepth(s)
+		}
 		if !yield(s, p.err) {
 			break
 		}
@@ -3590,9 +3626,14 @@ func (p *Parser) wordParts(wps []WordPart) []WordPart {
 	}
 	for {
 		start := p.cursorSnapshot()
+		d, ok := p.enterNest()
+		if !ok {
+			return wps
+		}
 		p.openNodes++
 		n := p.wordPart()
 		p.openNodes--
+		p.leaveNest(d)
 		if n == nil {
 			if len(wps) == 0 {
 				return nil // normalize empty lists into nil
@@ -4109,10 +4150,14 @@ func trailingExtGlobOp(lit *Lit) (prefix *Lit, op GlobOperator, opPos Pos, ok bo
 type rawPatternParser struct {
 	lang         LangVariant
 	allowExtGlob bool
+	// owner is the parser whose input this re-parses, so that the shell
+	// parts inside the pattern count toward its nesting depth.
+	owner *Parser
 }
 
 type rawWordPartParser struct {
-	lang LangVariant
+	lang  LangVariant
+	owner *Parser
 }
 
 func patternExtGlobEnabled(lang LangVariant, parseExtGlob bool) bool {
@@ -4120,11 +4165,11 @@ func patternExtGlobEnabled(lang LangVariant, parseExtGlob bool) bool {
 }
 
 func (p *Parser) newRawPatternParser() rawPatternParser {
-	return rawPatternParser{lang: p.lang, allowExtGlob: p.parseExtGlob}
+	return rawPatternParser{lang: p.lang, allowExtGlob: p.parseExtGlob, owner: p}
 }
 
 func (p *Parser) newCondPatternParser() rawPatternParser {
-	return rawPatternParser{lang: p.lang, allowExtGlob: p.condPatternExtGlobEnabled()}
+	return rawPatternParser{lang: p.lang, allowExtGlob: p.condPatternExtGlobEnabled(), owner: p}
 }
 
 func (p *Parser) extGlobEnabled() bool {
@@ -4164,7 +4209,7 @@ func (r rawWordPartParser) parse(raw string, base Pos) []WordPart {
 			continue
 		case '\'', '"', '`', '$':
 			flushLit(partStart, i)
-			part, consumed, ok := parseRawWordPart(raw[i:], posAddCol(base, i), r.lang)
+			part, consumed, ok := parseRawWordPart(raw[i:], posAddCol(base, i), r.lang, r.owner)
 			if !ok {
 				i++
 				partStart = i
@@ -4177,7 +4222,7 @@ func (r rawWordPartParser) parse(raw string, base Pos) []WordPart {
 		case '<', '>':
 			if i+1 < len(raw) && raw[i+1] == '(' {
 				flushLit(partStart, i)
-				part, consumed, ok := parseRawWordPart(raw[i:], posAddCol(base, i), r.lang)
+				part, consumed, ok := parseRawWordPart(raw[i:], posAddCol(base, i), r.lang, r.owner)
 				if ok {
 					parts = append(parts, part)
 					i += consumed
@@ -4640,7 +4685,7 @@ func (r rawPatternParser) parseExtGlob(raw string, base Pos, start int) (*ExtGlo
 }
 
 func (r rawPatternParser) parseShellPart(raw string, base Pos) (PatternPart, int, bool) {
-	part, consumed, ok := parseRawWordPart(raw, base, r.lang)
+	part, consumed, ok := parseRawWordPart(raw, base, r.lang, r.owner)
 	if !ok {
 		return nil, 0, false
 	}
@@ -4651,7 +4696,15 @@ func (r rawPatternParser) parseShellPart(raw string, base Pos) (PatternPart, int
 	return patPart, consumed, true
 }
 
-func parseRawWordPart(raw string, base Pos, lang LangVariant) (WordPart, int, bool) {
+// parseRawWordPart parses the word part at the start of raw. owner, if not
+// nil, is the parser whose input raw comes from: the nested parse continues
+// its nesting depth and reports a nesting error back to it.
+func parseRawWordPart(raw string, base Pos, lang LangVariant, owner *Parser) (WordPart, int, bool) {
+	if owner != nil && owner.nestingFailed {
+		// Retrying would only hit the limit again: callers treat a failed
+		// part as literal text and keep scanning into the same nesting.
+		return nil, 0, false
+	}
 	sub := tempParserPool.Get().(*Parser)
 	scratch := parserScratchPool.Get().(*parserScratch)
 	*sub = Parser{
@@ -4669,6 +4722,9 @@ func parseRawWordPart(raw string, base Pos, lang LangVariant) (WordPart, int, bo
 		tempParserPool.Put(sub)
 		parserScratchPool.Put(scratch)
 	}()
+	if owner != nil {
+		owner.subParserNesting(sub)
+	}
 	sub.reset()
 	var file File
 	sub.f = &file
@@ -4681,6 +4737,9 @@ func parseRawWordPart(raw string, base Pos, lang LangVariant) (WordPart, int, bo
 	sub.rune()
 	sub.next()
 	part := sub.wordPart()
+	if owner != nil {
+		owner.absorbSubParserNesting(sub)
+	}
 	if sub.err != nil || part == nil {
 		return nil, 0, false
 	}
@@ -6381,6 +6440,7 @@ func (p *Parser) getStmt(readEnd, binCmd, fnBody bool) *Stmt {
 			Op:    BinCmdOperator(p.tok),
 			X:     s,
 		}
+		p.chainLinks++
 		p.next()
 		p.got(_Newl)
 		b.Y = p.getStmt(false, true, false)
@@ -6446,6 +6506,16 @@ func stmtHasHeredocMetadata(s *Stmt) bool {
 }
 
 func (p *Parser) gotStmtPipe(s *Stmt, binCmd bool) *Stmt {
+	d, ok := p.enterNest()
+	if !ok {
+		return nil
+	}
+	s = p.gotStmtPipeNested(s, binCmd)
+	p.leaveNest(d)
+	return s
+}
+
+func (p *Parser) gotStmtPipeNested(s *Stmt, binCmd bool) *Stmt {
 	s.Comments, p.accComs = p.accComs, nil
 	for p.peekRedir() {
 		p.doRedirect(s)
@@ -6697,6 +6767,7 @@ func (p *Parser) gotStmtPipe(s *Stmt, binCmd bool) *Stmt {
 			break
 		}
 		b := &BinaryCmd{OpPos: p.pos, Op: BinCmdOperator(p.tok), X: s}
+		p.chainLinks++
 		p.next()
 		p.got(_Newl)
 		if b.Y = p.gotStmtPipe(&Stmt{Position: p.pos}, true); b.Y == nil || p.err != nil {
@@ -7323,7 +7394,7 @@ func (p *Parser) casePatternUsesOptionalOpener() bool {
 	if !grouped {
 		return true
 	}
-	_, end := scanPatternText(tail, p.pos, patternScanCase, p.lang, p.parseExtGlob)
+	_, end := scanPatternText(tail, p.pos, patternScanCase, p.lang, p.parseExtGlob, p)
 	if !p.readEOF && end == len(tail) {
 		return true
 	}
@@ -7355,7 +7426,7 @@ func patternTextBoundary(raw string, i int, mode patternScanMode, hardParenDepth
 	}
 }
 
-func scanPatternText(raw string, base Pos, mode patternScanMode, lang LangVariant, parseExtGlob bool) (*scannedRawPattern, int) {
+func scanPatternText(raw string, base Pos, mode patternScanMode, lang LangVariant, parseExtGlob bool, owner *Parser) (*scannedRawPattern, int) {
 	start := 0
 	for start < len(raw) {
 		switch raw[start] {
@@ -7376,7 +7447,7 @@ scan:
 	extglobDepth := 0
 	hardParenDepth := 0
 	softParenDepth := 0
-	rawParser := rawPatternParser{lang: lang, allowExtGlob: parseExtGlob}
+	rawParser := rawPatternParser{lang: lang, allowExtGlob: parseExtGlob, owner: owner}
 	for i := start; ; {
 		if patternTextBoundary(raw, i, mode, hardParenDepth, softParenDepth) {
 			return scanned, i
@@ -7449,7 +7520,7 @@ scan:
 
 func (p *Parser) scanRawPatternSource(start Pos, mode patternScanMode) (*scannedRawPattern, bool) {
 	raw := p.sourceBytesFromPos(start)
-	scanned, end := scanPatternText(bytesToStringView(raw), start, mode, p.lang, p.parseExtGlob)
+	scanned, end := scanPatternText(bytesToStringView(raw), start, mode, p.lang, p.parseExtGlob, p)
 	if mode == patternScanCase && !p.readEOF && end == len(raw) {
 		return nil, false
 	}
@@ -7460,7 +7531,19 @@ func (p *Parser) scanRawPatternSource(start Pos, mode patternScanMode) (*scanned
 	scanned.raw = string(raw[rawStart:end])
 	boundaryPos := posAddCol(start, end)
 	for p.tok != _EOF && p.pos.Offset() < boundaryPos.Offset() {
-		p.next()
+		before := p.cursorSnapshot()
+		if p.tok == bckQuote {
+			// The raw scan already parsed the pattern; a backquote
+			// substitution must still be consumed as a whole.
+			p.wordPart()
+		} else {
+			p.next()
+		}
+		if !before.progressed(p) {
+			// The lexer can stall on a token it will not consume, such
+			// as an unclosed backquote; leave it for the caller to report.
+			break
+		}
 	}
 	if p.pos.Offset() != boundaryPos.Offset() {
 		p.next()
@@ -8006,7 +8089,7 @@ scan:
 	p.next()
 
 	word := &Word{
-		Parts:           rawWordPartParser{lang: p.lang}.parse(raw, start),
+		Parts:           rawWordPartParser{lang: p.lang, owner: p}.parse(raw, start),
 		AliasExpansions: append([]*AliasExpansion(nil), p.aliasChain...),
 	}
 	return p.finishWord(word)
@@ -8399,6 +8482,15 @@ func (p *Parser) scanCondRegexDoubleParen(start Pos) bool {
 }
 
 func (p *Parser) condExprBinary(pastAndOr bool) CondExpr {
+	if !pastAndOr {
+		// Negations, parentheses and the right side of && and || all
+		// recurse through here.
+		d, ok := p.enterNest()
+		if !ok {
+			return nil
+		}
+		defer p.leaveNest(d)
+	}
 	p.got(_Newl)
 	var left CondExpr
 	if pastAndOr {
@@ -8582,6 +8674,15 @@ func (p *Parser) condExprUnary() CondExpr {
 }
 
 func (p *Parser) testExprBinary(pastAndOr bool) TestExpr {
+	if !pastAndOr {
+		// Negations, parentheses and the right side of && and || all
+		// recurse through here.
+		d, ok := p.enterNest()
+		if !ok {
+			return nil
+		}
+		defer p.leaveNest(d)
+	}
 	p.got(_Newl)
 	var left TestExpr
 	if pastAndOr {

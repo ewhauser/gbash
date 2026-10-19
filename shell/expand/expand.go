@@ -141,6 +141,11 @@ type Config struct {
 	braceScope      braceBudget
 	braceScopeDepth int
 
+	// arithDepth counts nested arithmetic evaluations that re-enter the
+	// evaluator through a variable's string value or an array subscript, so
+	// self-referencing values fail instead of overflowing the Go stack.
+	arithDepth int
+
 	globIgnore         []string
 	globIgnoreMatchers []func(string) bool
 	globCollatorLocale string
@@ -2617,7 +2622,10 @@ func findAllIndex(pat, name string, n int) [][]int {
 	if err != nil {
 		return nil
 	}
-	rx := regexp.MustCompile(expr)
+	rx, err := regexp.Compile(expr)
+	if err != nil {
+		return nil
+	}
 	return rx.FindAllStringIndex(name, n)
 }
 

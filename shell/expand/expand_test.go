@@ -1258,8 +1258,8 @@ func TestPrepareConfigDefersParamPatternCacheInit(t *testing.T) {
 		t.Fatalf("compiledParamPatternCache initialized before compile")
 	}
 
-	if cfg.compileParamPattern(expr) == nil {
-		t.Fatalf("compileParamPattern() returned nil")
+	if compiled, err := cfg.compileParamPattern(expr); err != nil || compiled == nil {
+		t.Fatalf("compileParamPattern() = (%v, %v), want a compiled pattern", compiled, err)
 	}
 	if cfg.compiledParamPatternCache == nil {
 		t.Fatalf("compiledParamPatternCache not initialized lazily")

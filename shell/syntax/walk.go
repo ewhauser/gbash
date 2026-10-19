@@ -8,221 +8,300 @@ import (
 	"io"
 	"iter"
 	"reflect"
+	"slices"
+	"sync"
 )
 
 // Walk traverses a syntax tree in depth-first order: It starts by calling
 // f(node); node must not be nil. If f returns true, Walk invokes f
 // recursively for each of the non-nil children of node, followed by
 // f(nil).
+//
+// Walk keeps its own stack instead of recursing, so arbitrarily deep trees,
+// such as long "a && b && ..." chains, cannot overflow the goroutine stack.
 func Walk(node Node, f func(Node) bool) {
-	if node == nil || !f(node) {
+	if node == nil {
 		return
 	}
+	w := walkerPool.Get().(*walker)
+	w.stack = append(w.stack[:0], walkEntry{node: node})
+	defer w.release()
+	for len(w.stack) > 0 {
+		e := w.stack[len(w.stack)-1]
+		w.stack = w.stack[:len(w.stack)-1]
+		if e.close {
+			f(nil)
+			continue
+		}
+		if e.node == nil || !f(e.node) {
+			continue
+		}
+		w.push(e.node)
+	}
+}
 
+// walkEntry is either a node still to visit or, when close is set, the
+// f(nil) call that ends a visited node.
+type walkEntry struct {
+	node  Node
+	close bool
+}
+
+type walker struct {
+	stack []walkEntry
+}
+
+var walkerPool = sync.Pool{New: func() any { return new(walker) }}
+
+func (w *walker) release() {
+	if cap(w.stack) > 1<<12 {
+		// Don't keep huge stacks from pathological trees alive.
+		return
+	}
+	clear(w.stack[:cap(w.stack)])
+	w.stack = w.stack[:0]
+	walkerPool.Put(w)
+}
+
+// push schedules the children of node, then its closing f(nil), so that they
+// pop off the stack in the order the recursive walk visited them. A trailing
+// comment kept by a Stmt, CaseItem or ArrayElem is visited after the closing
+// call, matching the deferred walk of the original recursive implementation.
+func (w *walker) push(node Node) {
+	// Comments attached to a Stmt, CaseItem or ArrayElem come first, except
+	// that the first trailing one is visited after the closing f(nil), and
+	// any later ones are not visited at all, as the recursive walk did.
+	var comments []Comment
+	var pos Pos
+	atEnd := false
+	switch node := node.(type) {
+	case *Stmt:
+		if comments = node.Comments; len(comments) > 0 {
+			pos, atEnd = node.End(), true
+		}
+	case *CaseItem:
+		comments, pos = node.Comments, node.Pos()
+	case *ArrayElem:
+		comments, pos = node.Comments, node.Pos()
+	}
+	leading := len(comments)
+	for i := range comments {
+		if isTrailingComment(&comments[i], pos, atEnd) {
+			leading = i
+			c := comments[i]
+			w.add(&c)
+			break
+		}
+	}
+	w.stack = append(w.stack, walkEntry{close: true})
+	base := len(w.stack)
+	for i, c := range comments {
+		if i == leading {
+			break
+		}
+		w.add(&c)
+	}
+	w.appendChildren(node)
+	slices.Reverse(w.stack[base:])
+}
+
+// isTrailingComment reports whether c follows its node: for a Stmt (atEnd),
+// a comment at or after the statement's end; otherwise, one after pos.
+func isTrailingComment(c *Comment, pos Pos, atEnd bool) bool {
+	if atEnd {
+		return !pos.After(c.Pos())
+	}
+	return c.Pos().After(pos)
+}
+
+func (w *walker) add(node Node) {
+	w.stack = append(w.stack, walkEntry{node: node})
+}
+
+// appendChildren adds the children of node in visiting order. Comments
+// attached to a Stmt, CaseItem or ArrayElem are handled by push.
+func (w *walker) appendChildren(node Node) {
 	switch node := node.(type) {
 	case *File:
-		walkList(node.Stmts, f)
-		walkComments(node.Last, f)
+		addList(w, node.Stmts)
+		w.comments(node.Last)
 	case *Comment:
 	case *Stmt:
-		for _, c := range node.Comments {
-			if !node.End().After(c.Pos()) {
-				defer Walk(&c, f)
-				break
-			}
-			Walk(&c, f)
-		}
 		if node.Cmd != nil {
-			Walk(node.Cmd, f)
+			w.add(node.Cmd)
 		}
-		walkList(node.Redirs, f)
+		addList(w, node.Redirs)
 	case *VarRef:
-		walkNilable(node.Name, f)
-		walkNilable(node.Index, f)
+		addNilable(w, node.Name)
+		addNilable(w, node.Index)
 	case *Subscript:
-		walkNilable(node.Expr, f)
+		addNilable(w, node.Expr)
 	case *Assign:
-		walkNilable(node.Ref, f)
-		walkNilable(node.Value, f)
-		walkNilable(node.Array, f)
+		addNilable(w, node.Ref)
+		addNilable(w, node.Value)
+		addNilable(w, node.Array)
 	case *DeclFlag:
-		walkNilable(node.Word, f)
+		addNilable(w, node.Word)
 	case *DeclName:
-		walkNilable(node.Ref, f)
+		addNilable(w, node.Ref)
 	case *DeclAssign:
-		walkNilable(node.Assign, f)
+		addNilable(w, node.Assign)
 	case *DeclDynamicWord:
-		walkNilable(node.Word, f)
+		addNilable(w, node.Word)
 	case *Redirect:
-		walkNilable(node.N, f)
-		walkNilable(node.Word, f)
-		walkNilable(node.HdocDelim, f)
-		walkNilable(node.Hdoc, f)
+		addNilable(w, node.N)
+		addNilable(w, node.Word)
+		addNilable(w, node.HdocDelim)
+		addNilable(w, node.Hdoc)
 	case *HeredocDelim:
-		walkList(node.Parts, f)
+		addList(w, node.Parts)
 	case *CallExpr:
-		walkList(node.Assigns, f)
-		walkList(node.Args, f)
+		addList(w, node.Assigns)
+		addList(w, node.Args)
 	case *Subshell:
-		walkList(node.Stmts, f)
-		walkComments(node.Last, f)
+		addList(w, node.Stmts)
+		w.comments(node.Last)
 	case *Block:
-		walkList(node.Stmts, f)
-		walkComments(node.Last, f)
+		addList(w, node.Stmts)
+		w.comments(node.Last)
 	case *IfClause:
-		walkList(node.Cond, f)
-		walkComments(node.CondLast, f)
-		walkList(node.Then, f)
-		walkComments(node.ThenLast, f)
-		walkNilable(node.Else, f)
+		addList(w, node.Cond)
+		w.comments(node.CondLast)
+		addList(w, node.Then)
+		w.comments(node.ThenLast)
+		addNilable(w, node.Else)
 	case *WhileClause:
-		walkList(node.Cond, f)
-		walkComments(node.CondLast, f)
-		walkList(node.Do, f)
-		walkComments(node.DoLast, f)
+		addList(w, node.Cond)
+		w.comments(node.CondLast)
+		addList(w, node.Do)
+		w.comments(node.DoLast)
 	case *ForClause:
-		walkNilable(node.Loop, f)
-		walkList(node.Do, f)
-		walkComments(node.DoLast, f)
+		addNilable(w, node.Loop)
+		addList(w, node.Do)
+		w.comments(node.DoLast)
 	case *WordIter:
-		Walk(node.Name, f)
-		walkList(node.Items, f)
+		w.add(node.Name)
+		addList(w, node.Items)
 	case *CStyleLoop:
-		walkNilable(node.Init, f)
-		walkNilable(node.Cond, f)
-		walkNilable(node.Post, f)
+		addNilable(w, node.Init)
+		addNilable(w, node.Cond)
+		addNilable(w, node.Post)
 	case *BinaryCmd:
-		walkNilable(node.X, f)
-		walkNilable(node.Y, f)
+		addNilable(w, node.X)
+		addNilable(w, node.Y)
 	case *FuncDecl:
-		walkNilable(node.Name, f)
-		walkList(node.Names, f)
-		walkNilable(node.Body, f)
+		addNilable(w, node.Name)
+		addList(w, node.Names)
+		addNilable(w, node.Body)
 	case *Word:
-		walkList(node.Parts, f)
+		addList(w, node.Parts)
 	case *Lit:
 	case *SglQuoted:
 	case *DblQuoted:
-		walkList(node.Parts, f)
+		addList(w, node.Parts)
 	case *BraceExp:
-		walkList(node.Elems, f)
+		addList(w, node.Elems)
 	case *Pattern:
-		walkList(node.Parts, f)
+		addList(w, node.Parts)
 	case *PatternAny:
 	case *PatternSingle:
 	case *PatternCharClass:
 	case *PatternGroup:
-		walkList(node.Patterns, f)
+		addList(w, node.Patterns)
 	case *CmdSubst:
-		walkList(node.Stmts, f)
-		walkComments(node.Last, f)
+		addList(w, node.Stmts)
+		w.comments(node.Last)
 	case *ParamExp:
-		walkNilable(node.Flags, f)
-		walkNilable(node.Param, f)
-		walkNilable(node.NestedParam, f)
-		walkNilable(node.Index, f)
+		addNilable(w, node.Flags)
+		addNilable(w, node.Param)
+		addNilable(w, node.NestedParam)
+		addNilable(w, node.Index)
 		if node.Slice != nil {
-			walkNilable(node.Slice.Offset, f)
-			walkNilable(node.Slice.Length, f)
+			addNilable(w, node.Slice.Offset)
+			addNilable(w, node.Slice.Length)
 		}
 		if node.Repl != nil {
-			walkNilable(node.Repl.Orig, f)
-			walkNilable(node.Repl.With, f)
+			addNilable(w, node.Repl.Orig)
+			addNilable(w, node.Repl.With)
 		}
 		if node.Exp != nil {
-			walkNilable(node.Exp.Word, f)
-			walkNilable(node.Exp.Pattern, f)
+			addNilable(w, node.Exp.Word)
+			addNilable(w, node.Exp.Pattern)
 		}
 	case *ArithmExp:
-		walkNilable(node.X, f)
+		addNilable(w, node.X)
 	case *ArithmCmd:
-		walkNilable(node.X, f)
+		addNilable(w, node.X)
 	case *BinaryArithm:
-		walkNilable(node.X, f)
-		walkNilable(node.Y, f)
+		addNilable(w, node.X)
+		addNilable(w, node.Y)
 	case *CondBinary:
-		walkNilable(node.X, f)
-		walkNilable(node.Y, f)
+		addNilable(w, node.X)
+		addNilable(w, node.Y)
 	case *CondUnary:
-		walkNilable(node.X, f)
+		addNilable(w, node.X)
 	case *CondParen:
-		Walk(node.X, f)
+		w.add(node.X)
 	case *CondWord:
-		walkNilable(node.Word, f)
+		addNilable(w, node.Word)
 	case *CondVarRef:
-		walkNilable(node.Ref, f)
+		addNilable(w, node.Ref)
 	case *CondPattern:
-		walkNilable(node.Pattern, f)
+		addNilable(w, node.Pattern)
 	case *CondRegex:
-		walkNilable(node.Word, f)
+		addNilable(w, node.Word)
 	case *BinaryTest:
-		walkNilable(node.X, f)
-		walkNilable(node.Y, f)
+		addNilable(w, node.X)
+		addNilable(w, node.Y)
 	case *UnaryArithm:
-		walkNilable(node.X, f)
+		addNilable(w, node.X)
 	case *UnaryTest:
-		walkNilable(node.X, f)
+		addNilable(w, node.X)
 	case *ParenArithm:
-		walkNilable(node.X, f)
+		addNilable(w, node.X)
 	case *FlagsArithm:
-		Walk(node.Flags, f)
+		w.add(node.Flags)
 		if node.X != nil {
-			Walk(node.X, f)
+			w.add(node.X)
 		}
 	case *ParenTest:
-		walkNilable(node.X, f)
+		addNilable(w, node.X)
 	case *CaseClause:
-		Walk(node.Word, f)
-		walkList(node.Items, f)
-		walkComments(node.Last, f)
+		w.add(node.Word)
+		addList(w, node.Items)
+		w.comments(node.Last)
 	case *CaseItem:
-		for _, c := range node.Comments {
-			if c.Pos().After(node.Pos()) {
-				defer Walk(&c, f)
-				break
-			}
-			Walk(&c, f)
-		}
-		walkList(node.Patterns, f)
-		walkList(node.Stmts, f)
-		walkComments(node.Last, f)
+		addList(w, node.Patterns)
+		addList(w, node.Stmts)
+		w.comments(node.Last)
 	case *TestClause:
-		walkNilable(node.X, f)
+		addNilable(w, node.X)
 	case *DeclClause:
-		walkList(node.Operands, f)
+		addList(w, node.Operands)
 	case *ArrayExpr:
-		walkList(node.Elems, f)
-		walkComments(node.Last, f)
+		addList(w, node.Elems)
+		w.comments(node.Last)
 	case *ArrayElem:
-		for _, c := range node.Comments {
-			if c.Pos().After(node.Pos()) {
-				defer Walk(&c, f)
-				break
-			}
-			Walk(&c, f)
-		}
-		walkNilable(node.Index, f)
-		walkNilable(node.Value, f)
+		addNilable(w, node.Index)
+		addNilable(w, node.Value)
 	case *ExtGlob:
-		walkList(node.Patterns, f)
+		addList(w, node.Patterns)
 	case *ProcSubst:
-		walkList(node.Stmts, f)
-		walkComments(node.Last, f)
+		addList(w, node.Stmts)
+		w.comments(node.Last)
 	case *TimeClause:
-		walkNilable(node.Stmt, f)
+		addNilable(w, node.Stmt)
 	case *CoprocClause:
-		walkNilable(node.Name, f)
-		walkNilable(node.Stmt, f)
+		addNilable(w, node.Name)
+		addNilable(w, node.Stmt)
 	case *LetClause:
-		walkList(node.Exprs, f)
+		addList(w, node.Exprs)
 	case *TestDecl:
-		walkNilable(node.Description, f)
-		walkNilable(node.Body, f)
+		addNilable(w, node.Description)
+		addNilable(w, node.Body)
 	default:
 		panic(fmt.Sprintf("syntax.Walk: unexpected node type %T", node))
 	}
-
-	f(nil)
 }
 
 type nilableNode interface {
@@ -230,23 +309,23 @@ type nilableNode interface {
 	comparable // pointer nodes, which can be compared to nil
 }
 
-func walkNilable[N nilableNode](node N, f func(Node) bool) {
+func addNilable[N nilableNode](w *walker, node N) {
 	var zero N // nil
 	if node != zero {
-		Walk(node, f)
+		w.add(node)
 	}
 }
 
-func walkList[N Node](list []N, f func(Node) bool) {
+func addList[N Node](w *walker, list []N) {
 	for _, node := range list {
-		Walk(node, f)
+		w.add(node)
 	}
 }
 
-func walkComments(list []Comment, f func(Node) bool) {
+func (w *walker) comments(list []Comment) {
 	// Note that []Comment does not satisfy the generic constraint []Node.
 	for i := range list {
-		Walk(&list[i], f)
+		w.add(&list[i])
 	}
 }
 

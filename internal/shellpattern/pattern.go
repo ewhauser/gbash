@@ -126,6 +126,13 @@ func Regexp(pat string, mode Mode) (string, error) {
 	return sb.String(), nil
 }
 
+// truncateBuilder discards everything written to sb after its first n bytes.
+func truncateBuilder(sb *strings.Builder, n int) {
+	kept := sb.String()[:n]
+	sb.Reset()
+	sb.WriteString(kept)
+}
+
 // stringLexer helps us tokenize a pattern string.
 // Note that we can use the null byte '\x00' to signal "no character" as shell strings cannot contain null bytes.
 // TODO: should the tokenization be based on runes? e.g: [á-é]
@@ -173,7 +180,8 @@ func regexpNext(sb *strings.Builder, sl *stringLexer, mode Mode) error {
 			if sl.peekNext() != '(' {
 				break
 			}
-			start := sl.i - 1       // position of the operator
+			start := sl.i - 1 // position of the operator
+			mark := sb.Len()
 			sb.WriteByte(sl.next()) // (
 		nestedLoop:
 			for {
@@ -186,7 +194,12 @@ func regexpNext(sb *strings.Builder, sl *stringLexer, mode Mode) error {
 					continue
 				}
 				if err := regexpNext(sb, sl, mode); err == io.EOF {
-					break
+					// Like bash, match a group without its closing
+					// parenthesis, and everything after it, literally.
+					truncateBuilder(sb, mark)
+					sb.WriteString(regexp.QuoteMeta(sl.s[start:]))
+					sl.i = len(sl.s)
+					return nil
 				} else if err != nil {
 					return err
 				}

@@ -640,6 +640,8 @@ For script execution, that pipeline:
 
 The runtime request boundary carries only script text or tokenized command input. Parsing is a private shell-core concern.
 
+Go cannot recover from a goroutine stack overflow, so no script, including text built at runtime and run through `eval` or re-parsed as an arithmetic value, may recurse without bound in the parser, in `syntax.Walk`, or in the interpreter. The parser fails with a `syntax.ParseError` (`nesting exceeds the maximum depth of N`) when constructs nest deeper than `syntax.MaxNestingDepth` (16000), counting subshells, blocks, command, process and parameter substitutions, arithmetic parentheses, unary and right-associative operators, subscripts, and `[[ ]]` negations and groups, including shell parts re-parsed inside patterns and here-documents. Lists that the parser builds in a loop, such as `a && b && ...`, pipelines, or `1+1+...`, still add one tree level per operator, so a parsed tree deeper than `syntax.MaxTreeDepth` (50000) fails the same way. `syntax.Walk` keeps its own stack and handles trees of any depth. Arithmetic that re-enters itself through variable values or array subscripts (for example `x='x[x]'; echo $((x))`) stops after 1024 nested evaluations with bash's `expression recursion level exceeded` error. Bash has no fixed parser limits, so rejecting deeper input is a deliberate sandbox divergence.
+
 ### 9.2 Runner construction
 
 For each execution, build a fresh `interp.Runner` through one shell-owned constructor path rather than ad hoc option hooks or split config layers.
