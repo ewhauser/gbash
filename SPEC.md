@@ -772,6 +772,7 @@ Backend boundary for the current implementation:
 - `OverlayFS` is intended for internal session use and is exposed through `gbfs.Overlay(...)`
 - `OverlayFS` resolves symlinks against the merged view of both layers: each link is read from the layer that currently provides it, and its target may live in either layer; `Stat`, `Open`, `ReadDir`, `Realpath`, `Chdir`, `Chmod`, `Chtimes`, and following `Chown` follow the final link, while `Lstat`, `Readlink`, `Remove`, `Rename`, `Link`, and the entry-creating operations only resolve parent directories
 - writes and metadata changes through a symlink copy up and modify the resolved target, never the link itself; `MkdirAll` follows symlinked directory components; `O_CREATE|O_EXCL` fails on any existing link, including a dangling one
+- `Chmod`, `Chown`, `Chtimes`, and `Lchtimes` on a lower-layer directory copy up only that directory node (mode, ownership, and modification time), never its children; missing upper ancestors are copied up with their lower metadata, so tombstoned children stay hidden and the cost does not grow with the subtree
 - `MountableFS` is an opt-in namespace backend exposed through `gbfs.Mountable(...)` and `gbash.MountableFileSystem(...)`; live `mount` and `unmount` behavior remains a concrete-backend capability rather than part of the core filesystem interface
 - `SnapshotFS` is a read-only backend for deterministic fixtures and direct tests
 - `SnapshotFS` is not the default `runtime` session backend because session bootstrap still creates the sandbox layout and command stubs
