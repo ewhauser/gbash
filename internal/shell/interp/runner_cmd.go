@@ -754,6 +754,7 @@ func (r *Runner) declOperandCommandFields(operand syntax.DeclOperand) ([]string,
 }
 
 func (r *Runner) declClauseCommandFields(cm *syntax.DeclClause) ([]string, bool) {
+	defer r.braceExpansionScope()()
 	fields := []string{cm.Variant.Value}
 	for _, operand := range r.mergeDeclOperands(cm.Variant.Value, cm.Operands) {
 		operandFields, ok := r.declOperandCommandFields(operand)
@@ -830,6 +831,7 @@ func (r *Runner) resolveCallExprArgs(args []*syntax.Word) ([]string, *syntax.Dec
 	if len(args) == 0 {
 		return nil, nil
 	}
+	defer r.braceExpansionScope()()
 	fields := make([]string, 0, len(args))
 	leading := make([]string, 0, len(args))
 	canDetectDecl := true

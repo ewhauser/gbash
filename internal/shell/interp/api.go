@@ -284,6 +284,8 @@ type Runner struct {
 	// their own exit status afterwards.
 	variableLimitHit bool
 
+	maxBraceExpansionWords int64
+
 	origDir     string
 	origParams  []string
 	origArg0    string
@@ -602,6 +604,10 @@ type RunnerConfig struct {
 	// intermediate values such as command substitution output. Zero means
 	// unlimited.
 	MaxVariableBytes int64
+
+	// MaxBraceExpansionWords caps the words brace expansion may generate for
+	// one command's arguments. Zero means unlimited.
+	MaxBraceExpansionWords int64
 }
 
 func newRunnerBase() *Runner {
@@ -706,6 +712,7 @@ func NewRunner(cfg *RunnerConfig) (*Runner, error) {
 	r.platform = normalizePlatform(cfg.Platform)
 	r.startupHome = cfg.StartupHome
 	r.maxVariableBytes = cfg.MaxVariableBytes
+	r.maxBraceExpansionWords = cfg.MaxBraceExpansionWords
 	r.Dir = cfg.Dir
 	r.startupVisibleDir = cfg.VisibleDir
 	r.analysis = newAnalysisState(cfg.AnalysisObserver, cfg.AnalysisRun)
@@ -1238,6 +1245,8 @@ func (r *Runner) Reset() {
 
 		maxVariableBytes: r.maxVariableBytes,
 
+		maxBraceExpansionWords: r.maxBraceExpansionWords,
+
 		// These can be set by functions like [Dir] or [Params], but
 		// builtins can overwrite them; reset the fields to whatever the
 		// constructor set up.
@@ -1560,6 +1569,7 @@ func (r *Runner) subshell(_ bool) *Runner {
 		disabledBuiltins:          r.disabledBuiltins,
 		startupHome:               r.startupHome,
 		maxVariableBytes:          r.maxVariableBytes,
+		maxBraceExpansionWords:    r.maxBraceExpansionWords,
 		origStart:                 r.origStart,
 		origShellStart:            r.origShellStart,
 		origArg0:                  r.origArg0,

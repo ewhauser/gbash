@@ -128,9 +128,18 @@ type Config struct {
 	// (e.g. {a,b,c}, {1..5}) is suppressed.
 	NoBraceExpand bool
 
+	// MaxBraceExpansionWords caps how many words brace expansion may generate
+	// across the words of one [Fields] call, or across every call made inside
+	// a [Config.BeginBraceExpansionScope] scope. Exceeding it fails expansion
+	// with [BraceExpansionLimitError]. Zero or negative means unlimited.
+	MaxBraceExpansionWords int64
+
 	// ExtGlob corresponds to the shell option which allows using extended
 	// pattern matching features when performing pathname expansion (globbing).
 	ExtGlob bool
+
+	braceScope      braceBudget
+	braceScopeDepth int
 
 	globIgnore         []string
 	globIgnoreMatchers []func(string) bool
@@ -293,6 +302,9 @@ func (cfg *Config) ResetRuntimeState() {
 	cfg.GlobSkipDots = false
 	cfg.NoUnset = false
 	cfg.NoBraceExpand = false
+	cfg.MaxBraceExpansionWords = 0
+	cfg.braceScope = braceBudget{}
+	cfg.braceScopeDepth = 0
 	cfg.ExtGlob = false
 	cfg.globIgnore = nil
 	cfg.globIgnoreMatchers = nil
@@ -1711,6 +1723,7 @@ func fieldsSeq(cfg *Config, allowAssignLike, preferStartupHome bool, words ...*s
 	cfg = prepareConfig(cfg)
 	dir := cfg.envGet("PWD")
 	return func(yield func(string, error) bool) {
+		budget := cfg.braceExpansionBudget()
 		for _, word := range words {
 			afterBraces := []*syntax.Word{word}
 			hadBraces := !cfg.NoBraceExpand && slices.ContainsFunc(word.Parts, func(part syntax.WordPart) bool {
@@ -1719,7 +1732,7 @@ func fieldsSeq(cfg *Config, allowAssignLike, preferStartupHome bool, words ...*s
 			})
 			if hadBraces {
 				var err error
-				afterBraces, err = Braces(word)
+				afterBraces, err = braces(word, budget)
 				if err != nil {
 					yield("", err)
 					return

@@ -1148,14 +1148,15 @@ func gbashPolicyConfig(specPath string) *policy.Config {
 
 func gbashPolicyLimits() policy.Limits {
 	return policy.Limits{
-		MaxCommandCount:      10000,
-		MaxGlobOperations:    100000,
-		MaxLoopIterations:    10000,
-		MaxSubstitutionDepth: 50,
-		MaxStdoutBytes:       1 << 20,
-		MaxStderrBytes:       1 << 20,
-		MaxFileBytes:         8 << 20,
-		MaxVariableBytes:     32 << 20,
+		MaxCommandCount:        10000,
+		MaxGlobOperations:      100000,
+		MaxBraceExpansionWords: 100000,
+		MaxLoopIterations:      10000,
+		MaxSubstitutionDepth:   50,
+		MaxStdoutBytes:         1 << 20,
+		MaxStderrBytes:         1 << 20,
+		MaxFileBytes:           8 << 20,
+		MaxVariableBytes:       32 << 20,
 	}
 }
 

@@ -31,14 +31,15 @@ const (
 )
 
 type Limits struct {
-	MaxCommandCount      int64
-	MaxGlobOperations    int64
-	MaxLoopIterations    int64
-	MaxSubstitutionDepth int64
-	MaxStdoutBytes       int64
-	MaxStderrBytes       int64
-	MaxFileBytes         int64
-	MaxVariableBytes     int64
+	MaxCommandCount        int64
+	MaxGlobOperations      int64
+	MaxBraceExpansionWords int64
+	MaxLoopIterations      int64
+	MaxSubstitutionDepth   int64
+	MaxStdoutBytes         int64
+	MaxStderrBytes         int64
+	MaxFileBytes           int64
+	MaxVariableBytes       int64
 }
 
 type Policy interface {

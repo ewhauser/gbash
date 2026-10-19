@@ -71,14 +71,15 @@ func New(opts ...Option) (*Runtime, error) {
 		}
 	}
 	defaultLimits := mergedLimits(policy.Limits{
-		MaxCommandCount:      10000,
-		MaxGlobOperations:    100000,
-		MaxLoopIterations:    10000,
-		MaxSubstitutionDepth: 50,
-		MaxStdoutBytes:       1 << 20,
-		MaxStderrBytes:       1 << 20,
-		MaxFileBytes:         8 << 20,
-		MaxVariableBytes:     32 << 20,
+		MaxCommandCount:        10000,
+		MaxGlobOperations:      100000,
+		MaxBraceExpansionWords: 100000,
+		MaxLoopIterations:      10000,
+		MaxSubstitutionDepth:   50,
+		MaxStdoutBytes:         1 << 20,
+		MaxStderrBytes:         1 << 20,
+		MaxFileBytes:           8 << 20,
+		MaxVariableBytes:       32 << 20,
 	}, resolved.LimitOverrides)
 	if resolved.Policy == nil {
 		resolved.Policy = policy.NewStatic(&policy.Config{
@@ -150,6 +151,9 @@ func mergedLimits(base, overrides policy.Limits) policy.Limits {
 	}
 	if overrides.MaxGlobOperations != 0 {
 		base.MaxGlobOperations = overrides.MaxGlobOperations
+	}
+	if overrides.MaxBraceExpansionWords != 0 {
+		base.MaxBraceExpansionWords = overrides.MaxBraceExpansionWords
 	}
 	if overrides.MaxLoopIterations != 0 {
 		base.MaxLoopIterations = overrides.MaxLoopIterations

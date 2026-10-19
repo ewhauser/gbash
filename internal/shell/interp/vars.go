@@ -1551,6 +1551,7 @@ func (r *Runner) resolvedCompoundArrayTarget(prev expand.Variable, ref *syntax.V
 }
 
 func (r *Runner) expandCompoundArrayElems(elems []*syntax.ArrayElem) []expandedArrayElem {
+	defer r.braceExpansionScope()()
 	expanded := make([]expandedArrayElem, 0, len(elems))
 	for _, elem := range elems {
 		item := expandedArrayElem{
