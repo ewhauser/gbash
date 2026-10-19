@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -102,7 +103,7 @@ func (c *TR) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedComm
 	}
 
 	translating := !opts.delete && len(sets) > 1
-	set1, set2, err := solveTRSets(inv.Stderr, sets[0], trSecondSet(sets), opts.complement, opts.truncate && translating, translating)
+	set1, set2, err := solveTRSets(inv.Stderr, sets[0], trSecondSet(sets), opts.complement, opts.truncate && translating, translating, maxFieldBytes(inv))
 	if err != nil {
 		return exitf(inv, 1, "tr: %s", err.Error())
 	}
@@ -192,10 +193,13 @@ func warnTrailingBackslash(inv *Invocation, value string) error {
 	return nil
 }
 
-func solveTRSets(warn io.Writer, set1Text, set2Text string, complement, truncateSet1, translating bool) (set1Solved, set2Solved []byte, err error) {
+func solveTRSets(warn io.Writer, set1Text, set2Text string, complement, truncateSet1, translating bool, maxLen int64) (set1Solved, set2Solved []byte, err error) {
 	set1Seqs, err := parseTRSequences([]byte(set1Text), warn)
 	if err != nil {
 		return nil, nil, err
+	}
+	if int64(trSequencesLen(set1Seqs)) > maxLen {
+		return nil, nil, trStringTooLongError(maxLen)
 	}
 	for _, seq := range set1Seqs {
 		if seq.kind == trSequenceStar {
@@ -218,6 +222,9 @@ func solveTRSets(warn io.Writer, set1Text, set2Text string, complement, truncate
 	}
 	if starCount > 1 {
 		return nil, nil, fmt.Errorf("only one [c*] repeat construct may appear in string2")
+	}
+	if int64(trSequencesLen(set2Seqs)) > maxLen {
+		return nil, nil, trStringTooLongError(maxLen)
 	}
 
 	set1Solved = trFlattenSequences(set1Seqs)
@@ -310,6 +317,26 @@ func solveTRSets(warn io.Writer, set1Text, set2Text string, complement, truncate
 		}
 	}
 	return set1Solved, set2Solved, nil
+}
+
+// trStringTooLongError reports a SET whose expansion, typically from a
+// [c*n] repeat count, would exceed the padded field cap.
+func trStringTooLongError(maxLen int64) error {
+	return fmt.Errorf("string too long (limit %d bytes), increase policy.Limits.MaxVariableBytes", maxLen)
+}
+
+// trSequencesLen sums the expanded length of seqs, saturating at math.MaxInt
+// so oversized repeat counts cannot overflow. [c*] constructs count as one.
+func trSequencesLen(seqs []trSequence) int {
+	total := 0
+	for _, seq := range seqs {
+		n := trSequenceLen(seq)
+		if n < 0 || total > math.MaxInt-n {
+			return math.MaxInt
+		}
+		total += n
+	}
+	return total
 }
 
 func trHasClass(seqs []trSequence) bool {
@@ -537,8 +564,8 @@ func trFlattenSequences(seqs []trSequence) []byte {
 		case trSequenceChar:
 			out = append(out, seq.char)
 		case trSequenceRange:
-			for b := seq.start; b <= seq.end; b++ {
-				out = append(out, b)
+			for b := int(seq.start); b <= int(seq.end); b++ {
+				out = append(out, byte(b))
 			}
 		case trSequenceRepeat:
 			for range seq.count {
@@ -558,7 +585,7 @@ func trSequenceLen(seq trSequence) int {
 	case trSequenceChar:
 		return 1
 	case trSequenceRange:
-		return int(seq.end-seq.start) + 1
+		return int(seq.end) - int(seq.start) + 1
 	case trSequenceRepeat:
 		return seq.count
 	case trSequenceStar:

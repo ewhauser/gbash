@@ -385,6 +385,24 @@ func decodeZ85(data []byte, ignoreGarbage bool) ([]byte, bool) {
 	return decoded, false
 }
 
+// basencBigDigitChars is math/big's digit alphabet for bases up to 62.
+const basencBigDigitChars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+// Base58 is a whole-input big-number conversion, so its cost grows faster
+// than linearly; these caps keep one invocation well under a second.
+const (
+	basencBase58MaxEncodeBytes = 256 << 10
+	basencBase58MaxDecodeBytes = 384 << 10
+)
+
+// basencBigBase58Digits maps a math/big digit character to its value.
+var basencBigBase58Digits = func() (table [256]byte) {
+	for i := range 58 {
+		table[basencBigDigitChars[i]] = byte(i)
+	}
+	return table
+}()
+
 func encodeBase58(data []byte) string {
 	if len(data) == 0 {
 		return ""
@@ -398,17 +416,11 @@ func encodeBase58(data []byte) string {
 		return strings.Repeat("1", leadingZeros)
 	}
 
-	value := new(big.Int).SetBytes(data[leadingZeros:])
-	base := big.NewInt(58)
-	mod := new(big.Int)
-	result := make([]byte, 0, len(data)*138/100+1)
-
-	for value.Sign() > 0 {
-		value.DivMod(value, base, mod)
-		result = append(result, basencBase58Alphabet[mod.Int64()])
-	}
-	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
-		result[i], result[j] = result[j], result[i]
+	// big.Int.Text converts with a subquadratic divide-and-conquer
+	// algorithm; translate its base-58 digits to the Bitcoin alphabet.
+	result := []byte(new(big.Int).SetBytes(data[leadingZeros:]).Text(58))
+	for i, digit := range result {
+		result[i] = basencBase58Alphabet[basencBigBase58Digits[digit]]
 	}
 
 	return strings.Repeat("1", leadingZeros) + string(result)
@@ -431,16 +443,15 @@ func decodeBase58(data []byte, ignoreGarbage bool) ([]byte, bool) {
 		return make([]byte, leadingOnes), false
 	}
 
-	value := big.NewInt(0)
-	base := big.NewInt(58)
+	digits := make([]byte, 0, len(filtered)-leadingOnes)
 	for _, b := range filtered[leadingOnes:] {
 		digit := basencBase58IndexMap[b]
 		if digit < 0 {
 			return nil, true
 		}
-		value.Mul(value, base)
-		value.Add(value, big.NewInt(int64(digit)))
+		digits = append(digits, byte(digit))
 	}
+	value := basencBase58DigitsToInt(digits, map[int]*big.Int{})
 
 	decoded := value.Bytes()
 	if len(decoded) == 0 {
@@ -449,6 +460,55 @@ func decodeBase58(data []byte, ignoreGarbage bool) ([]byte, bool) {
 	result := make([]byte, leadingOnes+len(decoded))
 	copy(result[leadingOnes:], decoded)
 	return result, false
+}
+
+// basencBase58LeafDigits is the digit count below which
+// basencBase58DigitsToInt accumulates directly.
+const basencBase58LeafDigits = 512
+
+// basencBase58DigitsToInt converts base-58 digit values to an integer by
+// splitting them in halves (value = high*58^k + low), so the cost follows
+// big.Int multiplication instead of growing quadratically with the input.
+// powers caches 58^k for the power-of-two k used at each level.
+func basencBase58DigitsToInt(digits []byte, powers map[int]*big.Int) *big.Int {
+	if len(digits) <= basencBase58LeafDigits {
+		value := new(big.Int)
+		chunk := new(big.Int)
+		// 58^10 < 2^64, so ten digits fit one uint64 step.
+		for start := 0; start < len(digits); start += 10 {
+			end := min(start+10, len(digits))
+			var acc, scale uint64 = 0, 1
+			for _, digit := range digits[start:end] {
+				acc = acc*58 + uint64(digit)
+				scale *= 58
+			}
+			value.Mul(value, chunk.SetUint64(scale))
+			value.Add(value, chunk.SetUint64(acc))
+		}
+		return value
+	}
+	k := basencBase58LeafDigits
+	for k*2 < len(digits) {
+		k *= 2
+	}
+	high := basencBase58DigitsToInt(digits[:len(digits)-k], powers)
+	low := basencBase58DigitsToInt(digits[len(digits)-k:], powers)
+	return high.Mul(high, basencBase58Power(k, powers)).Add(high, low)
+}
+
+func basencBase58Power(k int, powers map[int]*big.Int) *big.Int {
+	if power, ok := powers[k]; ok {
+		return power
+	}
+	var power *big.Int
+	if k <= basencBase58LeafDigits {
+		power = new(big.Int).Exp(big.NewInt(58), big.NewInt(int64(k)), nil)
+	} else {
+		half := basencBase58Power(k/2, powers)
+		power = new(big.Int).Mul(half, half)
+	}
+	powers[k] = power
+	return power
 }
 
 func filterWholeEncodedInput(data []byte, lookup *[256]bool, ignoreGarbage bool) ([]byte, bool) {

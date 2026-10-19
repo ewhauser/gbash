@@ -32,6 +32,7 @@ func readNamedInputs(ctx context.Context, inv *Invocation, names []string) ([]na
 		stdinData   []byte
 		stdinLoaded bool
 	)
+	budget := newInputBudget(inv)
 	for _, name := range names {
 		if name == "-" {
 			if !stdinLoaded {
@@ -41,6 +42,9 @@ func readNamedInputs(ctx context.Context, inv *Invocation, names []string) ([]na
 				}
 				stdinData = data
 				stdinLoaded = true
+				if err := budget.add(len(data)); err != nil {
+					return nil, err
+				}
 			}
 			inputs = append(inputs, namedInput{
 				Name:      "-",
@@ -52,6 +56,9 @@ func readNamedInputs(ctx context.Context, inv *Invocation, names []string) ([]na
 		}
 		data, abs, err := readAllFile(ctx, inv, name)
 		if err != nil {
+			return nil, err
+		}
+		if err := budget.add(len(data)); err != nil {
 			return nil, err
 		}
 		inputs = append(inputs, namedInput{

@@ -1,10 +1,12 @@
 package builtins
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -46,6 +48,9 @@ type expandOptions struct {
 	tabstops      []int
 	remainingMode expandRemainingMode
 	spaceCache    []byte
+	// maxSpaces caps the spaces one tab may expand to; zero means the
+	// default padded field cap.
+	maxSpaces int64
 }
 
 type Expand struct{}
@@ -155,7 +160,13 @@ func (c *Expand) RunParsed(ctx context.Context, inv *Invocation, matches *Parsed
 			continue
 		}
 
-		if _, err := inv.Stdout.Write(expandBytes(data, &opts)); err != nil {
+		if err := expandWrite(ctx, inv.Stdout, data, &opts); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			if errors.Is(err, errExpandTabTooWide) {
+				return fieldWidthError(inv, "expand")
+			}
 			return &ExitError{Code: 1, Err: err}
 		}
 	}
@@ -177,6 +188,7 @@ func parseExpandMatches(inv *Invocation, matches *ParsedCommand) (expandOptions,
 		tabstops:      tabstops,
 		remainingMode: mode,
 		spaceCache:    expandSpaceCache(tabstops, mode),
+		maxSpaces:     maxFieldBytes(inv),
 	}, nil
 }
 
@@ -339,29 +351,58 @@ func expandSpaceCache(tabstops []int, mode expandRemainingMode) []byte {
 }
 
 func expandBytes(data []byte, opts *expandOptions) []byte {
+	var out bytes.Buffer
+	_ = expandWrite(context.Background(), &out, data, opts)
+	return out.Bytes()
+}
+
+var errExpandTabTooWide = errors.New("expand: tab stop exceeds field width limit")
+
+// expandWrite streams the expansion of data to w, checking ctx while it
+// writes so a long run of wide tabs stops on cancellation or timeout.
+func expandWrite(ctx context.Context, w io.Writer, data []byte, opts *expandOptions) error {
 	if len(data) == 0 {
 		return nil
 	}
 
-	var out bytes.Buffer
+	out := bufio.NewWriter(w)
+	maxSpaces := opts.maxSpaces
+	if maxSpaces <= 0 {
+		maxSpaces = defaultMaxFieldBytes
+	}
 	col := 0
 	initial := true
-	for _, b := range data {
+	for i, b := range data {
+		if i&0xffff == 0 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
 		switch b {
 		case '\t':
 			spaces := expandNextTabstop(opts.tabstops, col, opts.remainingMode)
+			if spaces < 0 || int64(spaces) > maxSpaces {
+				// A single tab past the padded field cap fails like other
+				// oversized widths instead of streaming gigabytes of spaces.
+				_ = out.Flush()
+				return errExpandTabTooWide
+			}
 			col += spaces
 			if initial || !opts.initial {
-				expandWriteSpaces(&out, opts.spaceCache, spaces)
-			} else {
-				_ = out.WriteByte('\t')
+				if err := expandWriteSpaces(ctx, out, opts.spaceCache, spaces); err != nil {
+					return err
+				}
+			} else if err := out.WriteByte('\t'); err != nil {
+				return err
 			}
 		case '\b':
 			if col > 0 {
 				col--
 			}
 			initial = false
-			_ = out.WriteByte(b)
+			if err := out.WriteByte(b); err != nil {
+				return err
+			}
 		default:
 			col++
 			if b != ' ' {
@@ -371,18 +412,28 @@ func expandBytes(data []byte, opts *expandOptions) []byte {
 				col = 0
 				initial = true
 			}
-			_ = out.WriteByte(b)
+			if err := out.WriteByte(b); err != nil {
+				return err
+			}
 		}
 	}
-	return out.Bytes()
+	return out.Flush()
 }
 
-func expandWriteSpaces(out *bytes.Buffer, cache []byte, n int) {
+func expandWriteSpaces(ctx context.Context, out *bufio.Writer, cache []byte, n int) error {
 	for n > 0 {
 		chunk := min(len(cache), n)
-		_, _ = out.Write(cache[:chunk])
+		if _, err := out.Write(cache[:chunk]); err != nil {
+			return err
+		}
 		n -= chunk
+		if n > 0 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
 	}
+	return nil
 }
 
 func expandNextTabstop(tabstops []int, col int, mode expandRemainingMode) int {

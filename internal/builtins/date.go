@@ -616,7 +616,7 @@ func dateOutputTime(parsed time.Time, loc *time.Location, utc bool) time.Time {
 }
 
 func writeDateOutput(inv *Invocation, current time.Time, opts *dateOptions) error {
-	text, err := formatDateOutput(current, opts)
+	text, err := formatDateOutput(current, opts, maxFieldBytes(inv))
 	if err != nil {
 		return exitf(inv, 1, "date: %v", err)
 	}
@@ -626,10 +626,10 @@ func writeDateOutput(inv *Invocation, current time.Time, opts *dateOptions) erro
 	return nil
 }
 
-func formatDateOutput(current time.Time, opts *dateOptions) (string, error) {
+func formatDateOutput(current time.Time, opts *dateOptions, maxBytes int64) (string, error) {
 	switch opts.format {
 	case dateFormatCustom:
-		return formatDateString(current, opts.formatArg)
+		return formatDateStringLimit(current, opts.formatArg, maxBytes)
 	case dateFormatISO8601:
 		switch opts.formatArg {
 		case "date":

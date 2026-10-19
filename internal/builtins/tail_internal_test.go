@@ -65,3 +65,26 @@ func TestTailSameFileInfoReturnsUnknownWithoutComparableIdentity(t *testing.T) {
 		t.Fatalf("tailSameFileInfo(virtual, virtual) = (%v, %v), want (false, false)", same, known)
 	}
 }
+
+func TestParseTailSleepIntervalClampsToTickerRange(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]time.Duration{
+		"0":      time.Millisecond,
+		"0.0001": time.Millisecond,
+		"1.5":    1500 * time.Millisecond,
+		"1e300":  time.Duration(1<<63 - 1),
+		"inf":    time.Duration(1<<63 - 1),
+	}
+	for raw, want := range cases {
+		got, err := parseTailSleepInterval(raw)
+		if err != nil || got != want {
+			t.Fatalf("parseTailSleepInterval(%q) = %v, %v; want %v", raw, got, err, want)
+		}
+	}
+	for _, raw := range []string{"-1", "nan", "x"} {
+		if _, err := parseTailSleepInterval(raw); err == nil {
+			t.Fatalf("parseTailSleepInterval(%q) error = nil, want invalid interval", raw)
+		}
+	}
+}

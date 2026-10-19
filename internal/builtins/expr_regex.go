@@ -82,10 +82,16 @@ type exprRegexState struct {
 	captures *exprRegexCaptures
 }
 
+// exprRegexMatcher enumerates match end states depth-first, in the same
+// order the former list-building matcher produced them, and hands each to a
+// yield callback that returns false to stop the search.
 type exprRegexMatcher struct {
 	input []exprRegexUnit
 	steps int
+	err   error
 }
+
+type exprRegexYield func(exprRegexState) bool
 
 const exprRegexMaxSteps = 200000
 
@@ -112,22 +118,26 @@ func exprRunRegex(root *exprRegexExpr, captureCount int, units []exprRegexUnit, 
 		input: units,
 		steps: exprRegexMaxSteps,
 	}
-	states, err := matcher.matchExpr(root, exprRegexState{})
-	if err != nil {
-		return exprValue{}, err
+	// The result is the first enumerated state with the greatest end
+	// position, so the search can stop at the first state that consumes the
+	// whole input; no later state can be longer.
+	var best exprRegexState
+	found := false
+	matcher.matchExpr(root, exprRegexState{}, func(state exprRegexState) bool {
+		if !found || state.pos > best.pos {
+			best = state
+			found = true
+		}
+		return best.pos < len(units)
+	})
+	if matcher.err != nil {
+		return exprValue{}, matcher.err
 	}
-	if len(states) == 0 {
+	if !found {
 		if captureCount > 0 {
 			return newExprString(""), nil
 		}
 		return exprZeroValue(), nil
-	}
-
-	best := states[0]
-	for i := 1; i < len(states); i++ {
-		if states[i].pos > best.pos {
-			best = states[i]
-		}
 	}
 
 	if captureCount == 0 {
@@ -555,153 +565,132 @@ func (p *exprRegexParser) tryParsePOSIXClass() (exprRegexCharClassElem, bool) {
 	return exprRegexCharClassElem{posixClass: exprRegexPOSIXClassUnmatched}, true
 }
 
-func (m *exprRegexMatcher) matchExpr(expr *exprRegexExpr, state exprRegexState) ([]exprRegexState, error) {
-	if err := m.step(); err != nil {
-		return nil, err
+func (m *exprRegexMatcher) matchExpr(expr *exprRegexExpr, state exprRegexState, yield exprRegexYield) bool {
+	if !m.step() {
+		return false
 	}
-
-	results := make([]exprRegexState, 0, 4)
 	for i := range expr.alternatives {
-		states, err := m.matchSeq(expr.alternatives[i], state)
-		if err != nil {
-			return nil, err
+		if !m.matchSeq(expr.alternatives[i], state, yield) {
+			return false
 		}
-		results = append(results, states...)
 	}
-	return results, nil
+	return true
 }
 
-func (m *exprRegexMatcher) matchSeq(seq exprRegexSeq, state exprRegexState) ([]exprRegexState, error) {
-	states := []exprRegexState{state}
-	for _, node := range seq {
-		nextStates := make([]exprRegexState, 0, len(states))
-		for i := range states {
-			matched, err := m.matchNode(node, states[i])
-			if err != nil {
-				return nil, err
-			}
-			nextStates = append(nextStates, matched...)
-		}
-		if len(nextStates) == 0 {
-			return nil, nil
-		}
-		states = nextStates
+func (m *exprRegexMatcher) matchSeq(seq exprRegexSeq, state exprRegexState, yield exprRegexYield) bool {
+	if len(seq) == 0 {
+		return yield(state)
 	}
-	return states, nil
+	rest := seq[1:]
+	return m.matchNode(seq[0], state, func(next exprRegexState) bool {
+		return m.matchSeq(rest, next, yield)
+	})
 }
 
-func (m *exprRegexMatcher) matchNode(node *exprRegexNode, state exprRegexState) ([]exprRegexState, error) {
-	if err := m.step(); err != nil {
-		return nil, err
+func (m *exprRegexMatcher) matchNode(node *exprRegexNode, state exprRegexState, yield exprRegexYield) bool {
+	if !m.step() {
+		return false
 	}
 
 	switch node.kind {
 	case exprRegexLiteral:
 		if state.pos >= len(m.input) || m.input[state.pos].text != node.literal {
-			return nil, nil
+			return true
 		}
 		state.pos++
-		return []exprRegexState{state}, nil
+		return yield(state)
 	case exprRegexAny:
 		if state.pos >= len(m.input) {
-			return nil, nil
+			return true
 		}
 		state.pos++
-		return []exprRegexState{state}, nil
+		return yield(state)
 	case exprRegexNodeCharClass:
 		if state.pos >= len(m.input) || !node.class.matches(m.input[state.pos]) {
-			return nil, nil
+			return true
 		}
 		state.pos++
-		return []exprRegexState{state}, nil
+		return yield(state)
 	case exprRegexBegin:
 		if state.pos != 0 {
-			return nil, nil
+			return true
 		}
-		return []exprRegexState{state}, nil
+		return yield(state)
 	case exprRegexEnd:
 		if state.pos != len(m.input) {
-			return nil, nil
+			return true
 		}
-		return []exprRegexState{state}, nil
+		return yield(state)
 	case exprRegexBackref:
 		capture := state.capture(node.group)
 		if !capture.set {
-			return nil, nil
+			return true
 		}
 		length := capture.end - capture.start
 		if state.pos+length > len(m.input) {
-			return nil, nil
+			return true
 		}
 		for i := range length {
 			if m.input[capture.start+i].text != m.input[state.pos+i].text {
-				return nil, nil
+				return true
 			}
 		}
 		state.pos += length
-		return []exprRegexState{state}, nil
+		return yield(state)
 	case exprRegexGroup:
 		start := state.pos
-		states, err := m.matchExpr(node.expr, state)
-		if err != nil {
-			return nil, err
-		}
-		results := make([]exprRegexState, 0, len(states))
-		for i := range states {
-			matched := states[i]
-			matched = matched.withCapture(node.group, exprRegexCapture{
+		return m.matchExpr(node.expr, state, func(matched exprRegexState) bool {
+			return yield(matched.withCapture(node.group, exprRegexCapture{
 				set:   true,
 				start: start,
 				end:   matched.pos,
-			})
-			results = append(results, matched)
-		}
-		return results, nil
+			}))
+		})
 	case exprRegexRepeat:
-		return m.matchRepeat(node, state, 0)
+		return m.matchRepeat(node, state, 0, yield)
 	default:
-		return nil, exprInvalidRegexExpressionError()
+		m.err = exprInvalidRegexExpressionError()
+		return false
 	}
 }
 
-func (m *exprRegexMatcher) matchRepeat(node *exprRegexNode, state exprRegexState, count int) ([]exprRegexState, error) {
-	if err := m.step(); err != nil {
-		return nil, err
+func (m *exprRegexMatcher) matchRepeat(node *exprRegexNode, state exprRegexState, count int, yield exprRegexYield) bool {
+	if !m.step() {
+		return false
 	}
 
-	results := make([]exprRegexState, 0, 4)
 	if node.max < 0 || count < node.max {
-		states, err := m.matchNode(node.child, state)
-		if err != nil {
-			return nil, err
-		}
-		for i := range states {
-			matched := states[i]
+		ok := m.matchNode(node.child, state, func(matched exprRegexState) bool {
 			if matched.pos == state.pos {
 				if count+1 >= node.min {
-					results = append(results, matched)
+					return yield(matched)
 				}
-				continue
+				return true
 			}
-			next, err := m.matchRepeat(node, matched, count+1)
-			if err != nil {
-				return nil, err
-			}
-			results = append(results, next...)
+			return m.matchRepeat(node, matched, count+1, yield)
+		})
+		if !ok {
+			return false
 		}
 	}
 	if count >= node.min {
-		results = append(results, state)
+		return yield(state)
 	}
-	return results, nil
+	return true
 }
 
-func (m *exprRegexMatcher) step() error {
+// step charges one unit of matching work. Exhausting the budget stops the
+// search with a distinct "too complex" error rather than reporting the
+// (valid) pattern as invalid.
+func (m *exprRegexMatcher) step() bool {
 	m.steps--
 	if m.steps < 0 {
-		return exprInvalidRegexExpressionError()
+		if m.err == nil {
+			m.err = exprRegexTooComplexError()
+		}
+		return false
 	}
-	return nil
+	return true
 }
 
 func (s exprRegexState) capture(group int) exprRegexCapture {
