@@ -242,6 +242,7 @@ func readColumnContent(ctx context.Context, inv *Invocation, files []string) (st
 		stdinData   []byte
 		stdinLoaded bool
 	)
+	budget := newInputBudget(inv)
 
 	for _, name := range files {
 		var data []byte
@@ -267,6 +268,9 @@ func readColumnContent(ctx context.Context, inv *Invocation, files []string) (st
 				return "", err
 			}
 			data = fileData
+		}
+		if err := budget.add(len(data)); err != nil {
+			return "", err
 		}
 		if _, err := builder.Write(data); err != nil {
 			return "", &ExitError{Code: 1, Err: err}

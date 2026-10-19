@@ -218,3 +218,22 @@ func TestStreamingLineReadersRejectOversizedLines(t *testing.T) {
 		t.Fatalf("ExitCode = %d, Stdout = %q, want 0 %q; stderr=%q", result.ExitCode, got, want, result.Stderr)
 	}
 }
+
+func TestFileOperandBuiltinsCapCombinedInput(t *testing.T) {
+	t.Parallel()
+	// 4 x MaxFileBytes (100) is the combined cap; five 90-byte files exceed it.
+	setup := "for i in 1 2 3 4 5 6 7 8 9; do printf 'line%04d\\n' $i; done > /tmp/f\n"
+	for _, cmd := range []string{"sort", "sed p", "tac", "paste", "rev", "column"} {
+		result := execWithDeadline(t, smallFileLimitConfig(100), setup+cmd+" /tmp/f /tmp/f /tmp/f /tmp/f /tmp/f >/dev/null\n")
+		want := 1
+		if cmd == "sort" {
+			want = 2
+		}
+		assertExitStderr(t, result, want, "combined input exceeds maximum size of 400 bytes")
+
+		result = execWithDeadline(t, smallFileLimitConfig(100), setup+cmd+" /tmp/f /tmp/f /tmp/f /tmp/f >/dev/null\n")
+		if result.ExitCode != 0 {
+			t.Fatalf("%s within the cap: ExitCode = %d; stderr=%q", cmd, result.ExitCode, result.Stderr)
+		}
+	}
+}

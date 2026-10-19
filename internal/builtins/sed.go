@@ -164,12 +164,16 @@ func (c *Sed) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCom
 		var lines []string
 		trailingNL := false
 		seenLines := false
+		budget := newInputBudget(inv)
 		for _, file := range files {
 			data, _, err := readAllFile(ctx, inv, file)
 			if err != nil {
 				_, _ = fmt.Fprintf(inv.Stderr, "sed: %s: %s\n", file, readAllErrorText(err))
 				exitCode = 1
 				continue
+			}
+			if err := budget.add(len(data)); err != nil {
+				return err
 			}
 			fileLines := textLines(data)
 			if len(fileLines) == 0 {
