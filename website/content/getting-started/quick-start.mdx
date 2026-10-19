@@ -94,7 +94,7 @@ gbash --root /path/to/project --cwd /home/agent/project -c 'pwd; ls'
 Non-interactive runs can emit a single structured result object:
 
 ```bash
-gbash -c 'echo hello' --json
+gbash --json -c 'echo hello'
 ```
 
 The JSON payload includes `stdout`, `stderr`, `exitCode`, truncation flags, timing metadata, and trace metadata when tracing is enabled by the wrapper.

@@ -408,7 +408,7 @@ func TestRunCLIJSONOutputEncodesExecutionResult(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), []string{"-c", "printf 'hello\\n'; printf 'warn\\n' >&2", "--json"}, strings.NewReader(""), &stdout, &stderr, false)
+	exitCode, err := runCLI(context.Background(), []string{"--json", "-c", "printf 'hello\\n'; printf 'warn\\n' >&2"}, strings.NewReader(""), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
@@ -445,7 +445,7 @@ func TestRunCLIJSONOutputEncodesCLIError(t *testing.T) {
 	var stdout strings.Builder
 	var stderr strings.Builder
 
-	exitCode, err := runCLI(context.Background(), []string{"-c", "pwd", "--json", "--root", "/", "--readwrite-root", "/"}, strings.NewReader(""), &stdout, &stderr, false)
+	exitCode, err := runCLI(context.Background(), []string{"--json", "--root", "/", "--readwrite-root", "/", "-c", "pwd"}, strings.NewReader(""), &stdout, &stderr, false)
 	if err != nil {
 		t.Fatalf("runCLI() error = %v", err)
 	}
