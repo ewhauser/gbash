@@ -258,7 +258,7 @@ func (o *OverlayFS) Chmod(ctx context.Context, name string, mode stdfs.FileMode)
 		return toPathError("chmod", requested, err)
 	}
 	if source == overlaySourceLower {
-		if err := clonePathWithInfo(ctx, o.lower, abs, info, o.upper, abs); err != nil {
+		if err := o.copyUpNode(ctx, abs, info); err != nil {
 			return toPathError("chmod", abs, err)
 		}
 	}
@@ -275,7 +275,7 @@ func (o *OverlayFS) Chown(ctx context.Context, name string, uid, gid uint32, fol
 		return toPathError("chown", requested, err)
 	}
 	if source == overlaySourceLower {
-		if err := clonePathWithInfo(ctx, o.lower, abs, info, o.upper, abs); err != nil {
+		if err := o.copyUpNode(ctx, abs, info); err != nil {
 			return toPathError("chown", abs, err)
 		}
 	}
@@ -292,7 +292,7 @@ func (o *OverlayFS) Chtimes(ctx context.Context, name string, atime, mtime time.
 		return toPathError("chtimes", requested, err)
 	}
 	if source == overlaySourceLower {
-		if err := clonePathWithInfo(ctx, o.lower, abs, info, o.upper, abs); err != nil {
+		if err := o.copyUpNode(ctx, abs, info); err != nil {
 			return toPathError("chtimes", abs, err)
 		}
 	}
@@ -309,7 +309,7 @@ func (o *OverlayFS) Lchtimes(ctx context.Context, name string, atime, mtime time
 		return toPathError("lchtimes", requested, err)
 	}
 	if source == overlaySourceLower {
-		if err := clonePathWithInfo(ctx, o.lower, abs, info, o.upper, abs); err != nil {
+		if err := o.copyUpNode(ctx, abs, info); err != nil {
 			return toPathError("lchtimes", abs, err)
 		}
 	}
@@ -467,6 +467,36 @@ const (
 	overlaySourceUpper
 	overlaySourceLower
 )
+
+// copyUpNode copies the node at abs, which the merged view currently takes
+// from the lower layer, into the upper layer so a metadata change can be
+// recorded there. Missing upper ancestors are created with their lower
+// metadata. A directory is copied as a bare node: its children stay in the
+// lower layer, where the merged ReadDir still finds them and tombstones keep
+// deleted ones hidden.
+func (o *OverlayFS) copyUpNode(ctx context.Context, abs string, info stdfs.FileInfo) error {
+	parent := parentDir(abs)
+	if parent != "/" {
+		current := "/"
+		for part := range strings.SplitSeq(strings.TrimPrefix(parent, "/"), "/") {
+			current = joinChildPath(current, part)
+			dirInfo, source, err := o.visiblePrefixInfo(ctx, current)
+			if err != nil {
+				return err
+			}
+			if source == overlaySourceUpper {
+				continue
+			}
+			if err := cloneDirNode(ctx, o.upper, current, dirInfo); err != nil {
+				return err
+			}
+		}
+	}
+	if info.IsDir() {
+		return cloneDirNode(ctx, o.upper, abs, info)
+	}
+	return clonePathWithInfo(ctx, o.lower, abs, info, o.upper, abs)
+}
 
 func (o *OverlayFS) visibleInfo(ctx context.Context, abs string) (stdfs.FileInfo, overlaySource, error) {
 	if info, err := o.upper.Lstat(ctx, abs); err == nil {
