@@ -233,6 +233,12 @@ func catWouldUnsafeOverwrite(ctx context.Context, inv *Invocation, name string) 
 	if err != nil {
 		return false, nil
 	}
+	if !info.Mode().IsRegular() || !outputInfo.Mode().IsRegular() {
+		// Only a regular file can be overwritten while cat reads it. Opening
+		// any other input to compare it would also consume one-shot sources
+		// such as a process substitution before cat reads them.
+		return false, nil
+	}
 	if !testSameFile(info, outputInfo) {
 		file, _, openErr := openRead(ctx, inv, name)
 		if openErr != nil {
