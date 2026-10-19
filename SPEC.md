@@ -825,6 +825,8 @@ Path-policy enforcement rule for the current runtime:
 
 - the lexical path the user asked for is checked first
 - if the backend resolves that path through a symlink, the resolved target path is checked before backend access
+- remove, rename, lstat, and readlink checks resolve symlinks in every parent component but leave the final entry itself unresolved
+- write and mkdir checks resolve through the deepest existing ancestor and follow dangling symlinks, because creating operations may materialize missing components behind them
 - in `SymlinkDeny` mode, any attempted traversal through a symlink fails even if both lexical and resolved paths would otherwise be allowed
 
 ## 13. Trace Model
