@@ -11,15 +11,26 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
 // MemoryFS is the default mutable in-memory sandbox filesystem.
+//
+// Creating operations (OpenFile with O_CREATE, Symlink, Link, Rename, Mkfifo)
+// require the destination's parent directory to exist, matching POSIX: a
+// missing parent fails with ENOENT and a non-directory parent with ENOTDIR.
 type MemoryFS struct {
 	mu         sync.RWMutex
 	cwd        string
 	nodes      map[string]*memoryNode
 	nextNodeID uint64
+
+	// implicitParents makes creating operations create missing parent
+	// directories instead of failing. Only OverlayFS's upper layer sets it:
+	// copy-up writes upper paths whose parents may exist only in the lower
+	// layer, and the overlay validates parents against its merged view.
+	implicitParents bool
 }
 
 type memoryNode struct {
@@ -60,6 +71,14 @@ func NewMemory() *MemoryFS {
 	}
 }
 
+// newMemoryWithImplicitParents creates a MemoryFS whose creating operations
+// create missing parent directories. It backs OverlayFS's upper layer.
+func newMemoryWithImplicitParents() *MemoryFS {
+	m := NewMemory()
+	m.implicitParents = true
+	return m
+}
+
 // Clone returns an isolated copy of the in-memory filesystem state.
 func (m *MemoryFS) Clone() *MemoryFS {
 	m.mu.RLock()
@@ -91,9 +110,10 @@ func (m *MemoryFS) Clone() *MemoryFS {
 	}
 
 	return &MemoryFS{
-		cwd:        m.cwd,
-		nodes:      nodes,
-		nextNodeID: m.nextNodeID,
+		cwd:             m.cwd,
+		nodes:           nodes,
+		nextNodeID:      m.nextNodeID,
+		implicitParents: m.implicitParents,
 	}
 }
 
@@ -247,7 +267,7 @@ func (m *MemoryFS) Symlink(_ context.Context, target, linkName string) error {
 	if _, exists := m.nodes[abs]; exists {
 		return &os.PathError{Op: "symlink", Path: abs, Err: stdfs.ErrExist}
 	}
-	if err := m.mkdirAllLocked(parentDir(abs), 0o755); err != nil {
+	if err := m.ensureParentLocked("symlink", abs); err != nil {
 		return err
 	}
 	m.nodes[abs] = &memoryNode{
@@ -259,7 +279,7 @@ func (m *MemoryFS) Symlink(_ context.Context, target, linkName string) error {
 		uid:     DefaultOwnerUID,
 		gid:     DefaultOwnerGID,
 	}
-	m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{} //nolint:nilaway // parent guaranteed by mkdirAllLocked above
+	m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{} //nolint:nilaway // parent guaranteed by ensureParentLocked above
 	return nil
 }
 
@@ -275,17 +295,30 @@ func (m *MemoryFS) Link(_ context.Context, oldName, newName string) error {
 		return &os.PathError{Op: "link", Path: oldAbs, Err: stdfs.ErrInvalid}
 	}
 
-	newAbs := Resolve(m.cwd, newName)
-	if _, existing, err := m.resolvePathLocked(newName, false, true); err == nil && existing != nil {
+	requested := Resolve(m.cwd, newName)
+	newAbs, existing, err := m.resolvePathLocked(newName, false, true)
+	switch {
+	case err == nil && existing != nil:
 		return &os.PathError{Op: "link", Path: newAbs, Err: stdfs.ErrExist}
-	} else if err != nil && !errors.Is(err, stdfs.ErrNotExist) {
-		return &os.PathError{Op: "link", Path: newAbs, Err: err}
+	case err == nil:
+		// Resolved symlinked parents and found a missing final leaf.
+	case errors.Is(err, stdfs.ErrNotExist):
+		parentAbs, parentErr := m.resolveCreatePathLocked(parentDir(requested), 0)
+		if parentErr != nil {
+			return &os.PathError{Op: "link", Path: requested, Err: parentErr}
+		}
+		newAbs = Resolve(parentAbs, path.Base(requested))
+		if _, exists := m.nodes[newAbs]; exists {
+			return &os.PathError{Op: "link", Path: newAbs, Err: stdfs.ErrExist}
+		}
+	default:
+		return &os.PathError{Op: "link", Path: requested, Err: err}
 	}
-	if err := m.mkdirAllLocked(parentDir(newAbs), 0o755); err != nil {
+	if err := m.ensureParentLocked("link", newAbs); err != nil {
 		return err
 	}
 	m.nodes[newAbs] = node
-	m.nodes[parentDir(newAbs)].children[path.Base(newAbs)] = struct{}{} //nolint:nilaway // parent guaranteed by mkdirAllLocked above
+	m.nodes[parentDir(newAbs)].children[path.Base(newAbs)] = struct{}{} //nolint:nilaway // parent guaranteed by ensureParentLocked above
 	node.modTime = time.Now().UTC()
 	return nil
 }
@@ -298,6 +331,9 @@ func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm std
 	if (flag&os.O_TRUNC == 0 || !canWrite(flag)) && flag&(os.O_CREATE|os.O_EXCL) != (os.O_CREATE|os.O_EXCL) {
 		if _, err := m.materializePath(ctx, name, true); err != nil {
 			if flag&os.O_CREATE == 0 || !errors.Is(err, stdfs.ErrNotExist) {
+				if flag&os.O_CREATE != 0 {
+					err = createParentError(err)
+				}
 				return nil, &os.PathError{Op: "open", Path: Resolve(m.Getwd(), name), Err: err}
 			}
 		}
@@ -315,7 +351,7 @@ func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm std
 	if flag&os.O_CREATE != 0 {
 		abs, err = m.resolveCreatePathLocked(requested, 0)
 		if err != nil {
-			return nil, &os.PathError{Op: "open", Path: requested, Err: err}
+			return nil, &os.PathError{Op: "open", Path: requested, Err: createParentError(err)}
 		}
 		node = m.nodes[abs]
 	} else {
@@ -328,7 +364,7 @@ func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm std
 		if flag&os.O_CREATE == 0 {
 			return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrNotExist}
 		}
-		if err := m.mkdirAllLocked(parentDir(abs), 0o755); err != nil {
+		if err := m.ensureParentLocked("open", abs); err != nil {
 			return nil, err
 		}
 		if perm == 0 {
@@ -343,7 +379,7 @@ func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm std
 			gid:     DefaultOwnerGID,
 		}
 		m.nodes[abs] = node
-		m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{} //nolint:nilaway // parent guaranteed by mkdirAllLocked above
+		m.nodes[parentDir(abs)].children[path.Base(abs)] = struct{}{} //nolint:nilaway // parent guaranteed by ensureParentLocked above
 	} else if flag&os.O_CREATE != 0 && flag&os.O_EXCL != 0 {
 		return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrExist}
 	}
@@ -622,12 +658,22 @@ func (m *MemoryFS) Rename(_ context.Context, oldName, newName string) error {
 	}
 	newAbs, node, err := m.resolvePathLocked(newName, false, true)
 	if err != nil {
-		return &os.PathError{Op: "rename", Path: Resolve(m.cwd, newName), Err: err}
+		if m.implicitParents && errors.Is(err, stdfs.ErrNotExist) {
+			newAbs, err = m.resolveCreatePathLocked(Resolve(m.cwd, newName), 0)
+		}
+		if err != nil {
+			return &os.PathError{Op: "rename", Path: Resolve(m.cwd, newName), Err: createParentError(err)}
+		}
 	}
 	if node != nil {
 		return &os.PathError{Op: "rename", Path: newAbs, Err: stdfs.ErrExist}
 	}
-	if err := m.mkdirAllLocked(parentDir(newAbs), 0o755); err != nil {
+	if isDescendantPath(newAbs, oldAbs) {
+		// Moving a directory into its own subtree would detach it from the
+		// tree; rename(2) reports EINVAL.
+		return &os.PathError{Op: "rename", Path: newAbs, Err: stdfs.ErrInvalid}
+	}
+	if err := m.ensureParentLocked("rename", newAbs); err != nil {
 		return err
 	}
 
@@ -647,7 +693,7 @@ func (m *MemoryFS) Rename(_ context.Context, oldName, newName string) error {
 		newPath := strings.Replace(oldPath, oldAbs, newAbs, 1)
 		m.nodes[newPath] = moveNode
 	}
-	m.nodes[parentDir(newAbs)].children[path.Base(newAbs)] = struct{}{} //nolint:nilaway // parent guaranteed by mkdirAllLocked above
+	m.nodes[parentDir(newAbs)].children[path.Base(newAbs)] = struct{}{} //nolint:nilaway // parent guaranteed by ensureParentLocked above
 	m.rebuildDirectoryChildrenLocked()
 	return nil
 }
@@ -731,6 +777,34 @@ func (m *MemoryFS) mkdirAllLocked(name string, perm stdfs.FileMode) error {
 		current = next
 	}
 	return nil
+}
+
+// ensureParentLocked prepares the parent directory of abs, a resolved path
+// about to be created. Missing parents fail with ENOENT and non-directory
+// parents with ENOTDIR, unless implicitParents is set, in which case missing
+// parents are created.
+func (m *MemoryFS) ensureParentLocked(op, abs string) error {
+	parent := parentDir(abs)
+	if m.implicitParents {
+		return m.mkdirAllLocked(parent, 0o755)
+	}
+	node, ok := m.nodes[parent]
+	if !ok {
+		return &os.PathError{Op: op, Path: abs, Err: syscall.ENOENT}
+	}
+	if !node.mode.IsDir() {
+		return &os.PathError{Op: op, Path: abs, Err: syscall.ENOTDIR}
+	}
+	return nil
+}
+
+// createParentError maps the ErrInvalid that path resolution reports for a
+// non-directory intermediate component to ENOTDIR for creating operations.
+func createParentError(err error) error {
+	if errors.Is(err, stdfs.ErrInvalid) {
+		return syscall.ENOTDIR
+	}
+	return err
 }
 
 func (m *MemoryFS) resolvePathLocked(name string, followFinal, allowMissingFinal bool) (string, *memoryNode, error) {

@@ -51,6 +51,9 @@ func CustomFileSystem(factory gbfs.Factory, workingDir string) gbruntime.FileSys
 func (f seededFSFactory) New(ctx context.Context) (gbfs.FileSystem, error) {
 	mem := gbfs.NewMemory()
 	for name, contents := range f.files {
+		if err := mem.MkdirAll(ctx, path.Dir(name), 0o755); err != nil {
+			return nil, err
+		}
 		file, err := mem.OpenFile(ctx, name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 		if err != nil {
 			return nil, err
