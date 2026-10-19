@@ -83,12 +83,12 @@ Use `make fix-modules MODULE_VERSION=vX.Y.Z` when preparing the next coordinated
 
 The supported release path is GitHub Actions driven:
 
-1. Run `make release` or dispatch the `Prepare Release` workflow manually.
-2. Review and merge the generated `release/vX.Y.Z` PR into `main`.
+1. Merge changes into `main` with Conventional Commit PR titles (`feat(scope): ...`, `fix(scope): ...`). The `Release Please` workflow keeps an open `chore(release): vX.Y.Z` PR up to date with the next version and a `CHANGELOG.md` entry, and syncs the nested module versions on that PR with `make fix-modules`.
+2. Review and merge the release PR into `main` when you want to ship. Run `make release` to re-run release-please by hand if the PR needs refreshing.
 3. Let the `Publish Release` workflow create the root plus contrib tags and publish the root GitHub release automatically, including both `gbash` and `gbash-extras` archives plus a shared checksum file.
 4. The same workflow requests each released Go module version from `proxy.golang.org`, which is the supported way to make the new docs show up on `pkg.go.dev` for the root module and the release-tagged contrib modules.
 
-`Prepare Release` derives the next release line by taking the latest root `v*` tag and incrementing the patch number.
+release-please picks the version from the commits since the last release: while gbash is below 1.0, `feat` and `fix` commits bump the patch number and breaking changes bump the minor number. Commits typed `docs`, `test`, `refactor`, `ci`, `build`, or `chore` do not open a release on their own. The current version is tracked in `.release-please-manifest.json`, and the release behavior is configured in `release-please-config.json`.
 
 `make tag-release RELEASE_VERSION=vX.Y.Z` remains available as a local fallback for debugging or manual recovery, but it is no longer the primary release path. If you need to re-request documentation indexing for an existing release, run `./scripts/publish_pkgsite.sh vX.Y.Z`.
 

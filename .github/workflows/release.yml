@@ -31,6 +31,7 @@ jobs:
       should_publish: ${{ steps.context.outputs.should_publish }}
       version: ${{ steps.context.outputs.version }}
       ref: ${{ steps.context.outputs.ref }}
+      pr_number: ${{ steps.context.outputs.pr_number }}
     steps:
       - id: context
         env:
@@ -45,6 +46,7 @@ jobs:
           should_publish=false
           version=""
           ref=""
+          pr_number=""
 
           if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
             should_publish=true
@@ -59,15 +61,19 @@ jobs:
               pr_head_repo=$(echo "${pr_json}" | jq -r '.head.repo.full_name')
               pr_head_ref=$(echo "${pr_json}" | jq -r '.head.ref')
               pr_labels=$(echo "${pr_json}" | jq -r '[.labels[].name] | join(",")')
-              pr_author=$(echo "${pr_json}" | jq -r '.user.login')
 
+              # A merged release-please PR: same-repo release branch that is
+              # still waiting to be tagged. The version comes from the
+              # manifest at the merge commit.
               if [[ "${pr_head_repo}" == "${REPOSITORY}" ]] \
-                && [[ "${pr_head_ref}" == release/v* ]] \
-                && [[ ",${pr_labels}," == *",release,"* ]] \
-                && [[ "${pr_author}" == "github-actions[bot]" ]]; then
+                && [[ "${pr_head_ref}" == release-please--branches--main* ]] \
+                && [[ ",${pr_labels}," == *",autorelease: pending,"* ]]; then
                 should_publish=true
-                version="${pr_head_ref#release/}"
+                manifest_version=$(gh api "repos/${REPOSITORY}/contents/.release-please-manifest.json?ref=${COMMIT_SHA}" \
+                  --jq '.content' | base64 -d | jq -r '."."')
+                version="v${manifest_version}"
                 ref="${COMMIT_SHA}"
+                pr_number=$(echo "${pr_json}" | jq -r '.number')
               fi
             fi
           fi
@@ -81,6 +87,7 @@ jobs:
             echo "should_publish=${should_publish}"
             echo "version=${version}"
             echo "ref=${ref}"
+            echo "pr_number=${pr_number}"
           } >> "${GITHUB_OUTPUT}"
 
   publish:
@@ -91,6 +98,8 @@ jobs:
       contents: write
       pages: write
       id-token: write
+      pull-requests: write
+      issues: write
     outputs:
       pages_deployable: ${{ steps.pages_state.outputs.deployable }}
     steps:
@@ -163,6 +172,22 @@ jobs:
           REMOTE: origin
           RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
         run: ./scripts/tag_release.sh
+
+      # release-please is configured with skip-github-release, so it relies on
+      # this label swap to know the merged release PR has been tagged. Until it
+      # happens, release-please will not open the next release PR.
+      - name: Mark release PR as tagged
+        if: needs.resolve.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh label create "autorelease: tagged" --repo "${REPOSITORY}" --color ededed 2>/dev/null || true
+          gh pr edit "${PR_NUMBER}" --repo "${REPOSITORY}" \
+            --remove-label "autorelease: pending" \
+            --add-label "autorelease: tagged"
 
       - name: Check out root release tag
         env:
@@ -278,7 +303,7 @@ jobs:
         run: ./scripts/publish_pkgsite.sh
 
       # npm publish for @ewhauser/gbash-wasm is intentionally disabled for now.
-      # Keep the package build in release-check and prepare-release so the package
+      # Keep the package build in release-check and the release PR checks so the package
       # stays releasable, but do not publish from the coordinated release workflow
       # until the npm distribution contract is finalized.
       #

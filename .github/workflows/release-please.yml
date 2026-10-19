@@ -1,0 +1,77 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      pr_branch: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).headBranchName || '' }}
+    steps:
+      # RELEASE_TOKEN (not GITHUB_TOKEN) so the release PR triggers the normal
+      # PR checks without a workflow approval gate. GitHub releases and tags are
+      # still created by the Publish Release workflow (skip-github-release).
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  sync-modules:
+    needs: release-please
+    if: needs.release-please.outputs.pr_branch != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ needs.release-please.outputs.pr_branch }}
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
+        with:
+          go-version-file: go.mod
+
+      - run: go mod download
+
+      - name: Sync module versions
+        id: sync
+        run: |
+          set -euo pipefail
+          version="v$(jq -r '."."' .release-please-manifest.json)"
+          if [[ ! "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "invalid release version in manifest: ${version}" >&2
+            exit 1
+          fi
+          make fix-modules MODULE_VERSION="${version}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Push synchronized modules to the release PR
+        env:
+          BRANCH: ${{ needs.release-please.outputs.pr_branch }}
+          VERSION: ${{ steps.sync.outputs.version }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet --exit-code; then
+            echo "modules already synchronized for ${VERSION}"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): sync module versions for ${VERSION}"
+          git push origin "HEAD:${BRANCH}"
