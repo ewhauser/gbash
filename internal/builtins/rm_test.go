@@ -268,6 +268,9 @@ func TestRMForceIgnoresRemoveNotExistAfterSuccessfulLstat(t *testing.T) {
 
 	ctx := context.Background()
 	mem := gbfs.NewMemory()
+	if err := mem.MkdirAll(ctx, "/tmp", 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
 	file, err := mem.OpenFile(ctx, "/tmp/race", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		t.Fatalf("OpenFile() error = %v", err)
@@ -310,6 +313,9 @@ func TestRMRecursiveEmptyOperandDoesNotTouchWorkingDirectory(t *testing.T) {
 
 	ctx := context.Background()
 	mem := gbfs.NewMemory()
+	if err := mem.MkdirAll(ctx, "/tmp", 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
 	file, err := mem.OpenFile(ctx, "/tmp/keep", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		t.Fatalf("OpenFile() error = %v", err)
@@ -348,6 +354,9 @@ func TestRMForceIgnoresInvalidLookupErrors(t *testing.T) {
 
 	ctx := context.Background()
 	mem := gbfs.NewMemory()
+	if err := mem.MkdirAll(ctx, "/tmp", 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
 	file, err := mem.OpenFile(ctx, "/tmp/existing-non-dir", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		t.Fatalf("OpenFile() error = %v", err)
@@ -404,6 +413,9 @@ func TestRMInteractiveAlwaysUsesWriteProtectedPrompts(t *testing.T) {
 
 			ctx := context.Background()
 			mem := gbfs.NewMemory()
+			if err := mem.MkdirAll(ctx, "/tmp", 0o755); err != nil {
+				t.Fatalf("MkdirAll() error = %v", err)
+			}
 			name := "empty"
 			if tt.contents != "" {
 				name = "full"
@@ -456,6 +468,9 @@ func TestRMDirDoesNotPromptWhenTTYEnvButRedirectedStdin(t *testing.T) {
 
 	ctx := context.Background()
 	mem := gbfs.NewMemory()
+	if err := mem.MkdirAll(ctx, "/tmp", 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
 	if err := mem.MkdirAll(ctx, "/tmp/inacc", 0o000); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
@@ -521,6 +536,9 @@ func TestRMRecursiveRemovesUnreadableEmptyDirectory(t *testing.T) {
 
 	ctx := context.Background()
 	mem := gbfs.NewMemory()
+	if err := mem.MkdirAll(ctx, "/tmp", 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
 	if err := mem.MkdirAll(ctx, "/tmp/inacc", 0o000); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
@@ -558,6 +576,9 @@ func TestRMRecursiveUnreadableNonEmptyDirectoryReportsPermissionDenied(t *testin
 
 	ctx := context.Background()
 	mem := gbfs.NewMemory()
+	if err := mem.MkdirAll(ctx, "/tmp", 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
 	if err := mem.MkdirAll(ctx, "/tmp/dir", 0o000); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
@@ -602,6 +623,9 @@ func TestRMVerbosePreservesTopLevelTrailingSlash(t *testing.T) {
 
 	ctx := context.Background()
 	mem := gbfs.NewMemory()
+	if err := mem.MkdirAll(ctx, "/tmp", 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
 	if err := mem.MkdirAll(ctx, "/tmp/a", 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}

@@ -80,6 +80,9 @@ func (c *overlayFuzzCursor) Intn(n int) int {
 func writeOverlayFuzzFile(t *testing.T, fsys FileSystem, name string, data []byte) {
 	t.Helper()
 
+	if err := fsys.MkdirAll(context.Background(), parentDir(name), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", parentDir(name), err)
+	}
 	file, err := fsys.OpenFile(context.Background(), name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		t.Fatalf("OpenFile(%q) error = %v", name, err)

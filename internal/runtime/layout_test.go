@@ -480,6 +480,9 @@ func TestEnsureCommandStubDoesNotCloneExistingLowerStub(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	lower := gbfs.NewMemory()
+	if err := lower.MkdirAll(ctx, "/bin", 0o755); err != nil {
+		t.Fatalf("MkdirAll(/bin) error = %v", err)
+	}
 	file, err := lower.OpenFile(ctx, "/bin/echo", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
 		t.Fatalf("OpenFile(/bin/echo) error = %v", err)

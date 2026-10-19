@@ -748,6 +748,9 @@ Implementation detail for the current runtime:
 - `MemoryFS` stores symlink entries directly for testing and path-safety enforcement, but the runtime still defaults to `SymlinkDeny`
 - `MemoryFS.Stat`, `Open`, `ReadDir`, `Chdir`, and `Realpath` follow symlinks; `Lstat`, `Readlink`, `Remove`, and `Rename` operate on the symlink entry itself
 - `MemoryFS` may also hold lazy regular-file providers that materialize on first content-sensitive access such as `Open`, `Stat`, `Lstat`, or `DirEntry.Info`
+- `MemoryFS` creating operations (`OpenFile` with `O_CREATE`, `Symlink`, `Link`, `Rename`, `Mkfifo`) never create missing parent directories: a missing parent fails with `ENOENT` and a non-directory parent with `ENOTDIR`, so `echo hi > /missing/dir/x` exits 1 with `No such file or directory` as in bash; only `MkdirAll` and initial-file seeding create parents
+- `MemoryFS.Rename` rejects moving a directory into its own subtree with `EINVAL`, matching `rename(2)` and `OverlayFS`
+- `OverlayFS`'s private upper-layer `MemoryFS` is the one exception to the parent rule: it creates missing upper parents implicitly so copy-up can write paths whose parents exist only in the lower layer
 
 Current and planned backends:
 
