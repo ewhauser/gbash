@@ -28,5 +28,5 @@ Versioning rules:
 - contrib modules should require real tagged `github.com/ewhauser/gbash` versions, not `v0.0.0`
 - contrib modules keep committed local `replace` directives so each module builds against the local checkout before those tags exist
 - `make fix-modules MODULE_VERSION=vX.Y.Z` updates the nested module requirements and refreshes those local replaces
-- the default release flow is GitHub Actions based: prepare a `release/vX.Y.Z` PR, merge it, and let publish automation create the matching root plus contrib tags
+- the default release flow is GitHub Actions based: merge the release-please `chore(release): vX.Y.Z` PR, and let publish automation create the matching root plus contrib tags
 - `make tag-release RELEASE_VERSION=vX.Y.Z` remains as a local fallback for debugging or manual recovery

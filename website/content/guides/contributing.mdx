@@ -68,11 +68,11 @@ This updates nested module requirements, refreshes local replaces, updates the n
 
 Releases are driven by GitHub Actions:
 
-1. Run `make release` or dispatch the **Prepare Release** workflow
-2. Review and merge the generated `release/vX.Y.Z` PR into `main`
+1. Merge changes into `main` with Conventional Commit PR titles (`feat(scope): ...`, `fix(scope): ...`). The **Release Please** workflow keeps an open `chore(release): vX.Y.Z` PR with the next version and changelog, and syncs nested module versions on it
+2. Review and merge the release PR into `main` when you want to ship
 3. The **Publish Release** workflow creates root and contrib tags, publishes the GitHub release with `gbash` and `gbash-extras` archives plus a shared checksum file
 
-The prepare step derives the next version by incrementing the patch number of the latest root `v*` tag.
+While gbash is below 1.0, `feat` and `fix` commits bump the patch number and breaking changes bump the minor number.
 
 ## Benchmarks
 
