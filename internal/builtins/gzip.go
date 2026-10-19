@@ -148,16 +148,16 @@ func runGzipItem(ctx context.Context, inv *Invocation, opts *gzipOptions, name, 
 	defer closeInput()
 
 	if opts.test {
-		return gzipMaybeQuietError(gzipTestStream(inv, opts.verbose, name, reader), opts.quiet)
+		return gzipMaybeQuietError(gzipTestStream(ctx, inv, opts.verbose, name, reader), opts.quiet)
 	}
 
 	if opts.toStdout || name == "-" {
 		if opts.decompress {
-			if err := gunzipStream(reader, inv.Stdout); err != nil {
+			if err := gunzipStream(ctx, reader, inv.Stdout, 0); err != nil {
 				return gzipExitf(inv, opts.quiet, "%s: %v", commandName, err)
 			}
 		} else {
-			if err := gzipStream(inv.Stdout, reader); err != nil {
+			if err := gzipStream(ctx, inv.Stdout, reader); err != nil {
 				return gzipExitf(inv, opts.quiet, "%s: %v", commandName, err)
 			}
 		}
@@ -194,11 +194,12 @@ func runGzipItem(ctx context.Context, inv *Invocation, opts *gzipOptions, name, 
 	writeErr := func() error {
 		defer func() { _ = output.Close() }()
 		if opts.decompress {
-			return gunzipStream(reader, output)
+			return gunzipStream(ctx, reader, output, fileSizeLimit(inv))
 		}
-		return gzipStream(output, reader)
+		return gzipStream(ctx, output, reader)
 	}()
 	if writeErr != nil {
+		_ = inv.FS.Remove(ctx, targetAbs, false)
 		return gzipExitf(inv, opts.quiet, "%s: %v", commandName, writeErr)
 	}
 	recordFileMutation(inv.TraceRecorder(), "write", targetAbs, sourceAbs, targetAbs)
@@ -269,8 +270,8 @@ func gzipInputError(inv *Invocation, quiet bool, name string, err error) error {
 	return gzipExitf(inv, quiet, "gzip: %s: %v", name, err)
 }
 
-func gzipTestStream(inv *Invocation, verbose bool, displayName string, reader io.Reader) error {
-	err := gunzipStream(reader, io.Discard)
+func gzipTestStream(ctx context.Context, inv *Invocation, verbose bool, displayName string, reader io.Reader) error {
+	err := gunzipStream(ctx, reader, io.Discard, 0)
 	if err != nil {
 		return exitf(inv, 1, "gzip: %v", err)
 	}
@@ -298,22 +299,24 @@ func gzipTargetExists(ctx context.Context, inv *Invocation, targetAbs string) (b
 	return exists, nil
 }
 
-func gzipStream(dst io.Writer, src io.Reader) error {
+func gzipStream(ctx context.Context, dst io.Writer, src io.Reader) error {
 	zw := gzip.NewWriter(dst)
-	if _, err := io.Copy(zw, src); err != nil {
+	if _, err := copyBounded(ctx, zw, src, 0); err != nil {
 		_ = zw.Close()
 		return err
 	}
 	return zw.Close()
 }
 
-func gunzipStream(src io.Reader, dst io.Writer) error {
+// gunzipStream decompresses src into dst, failing once the output exceeds
+// maxBytes (when positive) so decompression bombs cannot grow without bound.
+func gunzipStream(ctx context.Context, src io.Reader, dst io.Writer, maxBytes int64) error {
 	zr, err := gzip.NewReader(src)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = zr.Close() }()
-	_, err = io.Copy(dst, zr)
+	_, err = copyBounded(ctx, dst, zr, maxBytes)
 	return err
 }
 
