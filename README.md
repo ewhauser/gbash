@@ -215,7 +215,7 @@ gbash --root /path/to/project --cwd /home/agent/project -c 'pwd; ls'
 For programmatic wrappers and harnesses, non-interactive runs can emit one structured JSON object instead of streaming stdout and stderr directly:
 
 ```bash
-gbash -c 'echo hello' --json
+gbash --json -c 'echo hello'
 ```
 
 The JSON payload includes `stdout`, `stderr`, `exitCode`, truncation flags, timing metadata, and trace metadata when the wrapper enables tracing on the underlying runtime.

@@ -1,19 +1,26 @@
 package cli
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ewhauser/gbash"
 	"github.com/ewhauser/gbash/trace"
 )
 
 type jsonExecutionResult struct {
-	Stdout          string            `json:"stdout"`
-	Stderr          string            `json:"stderr"`
+	Stdout string `json:"stdout"`
+	Stderr string `json:"stderr"`
+	// StdoutBase64 and StderrBase64 carry the exact bytes, base64-encoded,
+	// only when the stream is not valid UTF-8; Stdout and Stderr then hold a
+	// lossy copy with invalid bytes replaced by U+FFFD.
+	StdoutBase64    string            `json:"stdoutBase64,omitempty"`
+	StderrBase64    string            `json:"stderrBase64,omitempty"`
 	ExitCode        int               `json:"exitCode"`
 	StdoutTruncated bool              `json:"stdoutTruncated"`
 	StderrTruncated bool              `json:"stderrTruncated"`
@@ -34,14 +41,14 @@ type jsonTraceSummary struct {
 	EventCount  int    `json:"eventCount"`
 }
 
-func writeJSONExecutionResult(w io.Writer, payload jsonExecutionResult) error {
+func writeJSONExecutionResult(w io.Writer, payload *jsonExecutionResult) error {
 	encoder := json.NewEncoder(writerOrDiscard(w))
 	encoder.SetEscapeHTML(false)
 	return encoder.Encode(payload)
 }
 
-func buildJSONExecutionResult(exitCode int, result *gbash.ExecutionResult, errText string) jsonExecutionResult {
-	payload := jsonExecutionResult{
+func buildJSONExecutionResult(exitCode int, result *gbash.ExecutionResult, errText string) *jsonExecutionResult {
+	payload := &jsonExecutionResult{
 		ExitCode: exitCode,
 	}
 	if result != nil {
@@ -53,7 +60,18 @@ func buildJSONExecutionResult(exitCode int, result *gbash.ExecutionResult, errTe
 		payload.Trace = jsonTraceFromEvents(result.Events)
 	}
 	payload.Stderr = appendStderrMessage(payload.Stderr, errText)
+	payload.StdoutBase64 = base64IfNotUTF8(payload.Stdout)
+	payload.StderrBase64 = base64IfNotUTF8(payload.Stderr)
 	return payload
+}
+
+// base64IfNotUTF8 returns the base64 encoding of text when JSON encoding
+// would otherwise replace invalid UTF-8 bytes, and "" when text is valid.
+func base64IfNotUTF8(text string) string {
+	if utf8.ValidString(text) {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString([]byte(text))
 }
 
 func jsonTimingFromExecution(result *gbash.ExecutionResult) *jsonTiming {

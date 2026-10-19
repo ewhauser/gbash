@@ -94,6 +94,25 @@ test("parseCustomCommand returns null when input contains shell control characte
   assert.equal(parseCustomCommand("greet (sub)", commands), null);
 });
 
+test("parseCustomCommand leaves expansions and multi-line input to the shell", () => {
+  const handler = () => ({ stdout: "", stderr: "", exitCode: 0 });
+  const commands = new Map([["greet", handler]]);
+  for (const command of [
+    "greet\nrm -rf /tmp/x",
+    "greet\r\necho",
+    "greet $HOME",
+    "greet '$HOME'",
+    "greet ${USER}",
+    "greet `id`",
+    "greet *.txt",
+    "greet file?.txt",
+    "greet [ab].txt",
+  ]) {
+    assert.equal(parseCustomCommand(command, commands), null, JSON.stringify(command));
+  }
+  assert.notEqual(parseCustomCommand("greet plain-arg", commands), null);
+});
+
 test("parseCustomCommand handles single-quoted arguments", () => {
   const handler = (args) => ({ stdout: args.join(","), stderr: "", exitCode: 0 });
   const commands = new Map([["echo", handler]]);

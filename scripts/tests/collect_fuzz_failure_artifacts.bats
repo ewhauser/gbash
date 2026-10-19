@@ -128,3 +128,19 @@ _create_fuzz_file() {
 	[[ "$output" == *"pkg/testdata/fuzz/FuzzFoo/corpus1"* ]]
 }
 
+
+@test "missing artifact directory and RUNNER_TEMP fails without deleting anything" {
+	mkdir -p "${SANDBOX}/fuzz-failure-artifacts"
+	echo keep > "${SANDBOX}/fuzz-failure-artifacts/keep"
+	run_gbash "cd /work && unset RUNNER_TEMP && source /scripts/collect_fuzz_failure_artifacts.sh"
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"RUNNER_TEMP is required"* ]]
+	[ -f "${SANDBOX}/fuzz-failure-artifacts/keep" ]
+}
+
+@test "root artifact directory is refused" {
+	run_gbash "cd /work && source /scripts/collect_fuzz_failure_artifacts.sh /"
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"refusing to use artifact directory"* ]]
+	[ -d "${SANDBOX}/work" ]
+}

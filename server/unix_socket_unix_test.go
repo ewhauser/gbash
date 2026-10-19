@@ -39,7 +39,7 @@ func TestListenUnixSocketNeverExposesPermissiveSocket(t *testing.T) {
 			}
 		}()
 
-		_, ln, err := listenUnixSocket(t.Context(), socket)
+		ln, err := listenUnixSocket(t.Context(), socket)
 		close(stop)
 		if err != nil {
 			t.Fatalf("listenUnixSocket(%q) error = %v", socket, err)
