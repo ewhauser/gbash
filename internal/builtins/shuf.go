@@ -552,6 +552,12 @@ func shufRunRange(ctx context.Context, inv *Invocation, writer *bufio.Writer, rn
 			return err
 		}
 		value, ok, err := iter.Next()
+		if errors.Is(err, errShufSparseRangeExhausted) {
+			if flushErr := writer.Flush(); flushErr != nil && !shufBrokenPipe(flushErr) {
+				return &ExitError{Code: 1, Err: flushErr}
+			}
+			return exitf(inv, 1, "shuf: cannot draw more than %d distinct values from a range this large; use -n or -r", shufSparseMaxEntries)
+		}
 		if err != nil {
 			return shufRandomExecutionError(inv, opts.randomSource, err)
 		}

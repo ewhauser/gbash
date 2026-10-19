@@ -164,3 +164,11 @@ func TestPrintfAndNumfmtHonorWidePrecision(t *testing.T) {
 	result = execWithDeadline(t, nil, "numfmt --format=%.40000000f 1\n")
 	assertExitStderr(t, result, 1, "numfmt: "+fieldTooLargeMessage)
 }
+
+func TestShufWideRangeHeadExitsQuickly(t *testing.T) {
+	t.Parallel()
+	result := execWithDeadline(t, nil, "shuf -i 0-2000000000 | head -1 | wc -l\nshuf -i 0-9223372036854775807 -n 3 | wc -l\n")
+	if got, want := result.Stdout, "1\n3\n"; result.ExitCode != 0 || got != want {
+		t.Fatalf("ExitCode = %d, Stdout = %q, want 0 %q; stderr=%q", result.ExitCode, got, want, result.Stderr)
+	}
+}
