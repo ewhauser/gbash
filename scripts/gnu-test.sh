@@ -134,7 +134,9 @@ write_launcher() {
   local gbash_bin=$2
   local hook_dir=$workdir/build-aux/gbash-harness
   local system_tmp_dir
+  local workdir_physical
   system_tmp_dir=$(CDPATH= cd -- "$(dirname "$workdir")" && pwd -P)
+  workdir_physical=$(CDPATH= cd -- "$workdir" && pwd -P)
   mkdir -p "$hook_dir"
 cat > "$hook_dir/gbash" <<EOF
 #!/bin/sh
@@ -184,10 +186,10 @@ jbgo_inherit_env_names() {
 
 jbgo_inherit_env=\$(jbgo_inherit_env_names)
 if [ -n "\$jbgo_inherit_env" ]; then
-  GBASH_SYSTEM_TMPDIR=$(shell_quote "$system_tmp_dir") exec $(shell_quote "$gbash_bin") --max-file-bytes $(shell_quote "$GNU_GBASH_MAX_FILE_BYTES") --inherit-env "\$jbgo_inherit_env" "\$@"
+  GBASH_SYSTEM_TMPDIR=$(shell_quote "$system_tmp_dir") exec $(shell_quote "$gbash_bin") --max-file-bytes $(shell_quote "$GNU_GBASH_MAX_FILE_BYTES") --compat-host-root $(shell_quote "$workdir") --compat-host-root $(shell_quote "$workdir_physical") --inherit-env "\$jbgo_inherit_env" "\$@"
 fi
 
-GBASH_SYSTEM_TMPDIR=$(shell_quote "$system_tmp_dir") exec $(shell_quote "$gbash_bin") --max-file-bytes $(shell_quote "$GNU_GBASH_MAX_FILE_BYTES") "\$@"
+GBASH_SYSTEM_TMPDIR=$(shell_quote "$system_tmp_dir") exec $(shell_quote "$gbash_bin") --max-file-bytes $(shell_quote "$GNU_GBASH_MAX_FILE_BYTES") --compat-host-root $(shell_quote "$workdir") --compat-host-root $(shell_quote "$workdir_physical") "\$@"
 EOF
   chmod 755 "$hook_dir/gbash"
 }

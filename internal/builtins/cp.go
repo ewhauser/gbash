@@ -722,7 +722,7 @@ func cpCopyDirectory(ctx context.Context, inv *Invocation, source, srcAbs string
 	if opts == nil || !opts.recursive {
 		return exitf(inv, 1, "cp: omitting directory %q", source)
 	}
-	if destAbs == srcAbs || strings.HasPrefix(destAbs, srcAbs+"/") {
+	if destAbs == srcAbs || strings.HasPrefix(destAbs, srcAbs+"/") || cpDestinationInsideSource(ctx, inv, srcAbs, destAbs) {
 		return exitf(inv, 1, "cp: cannot copy a directory, %s, into itself, %s", quoteGNUOperand(source), quoteGNUOperand(destDisplay))
 	}
 
@@ -742,6 +742,9 @@ func cpCopyDirectory(ctx context.Context, inv *Invocation, source, srcAbs string
 		return err
 	}
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		childSource := joinChildPath(source, entry.Name())
 		childInfo, childAbs, childLinkInfo, err := resolveCPSource(ctx, inv, childSource, opts, false)
 		if err != nil {
@@ -758,6 +761,32 @@ func cpCopyDirectory(ctx context.Context, inv *Invocation, source, srcAbs string
 		}
 	}
 	return nil
+}
+
+// cpDestinationInsideSource reports whether destAbs resolves inside srcAbs
+// through symlinks, which the lexical prefix check cannot see.
+func cpDestinationInsideSource(ctx context.Context, inv *Invocation, srcAbs, destAbs string) bool {
+	realSrc, err := inv.FS.Realpath(ctx, srcAbs)
+	if err != nil {
+		return false
+	}
+	existing, rest := destAbs, ""
+	for {
+		if _, err := inv.FS.StatQuiet(ctx, existing); err == nil {
+			break
+		}
+		if existing == "/" {
+			return false
+		}
+		rest = path.Join(path.Base(existing), rest)
+		existing = path.Dir(existing)
+	}
+	realExisting, err := inv.FS.Realpath(ctx, existing)
+	if err != nil {
+		return false
+	}
+	realDest := path.Join(realExisting, rest)
+	return realDest == realSrc || strings.HasPrefix(realDest, strings.TrimSuffix(realSrc, "/")+"/")
 }
 
 func cpPrepareDirectoryDestination(ctx context.Context, inv *Invocation, source, destAbs, destDisplay string, destInfo stdfs.FileInfo, destExists bool) (bool, error) {
@@ -793,15 +822,46 @@ func cpSameFile(ctx context.Context, inv *Invocation, srcAbs string, srcInfo std
 	if srcAbs == destAbs {
 		return true
 	}
-	if srcInfo != nil && destInfo != nil && testSameFile(srcInfo, destInfo) {
+	if srcInfo == nil || destInfo == nil {
+		return false
+	}
+	same, known := cpInfoSameFile(srcInfo, destInfo)
+	if same {
 		return true
 	}
-	if srcInfo != nil && destInfo != nil && destInfo.Mode()&stdfs.ModeSymlink != 0 {
-		if effectiveDestInfo, err := cpStatQuiet(ctx, inv, destAbs); err == nil && testSameFile(srcInfo, effectiveDestInfo) {
+	if destInfo.Mode()&stdfs.ModeSymlink != 0 {
+		effectiveDestInfo, err := cpStatQuiet(ctx, inv, destAbs)
+		if err != nil {
+			return false
+		}
+		if same, known = cpInfoSameFile(srcInfo, effectiveDestInfo); same {
 			return true
 		}
 	}
-	return false
+	if known || srcInfo.Mode()&stdfs.ModeSymlink != 0 {
+		return false
+	}
+	// Backends without inode identity: fall back to canonical paths, as mv does.
+	realSrc, err := inv.FS.Realpath(ctx, srcAbs)
+	if err != nil {
+		return false
+	}
+	realDst, err := inv.FS.Realpath(ctx, destAbs)
+	return err == nil && realSrc == realDst
+}
+
+// cpInfoSameFile compares file identity using host dev/inode or the sandbox
+// backend's node identity. known reports whether both sides had an identity.
+func cpInfoSameFile(a, b stdfs.FileInfo) (same, known bool) {
+	if testSameFile(a, b) {
+		return true, true
+	}
+	keyA, okA := fileInfoIdentity(a)
+	keyB, okB := fileInfoIdentity(b)
+	if okA && okB {
+		return keyA == keyB, true
+	}
+	return false, false
 }
 
 func prepareCPDestination(ctx context.Context, inv *Invocation, source, srcAbs string, srcInfo stdfs.FileInfo, copyingSymlink bool, destAbs, destDisplay string, destInfo stdfs.FileInfo, destExists, sameFile bool, opts *cpOptions, state *cpRunState) (copySourceAbs string, updatedDestInfo stdfs.FileInfo, updatedDestExists bool, err error) {
@@ -825,7 +885,10 @@ func prepareCPDestination(ctx context.Context, inv *Invocation, source, srcAbs s
 		if backupInfo, _, backupExists, err := lstatMaybe(ctx, inv, backupAbs); err != nil {
 			return "", nil, false, err
 		} else if backupExists {
-			if err := inv.FS.Remove(ctx, backupAbs, backupInfo.IsDir()); err != nil {
+			if backupInfo.IsDir() {
+				return "", nil, false, exitf(inv, 1, "cp: cannot backup %s: Is a directory", quoteGNUOperand(destDisplay))
+			}
+			if err := inv.FS.Remove(ctx, backupAbs, false); err != nil {
 				return "", nil, false, &ExitError{Code: 1, Err: err}
 			}
 		}

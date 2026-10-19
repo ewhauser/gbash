@@ -76,7 +76,12 @@ type splitInput struct {
 	info stdfs.FileInfo
 }
 
+// splitMaxOutputFiles bounds how many files one split invocation may create
+// so huge chunk counts cannot exhaust sandbox memory.
+const splitMaxOutputFiles = 100000
+
 type splitSuffixGenerator struct {
+	generated   uint64
 	alphabet    string
 	autoGrow    bool
 	width       int
@@ -287,6 +292,9 @@ func parseSplitStrategy(inv *Invocation, matches *ParsedCommand, opts *splitOpti
 		spec, err := parseSplitNumber(matches.Value("number"))
 		if err != nil {
 			return exitf(inv, 1, "split: %s", err.Error())
+		}
+		if spec.chunks > splitMaxOutputFiles && spec.kth == 0 && !matches.Has("elide-empty-files") {
+			return exitf(inv, 1, "split: invalid number of chunks: %s: too many output files (limit %d)", quoteGNUOperand(matches.Value("number")), splitMaxOutputFiles)
 		}
 		opts.mode = splitModeNumber
 		opts.number = spec
@@ -729,6 +737,13 @@ func splitWriteNumberContent(ctx context.Context, inv *Invocation, input splitIn
 }
 
 func splitWriteChunk(ctx context.Context, inv *Invocation, input splitInput, prefix string, opts *splitOptions, suffixes *splitSuffixGenerator, chunk []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if suffixes.generated >= splitMaxOutputFiles {
+		return exitf(inv, 1, "split: too many output files (limit %d)", splitMaxOutputFiles)
+	}
+	suffixes.generated++
 	name, err := suffixes.Next(inv)
 	if err != nil {
 		return err
@@ -1301,7 +1316,7 @@ func parseSplitSuffixLength(raw string) (int, error) {
 		return 0, fmt.Errorf("invalid suffix length")
 	}
 	value, err := strconv.ParseUint(raw, 10, 64)
-	if err != nil || value > uint64(math.MaxInt) {
+	if err != nil || value > maxOutputNameWidth {
 		return 0, fmt.Errorf("invalid suffix length")
 	}
 	return int(value), nil

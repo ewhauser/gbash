@@ -59,6 +59,9 @@ func WithConfig(cfg *Config) Option {
 		if cfg.AnalysisObserver != nil {
 			target.AnalysisObserver = cfg.AnalysisObserver
 		}
+		if len(cfg.CompatHostRoots) > 0 {
+			target.CompatHostRoots = append([]string(nil), cfg.CompatHostRoots...)
+		}
 		return nil
 	}
 }
@@ -164,6 +167,14 @@ func mergeLimitOverrides(base, overrides policy.Limits) policy.Limits {
 func WithBaseEnv(env map[string]string) Option {
 	return func(target *Config) error {
 		target.BaseEnv = copyStringMap(env)
+		return nil
+	}
+}
+
+// WithCompatHostRoots sets [Config.CompatHostRoots].
+func WithCompatHostRoots(roots ...string) Option {
+	return func(target *Config) error {
+		target.CompatHostRoots = append([]string(nil), roots...)
 		return nil
 	}
 }

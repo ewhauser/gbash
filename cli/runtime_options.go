@@ -21,6 +21,7 @@ type runtimeOptions struct {
 	root            string
 	readWriteRoot   string
 	inheritEnv      []string
+	compatHostRoots []string
 	copyScript      bool
 	cwd             string
 	maxFileBytes    int64
@@ -89,6 +90,14 @@ func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
 				return opts, nil, err
 			}
 			opts.inheritEnv = appendUniqueStrings(opts.inheritEnv, names...)
+		case arg == "--compat-host-root":
+			if i+1 >= len(args) {
+				return opts, nil, fmt.Errorf("--compat-host-root requires a path")
+			}
+			i++
+			opts.compatHostRoots = appendUniqueStrings(opts.compatHostRoots, args[i])
+		case strings.HasPrefix(arg, "--compat-host-root="):
+			opts.compatHostRoots = appendUniqueStrings(opts.compatHostRoots, strings.TrimPrefix(arg, "--compat-host-root="))
 		case arg == "--copy-script":
 			opts.copyScript = true
 		case arg == "--cwd":
@@ -326,6 +335,16 @@ func (opts *runtimeOptions) gbashOptions() ([]gbash.Option, error) {
 		if cwdValue == "" {
 			cwdValue = "/"
 		}
+	}
+	if len(opts.compatHostRoots) > 0 {
+		roots := make([]string, 0, len(opts.compatHostRoots))
+		for _, root := range opts.compatHostRoots {
+			if !filepath.IsAbs(root) {
+				return nil, fmt.Errorf("--compat-host-root must be an absolute path: %s", root)
+			}
+			roots = append(roots, filepath.ToSlash(filepath.Clean(root)))
+		}
+		runtimeOpts = append(runtimeOpts, gbash.WithCompatHostRoots(roots...))
 	}
 	baseEnv = inheritSelectedEnv(baseEnv, opts.inheritEnv)
 	if baseEnv != nil {
@@ -635,6 +654,8 @@ func renderHelp(w io.Writer, name string) error {
 		"  --cwd DIR             set the initial sandbox working directory\n"+
 		"  --readwrite-root DIR  mount DIR as sandbox / with writes persisted back to the host filesystem\n"+
 		"  --inherit-env VARS    copy comma-separated host env var names into the runtime base environment\n"+
+		"  --compat-host-root DIR\n"+
+		"                        lexically remap absolute host paths under DIR onto sandbox / (repeatable)\n"+
 		"  --copy-script         copy the positional host script into the sandbox before execution\n"+
 		"  --max-file-bytes N    override the sandbox file-size/read-size limit in bytes\n"+
 		"\nCLI output options:\n"+

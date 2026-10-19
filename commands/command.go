@@ -44,9 +44,19 @@ type Invocation struct {
 	Limits                policy.Limits
 	GetRegisteredCommands func() []string
 
-	trace   trace.Recorder
-	now     func() time.Time
-	setTime func(time.Time) error
+	trace           trace.Recorder
+	now             func() time.Time
+	setTime         func(time.Time) error
+	compatHostRoots []string
+}
+
+// CompatHostRoots returns the embedder-configured host roots that builtins
+// remap lexically onto the sandbox root. Scripts cannot change this list.
+func (inv *Invocation) CompatHostRoots() []string {
+	if inv == nil {
+		return nil
+	}
+	return inv.compatHostRoots
 }
 
 type definedCommand struct {

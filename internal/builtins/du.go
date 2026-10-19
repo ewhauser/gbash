@@ -549,6 +549,9 @@ func (c *DU) walkNode(
 		}
 
 		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return 0, true, err
+			}
 			childTotal, childIsDir, err := c.walkChild(ctx, inv, state, abs, visible, entry.Name(), depth+1, symlinkDepth)
 			if err != nil {
 				return 0, true, err

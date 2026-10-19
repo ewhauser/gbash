@@ -61,6 +61,9 @@ func evaluateFindExpr(expr findExpr, ctx *findEvalContext) findEvalResult {
 		if e.fileType == 'd' {
 			return findEvalResult{matches: ctx.isDir}
 		}
+		if e.fileType == 'l' {
+			return findEvalResult{matches: ctx.isSymlink}
+		}
 		return findEvalResult{}
 	case *findEmptyExpr:
 		if !ctx.metadataAvailable {

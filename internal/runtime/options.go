@@ -49,6 +49,9 @@ func WithConfig(cfg *Config) Option {
 		if cfg.AnalysisObserver != nil {
 			target.AnalysisObserver = cfg.AnalysisObserver
 		}
+		if len(cfg.CompatHostRoots) > 0 {
+			target.CompatHostRoots = append([]string(nil), cfg.CompatHostRoots...)
+		}
 		return nil
 	}
 }

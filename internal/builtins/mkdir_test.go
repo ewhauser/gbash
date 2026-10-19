@@ -139,12 +139,52 @@ func TestMkdirParentsKeepsUserWriteExecuteOnIntermediateDirectories(t *testing.T
 
 func TestMkdirRemapsCompatHostAbsolutePaths(t *testing.T) {
 	t.Parallel()
-	env := defaultBaseEnv()
-	env["GBASH_COMPAT_ROOT"] = "/compat"
-	session := newSession(t, &Config{BaseEnv: env})
+	session := newSession(t, &Config{CompatHostRoots: []string{"/compat"}})
 
 	result := mustExecSession(t, session, "mkdir /testdir\ncd /testdir\nmkdir -p /compat/testdir/t\nprintf 'status=%s\\n' \"$?\"\ntest -d /testdir/t\nprintf 'exists=%s\\n' \"$?\"\n")
 	if got, want := result.Stdout, "status=0\nexists=0\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
+	}
+}
+
+func TestCompatHostRemapIgnoresScriptEnvAndHostFilesystem(t *testing.T) {
+	t.Parallel()
+
+	hostDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(hostDir, "real", "probe"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(real/probe) error = %v", err)
+	}
+	if err := os.Symlink("real", filepath.Join(hostDir, "link")); err != nil {
+		t.Fatalf("Symlink(link) error = %v", err)
+	}
+
+	// Script-visible env vars must not enable the remap: the paths stay as
+	// written inside the sandbox.
+	session := newSession(t, &Config{})
+	script := "export GBASH_COMPAT_ROOT=" + hostDir + " abs_top_builddir=" + hostDir + " abs_top_srcdir=" + hostDir + "\n" +
+		"mkdir -p " + hostDir + "/real/x\n" +
+		"test -d " + hostDir + "/real/x && echo kept\n" +
+		"test -e /real/x || echo not-remapped\n"
+	result := mustExecSession(t, session, script)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "kept\nnot-remapped\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
+	}
+
+	// With an embedder root configured, the remap stays lexical: a host
+	// symlink pointing at the root must not be resolved on the host.
+	session = newSession(t, &Config{CompatHostRoots: []string{hostDir + "/real"}})
+	script = "mkdir -p " + hostDir + "/real/probe\n" +
+		"test -d /probe && echo remapped\n" +
+		"mkdir -p " + hostDir + "/link/viaLink\n" +
+		"test -e /viaLink || echo link-not-resolved\n"
+	result = mustExecSession(t, session, script)
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "remapped\nlink-not-resolved\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
 	}
 }

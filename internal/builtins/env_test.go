@@ -725,12 +725,10 @@ func TestEnvMapsHostAbsoluteCompatWrapperPathsFromTopBuilddir(t *testing.T) {
 	}
 
 	rt := newRuntime(t, &Config{
-		FileSystem: gbruntime.ReadWriteDirectoryFileSystem(root, gbruntime.ReadWriteDirectoryOptions{}),
+		FileSystem:      gbruntime.ReadWriteDirectoryFileSystem(root, gbruntime.ReadWriteDirectoryOptions{}),
+		CompatHostRoots: []string{root},
 	})
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		Env: map[string]string{
-			"abs_top_builddir": root,
-		},
 		Script: "env -S '" + root + "/src/printf x%sx\\\\n A B'\n",
 	})
 	if err != nil {
