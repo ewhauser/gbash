@@ -345,7 +345,41 @@ func hasSingleQuote(word *syntax.Word) *syntax.SglQuoted {
 }
 
 func Arithm(cfg *Config, expr syntax.ArithmExpr) (int, error) {
+	// Array subscripts re-enter Arithm, so a value like x="x[x]" recurses
+	// through here rather than through arithm's depth parameter. The entry
+	// limit is looser than the string re-parse limit so the bash-style
+	// diagnostic names the recursing value whenever one is involved.
+	leave, err := cfg.enterArith(2*maxArithRecursionDepth, expr, "")
+	if err != nil {
+		return 0, err
+	}
+	defer leave()
 	return arithm(cfg, expr, expr, 0)
+}
+
+// maxArithRecursionDepth matches bash's MAX_EXPR_RECURSION_LEVEL.
+const maxArithRecursionDepth = 1024
+
+// enterArith records one nested arithmetic evaluation on cfg and fails with
+// bash's "expression recursion level exceeded" once the nesting passes limit.
+// The returned func must be called when the evaluation finishes.
+func (cfg *Config) enterArith(limit int, expr syntax.ArithmExpr, text string) (func(), error) {
+	if cfg.arithDepth >= limit {
+		if text == "" && expr != nil {
+			text = arithExprSource(expr)
+		}
+		return nil, &ArithmDiagnosticError{
+			ExprText:  text,
+			TokenText: text,
+			Message:   "expression recursion level exceeded",
+		}
+	}
+	cfg.arithDepth++
+	return cfg.leaveArith, nil
+}
+
+func (cfg *Config) leaveArith() {
+	cfg.arithDepth--
 }
 
 // ArithmLet evaluates a let expression after shell quote removal, matching
@@ -483,6 +517,11 @@ func (cfg *Config) arithmStringValue(root, tokenExpr syntax.ArithmExpr, word *sy
 		if nested, err := p.Arithmetic(strings.NewReader(s)); err == nil {
 			if nested != nil {
 				if word, ok := nested.(*syntax.Word); !ok || word.Lit() != s {
+					leave, err := cfg.enterArith(maxArithRecursionDepth, nil, s)
+					if err != nil {
+						return 0, err
+					}
+					defer leave()
 					return arithm(cfg, root, nested, depth+1)
 				}
 			}
@@ -524,6 +563,11 @@ func arithm(cfg *Config, root, expr syntax.ArithmExpr, depth int) (int, error) {
 		if parsed, ok, err := arithmRuntimeParse(cfg, expr); err != nil {
 			return 0, err
 		} else if ok {
+			leave, err := cfg.enterArith(maxArithRecursionDepth, expr, "")
+			if err != nil {
+				return 0, err
+			}
+			defer leave()
 			return arithm(cfg, root, parsed, depth+1)
 		}
 	}
