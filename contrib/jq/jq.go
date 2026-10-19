@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/ewhauser/gbash/commands"
-	"github.com/itchyny/gojq"
+	"github.com/ewhauser/gbash/contrib/jq/internal/gojq"
 )
 
 type JQ struct{}
@@ -676,6 +676,9 @@ func runJQQuery(ctx context.Context, inv *commands.Invocation, code *gojq.Code, 
 		if err := formatter.WriteValue(value); err != nil {
 			if _, ok := commands.ExitCode(err); ok {
 				return false, err
+			}
+			if depthErr, ok := errors.AsType[*gojq.DepthLimitError](err); ok {
+				return false, exitf(inv, 5, "jq: %v", depthErr)
 			}
 			return false, &commands.ExitError{Code: 5, Err: err}
 		}

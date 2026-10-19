@@ -136,7 +136,7 @@ func (m *core) Run(ctx context.Context, exec *Execution) (result *RunResult, run
 		if recovered := recover(); recovered != nil {
 			finishAnalysis(analysis.Status{Code: 2, Exiting: true})
 			if exec.Stderr != nil {
-				_, _ = fmt.Fprintln(exec.Stderr, sanitizeRunnerPanic(recovered))
+				_, _ = fmt.Fprintln(exec.Stderr, interp.SanitizeRunnerPanic(recovered))
 			}
 			result = &RunResult{FinalEnv: nil}
 			runErr = interp.ExitStatus(2)
@@ -381,20 +381,6 @@ func runnerParamArgs(startupOptions, args []string) []string {
 	out = append(out, "--")
 	out = append(out, args...)
 	return out
-}
-
-func sanitizeRunnerPanic(recovered any) string {
-	message := fmt.Sprint(recovered)
-	switch {
-	case strings.HasPrefix(message, "unhandled >& arg:"),
-		strings.HasPrefix(message, "unhandled > arg:"),
-		strings.HasPrefix(message, "unhandled < arg:"),
-		strings.HasPrefix(message, "unsupported redirect fd:"),
-		strings.HasPrefix(message, "unhandled redirect op:"):
-		return "invalid redirection"
-	default:
-		return "shell execution failed"
-	}
 }
 
 func executionSourceName(exec *Execution) string {

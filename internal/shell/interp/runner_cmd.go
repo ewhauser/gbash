@@ -295,6 +295,7 @@ func (r *Runner) cmdBinary(ctx context.Context, cm *syntax.BinaryCmd) {
 				r2.pipelineErrTrapDepth--
 				pw.Close()
 			}()
+			defer r2.recoverAsyncPanic()
 			r2.stmt(ctx, cm.X)
 			r2.exit.exiting = false // subshells don't exit the parent shell
 		})
