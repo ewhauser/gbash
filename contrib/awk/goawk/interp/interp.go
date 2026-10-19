@@ -173,6 +173,11 @@ type interp struct {
 	csvJoinFieldsBuf  bytes.Buffer
 	chars             bool
 	newlineOutputCRLF bool
+
+	// Memory bounds (see limits.go)
+	maxStringBytes int
+	maxArrayBytes  int64
+	arrayBytes     int64
 }
 
 // Various const configuration. Could make these part of Config if
@@ -362,6 +367,17 @@ type Config struct {
 	// output. The default is "smart", meaning no translation on Linux/Unix
 	// and CRLF translation on Windows.
 	NewlineOutput NewlineMode
+
+	// If positive, MaxStringBytes bounds the length of strings the program
+	// builds by concatenation, sprintf/printf, sub/gsub, multi-dimensional
+	// subscripts, native function results, and $0 reconstruction. Exceeding
+	// it stops execution with an error.
+	MaxStringBytes int
+
+	// If positive, MaxArrayBytes bounds the estimated memory held by all
+	// array elements (keys, string values, and a fixed per-element
+	// overhead). Exceeding it stops execution with an error.
+	MaxArrayBytes int64
 }
 
 // IOMode specifies the input parsing or print output mode.
@@ -484,6 +500,15 @@ func (p *interp) setExecuteConfig(config *Config) error {
 	if len(config.Environ)%2 != 0 {
 		return newError("length of config.Environ must be a multiple of 2, not %d", len(config.Environ))
 	}
+	p.maxStringBytes = config.MaxStringBytes
+	if p.maxArrayBytes <= 0 && config.MaxArrayBytes > 0 {
+		// Start charging arrays populated by earlier executions.
+		p.arrayBytes = 0
+		for _, array := range p.arrays {
+			p.arrayBytes += arrayBytes(array)
+		}
+	}
+	p.maxArrayBytes = config.MaxArrayBytes
 
 	// Set up I/O mode config (Vars will override)
 	p.inputMode = config.InputMode
@@ -521,10 +546,16 @@ func (p *interp) setExecuteConfig(config *Config) error {
 
 	// Set up ARGV and other variables from config
 	argvIndex := p.arrayIndexes["ARGV"]
-	p.setArrayValue(resolver.Global, argvIndex, "0", str(config.Argv0))
+	err := p.setArrayValue(resolver.Global, argvIndex, "0", str(config.Argv0))
+	if err != nil {
+		return err
+	}
 	p.argc = len(config.Args) + 1
 	for i, arg := range config.Args {
-		p.setArrayValue(resolver.Global, argvIndex, strconv.Itoa(i+1), numStr(arg))
+		err := p.setArrayValue(resolver.Global, argvIndex, strconv.Itoa(i+1), numStr(arg))
+		if err != nil {
+			return err
+		}
 	}
 	p.noArgVars = config.NoArgVars
 	p.currentRecordHook = config.CurrentRecordHook
@@ -540,7 +571,7 @@ func (p *interp) setExecuteConfig(config *Config) error {
 	p.chars = config.Chars
 
 	// After Vars has been handled, validate CSV configuration.
-	err := validateCSVInputConfig(p.inputMode, p.csvInputConfig)
+	err = validateCSVInputConfig(p.inputMode, p.csvInputConfig)
 	if err != nil {
 		return err
 	}
@@ -553,18 +584,27 @@ func (p *interp) setExecuteConfig(config *Config) error {
 	environIndex := p.arrayIndexes["ENVIRON"]
 	if config.Environ != nil {
 		for i := 0; i < len(config.Environ); i += 2 {
-			p.setArrayValue(resolver.Global, environIndex, config.Environ[i], numStr(config.Environ[i+1]))
+			err := p.setArrayValue(resolver.Global, environIndex, config.Environ[i], numStr(config.Environ[i+1]))
+			if err != nil {
+				return err
+			}
 		}
 	} else {
 		for _, kv := range os.Environ() {
 			key, val, ok := strings.Cut(kv, "=")
 			if ok {
-				p.setArrayValue(resolver.Global, environIndex, key, numStr(val))
+				err := p.setArrayValue(resolver.Global, environIndex, key, numStr(val))
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
 	p.setGlobalByName("ARGIND", num(0))
-	p.setArrayByName("PROCINFO", "version", numStr("5.3.2"))
+	err = p.setArrayByName("PROCINFO", "version", numStr("5.3.2"))
+	if err != nil {
+		return err
+	}
 
 	// Set up system shell command
 	if len(config.ShellCommand) != 0 {
@@ -859,6 +899,10 @@ func (p *interp) setSpecial(index int, v value) error {
 			p.fields = append(p.fields, "")
 			p.fieldsIsTrueStr = append(p.fieldsIsTrueStr, false)
 		}
+		err := p.checkFieldsJoinLen()
+		if err != nil {
+			return err
+		}
 		p.assignLine(p.joinFields(p.fields), true)
 	case ast.V_NR:
 		p.lineNum = int(v.num())
@@ -960,12 +1004,12 @@ func (p *interp) setGlobalByName(name string, v value) error {
 	return p.setGlobal(index, v)
 }
 
-func (p *interp) setArrayByName(name, key string, v value) {
+func (p *interp) setArrayByName(name, key string, v value) error {
 	index, ok := p.arrayIndexes[name]
 	if !ok {
-		return
+		return nil
 	}
-	p.arrays[index][key] = v
+	return p.arraySet(p.arrays[index], key, v)
 }
 
 func (p *interp) globalString(name string) string {
@@ -1062,9 +1106,9 @@ func (p *interp) localArray(index int) map[string]value {
 }
 
 // Set a value in given array by key (index)
-func (p *interp) setArrayValue(scope resolver.Scope, arrayIndex int, index string, v value) {
+func (p *interp) setArrayValue(scope resolver.Scope, arrayIndex int, index string, v value) error {
 	array := p.array(scope, arrayIndex)
-	array[index] = v
+	return p.arraySet(array, index, v)
 }
 
 // Get the value of given numbered field, equivalent to "$index"
@@ -1136,6 +1180,10 @@ func (p *interp) setField(index int, value string) error {
 	p.fields[index-1] = value
 	p.fieldsIsTrueStr[index-1] = true
 	p.numFields = len(p.fields)
+	err := p.checkFieldsJoinLen()
+	if err != nil {
+		return err
+	}
 	p.assignLine(p.joinFields(p.fields), true)
 	return nil
 }
