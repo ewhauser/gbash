@@ -1,10 +1,12 @@
 package builtins
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
 	stdfs "io/fs"
+	"math"
 	"slices"
 	"strings"
 	"unicode"
@@ -104,25 +106,28 @@ func (c *Column) RunParsed(ctx context.Context, inv *Invocation, matches *Parsed
 		outSep = opts.outputSep
 	}
 
-	var output string
+	out := newColumnLineWriter(inv.Stdout)
 	if opts.table {
 		rows := make([][]string, 0, len(nonEmptyLines))
 		for _, line := range nonEmptyLines {
 			rows = append(rows, splitColumnFields(line, opts.separator, opts.noMerge))
 		}
-		output = formatColumnTable(rows, outSep)
+		err = formatColumnTable(ctx, out, rows, outSep)
 	} else {
 		items := make([]string, 0, len(nonEmptyLines))
 		for _, line := range nonEmptyLines {
 			items = append(items, splitColumnFields(line, opts.separator, opts.noMerge)...)
 		}
-		output = formatColumnFill(items, opts.width, opts.widthValid, outSep)
+		err = formatColumnFill(ctx, inv, out, items, opts.width, opts.widthValid, outSep)
 	}
-
-	if output != "" {
-		output += "\n"
+	if err == nil {
+		err = out.finish()
 	}
-	if _, err := io.WriteString(inv.Stdout, output); err != nil {
+	if err != nil {
+		var exitErr *ExitError
+		if errors.As(err, &exitErr) || ctx.Err() != nil {
+			return err
+		}
 		return &ExitError{Code: 1, Err: err}
 	}
 	return nil
@@ -312,15 +317,64 @@ func filterEmptyColumnFields(fields []string) []string {
 	return filtered
 }
 
-func formatColumnTable(rows [][]string, outputSep string) string {
+// columnLineWriter streams newline-separated output lines and adds a final
+// newline only when something was written, matching the former
+// strings.Join(lines, "\n") + "\n" rendering without buffering every line.
+type columnLineWriter struct {
+	w       *bufio.Writer
+	lines   int
+	written bool
+}
+
+func newColumnLineWriter(w io.Writer) *columnLineWriter {
+	return &columnLineWriter{w: bufio.NewWriter(w)}
+}
+
+func (c *columnLineWriter) writeLine(cells []string, sep string) error {
+	if c.lines > 0 {
+		if err := c.w.WriteByte('\n'); err != nil {
+			return err
+		}
+		c.written = true
+	}
+	c.lines++
+	for i, cell := range cells {
+		if i > 0 {
+			if _, err := c.w.WriteString(sep); err != nil {
+				return err
+			}
+		}
+		if _, err := c.w.WriteString(cell); err != nil {
+			return err
+		}
+		if cell != "" || (i > 0 && sep != "") {
+			c.written = true
+		}
+	}
+	return nil
+}
+
+func (c *columnLineWriter) finish() error {
+	if c.written {
+		if err := c.w.WriteByte('\n'); err != nil {
+			return err
+		}
+	}
+	return c.w.Flush()
+}
+
+func formatColumnTable(ctx context.Context, out *columnLineWriter, rows [][]string, outputSep string) error {
 	if len(rows) == 0 {
-		return ""
+		return nil
 	}
 
 	widths := calculateColumnWidths(rows)
-	lines := make([]string, 0, len(rows))
+	cells := make([]string, 0, len(widths))
 	for _, row := range rows {
-		cells := make([]string, 0, len(row))
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		cells = cells[:0]
 		for i, cell := range row {
 			if i == len(row)-1 {
 				cells = append(cells, cell)
@@ -328,9 +382,11 @@ func formatColumnTable(rows [][]string, outputSep string) string {
 			}
 			cells = append(cells, padColumnCell(cell, widths[i]))
 		}
-		lines = append(lines, strings.Join(cells, outputSep))
+		if err := out.writeLine(cells, outputSep); err != nil {
+			return err
+		}
 	}
-	return strings.Join(lines, "\n")
+	return nil
 }
 
 func calculateColumnWidths(rows [][]string) []int {
@@ -350,9 +406,9 @@ func calculateColumnWidths(rows [][]string) []int {
 	return widths
 }
 
-func formatColumnFill(items []string, width int, widthValid bool, outputSep string) string {
+func formatColumnFill(ctx context.Context, inv *Invocation, out *columnLineWriter, items []string, width int, widthValid bool, outputSep string) error {
 	if len(items) == 0 || !widthValid {
-		return ""
+		return nil
 	}
 
 	maxItemWidth := 0
@@ -365,15 +421,24 @@ func formatColumnFill(items []string, width int, widthValid bool, outputSep stri
 	sepWidth := utf16Len(outputSep)
 	columnWidth := maxItemWidth + sepWidth
 	if columnWidth == 0 {
-		return ""
+		return nil
 	}
 
-	numColumns := max(1, (width+sepWidth)/columnWidth)
+	// More columns than items only adds empty cells, so cap the count before
+	// it sizes any allocation; -c 4294967296 must not build a giant row.
+	numColumns := max(1, (min(width, math.MaxInt-sepWidth)+sepWidth)/columnWidth)
+	numColumns = min(numColumns, len(items))
+	if numColumns > 1 && int64(numColumns-1) > maxFieldBytes(inv)/int64(columnWidth) {
+		return fieldWidthError(inv, "column")
+	}
 	numRows := (len(items) + numColumns - 1) / numColumns
 
-	lines := make([]string, 0, numRows)
+	cells := make([]string, 0, numColumns)
 	for row := range numRows {
-		cells := make([]string, 0, numColumns)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		cells = cells[:0]
 		for col := range numColumns {
 			index := (col * numRows) + row
 			if index >= len(items) {
@@ -387,9 +452,11 @@ func formatColumnFill(items []string, width int, widthValid bool, outputSep stri
 				cells = append(cells, padColumnCell(item, maxItemWidth))
 			}
 		}
-		lines = append(lines, strings.Join(cells, outputSep))
+		if err := out.writeLine(cells, outputSep); err != nil {
+			return err
+		}
 	}
-	return strings.Join(lines, "\n")
+	return nil
 }
 
 func padColumnCell(value string, width int) string {

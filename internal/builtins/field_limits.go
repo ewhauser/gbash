@@ -1,6 +1,9 @@
 package builtins
 
-import "math"
+import (
+	"io"
+	"math"
+)
 
 // defaultMaxFieldBytes is the padded-field cap used when an invocation carries
 // no MaxVariableBytes limit. It matches the runtime's default variable limit.
@@ -34,6 +37,27 @@ func fieldWidthError(inv *Invocation, name string) error {
 func checkFieldWidth(inv *Invocation, name string, width int64) error {
 	if fieldWidthTooLarge(inv, width) {
 		return fieldWidthError(inv, name)
+	}
+	return nil
+}
+
+// writePadding writes n copies of pad to w in fixed-size chunks so wide
+// fields neither allocate n bytes nor issue n one-byte writes.
+func writePadding(w io.Writer, pad byte, n int) error {
+	if n <= 0 {
+		return nil
+	}
+	var chunk [4096]byte
+	fill := min(n, len(chunk))
+	for i := range fill {
+		chunk[i] = pad
+	}
+	for n > 0 {
+		step := min(n, fill)
+		if _, err := w.Write(chunk[:step]); err != nil {
+			return err
+		}
+		n -= step
 	}
 	return nil
 }

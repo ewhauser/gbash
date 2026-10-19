@@ -85,3 +85,58 @@ func TestTRRejectsOversizedRepeatCounts(t *testing.T) {
 		t.Fatalf("ExitCode = %d, Stdout = %q, want 0 %q", result.ExitCode, got, want)
 	}
 }
+
+func TestTextBuiltinsRejectOversizedFieldWidths(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		script string
+		want   string
+	}{
+		{"date '+%2147483648Y'\n", "date: " + fieldTooLargeMessage},
+		{"date '+%9223372036854775807Y'\n", "date: " + fieldTooLargeMessage},
+		{"date '+%99999999999999999999Y'\n", "date: " + fieldTooLargeMessage},
+		{"printf 'a\\tb' | expand -t 9223372036854775807\n", "expand: " + fieldTooLargeMessage},
+		{"printf 'a\\tb\\tc' | expand -t 1,40000000\n", "expand: " + fieldTooLargeMessage},
+		{"echo a | nl -bn -w 4294967296\n", "nl: " + fieldTooLargeMessage},
+		{"echo a | nl -w 9223372036854775807\n", "nl: " + fieldTooLargeMessage},
+	}
+	for _, tc := range cases {
+		result := execWithDeadline(t, nil, tc.script)
+		assertExitStderr(t, result, 1, tc.want)
+		if len(result.Stdout) > 16 {
+			t.Fatalf("%q: Stdout = %q, want at most the text before the wide field", tc.script, result.Stdout)
+		}
+	}
+}
+
+func TestDateFieldWidthWithinLimitStillPads(t *testing.T) {
+	t.Parallel()
+	result := execWithDeadline(t, nil, "date -u -d @0 '+%10Y|%_5d'\n")
+	if got, want := result.Stdout, "0000001970|    1\n"; result.ExitCode != 0 || got != want {
+		t.Fatalf("ExitCode = %d, Stdout = %q, want 0 %q; stderr=%q", result.ExitCode, got, want, result.Stderr)
+	}
+}
+
+func TestColumnCapsFillColumnsAtItemCount(t *testing.T) {
+	t.Parallel()
+	result := execWithDeadline(t, nil, "echo a | column -c 4294967296\nprintf 'a\\nb\\nc\\n' | column -c 9223372036854775807\nseq 6 | column -c 12\n")
+	if got, want := result.Stdout, "a\na  b  c\n1  3  5\n2  4  6\n"; result.ExitCode != 0 || got != want {
+		t.Fatalf("ExitCode = %d, Stdout = %q, want 0 %q; stderr=%q", result.ExitCode, got, want, result.Stderr)
+	}
+}
+
+func TestExpandWideTabStopStopsOnTimeout(t *testing.T) {
+	t.Parallel()
+	result := execWithDeadline(t, nil, "printf '\\t\\t\\t\\t\\t\\t\\t\\t' | timeout 0.2 expand -t 30000000 >/dev/null\necho \"rc=$?\"\nprintf 'a\\tb\\n' | expand -t 4\n")
+	if got, want := result.Stdout, "rc=0\na   b\n"; got != want && result.Stdout != "rc=124\na   b\n" {
+		t.Fatalf("Stdout = %q, want %q (or timeout 124); stderr=%q", got, want, result.Stderr)
+	}
+}
+
+func TestNLWidePaddingWithinLimit(t *testing.T) {
+	t.Parallel()
+	result := execWithDeadline(t, nil, "printf 'a\\n\\nb\\n' | nl -w 3 -s '|'\nprintf 'x\\n' | nl -n rz -w 5\n")
+	if got, want := result.Stdout, "  1|a\n    \n  2|b\n00001\tx\n"; result.ExitCode != 0 || got != want {
+		t.Fatalf("ExitCode = %d, Stdout = %q, want 0 %q; stderr=%q", result.ExitCode, got, want, result.Stderr)
+	}
+}
