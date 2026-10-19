@@ -188,7 +188,7 @@ func (s *simplifier) inlineSimpleParams(x ArithmExpr) ArithmExpr {
 		return x
 	}
 	pe, _ := w.Parts[0].(*ParamExp)
-	if pe == nil || !ValidName(pe.Param.Value) {
+	if pe == nil || pe.Param == nil || !ValidName(pe.Param.Value) {
 		// Not a parameter expansion, or not a valid name, like $3.
 		return x
 	}
