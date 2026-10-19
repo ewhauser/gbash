@@ -77,10 +77,18 @@ export function deriveEnv(
   return Object.keys(env).length === 0 ? undefined : env;
 }
 
+// Characters that make shell expansion or multi-line parsing matter. The fast
+// path below has its own tokenizer, so it only takes commands that the shell
+// would split into the same words; anything else goes to the real shell.
+const unsafeFastPathCharacters = /[\n\r$`*?[]/;
+
 export function parseCustomCommand(
   command: string,
   customCommands: Map<string, CommandHandler>,
 ): { handler: CommandHandler; args: string[] } | null {
+  if (unsafeFastPathCharacters.test(command)) {
+    return null;
+  }
   const tokens = tokenizeSimpleCommand(command);
   if (!tokens || tokens.length === 0) {
     return null;
