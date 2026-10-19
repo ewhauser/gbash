@@ -38,10 +38,6 @@ func TestParseDeepNestingFailsWithParseError(t *testing.T) {
 		{"test parens", "[[ " + rep("( ", n) + "a" + rep(" )", n) + " ]]"},
 		{"test and chain", "[[ a" + rep(" && a", n) + " ]]"},
 		{"time", rep("time ", n) + "true"},
-		// Patterns re-parse their shell parts with fresh sub-parsers, which
-		// must inherit the nesting depth. Each level also re-scans the rest
-		// of the input, so keep this one short: it only has to pass the limit.
-		{"conditional pattern", "[[ x == " + rep("$([[ x == ", 2*MaxNestingDepth) + "x" + rep(" ]])", 2*MaxNestingDepth) + " ]]"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -118,6 +114,31 @@ func TestStmtsSeqChecksTreeDepthPerStatement(t *testing.T) {
 	requireNestingError(t, gotErr, MaxTreeDepth)
 	if stmts != 1 {
 		t.Fatalf("got %d statements before the error, want 1", stmts)
+	}
+}
+
+// Patterns and heredoc bodies re-parse their shell parts with fresh
+// sub-parsers, which must continue the nesting depth instead of starting
+// over; otherwise nesting through them was unbounded. Deep input of this
+// shape is slow to parse, so start the parser just below the limit.
+func TestSubParsersInheritNestingDepth(t *testing.T) {
+	t.Parallel()
+	const levels = 4
+	rep := strings.Repeat
+	for _, src := range []string{
+		"[[ x == " + rep("$([[ x == ", levels) + "x" + rep(" ]])", levels) + " ]]",
+		"[[ x == " + rep(`"$([[ x == `, levels) + "x" + rep(` ]])"`, levels) + " ]]",
+		"case x in " + rep("$(case x in ", levels) + "x" + rep(") ;; esac)", levels) + ") ;; esac",
+		"cat <<EOF\n" + rep("$(", levels) + "x" + rep(")", levels) + "\nEOF",
+	} {
+		p := NewParser()
+		p.nestBase = MaxNestingDepth - levels
+		_, err := p.Parse(strings.NewReader(src+"\n"), "")
+		requireNestingError(t, err, MaxNestingDepth)
+
+		if _, err := NewParser().Parse(strings.NewReader(src+"\n"), ""); err != nil {
+			t.Fatalf("Parse(%.40q...) from depth 0 error = %v, want nil", src, err)
+		}
 	}
 }
 

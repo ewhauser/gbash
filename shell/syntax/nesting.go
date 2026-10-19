@@ -10,13 +10,13 @@ import (
 // expansions, arithmetic parentheses and unary operators, and [[ ]]
 // negations. Deeper input fails with a [ParseError] instead of overflowing
 // the goroutine stack, which Go cannot recover from.
-const MaxNestingDepth = 1000
+const MaxNestingDepth = 16000
 
 // MaxTreeDepth bounds the depth of a parsed syntax tree. Lists such as
 // "a && b && ..." or "1+1+..." are parsed in a loop yet still build one tree
 // level per operator, and the interpreter walks those levels recursively, so
 // they are capped separately from [MaxNestingDepth].
-const MaxTreeDepth = 10000
+const MaxTreeDepth = 50000
 
 // treeCheckThreshold is how much nesting or how many chained operators a
 // top-level parse may see before its tree depth is measured. Below it the
