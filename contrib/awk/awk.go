@@ -19,7 +19,10 @@ import (
 	"github.com/ewhauser/gbash/commands"
 )
 
-type AWK struct{}
+type AWK struct {
+	// maxDuration overrides awkDefaultMaxDuration; tests set it.
+	maxDuration time.Duration
+}
 
 type awkOptions struct {
 	fieldSeparator string
@@ -94,7 +97,9 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 		return exitCodef(inv, 1, "awk: parse error: %v", err)
 	}
 
-	stdin := newLazyAWKStdin(ctx, inv)
+	ctx, budget := newAWKTimeBudget(ctx, c.maxDuration)
+	defer budget.stop()
+	stdin := newLazyAWKStdin(ctx, inv, budget)
 
 	config := &interp.Config{
 		Stdin:             stdin,
@@ -108,7 +113,7 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 		InputMode:         opts.inputMode,
 		FileOpener:        newAWKFileOpener(ctx, inv, stdin),
 		FileWriter:        newAWKFileWriter(ctx, inv),
-		ShellRunner:       newAWKShellRunner(ctx, inv),
+		ShellRunner:       newAWKShellRunner(ctx, inv, budget),
 		PipeReader:        newAWKPipeReader(ctx, inv),
 		PipeWriter:        newAWKPipeWriter(ctx, inv),
 		CurrentRecordHook: nativeState.setCurrentRecord,
@@ -122,6 +127,9 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 	}
 	status, err := program.ExecuteContext(ctx, config)
 	if err != nil {
+		if budget.exceeded(ctx) {
+			return exitf(inv, "awk: execution exceeded the %s time limit", awkDefaultMaxDuration)
+		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
@@ -422,9 +430,11 @@ type lazyAWKStdin struct {
 	err    error
 }
 
-func newLazyAWKStdin(ctx context.Context, inv *commands.Invocation) io.Reader {
+func newLazyAWKStdin(ctx context.Context, inv *commands.Invocation, budget *awkTimeBudget) io.Reader {
 	return &lazyAWKStdin{
 		load: func() ([]byte, error) {
+			budget.pause()
+			defer budget.resume()
 			return commands.ReadAllStdin(ctx, inv)
 		},
 	}
@@ -467,11 +477,13 @@ func newAWKShellRequest(code string) *commands.ExecutionRequest {
 	}
 }
 
-func newAWKShellRunner(ctx context.Context, inv *commands.Invocation) func(string, io.Reader, io.Writer, io.Writer) (int, error) {
+func newAWKShellRunner(ctx context.Context, inv *commands.Invocation, budget *awkTimeBudget) func(string, io.Reader, io.Writer, io.Writer) (int, error) {
 	return func(code string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 		if inv.Exec == nil {
 			return -1, fmt.Errorf("awk: shell execution is unavailable")
 		}
+		budget.pause()
+		defer budget.resume()
 		req := newAWKShellRequest(code)
 		req.Stdin = stdin
 		req.Stdout = stdout
