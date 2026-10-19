@@ -48,7 +48,11 @@ func (c *Printf) Run(ctx context.Context, inv *Invocation) error {
 			value, ok := inv.Env[name]
 			return value, ok
 		},
+		MaxOutputBytes: printfMaxOutputBytes(inv),
 	})
+	if result.LimitExceeded {
+		return exitf(inv, 126, "printf: value too large (limit %d bytes), increase policy.Limits.MaxVariableBytes", printfMaxOutputBytes(inv))
+	}
 	for _, diag := range result.Diagnostics {
 		_, _ = fmt.Fprintf(stderr, "printf: %s\n", diag)
 	}
@@ -95,3 +99,10 @@ func normalizeGNUPrintfArgs(args []string) (normalized []string, err error) {
 }
 
 var _ Command = (*Printf)(nil)
+
+func printfMaxOutputBytes(inv *Invocation) int64 {
+	if inv == nil {
+		return 0
+	}
+	return inv.Limits.MaxVariableBytes
+}

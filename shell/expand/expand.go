@@ -56,6 +56,12 @@ type Config struct {
 	// need startup-sensitive tilde semantics.
 	StartupHome string
 
+	// MaxVariableBytes caps values that one expansion step can grow without
+	// bound: command substitution output and pattern substitution results.
+	// Exceeding it fails the expansion with a [VariableSizeLimitError]. Zero
+	// means unlimited.
+	MaxVariableBytes int64
+
 	// LangVariant controls shell-variant-sensitive reparsing and quoting
 	// helpers used during expansion. The zero value behaves like Bash.
 	LangVariant syntax.LangVariant
@@ -122,9 +128,18 @@ type Config struct {
 	// (e.g. {a,b,c}, {1..5}) is suppressed.
 	NoBraceExpand bool
 
+	// MaxBraceExpansionWords caps how many words brace expansion may generate
+	// across the words of one [Fields] call, or across every call made inside
+	// a [Config.BeginBraceExpansionScope] scope. Exceeding it fails expansion
+	// with [BraceExpansionLimitError]. Zero or negative means unlimited.
+	MaxBraceExpansionWords int64
+
 	// ExtGlob corresponds to the shell option which allows using extended
 	// pattern matching features when performing pathname expansion (globbing).
 	ExtGlob bool
+
+	braceScope      braceBudget
+	braceScopeDepth int
 
 	globIgnore         []string
 	globIgnoreMatchers []func(string) bool
@@ -287,6 +302,9 @@ func (cfg *Config) ResetRuntimeState() {
 	cfg.GlobSkipDots = false
 	cfg.NoUnset = false
 	cfg.NoBraceExpand = false
+	cfg.MaxBraceExpansionWords = 0
+	cfg.braceScope = braceBudget{}
+	cfg.braceScopeDepth = 0
 	cfg.ExtGlob = false
 	cfg.globIgnore = nil
 	cfg.globIgnoreMatchers = nil
@@ -1705,6 +1723,7 @@ func fieldsSeq(cfg *Config, allowAssignLike, preferStartupHome bool, words ...*s
 	cfg = prepareConfig(cfg)
 	dir := cfg.envGet("PWD")
 	return func(yield func(string, error) bool) {
+		budget := cfg.braceExpansionBudget()
 		for _, word := range words {
 			afterBraces := []*syntax.Word{word}
 			hadBraces := !cfg.NoBraceExpand && slices.ContainsFunc(word.Parts, func(part syntax.WordPart) bool {
@@ -1713,7 +1732,7 @@ func fieldsSeq(cfg *Config, allowAssignLike, preferStartupHome bool, words ...*s
 			})
 			if hadBraces {
 				var err error
-				afterBraces, err = Braces(word)
+				afterBraces, err = braces(word, budget)
 				if err != nil {
 					yield("", err)
 					return
@@ -1939,7 +1958,17 @@ func (cfg *Config) wordField(wps []syntax.WordPart, ql quoteLevel) ([]fieldPart,
 
 func (cfg *Config) cmdSubst(cs *syntax.CmdSubst) (string, error) {
 	sb := cfg.strBuilder()
-	if err := cfg.runCmdSubst(sb, cs); err != nil {
+	if cfg.MaxVariableBytes > 0 {
+		w := &limitedStringWriter{b: sb, limit: cfg.MaxVariableBytes}
+		err := cfg.runCmdSubst(w, cs)
+		if w.exceeded {
+			sb.Reset()
+			return "", VariableSizeLimitError{What: "command substitution", Limit: cfg.MaxVariableBytes}
+		}
+		if err != nil {
+			return "", err
+		}
+	} else if err := cfg.runCmdSubst(sb, cs); err != nil {
 		return "", err
 	}
 	out := sb.String()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	stdfs "io/fs"
+	"os"
 	"slices"
 	"testing"
 	"time"
@@ -249,4 +250,83 @@ func TestOverlayFSLinkAfterDirMetadataCopyUp(t *testing.T) {
 	if _, err := overlay.upper.Lstat(ctx, "/d/b"); !errors.Is(err, stdfs.ErrNotExist) {
 		t.Fatalf("upper Lstat(/d/b) error = %v, want ErrNotExist", err)
 	}
+}
+
+// Every copy-up must create missing upper ancestors with their lower
+// metadata; otherwise default-metadata upper directories shadow the lower ones.
+func TestOverlayFSCopyUpPreservesAncestorMetadata(t *testing.T) {
+	t.Parallel()
+	ops := []struct {
+		name  string
+		apply func(context.Context, *OverlayFS) error
+	}{
+		{
+			name: "OpenFileWriteOnly",
+			apply: func(ctx context.Context, o *OverlayFS) error {
+				return overlayWriteFile(ctx, o, "/p/d/f", os.O_WRONLY)
+			},
+		},
+		{
+			name: "OpenFileAppend",
+			apply: func(ctx context.Context, o *OverlayFS) error {
+				return overlayWriteFile(ctx, o, "/p/d/f", os.O_WRONLY|os.O_APPEND)
+			},
+		},
+		{
+			name:  "Link",
+			apply: func(ctx context.Context, o *OverlayFS) error { return o.Link(ctx, "/p/d/f", "/p/d/g") },
+		},
+	}
+	for _, op := range ops {
+		t.Run(op.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			lower := seededMemory(t, map[string]string{"/p/d/f": "f"})
+			if err := lower.Chmod(ctx, "/p", 0o750); err != nil {
+				t.Fatalf("lower Chmod(/p) error = %v", err)
+			}
+			if err := lower.Chown(ctx, "/p/d", 7, 8, true); err != nil {
+				t.Fatalf("lower Chown(/p/d) error = %v", err)
+			}
+			lowerTime := time.Date(1999, 1, 1, 0, 0, 0, 0, time.UTC)
+			if err := lower.Chtimes(ctx, "/p", lowerTime, lowerTime); err != nil {
+				t.Fatalf("lower Chtimes(/p) error = %v", err)
+			}
+			overlay := NewOverlay(lower)
+
+			if err := op.apply(ctx, overlay); err != nil {
+				t.Fatalf("%s error = %v", op.name, err)
+			}
+
+			parent, err := overlay.Stat(ctx, "/p")
+			if err != nil {
+				t.Fatalf("Stat(/p) error = %v", err)
+			}
+			if got := parent.Mode().Perm(); got != 0o750 {
+				t.Fatalf("Stat(/p).Mode().Perm() = %o, want 750", got)
+			}
+			if !parent.ModTime().Equal(lowerTime) {
+				t.Fatalf("Stat(/p).ModTime() = %v, want %v", parent.ModTime(), lowerTime)
+			}
+			dir, err := overlay.Stat(ctx, "/p/d")
+			if err != nil {
+				t.Fatalf("Stat(/p/d) error = %v", err)
+			}
+			if ownership, ok := OwnershipFromFileInfo(dir); !ok || ownership.UID != 7 || ownership.GID != 8 {
+				t.Fatalf("Stat(/p/d) ownership = %+v (ok=%v), want 7:8", ownership, ok)
+			}
+		})
+	}
+}
+
+func overlayWriteFile(ctx context.Context, o *OverlayFS, name string, flag int) error {
+	file, err := o.OpenFile(ctx, name, flag, 0)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write([]byte("x")); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }

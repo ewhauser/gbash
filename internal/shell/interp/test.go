@@ -483,7 +483,7 @@ func (r *Runner) regexMatch(subject, expr string) bool {
 		Kind: expand.Indexed,
 		List: m,
 	}
-	r.setVar("BASH_REMATCH", vr)
+	r.setShellManagedVar("BASH_REMATCH", vr)
 	return true
 }
 

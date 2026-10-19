@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ewhauser/gbash/commands"
+	"github.com/ewhauser/gbash/contrib/jq/internal/gojq"
 	"github.com/ewhauser/gbash/internal/commandutil"
 	"golang.org/x/term"
 )
@@ -133,8 +134,50 @@ func newJQEncoder(tab bool, indent int, asciiOutput, useColor bool) *jqEncoder {
 }
 
 func (e *jqEncoder) marshal(value any, out io.Writer) error {
+	if err := jqCheckDepth(value); err != nil {
+		return err
+	}
 	e.out = out
 	return cmp.Or(e.encode(value), e.flush())
+}
+
+// jqCheckDepth rejects values nested deeper than gojq.MaxDepth before the
+// recursive encoder sees them, so output cannot overflow the goroutine stack
+// and nothing is written for a value that cannot be encoded.
+func jqCheckDepth(value any) error {
+	type frame struct {
+		value any
+		depth int
+	}
+	stack := []frame{{value: value}}
+	push := func(child any, depth int) {
+		switch child.(type) {
+		case []any, map[string]any:
+			stack = append(stack, frame{value: child, depth: depth})
+		}
+	}
+	for len(stack) > 0 {
+		top := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		depth := top.depth + 1
+		switch value := top.value.(type) {
+		case []any:
+			if depth > gojq.MaxDepth {
+				return &gojq.DepthLimitError{Op: "encode"}
+			}
+			for _, child := range value {
+				push(child, depth)
+			}
+		case map[string]any:
+			if depth > gojq.MaxDepth {
+				return &gojq.DepthLimitError{Op: "encode"}
+			}
+			for _, child := range value {
+				push(child, depth)
+			}
+		}
+	}
+	return nil
 }
 
 func (e *jqEncoder) flush() error {
