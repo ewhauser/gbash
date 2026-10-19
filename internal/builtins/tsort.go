@@ -303,7 +303,7 @@ func tsortReadGraph(ctx context.Context, inv *Invocation, name string, reader io
 		if err == nil {
 			continue
 		}
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		return tsortReadError(inv, name, err)

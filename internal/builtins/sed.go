@@ -126,7 +126,7 @@ func (c *Sed) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCom
 			return err
 		}
 		trailingNL := len(data) > 0 && data[len(data)-1] == '\n'
-		return sedRunError(ctx, inv, runSedProgram(newSedRun(ctx, inv, inv.Stdout), program, textLines(data), opts.quiet, trailingNL))
+		return sedRunError(ctx, inv, runSedProgram(ctx, newSedRun(inv, inv.Stdout), program, textLines(data), opts.quiet, trailingNL))
 	}
 
 	if opts.inPlace {
@@ -139,7 +139,7 @@ func (c *Sed) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCom
 			}
 			trailingNL := len(data) > 0 && data[len(data)-1] == '\n'
 			buffer := &sedOutputBuffer{limit: inv.Limits.MaxFileBytes}
-			if err := runSedProgram(newSedRun(ctx, inv, buffer), program, textLines(data), opts.quiet, trailingNL); err != nil {
+			if err := runSedProgram(ctx, newSedRun(inv, buffer), program, textLines(data), opts.quiet, trailingNL); err != nil {
 				return sedRunError(ctx, inv, err)
 			}
 			output := buffer.Bytes()
@@ -184,7 +184,7 @@ func (c *Sed) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCom
 			seenLines = true
 		}
 		if seenLines {
-			if err := runSedProgram(newSedRun(ctx, inv, inv.Stdout), program, lines, opts.quiet, trailingNL); err != nil {
+			if err := runSedProgram(ctx, newSedRun(inv, inv.Stdout), program, lines, opts.quiet, trailingNL); err != nil {
 				return sedRunError(ctx, inv, err)
 			}
 		}
@@ -196,8 +196,8 @@ func (c *Sed) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCom
 	return nil
 }
 
-func newSedRun(ctx context.Context, inv *Invocation, out io.Writer) *sedRun {
-	return &sedRun{ctx: ctx, out: out, maxPatternBytes: maxFieldBytes(inv)}
+func newSedRun(inv *Invocation, out io.Writer) *sedRun {
+	return &sedRun{out: out, maxPatternBytes: maxFieldBytes(inv)}
 }
 
 // sedRunError maps runSedProgram failures to shell-facing errors.
@@ -219,17 +219,22 @@ func sedRunError(ctx context.Context, inv *Invocation, err error) error {
 var errSedOutputTooLarge = errors.New("sed: output too large")
 
 // sedOutputBuffer collects in-place output, failing once it would exceed the
-// file size limit rather than growing without bound.
+// file size limit rather than growing without bound. It deliberately exposes
+// only Write, so bufio cannot bypass the check through WriteString.
 type sedOutputBuffer struct {
-	bytes.Buffer
+	buf   bytes.Buffer
 	limit int64
 }
 
 func (b *sedOutputBuffer) Write(p []byte) (int, error) {
-	if b.limit > 0 && int64(b.Len())+int64(len(p)) > b.limit {
+	if b.limit > 0 && int64(b.buf.Len())+int64(len(p)) > b.limit {
 		return 0, errSedOutputTooLarge
 	}
-	return b.Buffer.Write(p)
+	return b.buf.Write(p)
+}
+
+func (b *sedOutputBuffer) Bytes() []byte {
+	return b.buf.Bytes()
 }
 
 func parseSedMatches(ctx context.Context, inv *Invocation, matches *ParsedCommand) (sedOptions, []string, error) {
@@ -561,7 +566,6 @@ func parseSedDelimited(input string, delimiter rune) (value, remainder string, e
 
 // sedRun carries the limits and destination for one runSedProgram call.
 type sedRun struct {
-	ctx context.Context
 	out io.Writer
 	// maxPatternBytes caps one pattern space after substitution.
 	maxPatternBytes int64
@@ -570,9 +574,9 @@ type sedRun struct {
 var errSedPatternSpaceTooLarge = errors.New("sed: pattern space too large")
 
 // runSedProgram streams the program's output for lines to run.out one line at
-// a time, checking run.ctx between lines and substitutions, so neither a
-// global substitution nor a long input buffers its whole result.
-func runSedProgram(run *sedRun, program []sedCommand, lines []string, quiet, trailingNewline bool) error {
+// a time, checking ctx between lines and substitutions, so neither a global
+// substitution nor a long input buffers its whole result.
+func runSedProgram(ctx context.Context, run *sedRun, program []sedCommand, lines []string, quiet, trailingNewline bool) error {
 	out := bufio.NewWriter(run.out)
 	active := make([]bool, len(program))
 	totalLines := len(lines)
@@ -590,7 +594,7 @@ func runSedProgram(run *sedRun, program []sedCommand, lines []string, quiet, tra
 	}
 
 	for index, original := range lines {
-		if err := run.ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		current := original
@@ -613,7 +617,7 @@ func runSedProgram(run *sedRun, program []sedCommand, lines []string, quiet, tra
 			case sedCommandQuit:
 				quit = true
 			case sedCommandSubstitute:
-				next, matched, err := sedReplace(run, command.pattern, current, command.replacement, command.global)
+				next, matched, err := sedReplace(ctx, run, command.pattern, current, command.replacement, command.global)
 				if err != nil {
 					return err
 				}
@@ -689,7 +693,7 @@ func sedAddressMatches(address *sedAddress, line string, lineNumber, totalLines 
 	}
 }
 
-func sedReplace(run *sedRun, pattern *regexp.Regexp, line, replacement string, global bool) (string, bool, error) {
+func sedReplace(ctx context.Context, run *sedRun, pattern *regexp.Regexp, line, replacement string, global bool) (string, bool, error) {
 	matches := pattern.FindAllStringSubmatchIndex(line, -1)
 	if len(matches) == 0 {
 		return line, false, nil
@@ -706,7 +710,7 @@ func sedReplace(run *sedRun, pattern *regexp.Regexp, line, replacement string, g
 			continue
 		}
 		if i&0x3ff == 0x3ff {
-			if err := run.ctx.Err(); err != nil {
+			if err := ctx.Err(); err != nil {
 				return "", false, err
 			}
 		}

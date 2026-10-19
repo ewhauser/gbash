@@ -151,7 +151,7 @@ func factorReadStdin(ctx context.Context, inv *Invocation, writer *bufio.Writer,
 			return hadWarning, lineErr
 		}
 
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return hadWarning, nil
 		}
 		if err != nil {

@@ -349,16 +349,19 @@ func uniqWrite(_ context.Context, inv *Invocation, reader io.Reader, writer io.W
 }
 
 // uniqReadRecord reads the next record into dst. It reports false at end of
-// input, with a non-nil error only when a record exceeds MaxFileBytes.
+// input, with a non-nil error when a record exceeds MaxFileBytes or the
+// read fails.
 func uniqReadRecord(reader *boundedLineReader, dst *[]byte, terminator byte) (bool, error) {
 	*dst = (*dst)[:0]
 	line, err := reader.ReadLine(terminator)
 	var exitErr *ExitError
-	if errors.As(err, &exitErr) {
+	switch {
+	case errors.As(err, &exitErr):
 		return false, err
-	}
-	if len(line) == 0 && err != nil {
+	case len(line) == 0 && errors.Is(err, io.EOF):
 		return false, nil
+	case len(line) == 0 && err != nil:
+		return false, &ExitError{Code: 1, Err: err}
 	}
 	if len(line) > 0 && line[len(line)-1] == terminator {
 		line = line[:len(line)-1]
