@@ -28,7 +28,12 @@ func (p *Parser) arithmExprAssign(compact bool) ArithmExpr {
 		pos := p.pos
 		tok := p.tok
 		p.nextArithOp(compact)
+		d, ok := p.enterNest()
+		if !ok {
+			return value
+		}
 		y := p.arithmExprAssign(compact)
+		p.leaveNest(d)
 		if y == nil {
 			p.followErrExp(pos, tok)
 		}
@@ -56,6 +61,11 @@ func (p *Parser) arithmExprTernary(compact bool) ArithmExpr {
 			expected:   []ParseErrorSymbol{ParseErrorSymbolExpression},
 		}, "%#q must follow an expression", p.tok)
 	}
+	d, ok := p.enterNest()
+	if !ok {
+		return value
+	}
+	defer p.leaveNest(d)
 	questPos := p.pos
 	p.nextArithOp(compact)
 	if BinAritOperator(p.tok) == TernColon {
@@ -146,7 +156,12 @@ func (p *Parser) arithmExprPower(compact bool) ArithmExpr {
 	op := p.tok
 	pos := p.pos
 	p.nextArithOp(compact)
+	d, ok := p.enterNest()
+	if !ok {
+		return value
+	}
 	y := p.arithmExprPower(compact)
+	p.leaveNest(d)
 	if y == nil {
 		p.followErrExp(pos, op)
 	}
@@ -167,7 +182,13 @@ func (p *Parser) arithmExprUnary(compact bool) ArithmExpr {
 	case Not, BitNegation, Plus, Minus:
 		ue := &UnaryArithm{OpPos: p.pos, Op: UnAritOperator(p.tok)}
 		p.nextArithOp(compact)
-		if ue.X = p.arithmExprUnary(compact); ue.X == nil {
+		d, ok := p.enterNest()
+		if !ok {
+			return nil
+		}
+		ue.X = p.arithmExprUnary(compact)
+		p.leaveNest(d)
+		if ue.X == nil {
 			p.followErrExp(ue.OpPos, ue.Op)
 		}
 		return ue
@@ -176,6 +197,17 @@ func (p *Parser) arithmExprUnary(compact bool) ArithmExpr {
 }
 
 func (p *Parser) arithmExprValue(compact bool) ArithmExpr {
+	// Parentheses, subscripts and prefix ++/-- recurse through here.
+	d, ok := p.enterNest()
+	if !ok {
+		return nil
+	}
+	x := p.arithmExprValueNested(compact)
+	p.leaveNest(d)
+	return x
+}
+
+func (p *Parser) arithmExprValueNested(compact bool) ArithmExpr {
 	var x ArithmExpr
 	switch p.tok {
 	case addAdd, subSub:
@@ -312,7 +344,10 @@ func (p *Parser) arithmSuffixWord(start, end Pos, src string) *Word {
 	if src == "" {
 		return p.wordOne(p.rawLit(start, end, ""))
 	}
-	if word, err := doc.document(strings.NewReader(src), start); err == nil && word != nil {
+	p.subParserNesting(doc)
+	word, err := doc.document(strings.NewReader(src), start)
+	p.absorbSubParserNesting(doc)
+	if err == nil && word != nil {
 		return word
 	}
 	return p.wordOne(p.rawLit(start, end, src))
@@ -453,6 +488,7 @@ func (p *Parser) arithmExprBinary(compact bool, nextOp func(bool) ArithmExpr, op
 			X:     value,
 			Y:     y,
 		}
+		p.chainLinks++
 	}
 }
 

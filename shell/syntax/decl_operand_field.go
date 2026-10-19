@@ -26,6 +26,7 @@ func (p *Parser) DeclOperandField(r io.Reader) (DeclOperand, error) {
 	p.rune()
 	p.next()
 	op := p.declOperand(false)
+	p.checkTreeDepth(op)
 	if p.err != nil {
 		return op, p.err
 	}
