@@ -308,7 +308,10 @@ func funcOpAdd(_, l, r any) any {
 		},
 		func(l, r float64) any { return l + r },
 		func(l, r *big.Int) any { return new(big.Int).Add(l, r) },
-		func(l, r string) any { return l + r },
+		func(l, r string) any {
+			checkStringSize("add", len(l)+len(r))
+			return l + r
+		},
 		func(l, r []any) any {
 			if len(l) == 0 {
 				return r
@@ -316,6 +319,7 @@ func funcOpAdd(_, l, r any) any {
 			if len(r) == 0 {
 				return l
 			}
+			checkArrayLength("add", len(l)+len(r))
 			v := make([]any, len(l)+len(r))
 			copy(v, l)
 			copy(v[len(l):], r)
@@ -432,6 +436,7 @@ func repeatString(s string, n float64) any {
 	if n >= float64(math.MaxInt32/len(s)) {
 		return &repeatStringTooLargeError{s, n}
 	}
+	checkStringSize("multiply", len(s)*int(n))
 	return strings.Repeat(s, int(n))
 }
 

@@ -38,7 +38,7 @@ func Marshal(v any) (bs []byte, err error) {
 }
 
 func jsonMarshal(v any) string {
-	var sb strings.Builder
+	sb := sizeLimitedBuilder{op: "tojson"}
 	(&encoder{w: &sb}).encode(v)
 	return sb.String()
 }
