@@ -88,7 +88,7 @@ func (h *ReadWriteFS) Open(ctx context.Context, name string) (File, error) {
 	return h.OpenFile(ctx, name, os.O_RDONLY, 0)
 }
 
-func (h *ReadWriteFS) OpenFile(_ context.Context, name string, flag int, perm stdfs.FileMode) (File, error) {
+func (h *ReadWriteFS) OpenFile(ctx context.Context, name string, flag int, perm stdfs.FileMode) (File, error) {
 	abs := h.resolve(name)
 	root, resolved, err := openResolvedRoot(h.root, h.canonicalRoot, strings.TrimPrefix(abs, "/"), true, true)
 	if err != nil {
@@ -96,14 +96,8 @@ func (h *ReadWriteFS) OpenFile(_ context.Context, name string, flag int, perm st
 	}
 	defer func() { _ = root.Close() }()
 
-	file, err := root.OpenFile(rootRelativeOpenPath(resolved.rel), flag, perm)
+	file, info, err := openHostFile(ctx, root, rootRelativeOpenPath(resolved.rel), flag, perm)
 	if err != nil {
-		return nil, h.pathError("open", abs, err)
-	}
-
-	info, err := file.Stat()
-	if err != nil {
-		_ = file.Close()
 		return nil, h.pathError("open", abs, err)
 	}
 	if !hasWriteIntent(flag) {

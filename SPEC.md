@@ -750,6 +750,8 @@ Important properties:
 - host-backed filesystems must still satisfy policy checks and must never imply host command execution
 - a read-write host-backed filesystem may be enabled explicitly for external test harnesses or advanced embedding, but it is not the default runtime backend
 - host-backed filesystem mutations that create entries, including named pipes, must perform the final host operation relative to a resolved sandbox-confined directory handle rather than reusing a post-check absolute host path
+- host-backed filesystems open host entries with `O_NONBLOCK` so `open(2)` never blocks: host named pipes are served by a handle whose open, reads, and writes wait in bounded polls and give up once the caller's context ends, and host devices, sockets, and other special files are refused with `EPERM`
+- in-memory named pipes bind blocking reads and writes to the context they were opened under, so a FIFO without a peer stops at the execution timeout or cancellation instead of hanging
 - shell redirects and command file access share the same filesystem view
 - symlink support is optional and must default to the safer behavior when policy is ambiguous
 - for backends without symlink creation/traversal support, `Lstat` behaves like `Stat`, `Readlink` fails for non-symlinks, and `Realpath` resolves only existing virtual paths
