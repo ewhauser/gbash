@@ -244,7 +244,7 @@ func runTarExtract(ctx context.Context, inv *Invocation, opts *tarOptions) error
 		}
 		if opts.toStdout {
 			if tarIsRegularType(header.Typeflag) {
-				if _, err := copyBounded(ctx, inv.Stdout, tr, 0); err != nil {
+				if err := copyBounded(ctx, inv.Stdout, tr, 0); err != nil {
 					return &ExitError{Code: 1, Err: err}
 				}
 			}
@@ -269,7 +269,7 @@ func runTarExtract(ctx context.Context, inv *Invocation, opts *tarOptions) error
 				return err
 			}
 		case tar.TypeLink:
-			if err := tarExtractHardlink(ctx, inv, baseDir, entryName, targetAbs, header, opts.keepOld); err != nil {
+			if err := tarExtractHardlink(ctx, inv, baseDir, targetAbs, header, opts.keepOld); err != nil {
 				return err
 			}
 		default:
@@ -534,7 +534,7 @@ func tarExtractFile(ctx context.Context, inv *Invocation, tr *tar.Reader, target
 	if err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	if _, err := copyBounded(ctx, file, tr, fileSizeLimit(inv)); err != nil {
+	if err := copyBounded(ctx, file, tr, fileSizeLimit(inv)); err != nil {
 		_ = file.Close()
 		_ = inv.FS.Remove(ctx, targetAbs, false)
 		if errors.Is(err, errFileTooLarge) {
@@ -580,7 +580,7 @@ func tarExtractSymlink(ctx context.Context, inv *Invocation, entryName, targetAb
 	return nil
 }
 
-func tarExtractHardlink(ctx context.Context, inv *Invocation, baseDir, entryName, targetAbs string, header *tar.Header, keepOld bool) error {
+func tarExtractHardlink(ctx context.Context, inv *Invocation, baseDir, targetAbs string, header *tar.Header, keepOld bool) error {
 	linkName, err := sanitizeTarEntryName(header.Linkname)
 	if err != nil {
 		return exitf(inv, 1, "tar: %v", err)

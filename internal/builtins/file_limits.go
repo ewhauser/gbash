@@ -8,8 +8,12 @@ import (
 )
 
 // errFileTooLarge reports a write or resize that would exceed the sandbox
-// file-size limit. Its text matches the host EFBIG diagnostic.
-var errFileTooLarge = errors.New("File too large")
+// file-size limit. Its text matches the GNU EFBIG diagnostic.
+var errFileTooLarge error = fileTooLargeError{}
+
+type fileTooLargeError struct{}
+
+func (fileTooLargeError) Error() string { return "File too large" }
 
 // fileSizeLimit returns the positive MaxFileBytes bound for inv, or 0 when
 // file sizes are unbounded.
@@ -31,42 +35,31 @@ func exceedsFileSizeLimit(inv *Invocation, size uint64) bool {
 	return limit > 0 && size > uint64(limit)
 }
 
-// contextReader fails reads once ctx is done so long copy loops stop at the
-// request deadline.
-type contextReader struct {
-	ctx context.Context
-	r   io.Reader
-}
-
-func (r contextReader) Read(p []byte) (int, error) {
-	if err := r.ctx.Err(); err != nil {
-		return 0, err
-	}
-	return r.r.Read(p)
-}
-
 // copyBounded copies src to dst, observing ctx between reads and failing
 // with errFileTooLarge once more than limit bytes would be written. A
 // non-positive limit only applies the context check.
-func copyBounded(ctx context.Context, dst io.Writer, src io.Reader, limit int64) (int64, error) {
-	src = contextReader{ctx: ctx, r: src}
-	if limit <= 0 {
-		return io.Copy(dst, src)
+func copyBounded(ctx context.Context, dst io.Writer, src io.Reader, limit int64) error {
+	buf := make([]byte, 32*1024)
+	var written int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n, readErr := src.Read(buf)
+		if n > 0 {
+			if limit > 0 && written+int64(n) > limit {
+				return errFileTooLarge
+			}
+			if _, err := dst.Write(buf[:n]); err != nil {
+				return err
+			}
+			written += int64(n)
+		}
+		if errors.Is(readErr, io.EOF) {
+			return nil
+		}
+		if readErr != nil {
+			return readErr
+		}
 	}
-	n, err := io.Copy(dst, io.LimitReader(src, limit))
-	if err != nil {
-		return n, err
-	}
-	if n < limit {
-		return n, nil
-	}
-	var probe [1]byte
-	m, err := src.Read(probe[:])
-	if m > 0 {
-		return n, errFileTooLarge
-	}
-	if err != nil && !errors.Is(err, io.EOF) {
-		return n, err
-	}
-	return n, nil
 }

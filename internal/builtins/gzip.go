@@ -301,7 +301,7 @@ func gzipTargetExists(ctx context.Context, inv *Invocation, targetAbs string) (b
 
 func gzipStream(ctx context.Context, dst io.Writer, src io.Reader) error {
 	zw := gzip.NewWriter(dst)
-	if _, err := copyBounded(ctx, zw, src, 0); err != nil {
+	if err := copyBounded(ctx, zw, src, 0); err != nil {
 		_ = zw.Close()
 		return err
 	}
@@ -316,8 +316,7 @@ func gunzipStream(ctx context.Context, src io.Reader, dst io.Writer, maxBytes in
 		return err
 	}
 	defer func() { _ = zr.Close() }()
-	_, err = copyBounded(ctx, dst, zr, maxBytes)
-	return err
+	return copyBounded(ctx, dst, zr, maxBytes)
 }
 
 func gzipHelpText(commandName string) string {
