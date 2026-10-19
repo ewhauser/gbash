@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -149,11 +150,13 @@ func (c *Python) runSource(ctx context.Context, inv *commands.Invocation, source
 		return pythonExit(inv, err)
 	}
 
-	limits, hasDeadline := pythonResourceLimits(ctx, pythonDefaultMaxDuration)
-	_, err = runner.Run(ctx, monty.RunOptions{
-		Print:  monty.WriterPrintCallback(inv.Stdout),
-		OS:     pythonOSHandler(ctx, inv),
-		Limits: limits,
+	limits, hasDeadline := pythonResourceLimits(ctx)
+	_, err = pythonRunInterruptible(ctx, inv, func(stdout io.Writer, handler monty.OSHandler) (monty.Value, error) {
+		return runner.Run(ctx, monty.RunOptions{
+			Print:  monty.WriterPrintCallback(stdout),
+			OS:     handler,
+			Limits: limits,
+		})
 	})
 	if err != nil {
 		if ctxErr := pythonDeadlineError(ctx, err, hasDeadline); ctxErr != nil {
@@ -166,12 +169,12 @@ func (c *Python) runSource(ctx context.Context, inv *commands.Invocation, source
 
 // pythonResourceLimits derives Monty limits for one execution. The duration
 // tracks the request deadline when there is one, so the runtime timeout stops
-// Python; otherwise fallback applies (zero leaves the duration unbounded).
-func pythonResourceLimits(ctx context.Context, fallback time.Duration) (*monty.ResourceLimits, bool) {
+// Python; otherwise pythonDefaultMaxDuration applies.
+func pythonResourceLimits(ctx context.Context) (*monty.ResourceLimits, bool) {
 	limits := &monty.ResourceLimits{
 		MaxMemory:         pythonMaxMemory,
 		MaxRecursionDepth: pythonMaxRecursionDepth,
-		MaxDuration:       fallback,
+		MaxDuration:       pythonDefaultMaxDuration,
 	}
 	deadline, ok := ctx.Deadline()
 	if !ok {
@@ -205,9 +208,9 @@ func pythonDeadlineError(ctx context.Context, err error, hasDeadline bool) error
 }
 
 func (c *Python) runRepl(ctx context.Context, inv *commands.Invocation, source pythonSource) error {
-	// REPL time limits accumulate from construction, so only an absolute
-	// request deadline bounds them; an interactive session has no fallback.
-	limits, hasDeadline := pythonResourceLimits(ctx, 0)
+	// Monty measures REPL time limits from construction, so the fallback
+	// bounds the whole session's wall clock rather than each snippet.
+	limits, hasDeadline := pythonResourceLimits(ctx)
 	repl, err := monty.NewRepl(monty.ReplOptions{
 		ScriptName: source.entryPath,
 		Limits:     limits,
@@ -229,7 +232,6 @@ func (c *Python) runRepl(ctx context.Context, inv *commands.Invocation, source p
 		stdin = strings.NewReader("")
 	}
 	reader := bufio.NewReader(stdin)
-	handler := pythonOSHandler(ctx, inv)
 	prompt := pythonReplPrompt
 	usingTerminalInput := false
 	var terminalCloser io.Closer
@@ -273,9 +275,12 @@ func (c *Python) runRepl(ctx context.Context, inv *commands.Invocation, source p
 			continue
 		}
 
-		value, err := repl.FeedRun(ctx, pending.String(), monty.FeedOptions{
-			Print: monty.WriterPrintCallback(inv.Stdout),
-			OS:    handler,
+		snippet := pending.String()
+		value, err := pythonRunInterruptible(ctx, inv, func(stdout io.Writer, handler monty.OSHandler) (monty.Value, error) {
+			return repl.FeedRun(ctx, snippet, monty.FeedOptions{
+				Print: monty.WriterPrintCallback(stdout),
+				OS:    handler,
+			})
 		})
 		if err != nil {
 			if ctxErr := pythonDeadlineError(ctx, err, hasDeadline); ctxErr != nil {
@@ -315,7 +320,7 @@ func (c *Python) terminalReader(ctx context.Context, inv *commands.Invocation) (
 	if inv == nil || inv.FS == nil {
 		return nil, nil, "", nil
 	}
-	ttyPath, ok := pythonEnvTTYPath(inv.Env)
+	ttyPath, ok := pythonEnvTerminalPath(ctx, inv)
 	if !ok {
 		return nil, nil, "", nil
 	}
@@ -349,7 +354,7 @@ func (c *Python) classifySource(ctx context.Context, inv *commands.Invocation, m
 }
 
 func (c *Python) prepareNoArgSource(ctx context.Context, inv *commands.Invocation) (pythonSource, error) {
-	if pythonInputIsTTY(inv) {
+	if pythonInputIsTTY(ctx, inv) {
 		return c.prepareReplSource(inv), nil
 	}
 	return c.prepareStdinSource(ctx, inv)
@@ -422,7 +427,7 @@ func pythonOSHandler(ctx context.Context, inv *commands.Invocation) monty.OSHand
 	}, env)
 }
 
-func pythonInputIsTTY(inv *commands.Invocation) bool {
+func pythonInputIsTTY(ctx context.Context, inv *commands.Invocation) bool {
 	if inv == nil {
 		return false
 	}
@@ -441,7 +446,8 @@ func pythonInputIsTTY(inv *commands.Invocation) bool {
 			return true
 		}
 	}
-	return pythonEnvTTY(inv.Env)
+	_, ok := pythonEnvTerminalPath(ctx, inv)
+	return ok
 }
 
 func pythonTTYReader(reader io.Reader) io.Reader {
@@ -487,9 +493,22 @@ func pythonResolveReader(reader io.Reader) io.Reader {
 	return nil
 }
 
-func pythonEnvTTY(env map[string]string) bool {
-	_, ok := pythonEnvTTYPath(env)
-	return ok
+// pythonEnvTerminalPath returns the terminal named by $TTY only when that
+// device is a live terminal for this execution. Scripts can set TTY freely, so
+// the variable alone must not turn piped input into an interactive REPL.
+func pythonEnvTerminalPath(ctx context.Context, inv *commands.Invocation) (string, bool) {
+	if inv == nil || inv.FS == nil {
+		return "", false
+	}
+	ttyPath, ok := pythonEnvTTYPath(inv.Env)
+	if !ok {
+		return "", false
+	}
+	info, err := inv.FS.Stat(ctx, ttyPath)
+	if err != nil || info.Mode()&stdfs.ModeCharDevice == 0 {
+		return "", false
+	}
+	return ttyPath, true
 }
 
 func pythonEnvTTYPath(env map[string]string) (string, bool) {
@@ -572,7 +591,7 @@ func pythonReplValueString(ctx context.Context, displayRunner *monty.Runner, val
 	if displayRunner == nil {
 		return pythonFallbackValueString(value), nil
 	}
-	limits, _ := pythonResourceLimits(ctx, pythonDefaultMaxDuration)
+	limits, _ := pythonResourceLimits(ctx)
 	repr, err := displayRunner.Run(ctx, monty.RunOptions{
 		Inputs: map[string]monty.Value{
 			"_gbash_repl_value": value,
@@ -911,4 +930,76 @@ func int64Field(value reflect.Value, name string) (int64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// pythonRunInterruptible runs one Monty execution and returns as soon as ctx
+// is done. Monty only observes cancellation between host callbacks, so a busy
+// loop keeps running in the background until its MaxDuration expires; the
+// abandoned execution loses access to stdout and the filesystem as soon as
+// control returns.
+func pythonRunInterruptible(ctx context.Context, inv *commands.Invocation, run func(io.Writer, monty.OSHandler) (monty.Value, error)) (monty.Value, error) {
+	gate := &pythonOutputGate{}
+	stdout := &pythonGatedWriter{gate: gate, w: inv.Stdout}
+	base := pythonOSHandler(ctx, inv)
+	handler := func(callCtx context.Context, call monty.OSCall) (monty.Result, error) {
+		if !gate.open() {
+			return monty.Result{}, context.Canceled
+		}
+		return base(callCtx, call)
+	}
+
+	type outcome struct {
+		value monty.Value
+		err   error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		value, err := run(stdout, handler)
+		done <- outcome{value: value, err: err}
+	}()
+
+	select {
+	case got := <-done:
+		return got.value, got.err
+	case <-ctx.Done():
+		gate.close()
+		// Prefer a result that raced with cancellation so completed work is
+		// not misreported as interrupted.
+		select {
+		case got := <-done:
+			return got.value, got.err
+		default:
+			return monty.Value{}, ctx.Err()
+		}
+	}
+}
+
+// pythonOutputGate cuts an abandoned Monty execution off from host
+// callbacks. It never waits for an in-flight callback, since that callback may
+// be blocked on a pipe whose reader is also shutting down.
+type pythonOutputGate struct {
+	closed atomic.Bool
+}
+
+func (g *pythonOutputGate) open() bool {
+	return !g.closed.Load()
+}
+
+func (g *pythonOutputGate) close() {
+	g.closed.Store(true)
+}
+
+type pythonGatedWriter struct {
+	gate *pythonOutputGate
+	w    io.Writer
+}
+
+func (w *pythonGatedWriter) Write(p []byte) (int, error) {
+	if !w.gate.open() {
+		return 0, context.Canceled
+	}
+	if w.w == nil {
+		return len(p), nil
+	}
+	return w.w.Write(p)
 }

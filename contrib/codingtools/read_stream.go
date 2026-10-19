@@ -14,6 +14,11 @@ import (
 
 const contentTypeSniffBytes = 512
 
+// MaxImageBytes caps the size of an image file the read tool returns. Images
+// are returned whole and base64 encoded, so without a cap one read could load
+// an arbitrarily large file into memory.
+const MaxImageBytes = 5 << 20
+
 func readResponse(ctx context.Context, fsys gbfs.FileSystem, absolutePath string, req ReadRequest, opts TruncationOptions) (ReadResponse, error) {
 	file, err := fsys.Open(ctx, absolutePath)
 	if err != nil {
@@ -28,9 +33,12 @@ func readResponse(ctx context.Context, fsys gbfs.FileSystem, absolutePath string
 
 	reader := io.MultiReader(bytes.NewReader(sniff), file)
 	if mimeType := detectSupportedImageMimeType(sniff); mimeType != "" {
-		buffer, err := readAllReader(reader)
+		buffer, err := readAtMost(reader, MaxImageBytes+1)
 		if err != nil {
 			return ReadResponse{}, err
+		}
+		if len(buffer) > MaxImageBytes {
+			return ReadResponse{}, fmt.Errorf("image file exceeds the %s limit", FormatSize(MaxImageBytes))
 		}
 		return ReadResponse{
 			Content: []ContentBlock{
@@ -352,21 +360,4 @@ func readAtMost(reader io.Reader, limit int) ([]byte, error) {
 		}
 	}
 	return output, nil
-}
-
-func readAllReader(reader io.Reader) ([]byte, error) {
-	var output []byte
-	buffer := make([]byte, 32*1024)
-	for {
-		n, err := reader.Read(buffer)
-		if n > 0 {
-			output = append(output, buffer[:n]...)
-		}
-		if errors.Is(err, io.EOF) {
-			return output, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-	}
 }

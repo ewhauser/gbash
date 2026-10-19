@@ -782,7 +782,9 @@ func funcExplode(v any) any {
 }
 
 func explode(s string) []any {
-	xs := make([]any, len([]rune(s)))
+	n := utf8.RuneCountInString(s)
+	checkArrayLength("explode", n)
+	xs := make([]any, n)
 	var i int
 	for _, r := range s {
 		xs[i] = int(r)
@@ -823,6 +825,11 @@ func funcSplit(v any, args []any) any {
 	}
 	var ss []string
 	if len(args) == 1 {
+		if x == "" {
+			checkArrayLength("split", utf8.RuneCountInString(s))
+		} else {
+			checkArrayLength("split", strings.Count(s, x)+1)
+		}
 		ss = strings.Split(s, x)
 	} else {
 		var flags string
@@ -837,7 +844,8 @@ func funcSplit(v any, args []any) any {
 		if err != nil {
 			return err
 		}
-		ss = r.Split(s, -1)
+		ss = r.Split(s, MaxArrayLength+1)
+		checkArrayLength("split", len(ss))
 	}
 	xs := make([]any, len(ss))
 	for i, s := range ss {
@@ -988,6 +996,7 @@ func formatJoin(typ string, v any, sep string, escape func(string) string) any {
 		return &func0TypeError{"@" + typ, v}
 	}
 	ss := make([]string, len(vs))
+	size := len(sep) * (len(vs) - 1)
 	for i, v := range vs {
 		switch v := v.(type) {
 		case []any, map[string]any:
@@ -999,6 +1008,8 @@ func formatJoin(typ string, v any, sep string, escape func(string) string) any {
 				ss[i] = s
 			}
 		}
+		size += len(ss[i])
+		checkStringSize("@"+typ, size)
 	}
 	return strings.Join(ss, sep)
 }
@@ -1221,6 +1232,7 @@ func flatten(xs, vs []any, depth float64, level int) []any {
 		if vs, ok := v.([]any); ok && depth != 0 {
 			xs = flatten(xs, vs, depth-1, level+1)
 		} else {
+			checkArrayLength("flatten", len(xs)+1)
 			xs = append(xs, v)
 		}
 	}
@@ -1412,6 +1424,7 @@ func funcJoin(v, x any) any {
 		return &func1TypeError{"join", v, x}
 	}
 	ss := make([]string, len(vs))
+	size := len(sep) * (len(vs) - 1)
 	for i, v := range vs {
 		switch v := v.(type) {
 		case nil:
@@ -1428,6 +1441,8 @@ func funcJoin(v, x any) any {
 		default:
 			return &joinTypeError{v}
 		}
+		size += len(ss[i])
+		checkStringSize("join", size)
 	}
 	return strings.Join(ss, sep)
 }

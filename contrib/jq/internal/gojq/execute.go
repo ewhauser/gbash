@@ -25,12 +25,17 @@ func (env *env) Next() (result any, ok bool) {
 	defer func() { env.pc, env.backtrack = pc, true }()
 	defer func() {
 		if r := recover(); r != nil {
-			depthErr, isDepthErr := r.(*DepthLimitError)
-			if !isDepthErr {
+			limitErr, isLimitErr := r.(error)
+			switch limitErr.(type) {
+			case *DepthLimitError, *SizeLimitError:
+			default:
+				isLimitErr = false
+			}
+			if !isLimitErr {
 				panic(r)
 			}
 			pc, env.forks = len(env.codes), nil
-			result, ok = depthErr, true
+			result, ok = limitErr, true
 		}
 	}()
 loop:
@@ -83,7 +88,9 @@ loop:
 			env.push(m)
 		case opappend:
 			i := env.index(code.v.([2]int))
-			env.values[i] = append(env.values[i].([]any), env.pop())
+			vs := env.values[i].([]any)
+			checkArrayLength("collect", len(vs)+1)
+			env.values[i] = append(vs, env.pop())
 		case opfork:
 			if backtrack {
 				if err != nil {

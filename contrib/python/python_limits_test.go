@@ -108,7 +108,7 @@ func TestPythonHonorsExecutionTimeout(t *testing.T) {
 func TestPythonResourceLimitsWithoutDeadlineUseFallback(t *testing.T) {
 	t.Parallel()
 
-	limits, hasDeadline := pythonResourceLimits(context.Background(), pythonDefaultMaxDuration)
+	limits, hasDeadline := pythonResourceLimits(context.Background())
 	if hasDeadline {
 		t.Fatalf("hasDeadline = true, want false")
 	}
@@ -121,8 +121,89 @@ func TestPythonResourceLimitsWithoutDeadlineUseFallback(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel()
-	limits, hasDeadline = pythonResourceLimits(ctx, pythonDefaultMaxDuration)
+	limits, hasDeadline = pythonResourceLimits(ctx)
 	if !hasDeadline || limits.MaxDuration <= pythonDefaultMaxDuration || limits.MaxDuration > time.Hour {
 		t.Fatalf("deadline limits = %+v (hasDeadline=%v), want duration tracking the deadline", limits, hasDeadline)
+	}
+}
+
+// runPythonCanceled runs script without a request timeout, cancels the
+// context after a short delay, and fails instead of hanging when python
+// ignores cancellation.
+func runPythonCanceled(t *testing.T, run func(context.Context) (*gbruntime.ExecutionResult, error)) (*gbruntime.ExecutionResult, error) {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type outcome struct {
+		result *gbruntime.ExecutionResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := run(ctx)
+		done <- outcome{result: result, err: err}
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	start := time.Now()
+	cancel()
+	select {
+	case got := <-done:
+		if elapsed := time.Since(start); elapsed > 5*time.Second {
+			t.Fatalf("python took %s to stop after cancel", elapsed)
+		}
+		return got.result, got.err
+	case <-time.After(10 * time.Second):
+		t.Fatalf("python ignored cancellation for 10s")
+		return nil, nil
+	}
+}
+
+func TestPythonBusyLoopStopsPromptlyOnCancel(t *testing.T) {
+	t.Parallel()
+
+	rt := newPythonRuntime(t)
+	result, err := runPythonCanceled(t, func(ctx context.Context) (*gbruntime.ExecutionResult, error) {
+		return rt.Run(ctx, &gbruntime.ExecutionRequest{Script: "python3 -c 'while True: pass'\n"})
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 130 {
+		t.Fatalf("ExitCode = %d, want 130; stderr=%q", result.ExitCode, result.Stderr)
+	}
+}
+
+func TestPythonREPLBusyLoopStopsPromptlyOnCancel(t *testing.T) {
+	t.Parallel()
+
+	session := newPythonSession(t)
+	var stdout, stderr strings.Builder
+	_, _ = runPythonCanceled(t, func(ctx context.Context) (*gbruntime.ExecutionResult, error) {
+		_, err := session.Interact(ctx, &gbruntime.InteractiveRequest{
+			Stdin:  strings.NewReader("python3\nwhile True: pass\n\n"),
+			Stdout: &stdout,
+			Stderr: &stderr,
+		})
+		return nil, err
+	})
+}
+
+func TestPythonTTYEnvDoesNotForceREPLForPipedInput(t *testing.T) {
+	t.Parallel()
+
+	result, err := newPythonRuntime(t).Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script:  "printf 'print(6 * 7)\\n' | TTY=/dev/tty python3\n",
+		Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	if got, want := result.Stdout, "42\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q (no REPL prompts)", got, want)
 	}
 }

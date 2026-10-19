@@ -155,3 +155,52 @@ func TestSQLite3BoundsInMemoryStorage(t *testing.T) {
 		t.Fatalf("Stderr = %q, want out-of-memory diagnostic", result.Stderr)
 	}
 }
+
+func TestSQLite3StopsRecursiveQueryWithoutRequestDeadline(t *testing.T) {
+	t.Parallel()
+
+	registry := gbruntime.DefaultRegistry()
+	if err := registry.Register(&SQLite3{maxDuration: 200 * time.Millisecond}); err != nil {
+		t.Fatalf("Register(sqlite3) error = %v", err)
+	}
+	rt, err := gbruntime.New(gbruntime.WithConfig(&gbruntime.Config{Registry: registry}))
+	if err != nil {
+		t.Fatalf("runtime.New() error = %v", err)
+	}
+
+	start := time.Now()
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: `sqlite3 :memory: "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c;"` + "\necho after=$?\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("query ran for %s past a 200ms limit", elapsed)
+	}
+	if got, want := result.Stdout, "after=1\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "time limit") {
+		t.Fatalf("Stderr = %q, want time limit error", result.Stderr)
+	}
+}
+
+func TestSQLite3ExecContextKeepsRequestDeadline(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := sqliteExecContext(context.Background(), 0)
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok || time.Until(deadline) > sqliteDefaultMaxDuration {
+		t.Fatalf("Deadline() = %v, %v; want the default duration", deadline, ok)
+	}
+
+	parent, cancelParent := context.WithTimeout(context.Background(), time.Hour)
+	defer cancelParent()
+	ctx, cancel = sqliteExecContext(parent, 0)
+	defer cancel()
+	if deadline, _ := ctx.Deadline(); time.Until(deadline) < 59*time.Minute {
+		t.Fatalf("Deadline() = %v, want the request deadline", deadline)
+	}
+}
