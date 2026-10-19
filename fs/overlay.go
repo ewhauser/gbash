@@ -86,7 +86,7 @@ func (o *OverlayFS) OpenFile(ctx context.Context, name string, flag int, perm st
 			return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrInvalid}
 		}
 		// Copy up the resolved target, never a symlink that led to it.
-		if err := clonePathWithInfo(ctx, o.lower, resolved, info, o.upper, resolved); err != nil {
+		if err := o.copyUpNode(ctx, resolved, info); err != nil {
 			return nil, toPathError("open", abs, err)
 		}
 	}
@@ -238,7 +238,7 @@ func (o *OverlayFS) Link(ctx context.Context, oldName, newName string) error {
 		}
 	case overlaySourceLower:
 		if _, err := o.upper.Lstat(ctx, oldAbs); errors.Is(err, stdfs.ErrNotExist) {
-			if err := clonePath(ctx, o.lower, oldAbs, o.upper, oldAbs); err != nil {
+			if err := o.copyUpNode(ctx, oldAbs, info); err != nil {
 				return toPathError("link", oldAbs, err)
 			}
 		} else if err != nil {
@@ -472,9 +472,9 @@ const (
 )
 
 // copyUpNode copies the node at abs, which the merged view currently takes
-// from the lower layer, into the upper layer so a metadata change can be
-// recorded there. Missing upper ancestors are created with their lower
-// metadata. A directory is copied as a bare node: its children stay in the
+// from the lower layer, into the upper layer so a write, link, or metadata
+// change can be recorded there. Missing upper ancestors are created with their
+// lower metadata. A directory is copied as a bare node: its children stay in the
 // lower layer, where the merged ReadDir still finds them and tombstones keep
 // deleted ones hidden.
 func (o *OverlayFS) copyUpNode(ctx context.Context, abs string, info stdfs.FileInfo) error {

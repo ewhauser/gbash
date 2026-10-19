@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -353,14 +354,18 @@ func (c *HTTPClient) Do(ctx context.Context, req *Request) (*Response, error) {
 
 	redirects := 0
 	for {
-		if err := c.checkURLAllowed(ctx, currentURL); err != nil {
+		target, err := c.allowedURL(ctx, currentURL)
+		if err != nil {
 			return nil, err
 		}
+		currentURL = target.String()
 
 		httpReq, err := http.NewRequestWithContext(ctx, string(method), currentURL, bytes.NewReader(req.Body))
 		if err != nil {
 			return nil, err
 		}
+		// Send exactly the normalized URL that passed the allowlist check.
+		httpReq.URL = target
 		for name, value := range req.Headers {
 			httpReq.Header.Set(name, value)
 		}
@@ -429,25 +434,95 @@ func (c *HTTPClient) readResponse(requestURL string, resp *http.Response) (*Resp
 }
 
 func (c *HTTPClient) checkURLAllowed(ctx context.Context, rawURL string) error {
+	_, err := c.allowedURL(ctx, rawURL)
+	return err
+}
+
+// allowedURL parses rawURL, removes dot segments from its path, and checks the
+// normalized URL against the policy. Callers must send the returned URL so the
+// request on the wire matches what was checked.
+func (c *HTTPClient) allowedURL(ctx context.Context, rawURL string) (*url.URL, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return &AccessDeniedError{URL: rawURL, Reason: "invalid URL"}
+		return nil, &AccessDeniedError{URL: rawURL, Reason: "invalid URL"}
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return &AccessDeniedError{URL: rawURL, Reason: "only http and https are allowed"}
+		return nil, &AccessDeniedError{URL: rawURL, Reason: "only http and https are allowed"}
 	}
-	if parsed.Host == "" {
-		return &AccessDeniedError{URL: rawURL, Reason: "missing host"}
+	if parsed.Host == "" || parsed.Opaque != "" {
+		return nil, &AccessDeniedError{URL: rawURL, Reason: "missing host"}
+	}
+	if err := normalizeURLPath(parsed); err != nil {
+		return nil, &AccessDeniedError{URL: rawURL, Reason: err.Error()}
 	}
 	if !urlAllowed(parsed, c.cfg.allowedURLPrefixes) {
-		return &AccessDeniedError{URL: rawURL, Reason: "URL not in allowlist"}
+		return nil, &AccessDeniedError{URL: rawURL, Reason: "URL not in allowlist"}
 	}
 	if c.cfg.denyPrivateRanges {
 		if err := c.checkPrivateHost(ctx, parsed); err != nil {
-			return err
+			return nil, err
 		}
 	}
+	return parsed, nil
+}
+
+// normalizeURLPath applies RFC 3986 remove_dot_segments to the escaped path of
+// u in place. Paths that still contain a segment a server could interpret as
+// "." or ".." after percent-decoding, backslash separators, or ";" path
+// parameters are rejected rather than guessed at.
+func normalizeURLPath(u *url.URL) error {
+	escaped := removeDotSegments(u.EscapedPath())
+	if hasAmbiguousDotSegment(escaped) {
+		return errors.New("ambiguous dot segment in URL path")
+	}
+	decoded, err := url.PathUnescape(escaped)
+	if err != nil {
+		return errors.New("invalid URL path escape")
+	}
+	u.Path = decoded
+	u.RawPath = escaped
 	return nil
+}
+
+func removeDotSegments(escaped string) string {
+	if !strings.HasPrefix(escaped, "/") {
+		return escaped
+	}
+	segments := strings.Split(escaped[1:], "/")
+	out := make([]string, 0, len(segments))
+	for i, segment := range segments {
+		last := i == len(segments)-1
+		switch segment {
+		case ".":
+		case "..":
+			if len(out) > 0 {
+				out = out[:len(out)-1]
+			}
+		default:
+			out = append(out, segment)
+			continue
+		}
+		if last {
+			out = append(out, "")
+		}
+	}
+	return "/" + strings.Join(out, "/")
+}
+
+func hasAmbiguousDotSegment(escaped string) bool {
+	for segment := range strings.SplitSeq(escaped, "/") {
+		decoded, err := url.PathUnescape(segment)
+		if err != nil {
+			return true
+		}
+		for part := range strings.FieldsFuncSeq(decoded, func(r rune) bool { return r == '/' || r == '\\' }) {
+			part, _, _ = strings.Cut(part, ";")
+			if part == "." || part == ".." {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c *HTTPClient) checkPrivateHost(ctx context.Context, parsed *url.URL) error {
@@ -456,7 +531,7 @@ func (c *HTTPClient) checkPrivateHost(ctx context.Context, parsed *url.URL) erro
 		return &AccessDeniedError{URL: parsed.String(), Reason: "private or loopback host blocked"}
 	}
 
-	if ip := net.ParseIP(host); ip != nil {
+	if _, err := netip.ParseAddr(host); err == nil {
 		return nil
 	}
 
@@ -500,6 +575,10 @@ func normalizeAllowList(entries []string) (normalized []allowListEntry, problems
 		}
 		if parsed.User != nil {
 			problems = append(problems, fmt.Sprintf("allowlist URL must not include userinfo: %q", entry))
+			continue
+		}
+		if err := normalizeURLPath(parsed); err != nil {
+			problems = append(problems, fmt.Sprintf("allowlist URL has %s: %q", err, entry))
 			continue
 		}
 		normalized := allowListEntry{
@@ -581,16 +660,65 @@ func isPrivateHostname(host string) bool {
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return true
 	}
-	ip := net.ParseIP(host)
-	if ip == nil {
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
 		return false
 	}
-	return isPrivateIP(ip)
+	return isPrivateAddr(addr)
 }
 
+// nonPublicPrefixes lists special-purpose ranges that are not globally
+// reachable and are not already covered by the netip classification helpers
+// used in isPrivateAddr.
+var nonPublicPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),       // "this network"; 0.0.0.0 reaches localhost
+	netip.MustParsePrefix("100.64.0.0/10"),   // shared address space (CGNAT)
+	netip.MustParsePrefix("192.0.0.0/24"),    // IETF protocol assignments
+	netip.MustParsePrefix("192.0.2.0/24"),    // TEST-NET-1
+	netip.MustParsePrefix("198.18.0.0/15"),   // benchmarking
+	netip.MustParsePrefix("198.51.100.0/24"), // TEST-NET-2
+	netip.MustParsePrefix("203.0.113.0/24"),  // TEST-NET-3
+	netip.MustParsePrefix("240.0.0.0/4"),     // reserved, including 255.255.255.255
+	netip.MustParsePrefix("::/96"),           // unspecified and deprecated IPv4-compatible
+	netip.MustParsePrefix("::ffff:0:0:0/96"), // IPv4-translated
+	netip.MustParsePrefix("64:ff9b:1::/48"),  // local-use IPv4/IPv6 translation
+	netip.MustParsePrefix("100::/64"),        // discard-only
+	netip.MustParsePrefix("2001:db8::/32"),   // documentation
+	netip.MustParsePrefix("fec0::/10"),       // deprecated site-local
+}
+
+var (
+	nat64Prefix  = netip.MustParsePrefix("64:ff9b::/96")
+	sixToFourNet = netip.MustParsePrefix("2002::/16")
+)
+
 func isPrivateIP(ip net.IP) bool {
-	if ip == nil {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
 		return false
 	}
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalMulticast() || ip.IsLinkLocalUnicast()
+	return isPrivateAddr(addr)
+}
+
+func isPrivateAddr(addr netip.Addr) bool {
+	addr = addr.Unmap().WithZone("")
+	if addr.IsUnspecified() || addr.IsLoopback() || addr.IsPrivate() ||
+		addr.IsLinkLocalUnicast() || addr.IsMulticast() {
+		return true
+	}
+	for _, prefix := range nonPublicPrefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	// Translation prefixes embed an IPv4 destination; classify that instead.
+	if nat64Prefix.Contains(addr) {
+		raw := addr.As16()
+		return isPrivateAddr(netip.AddrFrom4([4]byte(raw[12:])))
+	}
+	if sixToFourNet.Contains(addr) {
+		raw := addr.As16()
+		return isPrivateAddr(netip.AddrFrom4([4]byte(raw[2:6])))
+	}
+	return false
 }

@@ -15,6 +15,10 @@ type Options struct {
 	Now       func() time.Time
 	StartTime time.Time
 	Dialect   Dialect
+	// MaxOutputBytes stops formatting once the output, or a single padded
+	// field, would grow past this many bytes; Result.LimitExceeded reports
+	// it. Zero means unlimited.
+	MaxOutputBytes int64
 }
 
 type Dialect uint8
@@ -29,6 +33,9 @@ type Result struct {
 	ExitCode    uint8
 	Diagnostics []string
 	Warnings    []string
+	// LimitExceeded reports that formatting stopped at
+	// Options.MaxOutputBytes; Output is empty then.
+	LimitExceeded bool
 }
 
 type formatSpec struct {
@@ -80,6 +87,20 @@ type formatter struct {
 	exitCode    uint8
 	diagnostics []string
 	warnings    []string
+	exceeded    bool
+}
+
+// overLimit reports whether writing extra more bytes would grow the output
+// past Options.MaxOutputBytes, and records it.
+func (f *formatter) overLimit(extra int) bool {
+	if f.opts.MaxOutputBytes <= 0 {
+		return false
+	}
+	if int64(f.out.Len())+int64(extra) > f.opts.MaxOutputBytes {
+		f.exceeded = true
+		return true
+	}
+	return false
 }
 
 func Format(format string, args []string, opts Options) Result {
@@ -116,6 +137,14 @@ func Format(format string, args []string, opts Options) Result {
 		f.addWarning(fmt.Sprintf("warning: ignoring excess arguments, starting with %s", quoteGNUDiagnosticOperand(f.args[f.index])))
 	}
 
+	if f.exceeded {
+		return Result{
+			ExitCode:      f.exitCode,
+			Diagnostics:   append([]string(nil), f.diagnostics...),
+			Warnings:      append([]string(nil), f.warnings...),
+			LimitExceeded: true,
+		}
+	}
 	return Result{
 		Output:      f.out.String(),
 		ExitCode:    f.exitCode,
@@ -403,6 +432,9 @@ func (f *formatter) run(tokens []formatToken) bool {
 				return true
 			}
 		}
+		if f.overLimit(0) {
+			return true
+		}
 	}
 	return false
 }
@@ -419,6 +451,9 @@ func (f *formatter) runGNU(tokens []formatToken, cycleBase int) bool {
 			if f.applyGNUSpec(&spec, cycleBase) {
 				return true
 			}
+		}
+		if f.overLimit(0) {
+			return true
 		}
 	}
 	return false
@@ -493,6 +528,9 @@ func (f *formatter) applySpec(spec *formatSpec) bool {
 		}
 	}
 
+	if spec.widthSet && f.overLimit(spec.width) {
+		return true
+	}
 	arg, present := f.nextArg()
 	switch spec.verb {
 	case 's':
@@ -710,6 +748,9 @@ func (f *formatter) applyGNUSpec(spec *formatSpec, cycleBase int) bool {
 		}
 	}
 
+	if spec.widthSet && f.overLimit(spec.width) {
+		return true
+	}
 	arg, present := f.gnuArgAt(cycleBase, spec.argSlot)
 	switch spec.verb {
 	case 's':

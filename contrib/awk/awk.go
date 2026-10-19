@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -83,8 +84,9 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 		return exitCodef(inv, 2, "awk: %v", err)
 	}
 
+	limits := awkMemoryLimits(inv)
 	nativeState := &awkNativeState{}
-	funcs := newAWKFuncs(inv, nativeState)
+	funcs := newAWKFuncs(inv, nativeState, limits.maxStringBytes)
 	compiled, err := parser.ParseProgram([]byte(programSource), &parser.ParserConfig{
 		Funcs: funcs,
 	})
@@ -111,15 +113,47 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 		PipeWriter:        newAWKPipeWriter(ctx, inv),
 		CurrentRecordHook: nativeState.setCurrentRecord,
 		Funcs:             funcs,
+		MaxStringBytes:    limits.maxStringBytes,
+		MaxArrayBytes:     limits.maxArrayBytes,
 	}
-	status, err := interp.ExecProgram(compiled, config)
+	program, err := interp.New(compiled)
 	if err != nil {
+		return exitf(inv, "awk: %v", err)
+	}
+	status, err := program.ExecuteContext(ctx, config)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		return exitf(inv, "awk: %v", err)
 	}
 	if status != 0 {
 		return &commands.ExitError{Code: status}
 	}
 	return nil
+}
+
+const (
+	awkMinStringBytes = 16 << 20
+	awkMinArrayBytes  = 256 << 20
+)
+
+type awkLimits struct {
+	maxStringBytes int
+	maxArrayBytes  int64
+}
+
+// awkMemoryLimits bounds what one awk program can hold. No string can be
+// written out whole when it is longer than both the stdout and file limits,
+// so strings stop at the larger of the two (never below 16 MiB), and all
+// arrays together get an estimated max(256 MiB, 4 × that) bytes.
+func awkMemoryLimits(inv *commands.Invocation) awkLimits {
+	maxString := max(inv.Limits.MaxStdoutBytes, inv.Limits.MaxFileBytes, awkMinStringBytes)
+	maxString = min(maxString, math.MaxInt32)
+	return awkLimits{
+		maxStringBytes: int(maxString),
+		maxArrayBytes:  max(awkMinArrayBytes, 4*maxString),
+	}
 }
 
 func parseAWKArgs(inv *commands.Invocation) (opts awkOptions, programText string, inputs []string, err error) {
@@ -530,7 +564,7 @@ func newAWKPipeWriter(ctx context.Context, inv *commands.Invocation) func(string
 	}
 }
 
-func newAWKFuncs(inv *commands.Invocation, state *awkNativeState) map[string]any {
+func newAWKFuncs(inv *commands.Invocation, state *awkNativeState, maxStringBytes int) map[string]any {
 	location := awkTimeLocation(inv)
 	return map[string]any{
 		"and": func(a, b float64) float64 {
@@ -547,7 +581,7 @@ func newAWKFuncs(inv *commands.Invocation, state *awkNativeState) map[string]any
 			if len(rest) > 0 {
 				target = rest[0]
 			}
-			return awkGensub(regex, replacement, how, target)
+			return awkGensub(regex, replacement, how, target, maxStringBytes)
 		},
 		"lshift": func(v, shift float64) float64 {
 			return float64((awkBitValue(v) << uint(int64(shift))) & awkBitMask)
@@ -776,26 +810,33 @@ func awkStrftimeFormat(layout string, when time.Time) string {
 	return b.String()
 }
 
-func awkGensub(regex, replacement, how, target string) (string, error) {
+func awkGensub(regex, replacement, how, target string, maxBytes int) (string, error) {
 	re, err := regexp.Compile(regex)
 	if err != nil {
 		return "", err
 	}
-	matches := re.FindAllStringSubmatchIndex(target, -1)
+	global := strings.EqualFold(how, "g")
+	targetMatch := 1
+	var selectorErr error
+	if !global && how != "" {
+		n, err := strconv.Atoi(how)
+		if err != nil || n <= 0 {
+			selectorErr = fmt.Errorf("gensub: invalid replacement selector %q", how)
+		} else {
+			targetMatch = n
+		}
+	}
+	limit := -1
+	if !global && selectorErr == nil {
+		// Only the first targetMatch matches matter.
+		limit = targetMatch
+	}
+	matches := re.FindAllStringSubmatchIndex(target, limit)
 	if len(matches) == 0 {
 		return target, nil
 	}
-
-	global := strings.EqualFold(how, "g")
-	targetMatch := 1
-	if !global {
-		if how != "" {
-			n, err := strconv.Atoi(how)
-			if err != nil || n <= 0 {
-				return "", fmt.Errorf("gensub: invalid replacement selector %q", how)
-			}
-			targetMatch = n
-		}
+	if selectorErr != nil {
+		return "", selectorErr
 	}
 
 	var out strings.Builder
@@ -807,6 +848,10 @@ func awkGensub(regex, replacement, how, target string) (string, error) {
 			continue
 		}
 		start, end := match[0], match[1]
+		// Each replacement byte expands to at most the whole match.
+		if maxBytes > 0 && out.Len()+(start-last)+len(replacement)*max(1, end-start)+(len(target)-end) > maxBytes {
+			return "", fmt.Errorf("gensub: string exceeds the %d-byte memory limit", maxBytes)
+		}
 		out.WriteString(target[last:start])
 		out.WriteString(awkExpandGensubReplacement(replacement, target, match))
 		last = end
