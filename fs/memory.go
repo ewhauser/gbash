@@ -375,6 +375,7 @@ func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm std
 		if err := m.ensureParentLocked("open", abs); err != nil {
 			return nil, err
 		}
+		perm &= storedPermBits
 		if perm == 0 {
 			perm = 0o644
 		}
@@ -523,9 +524,7 @@ func (m *MemoryFS) Chmod(_ context.Context, name string, mode stdfs.FileMode) er
 	if err != nil {
 		return &os.PathError{Op: "chmod", Path: Resolve(m.cwd, name), Err: err}
 	}
-	const mutableModeBits = stdfs.ModePerm | stdfs.ModeSetuid | stdfs.ModeSetgid | stdfs.ModeSticky
-	typeBits := node.mode &^ mutableModeBits
-	node.mode = typeBits | (mode & mutableModeBits)
+	node.mode = node.mode&^storedPermBits | mode&storedPermBits
 	node.modTime = time.Now().UTC()
 	m.nodes[abs] = node
 	return nil
@@ -618,7 +617,7 @@ func (m *MemoryFS) Mkfifo(_ context.Context, name string, perm stdfs.FileMode) e
 	now := time.Now().UTC()
 	m.nodes[abs] = &memoryNode{
 		id:      m.newNodeIDLocked(),
-		mode:    stdfs.ModeNamedPipe | perm.Perm(),
+		mode:    stdfs.ModeNamedPipe | perm&storedPermBits,
 		fifo:    newMemoryFIFO(),
 		atime:   now,
 		modTime: now,
@@ -770,7 +769,7 @@ func (m *MemoryFS) mkdirAllLocked(name string, perm stdfs.FileMode) error {
 			current = next
 			continue
 		}
-		if perm == 0 {
+		if perm &= storedPermBits; perm == 0 {
 			perm = 0o755
 		}
 		m.nodes[next] = &memoryNode{

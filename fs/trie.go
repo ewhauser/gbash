@@ -315,6 +315,7 @@ func (f *TrieFS) OpenFile(ctx context.Context, name string, flag int, perm stdfs
 		if err := f.mkdirAllLocked(parentDir(abs), 0o755); err != nil {
 			return nil, err
 		}
+		perm &= storedPermBits
 		if perm == 0 {
 			perm = 0o644
 		}
@@ -857,7 +858,7 @@ func (f *TrieFS) mkdirAllLocked(name string, perm stdfs.FileMode) error {
 	if name == "/" {
 		return nil
 	}
-	if perm == 0 {
+	if perm &= storedPermBits; perm == 0 {
 		perm = 0o755
 	}
 
