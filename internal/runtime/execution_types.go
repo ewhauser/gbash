@@ -37,7 +37,8 @@ type ExecutionRequest struct {
 	// be created or written, it is discarded and the stream falls back to
 	// truncation. Empty keeps the legacy truncate-and-drop behavior.
 	SpillDir string
-	// MaxSpillBytes caps each spill file. Overflow past the cap is dropped.
+	// MaxSpillBytes caps each spill file. Overflow past the cap is dropped and
+	// reported via [ExecutionResult.StdoutSpillTruncated].
 	// Zero or negative uses a 64 MiB default.
 	MaxSpillBytes int64
 }
@@ -66,6 +67,11 @@ type ExecutionResult struct {
 	// MaxSpillBytes of overflow. Empty when nothing was spilled.
 	StdoutSpillPath string
 	StderrSpillPath string
+	// StdoutSpillTruncated / StderrSpillTruncated report that the overflow
+	// exceeded MaxSpillBytes, so the spill file was cut short and the bytes
+	// past the cap were dropped.
+	StdoutSpillTruncated bool
+	StderrSpillTruncated bool
 }
 
 type InteractiveRequest struct {
@@ -119,22 +125,24 @@ func (result *ExecutionResult) commandResult() *commands.ExecutionResult {
 		return nil
 	}
 	return &commands.ExecutionResult{
-		ExitCode:        result.ExitCode,
-		ShellExited:     result.ShellExited,
-		Stdout:          result.Stdout,
-		Stderr:          result.Stderr,
-		ControlStderr:   result.ControlStderr,
-		CommandNotFound: result.CommandNotFound,
-		FinalEnv:        copyStringMap(result.FinalEnv),
-		StartedAt:       result.StartedAt,
-		FinishedAt:      result.FinishedAt,
-		Duration:        result.Duration,
-		Events:          cloneTraceEvents(result.Events),
-		StdoutTruncated: result.StdoutTruncated,
-		StderrTruncated: result.StderrTruncated,
-		TimedOut:        result.TimedOut,
-		StdoutSpillPath: result.StdoutSpillPath,
-		StderrSpillPath: result.StderrSpillPath,
+		ExitCode:             result.ExitCode,
+		ShellExited:          result.ShellExited,
+		Stdout:               result.Stdout,
+		Stderr:               result.Stderr,
+		ControlStderr:        result.ControlStderr,
+		CommandNotFound:      result.CommandNotFound,
+		FinalEnv:             copyStringMap(result.FinalEnv),
+		StartedAt:            result.StartedAt,
+		FinishedAt:           result.FinishedAt,
+		Duration:             result.Duration,
+		Events:               cloneTraceEvents(result.Events),
+		StdoutTruncated:      result.StdoutTruncated,
+		StderrTruncated:      result.StderrTruncated,
+		TimedOut:             result.TimedOut,
+		StdoutSpillPath:      result.StdoutSpillPath,
+		StderrSpillPath:      result.StderrSpillPath,
+		StdoutSpillTruncated: result.StdoutSpillTruncated,
+		StderrSpillTruncated: result.StderrSpillTruncated,
 	}
 }
 

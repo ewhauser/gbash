@@ -288,7 +288,7 @@ The runtime treats the runner's virtual directory plus shell-visible `PWD` as th
 
 Sandbox-facing machine metadata is also runtime-owned: `HOSTNAME`, `hostname`, `OSTYPE`, variant-exposed `BASHPID`, and `PPID` must resolve from sandbox metadata and runner state rather than from host uname or host process inspection.
 
-That metadata now has a supported public adapter boundary. `gbash.Config.Host` and `gbash.WithHost(host.Adapter)` select the logical host implementation, while the public `host` package owns typed platform identity, per-execution PID/PPID/process-group seeds, and the pipe primitive used for pipelines and process substitution. The default adapter remains internal and virtual so zero-config sandbox behavior stays unchanged.
+That metadata now has a supported public adapter boundary. `gbash.Config.Host` and `gbash.WithHost(host.Adapter)` select the logical host implementation, while the public `host` package owns typed platform identity, per-execution PID/PPID/process-group seeds, and the pipe primitive used for pipelines and process substitution. The default adapter remains internal and virtual so zero-config sandbox behavior stays unchanged: it reports PID `1`, PPID `0`, and process group `1`, and never the host's process-group id. Only `host.NewSystem()` exposes the real host PID, PPID, and process group.
 
 Signal identity is part of that runtime-owned metadata. Stable `$$` values, per-shell `BASHPID`, shell-family `PPID`, virtual background job IDs, and internal signal delivery for shell-managed `kill` targets must be derived from runner state rather than host PIDs.
 
@@ -829,6 +829,8 @@ Initial policy surface:
 - cancellation and timeout handling
 - network disabled unless a sandboxed network client is explicitly configured
 
+The runtime's default limits (below) also back custom policies: any `policy.Limits` field a custom `Policy` leaves at zero inherits the runtime default, so a policy built only to change roots or allowlists keeps every resource cap. A negative field (`policy.Unlimited`) explicitly disables that one limit, for custom policies and for `LimitOverrides` alike; the effective limits reported by `Session.Limits()` and `Invocation.Limits` show a disabled limit as `0`.
+
 Default policy stance for MVP:
 
 - command allowlist derived from the registered command set
@@ -843,7 +845,7 @@ Default policy stance for MVP:
 - symlink traversal denied unless a filesystem backend and policy explicitly allow it
 - request-level timeout is opt-in, but when it fires the execution must stop with exit code `124` and set `ExecutionResult.TimedOut`
 - caller-driven cancellation must stop the execution with exit code `130`
-- captured stdout/stderr beyond `MaxStdoutBytes` / `MaxStderrBytes` is dropped by default; when the embedder sets `ExecutionRequest.SpillDir`, the overflow is instead written to a host temp file in that directory (capped by `MaxSpillBytes`, default 64 MiB per stream) and reported via `StdoutSpillPath` / `StderrSpillPath`. These writes go to the host directly, outside the sandbox `FileSystem`; scripts cannot choose or read the spill location, the embedder owns cleanup, and a spill failure falls back to truncation instead of surfacing as a script write error
+- captured stdout/stderr beyond `MaxStdoutBytes` / `MaxStderrBytes` is dropped by default; when the embedder sets `ExecutionRequest.SpillDir`, the overflow is instead written to a host temp file in that directory (capped by `MaxSpillBytes`, default 64 MiB per stream) and reported via `StdoutSpillPath` / `StderrSpillPath`; when the overflow exceeds that cap the file is cut short and `StdoutSpillTruncated` / `StderrSpillTruncated` are set. These writes go to the host directly, outside the sandbox `FileSystem`; scripts cannot choose or read the spill location, the embedder owns cleanup, and a spill failure falls back to truncation instead of surfacing as a script write error
 - no ambient network access; `curl` is absent unless the runtime enables the sandboxed network client
 
 The policy package should be able to answer three questions:
@@ -855,6 +857,8 @@ The policy package should be able to answer three questions:
 Network policy for the current runtime is enforced by the dedicated `network/` layer rather than by generic shell evaluation. Commands never receive host `http.Client` access directly; they only receive the runtime-owned sandboxed `network.Client`. The default sandboxed HTTP client must not inherit host proxy environment variables, and private-range blocking must be enforced during the actual dial using the same resolver surface used by the preflight URL check.
 
 Allowlist path matching operates on a normalized path. Before matching, the client applies RFC 3986 `remove_dot_segments` to the escaped request path (and to each configured allowlist prefix), and it sends exactly that normalized URL, so `https://api.example.com/v1/a/../b` is checked and sent as `/v1/b`. Paths that would still contain a `.` or `..` segment once a server percent-decodes them (`%2e%2e`), splits on encoded or backslash separators (`..%2f`, `..%5c`, `..\`), or strips `;` path parameters (`..;`) are denied rather than guessed at; an allowlist prefix with such a segment is an invalid config. The same rule applies to every redirect target.
+
+Redirect following matches curl: a `301`, `302`, or `303` response turns any method other than `GET`/`HEAD` into a body-less `GET` (dropping `Content-*` headers), while `307` and `308` keep the method and body. `Authorization`, `Proxy-Authorization`, `Cookie`, and `Cookie2` headers are only sent to hops whose origin (scheme, host, and port with default ports made explicit) matches the initial request.
 
 `DenyPrivateRanges` blocks every non-globally-reachable destination, not just RFC 1918 space: unspecified addresses (`0.0.0.0/8`, `::`), loopback, private, link-local, multicast, shared/CGNAT (`100.64.0.0/10`), IETF/benchmarking/documentation/reserved ranges, deprecated IPv4-compatible and site-local IPv6, and NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`) addresses whose embedded IPv4 destination is itself non-public. IPv4-mapped IPv6 addresses are classified by their IPv4 form.
 
@@ -893,6 +897,7 @@ Implementation detail for the current runtime:
 - the core runtime does not adopt OpenTelemetry as its event schema or transport contract
 - tracing is disabled by default; `ExecutionResult.Events` is empty unless the embedder enables tracing
 - `TraceRedacted` is the recommended default and redacts secret-bearing argv values before events are returned or emitted
+  - redaction is best-effort and command-agnostic: it strips URL userinfo, secret-looking query keys, values of `-u`/`--user`/`--token`-style flags (separate, attached `-uuser:pass`, or ending a short-flag group such as `-su`), headers whose name contains a secret-looking word (`token`, `secret`, `auth`, `cookie`, `key`, ...) or whose value is a `Bearer`/`Basic` credential, and secret-looking `key=value` pairs or JSON string members in `-d`/`--data*`/`-F`/`--form`/`--json` bodies
 - `TraceRaw` preserves full argv and path metadata and is unsafe unless the embedder controls sinks and retention
 - interactive executions only emit trace callbacks; they do not return events
 - every event carries `session_id` and `execution_id`

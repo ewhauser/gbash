@@ -353,20 +353,35 @@ func (c *HTTPClient) Do(ctx context.Context, req *Request) (*Response, error) {
 	}
 
 	redirects := 0
+	body := req.Body
+	dropBodyHeaders := false
+	var originalOrigin string
 	for {
 		target, err := c.allowedURL(ctx, currentURL)
 		if err != nil {
 			return nil, err
 		}
 		currentURL = target.String()
+		if redirects == 0 {
+			originalOrigin = urlOrigin(target)
+		}
+		// Like curl, credentials only follow redirects that stay on the
+		// origin (scheme, host and port) of the initial request.
+		sameOrigin := urlOrigin(target) == originalOrigin
 
-		httpReq, err := http.NewRequestWithContext(ctx, string(method), currentURL, bytes.NewReader(req.Body))
+		httpReq, err := http.NewRequestWithContext(ctx, string(method), currentURL, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
 		// Send exactly the normalized URL that passed the allowlist check.
 		httpReq.URL = target
 		for name, value := range req.Headers {
+			if !sameOrigin && isCredentialHeader(name) {
+				continue
+			}
+			if dropBodyHeaders && isBodyHeader(name) {
+				continue
+			}
 			httpReq.Header.Set(name, value)
 		}
 
@@ -391,6 +406,14 @@ func (c *HTTPClient) Do(ctx context.Context, req *Request) (*Response, error) {
 			redirects++
 			if redirects > c.cfg.maxRedirects {
 				return nil, &TooManyRedirectsError{MaxRedirects: c.cfg.maxRedirects}
+			}
+			if redirectSwitchesToGet(resp.StatusCode, method) {
+				method = MethodGet
+				body = nil
+				dropBodyHeaders = true
+				if _, ok := c.cfg.allowedMethods[method]; !ok {
+					return nil, &MethodNotAllowedError{Method: string(method)}
+				}
 			}
 			currentURL = nextURL
 			continue
@@ -639,6 +662,56 @@ func resolveRedirectURL(currentURL, location string) (string, error) {
 		return "", err
 	}
 	return base.ResolveReference(next).String(), nil
+}
+
+// redirectSwitchesToGet reports whether following a redirect with statusCode
+// rewrites the request to a body-less GET. 301, 302 and 303 do so for every
+// method except GET and HEAD; 307 and 308 preserve the method and body.
+func redirectSwitchesToGet(statusCode int, method Method) bool {
+	switch statusCode {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther:
+		return method != MethodGet && method != MethodHead
+	default:
+		return false
+	}
+}
+
+// urlOrigin returns the scheme, host and port of u with default ports made
+// explicit, so that "https://h" and "https://h:443" compare equal.
+func urlOrigin(u *url.URL) string {
+	scheme := strings.ToLower(u.Scheme)
+	port := u.Port()
+	if port == "" {
+		switch scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		}
+	}
+	return scheme + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port)
+}
+
+// isCredentialHeader reports whether a request header carries credentials
+// that must not be forwarded to a different origin on redirect.
+func isCredentialHeader(name string) bool {
+	switch http.CanonicalHeaderKey(strings.TrimSpace(name)) {
+	case "Authorization", "Proxy-Authorization", "Cookie", "Cookie2":
+		return true
+	default:
+		return false
+	}
+}
+
+// isBodyHeader reports whether a request header describes the request body
+// and must be dropped once a redirect discards that body.
+func isBodyHeader(name string) bool {
+	switch http.CanonicalHeaderKey(strings.TrimSpace(name)) {
+	case "Content-Type", "Content-Length", "Content-Encoding", "Content-Language", "Content-Location", "Transfer-Encoding":
+		return true
+	default:
+		return false
+	}
 }
 
 func isRedirect(statusCode int) bool {

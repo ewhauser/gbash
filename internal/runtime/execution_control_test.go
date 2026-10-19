@@ -122,7 +122,7 @@ func (c *timeoutProbe) Run(ctx context.Context, inv *commands.Invocation) error 
 
 func TestExecutionTimeoutReturns124(t *testing.T) {
 	t.Parallel()
-	rt := newRuntimeWithLimits(t, policy.Limits{})
+	rt := newRuntimeWithLimits(t, unboundedLoopLimits)
 
 	result, err := rt.Run(context.Background(), &ExecutionRequest{
 		Script:  "while true; do :; done\n",
@@ -141,7 +141,7 @@ func TestExecutionTimeoutReturns124(t *testing.T) {
 
 func TestExecutionCancellationReturns130(t *testing.T) {
 	t.Parallel()
-	rt := newRuntimeWithLimits(t, policy.Limits{})
+	rt := newRuntimeWithLimits(t, unboundedLoopLimits)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

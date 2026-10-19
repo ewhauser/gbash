@@ -33,6 +33,13 @@ func newSession(t testing.TB, cfg *Config) *Session {
 	return session
 }
 
+// unboundedLoopLimits disables the command and loop caps so tests that spin
+// until a timeout or cancellation are not stopped by a default limit first.
+var unboundedLoopLimits = policy.Limits{
+	MaxCommandCount:   policy.Unlimited,
+	MaxLoopIterations: policy.Unlimited,
+}
+
 func newRuntimeWithLimits(t testing.TB, limits policy.Limits) *Runtime {
 	t.Helper()
 
