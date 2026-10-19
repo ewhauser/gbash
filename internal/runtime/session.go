@@ -89,8 +89,8 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 	}
 
 	limits := s.cfg.Policy.Limits()
-	stdout := newSpillingCaptureBuffer(limits.MaxStdoutBytes, req.SpillDir)
-	stderr := newSpillingCaptureBuffer(limits.MaxStderrBytes, req.SpillDir)
+	stdout := newSpillingCaptureBuffer(limits.MaxStdoutBytes, req.SpillDir, req.MaxSpillBytes)
+	stderr := newSpillingCaptureBuffer(limits.MaxStderrBytes, req.SpillDir, req.MaxSpillBytes)
 	defer stdout.Close()
 	defer stderr.Close()
 	stdoutWriter := newCapturePassthroughWriter(stdout, req.Stdout)
@@ -142,10 +142,9 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 			Events:          events,
 			StdoutTruncated: stdout.Truncated(),
 			StderrTruncated: stderr.Truncated(),
-			StdoutSpillPath: stdout.SpillPath(),
-			StderrSpillPath: stderr.SpillPath(),
 		}
 		handled := classifyExecutionControlError(ctx, req.Timeout, err, stderr, result)
+		finishCapturedOutput(result, stdout, stderr)
 		logExecutionOutputs(ctx, s.cfg.Logger, &baseLogEvent, result)
 		logExecutionCompletion(ctx, s.cfg.Logger, &baseLogEvent, result, err, false)
 		if handled {
@@ -214,8 +213,6 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 		Events:          events,
 		StdoutTruncated: stdout.Truncated(),
 		StderrTruncated: stderr.Truncated(),
-		StdoutSpillPath: stdout.SpillPath(),
-		StderrSpillPath: stderr.SpillPath(),
 	}
 	if runResult != nil {
 		result.FinalEnv = runResult.FinalEnv
@@ -223,6 +220,7 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 	}
 
 	handled := classifyExecutionControlError(ctx, req.Timeout, runErr, stderr, result)
+	finishCapturedOutput(result, stdout, stderr)
 	logExecutionOutputs(ctx, s.cfg.Logger, &baseLogEvent, result)
 	unexpectedRunErr := runErr != nil && !handled && !shell.IsExitStatus(runErr)
 	logExecutionCompletion(ctx, s.cfg.Logger, &baseLogEvent, result, runErr, unexpectedRunErr)
@@ -568,6 +566,16 @@ func classifyExecutionControlError(ctx context.Context, timeout time.Duration, r
 	default:
 		return false
 	}
+}
+
+// finishCapturedOutput closes the capture buffers' spill files and records
+// their paths. It runs after classifyExecutionControlError so a timeout or
+// cancellation message that overflows into the spill file is reported too.
+func finishCapturedOutput(result *ExecutionResult, stdout, stderr *captureBuffer) {
+	stdout.Close()
+	stderr.Close()
+	result.StdoutSpillPath = stdout.SpillPath()
+	result.StderrSpillPath = stderr.SpillPath()
 }
 
 func writeExecutionControlMessage(stderr *captureBuffer, message string) {

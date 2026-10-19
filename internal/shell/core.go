@@ -910,6 +910,8 @@ func normalizeSubexecRequest(req *commands.ExecutionRequest, currentEnv map[stri
 		Stdin:           req.Stdin,
 		Stdout:          req.Stdout,
 		Stderr:          req.Stderr,
+		SpillDir:        req.SpillDir,
+		MaxSpillBytes:   req.MaxSpillBytes,
 	}
 	if req.ReplaceEnv {
 		out.Env = mergeEnv(nil, req.Env)

@@ -33,9 +33,14 @@ type ExecutionRequest struct {
 	Stderr          io.Writer
 	// SpillDir optionally enables large-output spilling. When non-empty,
 	// stdout/stderr overflow beyond the policy byte limits is written to temp
-	// files in this directory (see [ExecutionResult.StdoutSpillPath]). Empty
-	// keeps the legacy truncate-and-drop behavior.
+	// files in this host directory (see [ExecutionResult.StdoutSpillPath]).
+	// The caller owns those files and must remove them. If a spill file cannot
+	// be created or written, it is discarded and the stream falls back to
+	// truncation. Empty keeps the legacy truncate-and-drop behavior.
 	SpillDir string
+	// MaxSpillBytes caps each spill file. Overflow past the cap is dropped.
+	// Zero or negative uses a 64 MiB default.
+	MaxSpillBytes int64
 }
 
 // ExecutionResult captures the output, exit status, timing, and optional trace
@@ -60,7 +65,9 @@ type ExecutionResult struct {
 	TimedOut bool
 	// StdoutSpillPath / StderrSpillPath point at temp files holding the
 	// overflow when the corresponding stream exceeded its byte limit and
-	// spilling was enabled. Empty when nothing was spilled.
+	// spilling was enabled. The file holds only the bytes past the limit:
+	// Stdout followed by the file contents is the full stream, up to
+	// MaxSpillBytes of overflow. Empty when nothing was spilled.
 	StdoutSpillPath string
 	StderrSpillPath string
 }
@@ -106,6 +113,7 @@ func (req *ExecutionRequest) runtimeRequest() *internalruntime.ExecutionRequest 
 		Stdout:          req.Stdout,
 		Stderr:          req.Stderr,
 		SpillDir:        req.SpillDir,
+		MaxSpillBytes:   req.MaxSpillBytes,
 	}
 }
 

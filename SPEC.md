@@ -414,6 +414,8 @@ type ExecutionRequest struct {
     Stdin           io.Reader
     Stdout          io.Writer
     Stderr          io.Writer
+    SpillDir        string
+    MaxSpillBytes   int64
 }
 
 type ExecutionResult struct {
@@ -428,6 +430,9 @@ type ExecutionResult struct {
     Events          []trace.Event
     StdoutTruncated bool
     StderrTruncated bool
+    TimedOut        bool
+    StdoutSpillPath string
+    StderrSpillPath string
 }
 
 type TraceMode uint8
@@ -806,8 +811,9 @@ Default policy stance for MVP:
 - maximum command substitution depth defaults to `50` per execution
 - maximum glob operations default to `100000` per execution
 - symlink traversal denied unless a filesystem backend and policy explicitly allow it
-- request-level timeout is opt-in, but when it fires the execution must stop with exit code `124`
+- request-level timeout is opt-in, but when it fires the execution must stop with exit code `124` and set `ExecutionResult.TimedOut`
 - caller-driven cancellation must stop the execution with exit code `130`
+- captured stdout/stderr beyond `MaxStdoutBytes` / `MaxStderrBytes` is dropped by default; when the embedder sets `ExecutionRequest.SpillDir`, the overflow is instead written to a host temp file in that directory (capped by `MaxSpillBytes`, default 64 MiB per stream) and reported via `StdoutSpillPath` / `StderrSpillPath`. These writes go to the host directly, outside the sandbox `FileSystem`; scripts cannot choose or read the spill location, the embedder owns cleanup, and a spill failure falls back to truncation instead of surfacing as a script write error
 - no ambient network access; `curl` is absent unless the runtime enables the sandboxed network client
 
 The policy package should be able to answer three questions:
