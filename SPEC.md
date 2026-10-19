@@ -849,6 +849,8 @@ Network policy for the current runtime is enforced by the dedicated `network/` l
 
 Allowlist path matching operates on a normalized path. Before matching, the client applies RFC 3986 `remove_dot_segments` to the escaped request path (and to each configured allowlist prefix), and it sends exactly that normalized URL, so `https://api.example.com/v1/a/../b` is checked and sent as `/v1/b`. Paths that would still contain a `.` or `..` segment once a server percent-decodes them (`%2e%2e`), splits on encoded or backslash separators (`..%2f`, `..%5c`, `..\`), or strips `;` path parameters (`..;`) are denied rather than guessed at; an allowlist prefix with such a segment is an invalid config. The same rule applies to every redirect target.
 
+Redirect following matches curl: a `301`, `302`, or `303` response turns any method other than `GET`/`HEAD` into a body-less `GET` (dropping `Content-*` headers), while `307` and `308` keep the method and body. `Authorization`, `Proxy-Authorization`, `Cookie`, and `Cookie2` headers are only sent to hops whose origin (scheme, host, and port with default ports made explicit) matches the initial request.
+
 `DenyPrivateRanges` blocks every non-globally-reachable destination, not just RFC 1918 space: unspecified addresses (`0.0.0.0/8`, `::`), loopback, private, link-local, multicast, shared/CGNAT (`100.64.0.0/10`), IETF/benchmarking/documentation/reserved ranges, deprecated IPv4-compatible and site-local IPv6, and NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`) addresses whose embedded IPv4 destination is itself non-public. IPv4-mapped IPv6 addresses are classified by their IPv4 form.
 
 Path-policy enforcement rule for the current runtime:
