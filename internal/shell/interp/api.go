@@ -377,18 +377,20 @@ type funcInfo struct {
 }
 
 type trapState struct {
-	actions             map[trapID]trapAction
-	display             map[trapID]trapAction
-	active              map[trapID]int
+	actions map[trapID]trapAction
+	display map[trapID]trapAction
+	active  map[trapID]int
+	// pending is appended to by goroutines that deliver signals, such as
+	// background jobs running kill, so it is guarded by pendingMu.
+	pendingMu           sync.Mutex
 	pending             []pendingSignalTrap
 	currentSignalNumber int
 	generation          uint64 // bumped on every setTrapAction call
 }
 
 type pendingSignalTrap struct {
-	id     trapID
-	status uint8
-	line   uint
+	id   trapID
+	line uint
 }
 
 type virtualPIDState struct {
@@ -1333,7 +1335,9 @@ func (r *Runner) Reset() {
 	r.traps.actions = nil
 	r.traps.display = nil
 	r.traps.active = nil
+	r.traps.pendingMu.Lock()
 	r.traps.pending = nil
+	r.traps.pendingMu.Unlock()
 	r.traps.currentSignalNumber = 0
 	r.trapLineOverride = 0
 	if r.signalOwner == nil {
