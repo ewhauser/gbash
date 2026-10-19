@@ -145,6 +145,9 @@ func mergeLimitOverrides(base, overrides policy.Limits) policy.Limits {
 	if overrides.MaxSubstitutionDepth != 0 {
 		base.MaxSubstitutionDepth = overrides.MaxSubstitutionDepth
 	}
+	if overrides.MaxFunctionDepth != 0 {
+		base.MaxFunctionDepth = overrides.MaxFunctionDepth
+	}
 	if overrides.MaxStdoutBytes != 0 {
 		base.MaxStdoutBytes = overrides.MaxStdoutBytes
 	}

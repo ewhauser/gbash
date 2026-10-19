@@ -76,6 +76,7 @@ func New(opts ...Option) (*Runtime, error) {
 		MaxBraceExpansionWords: 100000,
 		MaxLoopIterations:      10000,
 		MaxSubstitutionDepth:   50,
+		MaxFunctionDepth:       1000,
 		MaxStdoutBytes:         1 << 20,
 		MaxStderrBytes:         1 << 20,
 		MaxFileBytes:           8 << 20,
@@ -160,6 +161,9 @@ func mergedLimits(base, overrides policy.Limits) policy.Limits {
 	}
 	if overrides.MaxSubstitutionDepth != 0 {
 		base.MaxSubstitutionDepth = overrides.MaxSubstitutionDepth
+	}
+	if overrides.MaxFunctionDepth != 0 {
+		base.MaxFunctionDepth = overrides.MaxFunctionDepth
 	}
 	if overrides.MaxStdoutBytes != 0 {
 		base.MaxStdoutBytes = overrides.MaxStdoutBytes

@@ -816,6 +816,7 @@ Initial policy surface:
 - maximum commands per execution
 - maximum loop iterations
 - maximum command substitution depth
+- maximum function call depth
 - maximum glob operations
 - maximum variable value size
 - symlink policy
@@ -829,7 +830,8 @@ Default policy stance for MVP:
 - reads and writes allowed inside `/`
 - maximum command count defaults to `10000` per execution
 - maximum loop iterations default to `10000` per loop
-- maximum command substitution depth defaults to `50` per execution
+- maximum command substitution depth defaults to `50` per execution (`MaxSubstitutionDepth`). It is checked on the parsed script and again at runtime, where command substitutions, user-written subshells and process substitutions each add a level; pipeline stages run side by side and do not. Going deeper prints `subshell nesting limit exceeded (N), increase policy.Limits.MaxSubstitutionDepth` and exits the shell that tried to nest with status `126`
+- maximum function call depth defaults to `1000` (`MaxFunctionDepth`), counted across subshells like bash's `FUNCNEST`. A deeper call prints `NAME: maximum function nesting level exceeded (N), increase policy.Limits.MaxFunctionDepth` and exits the current shell with status `126`. Bash leaves `FUNCNEST` unset (unlimited) by default, so this is a deliberate sandbox divergence
 - maximum glob operations default to `100000` per execution
 - maximum variable value size defaults to `32 MiB` (`MaxVariableBytes`), with headroom over the `8 MiB` `MaxFileBytes` default so a whole file still fits in one variable. The cap applies to every shell variable write (plain and `+=` assignments, array and associative element writes, array literals and appends, `declare`/`local`/`export`/`readonly`, `read`, `printf -v`, `mapfile`/`readarray`, `${x:=...}`, and `for` variables), where an array counts its element bytes plus 16 bytes per element. It also caps the intermediate values that one step can grow without bound: command substitution output (measured before trailing newlines are stripped), `${x//pattern/replacement}` results, and `printf` output (both the shell builtin and the `printf` command, checked before a padded field is built). A command's expanded argument list and a `for` loop's word list are sized like an indexed array and held to the same cap, which bounds positional parameters and argv doubled with `"$@" "$@"`. `read` and `mapfile` stop buffering input once a value would exceed the cap. Going over prints `NAME: value too large (limit N bytes), increase policy.Limits.MaxVariableBytes`, leaves the variable unchanged, and exits the current shell with status `126` (interactive shells abort only the command). Values the shell derives from already-bounded data (`$_`, `BASH_EXECUTION_STRING`, `BASH_REMATCH`) are exempt. Bash itself only stops when allocation fails, so this is a deliberate sandbox divergence.
 - maximum brace-expansion words default to `100000` per command; the cap covers every word of one command's arguments, array assignment, or declaration operands together, and exceeding it prints `brace expansion: too many words (limit N), increase policy.Limits.MaxBraceExpansionWords` and exits the current shell with status `126`. Bash itself only stops when allocation fails, so this is a deliberate sandbox divergence. Brace sequences stop stepping before they would overflow `int`, so ranges ending at the integer bounds terminate.

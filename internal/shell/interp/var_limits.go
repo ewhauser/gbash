@@ -74,12 +74,7 @@ func (r *Runner) variableLimitExceeded(name string) {
 }
 
 func (r *Runner) applyVariableLimitExit() {
-	r.exit.code = 126
-	if r.interactive {
-		r.commandAborted = true
-	} else {
-		r.exit.exiting = true
-	}
+	r.applyLimitExit()
 }
 
 // reassertVariableLimitExit restores the limit status after a command whose

@@ -96,7 +96,11 @@ func (r *Runner) ExpandCmdSubst(w io.Writer, cs *syntax.CmdSubst) error {
 		f.Close()
 		return err
 	}
+	if r.subshellDepthExceeded() {
+		return SubshellDepthLimitError{Limit: r.maxSubshellDepth}
+	}
 	r2 := r.subshell(false)
+	r2.subshellDepth++
 	if r.expandBaseFDs != nil {
 		r2.shareFDTableSnapshot(r.expandBaseFDs)
 	}
@@ -120,7 +124,11 @@ func (r *Runner) expandDeferredBackquote(ctx context.Context, w io.Writer, cs *s
 		src = src[1 : len(src)-1]
 	}
 
+	if r.subshellDepthExceeded() {
+		return SubshellDepthLimitError{Limit: r.maxSubshellDepth}
+	}
 	r2 := r.subshell(false)
+	r2.subshellDepth++
 	if r.expandBaseFDs != nil {
 		r2.shareFDTableSnapshot(r.expandBaseFDs)
 	}
@@ -285,7 +293,11 @@ func (r *Runner) customProcSubst(ctx context.Context, ps *syntax.ProcSubst) (str
 }
 
 func (r *Runner) runProcSubst(ctx context.Context, ps *syntax.ProcSubst, path string, configure func(r2 *Runner) (func(), error)) (string, error) {
+	if r.subshellDepthExceeded() {
+		return "", SubshellDepthLimitError{Limit: r.maxSubshellDepth}
+	}
 	r2 := r.subshell(true)
+	r2.subshellDepth++
 	// TODO: note that `man bash` mentions that `wait` only waits for the last
 	// process substitution as long as it is $!; the logic here would mean we wait for all of them.
 	bg := bgProc{
@@ -398,6 +410,7 @@ func (r *Runner) expandErr(err error) {
 		arithDiagErr   *expand.ArithmDiagnosticError
 		varSizeErr     expand.VariableSizeLimitError
 		braceLimitErr  expand.BraceExpansionLimitError
+		depthLimitErr  SubshellDepthLimitError
 	)
 	if errors.As(err, &unsetErr) && unsetErr.Node != nil {
 		if file := r.currentExecFile(); file != "" {
@@ -431,6 +444,8 @@ func (r *Runner) expandErr(err error) {
 		} else {
 			r.exit.exiting = true
 		}
+	case errors.As(err, &depthLimitErr):
+		r.applyLimitExit()
 	case errors.As(err, &cmdArithErr):
 		r.exit.code = 1
 	case errors.As(err, &unboundVarErr):
@@ -2322,6 +2337,12 @@ func (r *Runner) call(ctx context.Context, pos syntax.Pos, args []string) {
 			CallLine: uint(r.functionCallLine(pos)),
 		})
 		defer r.analysisScopeExit(r.AnalysisStatus())
+		if r.maxFunctionDepth > 0 && r.funcDepth >= r.maxFunctionDepth {
+			r.functionDepthLimitExceeded(name)
+			return
+		}
+		r.funcDepth++
+		defer func() { r.funcDepth-- }()
 		// stack them to support nested func calls
 		oldParams := r.Params
 		r.Params = args[1:]
