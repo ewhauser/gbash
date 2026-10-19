@@ -26,7 +26,7 @@ Budgets prevent scripts from consuming unbounded resources. When a limit is reac
 | `MaxStdoutBytes` | 1 MB | Truncates stdout beyond this size |
 | `MaxStderrBytes` | 1 MB | Truncates stderr beyond this size |
 | `MaxFileBytes` | 8 MB | Limits individual file size |
-| `MaxVariableBytes` | 32 MB | Caps any one shell variable value, plus command substitution output and `${x//p/r}` results; exceeding it exits with status 126 |
+| `MaxVariableBytes` | 32 MB | Caps any one shell variable value, plus argument lists, command substitution output, `${x//p/r}` results, and `printf` output; exceeding it exits with status 126 |
 
 Override any limit through `policy.Config.Limits` when creating the runtime.
 

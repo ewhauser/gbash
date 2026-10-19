@@ -557,7 +557,13 @@ func (r *Runner) printfBuiltin(args []string) (exit exitStatus) {
 		LookupEnv: r.lookupPrintfEnv,
 		Now:       r.now,
 		StartTime: r.shellStartTime,
+
+		MaxOutputBytes: r.maxVariableBytes,
 	})
+	if result.LimitExceeded {
+		r.variableLimitExceeded("printf")
+		return exitStatus{code: 126}
+	}
 	for _, diag := range result.Diagnostics {
 		r.errf("printf: %s\n", diag)
 	}

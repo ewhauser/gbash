@@ -89,6 +89,10 @@ func (r *Runner) cmdCall(ctx context.Context, cm *syntax.CallExpr, tracingEnable
 	args := cm.Args
 	r.lastExpandExit = exitStatus{}
 	fields, decl := r.resolveCallExprArgs(args)
+	if r.wordListTooLarge(fields) {
+		r.variableLimitExceeded("argument list")
+		return
+	}
 	if decl != nil {
 		if r.posixSpecialBuiltinActive(decl.Variant.Value) {
 			restores := r.runSpecialCallAssigns(cm.Assigns)
@@ -399,6 +403,10 @@ func (r *Runner) cmdFor(ctx context.Context, cm *syntax.ForClause, trace *tracer
 		if inToken {
 			items = r.fields(y.Items...) // for i in ...; do ...
 			if r.stmtAborted() {
+				return
+			}
+			if r.wordListTooLarge(items) {
+				r.variableLimitExceeded("for word list")
 				return
 			}
 		}

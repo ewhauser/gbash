@@ -553,3 +553,27 @@ func TestFormatGNUQuoteRespectsLocaleForNonASCII(t *testing.T) {
 		t.Fatalf("UTF-8 locale Output = %q, want %q", got, want)
 	}
 }
+
+func TestFormatMaxOutputBytes(t *testing.T) {
+	t.Parallel()
+
+	for _, dialect := range []Dialect{DialectShell, DialectGNU} {
+		for _, tc := range []struct {
+			format   string
+			args     []string
+			want     string
+			exceeded bool
+		}{
+			{format: "%*s", args: []string{"8", "x"}, want: "       x"},
+			{format: "%*s", args: []string{"9", "x"}, exceeded: true},
+			{format: "%2000000000s", args: []string{"x"}, exceeded: true},
+			{format: "%s\n", args: []string{"abc", "def"}, want: "abc\ndef\n"},
+			{format: "%s\n", args: []string{"abc", "def", "g"}, exceeded: true},
+		} {
+			got := Format(tc.format, tc.args, Options{Dialect: dialect, MaxOutputBytes: 8})
+			if got.LimitExceeded != tc.exceeded || got.Output != tc.want {
+				t.Fatalf("dialect %d Format(%q, %q) = %q, exceeded %v; want %q, exceeded %v", dialect, tc.format, tc.args, got.Output, got.LimitExceeded, tc.want, tc.exceeded)
+			}
+		}
+	}
+}

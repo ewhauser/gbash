@@ -40,6 +40,20 @@ func variableValueBytes(vr expand.Variable) int64 {
 	}
 }
 
+// wordListTooLarge reports whether expanded words, such as a command's
+// arguments, exceed MaxVariableBytes when sized like an indexed array. This
+// bounds argv and positional parameters, which "$@" "$@" can double.
+func (r *Runner) wordListTooLarge(words []string) bool {
+	if r.maxVariableBytes <= 0 {
+		return false
+	}
+	size := int64(len(words)) * arrayElementOverheadBytes
+	for _, word := range words {
+		size += int64(len(word))
+	}
+	return size > r.maxVariableBytes
+}
+
 // variableTooLarge reports whether storing vr would exceed MaxVariableBytes.
 func (r *Runner) variableTooLarge(vr expand.Variable) bool {
 	if r.maxVariableBytes <= 0 || !vr.IsSet() {
