@@ -333,11 +333,11 @@ func (p *interp) setFieldNames(names []string) {
 
 	// Populate FIELDS array (mapping of field indexes to field names).
 	fieldsArray := p.array(resolver.Global, p.arrayIndexes["FIELDS"])
-	for k := range fieldsArray {
-		delete(fieldsArray, k)
-	}
+	p.arrayClear(fieldsArray)
 	for i, name := range names {
-		fieldsArray[strconv.Itoa(i+1)] = str(name)
+		// The header row is bounded by the record length, so an array limit
+		// error here can only leave FIELDS partially populated.
+		_ = p.arraySet(fieldsArray, strconv.Itoa(i+1), str(name))
 	}
 }
 

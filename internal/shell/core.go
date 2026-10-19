@@ -136,7 +136,7 @@ func (m *core) Run(ctx context.Context, exec *Execution) (result *RunResult, run
 		if recovered := recover(); recovered != nil {
 			finishAnalysis(analysis.Status{Code: 2, Exiting: true})
 			if exec.Stderr != nil {
-				_, _ = fmt.Fprintln(exec.Stderr, sanitizeRunnerPanic(recovered))
+				_, _ = fmt.Fprintln(exec.Stderr, interp.SanitizeRunnerPanic(recovered))
 			}
 			result = &RunResult{FinalEnv: nil}
 			runErr = interp.ExitStatus(2)
@@ -273,6 +273,10 @@ func (m *core) runnerConfig(exec *Execution, budget *executionBudget) *interp.Ru
 	if exec == nil {
 		return cfg
 	}
+	if exec.Policy != nil {
+		cfg.MaxVariableBytes = exec.Policy.Limits().MaxVariableBytes
+		cfg.MaxBraceExpansionWords = exec.Policy.Limits().MaxBraceExpansionWords
+	}
 	cfg.StartupHome = exec.StartupHome
 	cfg.Dir = exec.Dir
 	cfg.VisibleDir = exec.VisiblePWD
@@ -377,20 +381,6 @@ func runnerParamArgs(startupOptions, args []string) []string {
 	out = append(out, "--")
 	out = append(out, args...)
 	return out
-}
-
-func sanitizeRunnerPanic(recovered any) string {
-	message := fmt.Sprint(recovered)
-	switch {
-	case strings.HasPrefix(message, "unhandled >& arg:"),
-		strings.HasPrefix(message, "unhandled > arg:"),
-		strings.HasPrefix(message, "unhandled < arg:"),
-		strings.HasPrefix(message, "unsupported redirect fd:"),
-		strings.HasPrefix(message, "unhandled redirect op:"):
-		return "invalid redirection"
-	default:
-		return "shell execution failed"
-	}
 }
 
 func executionSourceName(exec *Execution) string {
@@ -1051,6 +1041,8 @@ func shellPathErrorText(err error) string {
 		return ""
 	case errors.Is(err, syscall.EISDIR):
 		return "Is a directory"
+	case errors.Is(err, syscall.ENOTDIR):
+		return "Not a directory"
 	case errors.Is(err, stdfs.ErrNotExist):
 		return "No such file or directory"
 	}

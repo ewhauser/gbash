@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/ewhauser/gbash/commands"
-	"github.com/itchyny/gojq"
+	"github.com/ewhauser/gbash/contrib/jq/internal/gojq"
 )
 
 type sandboxJQModuleLoader struct {

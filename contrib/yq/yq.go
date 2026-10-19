@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/ewhauser/gbash/commands"
 	gbfs "github.com/ewhauser/gbash/fs"
@@ -60,12 +59,16 @@ type namedInput struct {
 	FromStdin bool
 }
 
-var yqEvalMu sync.Mutex
-
 func init() {
 	backend := logging.AddModuleLevel(logging.NewLogBackend(io.Discard, "", 0))
 	backend.SetLevel(logging.ERROR, "")
 	logging.SetBackend(backend)
+
+	// yqlib reads these process-wide globals during evaluation. Set them once
+	// here, before any evaluation, so concurrent runtimes need no lock.
+	yqlib.InitExpressionParser()
+	yqlib.ConfiguredSecurityPreferences.DisableEnvOps = true
+	yqlib.ConfiguredSecurityPreferences.DisableFileOps = true
 }
 
 func NewYQ() *YQ {
@@ -443,49 +446,56 @@ func executeYQ(ctx context.Context, inv *commands.Invocation, opts *yqOptions, e
 		printer.SetNulSepOutput(true)
 	}
 
-	err = withYQSandbox(func() error {
-		switch opts.mode {
-		case yqModeEvalAll:
-			return runYQEvalAll(ctx, expression, inputs, printer, formats.inputFormat)
-		default:
-			return runYQEval(ctx, expression, inputs, printer, formats.inputFormat, opts.nullInput)
+	guard := newYQEvalGuard(ctx)
+	switch opts.mode {
+	case yqModeEvalAll:
+		err = runYQEvalAll(guard, expression, inputs, printer, formats.inputFormat)
+	default:
+		err = runYQEval(guard, expression, inputs, printer, formats.inputFormat, opts.nullInput)
+	}
+	if err = guard.finish(err); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return false, ctxErr
 		}
-	})
-	if err != nil {
 		return false, normalizeYQError(inv, err)
 	}
 	return printer.PrintedAnything(), nil
 }
 
-func withYQSandbox(run func() error) error {
-	yqEvalMu.Lock()
-	defer yqEvalMu.Unlock()
-
-	yqlib.InitExpressionParser()
-	security := yqlib.ConfiguredSecurityPreferences
-	yqlib.ConfiguredSecurityPreferences.DisableEnvOps = true
-	yqlib.ConfiguredSecurityPreferences.DisableFileOps = true
-	defer func() {
-		yqlib.ConfiguredSecurityPreferences = security
-	}()
-
-	return run()
+// runYQNullInput evaluates node once against a single null document, like
+// yqlib's StreamEvaluator.EvaluateNew.
+func runYQNullInput(node *yqlib.ExpressionNode, printer yqlib.Printer) error {
+	return runYQCandidates(node, yqNullCandidates(), printer)
 }
 
-func runYQEval(ctx context.Context, expression string, inputs []namedInput, printer yqlib.Printer, inputFormat *yqlib.Format, nullInput bool) error {
-	stream := yqlib.NewStreamEvaluator()
-	if nullInput {
-		return stream.EvaluateNew(expression, printer)
-	}
-
-	node, err := yqlib.ExpressionParser.ParseExpression(expression)
+func runYQCandidates(node *yqlib.ExpressionNode, candidates *list.List, printer yqlib.Printer) error {
+	result, err := yqlib.NewDataTreeNavigator().GetMatchingNodes(yqlib.Context{MatchingNodes: candidates}, node)
 	if err != nil {
 		return err
 	}
+	return printer.PrintResults(result.MatchingNodes)
+}
+
+func yqNullCandidates() *list.List {
+	candidates := list.New()
+	candidates.PushBack(&yqlib.CandidateNode{Kind: yqlib.ScalarNode, Tag: "!!null"})
+	return candidates
+}
+
+func runYQEval(guard *yqEvalGuard, expression string, inputs []namedInput, printer yqlib.Printer, inputFormat *yqlib.Format, nullInput bool) error {
+	node, err := guard.parse(expression)
+	if err != nil {
+		return err
+	}
+	if nullInput {
+		return runYQNullInput(node, printer)
+	}
+
+	stream := yqlib.NewStreamEvaluator()
 
 	var totalDocs uint
 	for _, input := range inputs {
-		if err := ctx.Err(); err != nil {
+		if err := guard.check(); err != nil {
 			return err
 		}
 		decoder, err := newYQDecoder(inputFormat)
@@ -499,19 +509,23 @@ func runYQEval(ctx context.Context, expression string, inputs []namedInput, prin
 		totalDocs += processed
 	}
 	if totalDocs == 0 {
-		return stream.EvaluateNew(expression, printer)
+		return runYQNullInput(node, printer)
 	}
 	return nil
 }
 
-func runYQEvalAll(ctx context.Context, expression string, inputs []namedInput, printer yqlib.Printer, inputFormat *yqlib.Format) error {
+func runYQEvalAll(guard *yqEvalGuard, expression string, inputs []namedInput, printer yqlib.Printer, inputFormat *yqlib.Format) error {
+	node, err := guard.parse(expression)
+	if err != nil {
+		return err
+	}
 	if len(inputs) == 0 {
-		return yqlib.NewStreamEvaluator().EvaluateNew(expression, printer)
+		return runYQNullInput(node, printer)
 	}
 
 	candidates := list.New()
 	for index, input := range inputs {
-		if err := ctx.Err(); err != nil {
+		if err := guard.check(); err != nil {
 			return err
 		}
 		decoder, err := newYQDecoder(inputFormat)
@@ -530,17 +544,9 @@ func runYQEvalAll(ctx context.Context, expression string, inputs []namedInput, p
 		candidates.PushBackList(documents)
 	}
 	if candidates.Len() == 0 {
-		candidates.PushBack(&yqlib.CandidateNode{
-			Kind: yqlib.ScalarNode,
-			Tag:  "!!null",
-		})
+		candidates = yqNullCandidates()
 	}
-
-	matches, err := yqlib.NewAllAtOnceEvaluator().EvaluateCandidateNodes(expression, candidates)
-	if err != nil {
-		return err
-	}
-	return printer.PrintResults(matches)
+	return runYQCandidates(node, candidates, printer)
 }
 
 func newYQDecoder(format *yqlib.Format) (yqlib.Decoder, error) {

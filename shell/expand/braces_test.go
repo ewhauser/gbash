@@ -5,6 +5,8 @@ package expand
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/ewhauser/gbash/shell/syntax"
@@ -376,4 +378,146 @@ func printWords(words ...*syntax.Word) string {
 	call := &syntax.CallExpr{Args: words}
 	p.Print(&buf, call)
 	return buf.String()
+}
+
+func TestBracesSequenceNearIntBoundsTerminates(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		src  string
+		want []string
+	}{
+		{
+			src:  "{9223372036854775806..9223372036854775807}",
+			want: []string{"9223372036854775806", "9223372036854775807"},
+		},
+		{
+			src:  "{9223372036854775807..9223372036854775806}",
+			want: []string{"9223372036854775807", "9223372036854775806"},
+		},
+		{
+			src:  "{-9223372036854775807..-9223372036854775808}",
+			want: []string{"-9223372036854775807", "-9223372036854775808"},
+		},
+		{
+			src:  "{-9223372036854775808..-9223372036854775807}",
+			want: []string{"-9223372036854775808", "-9223372036854775807"},
+		},
+		{
+			src:  "{1..9223372036854775807..4611686018427387904}",
+			want: []string{"1", "4611686018427387905"},
+		},
+		{
+			src:  "{-1..-9223372036854775808..4611686018427387904}",
+			want: []string{"-1", "-4611686018427387905"},
+		},
+		{
+			src:  "{-9223372036854775808..9223372036854775807..9223372036854775807}",
+			want: []string{"-9223372036854775808", "-1", "9223372036854775806"},
+		},
+		{
+			src:  "x{9223372036854775807..9223372036854775807}y",
+			want: []string{"x9223372036854775807y"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.src, func(t *testing.T) {
+			t.Parallel()
+			// A small budget turns a regression into a fast failure instead of
+			// an unbounded loop.
+			got, err := braces(parseCommandWord(t, tc.src), newBraceBudget(16))
+			if err != nil {
+				t.Fatalf("braces(%q) error = %v", tc.src, err)
+			}
+			want := printWords(litWords(tc.want...)...)
+			if gotStr := printWords(got...); gotStr != want {
+				t.Fatalf("braces(%q) = %q, want %q", tc.src, gotStr, want)
+			}
+		})
+	}
+}
+
+func TestFieldsBraceExpansionWordLimit(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		words []string
+		limit int64
+		want  int
+		fail  bool
+	}{
+		{name: "sequence at limit", words: []string{"{1..10}"}, limit: 10, want: 10},
+		{name: "sequence over limit", words: []string{"{1..11}"}, limit: 10, fail: true},
+		{name: "huge sequence", words: []string{"{1..9223372036854775807}"}, limit: 1000, fail: true},
+		{name: "cartesian product", words: []string{"{1..4}{a,b,c}"}, limit: 10, fail: true},
+		{name: "nested lists", words: []string{"{a,{b,{c,d}}}"}, limit: 4, want: 4},
+		{name: "budget spans words", words: []string{"{1..6}", "{1..6}"}, limit: 10, fail: true},
+		{name: "plain words not counted", words: []string{"a", "b", "c"}, limit: 1, want: 3},
+		{name: "unlimited", words: []string{"{1..500}"}, limit: 0, want: 500},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			words := make([]*syntax.Word, 0, len(tc.words))
+			for _, src := range tc.words {
+				words = append(words, parseCommandWord(t, src))
+			}
+			got, err := Fields(&Config{MaxBraceExpansionWords: tc.limit}, words...)
+			if tc.fail {
+				var limitErr BraceExpansionLimitError
+				if !errors.As(err, &limitErr) {
+					t.Fatalf("Fields() error = %v, want BraceExpansionLimitError", err)
+				}
+				if limitErr.Limit != tc.limit {
+					t.Fatalf("Limit = %d, want %d", limitErr.Limit, tc.limit)
+				}
+				if want := fmt.Sprintf("brace expansion: too many words (limit %d)", tc.limit); err.Error() != want {
+					t.Fatalf("Error() = %q, want %q", err.Error(), want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Fields() error = %v", err)
+			}
+			if len(got) != tc.want {
+				t.Fatalf("len(Fields()) = %d, want %d", len(got), tc.want)
+			}
+		})
+	}
+}
+
+func TestBraceExpansionScopeSpansFieldsCalls(t *testing.T) {
+	t.Parallel()
+
+	cfg := &Config{MaxBraceExpansionWords: 10}
+	word := parseCommandWord(t, "{1..6}")
+
+	// Outside a scope each call has its own budget.
+	for range 3 {
+		if _, err := Fields(cfg, word); err != nil {
+			t.Fatalf("Fields() outside scope error = %v", err)
+		}
+	}
+
+	cfg.BeginBraceExpansionScope()
+	cfg.BeginBraceExpansionScope()
+	if _, err := Fields(cfg, word); err != nil {
+		t.Fatalf("first Fields() in scope error = %v", err)
+	}
+	cfg.EndBraceExpansionScope()
+	var limitErr BraceExpansionLimitError
+	if _, err := Fields(cfg, word); !errors.As(err, &limitErr) {
+		t.Fatalf("second Fields() in scope error = %v, want BraceExpansionLimitError", err)
+	}
+	cfg.EndBraceExpansionScope()
+
+	// A new outermost scope starts from zero again.
+	cfg.BeginBraceExpansionScope()
+	defer cfg.EndBraceExpansionScope()
+	if _, err := Fields(cfg, word); err != nil {
+		t.Fatalf("Fields() in fresh scope error = %v", err)
+	}
 }

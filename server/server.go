@@ -61,28 +61,16 @@ func listenUnixSocket(ctx context.Context, socketPath string) (string, net.Liste
 	if socketPath == "" {
 		return "", nil, fmt.Errorf("server: socket path must not be empty")
 	}
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
 		return "", nil, fmt.Errorf("server: create socket directory: %w", err)
 	}
 	if err := removeStaleUnixSocket(ctx, socketPath); err != nil {
 		return "", nil, err
 	}
-	ln, err := (&net.ListenConfig{}).Listen(ctx, "unix", socketPath)
+	ln, err := listenPrivateUnixSocket(ctx, socketPath)
 	if err != nil {
-		return "", nil, fmt.Errorf("server: listen on unix socket: %w", err)
+		return "", nil, err
 	}
-	cleanup := true
-	defer func() {
-		if !cleanup {
-			return
-		}
-		_ = ln.Close()
-		_ = os.Remove(socketPath)
-	}()
-	if err := os.Chmod(socketPath, 0o600); err != nil {
-		return "", nil, fmt.Errorf("server: chmod socket: %w", err)
-	}
-	cleanup = false
 	return socketPath, ln, nil
 }
 
@@ -461,7 +449,7 @@ func (c *clientConn) handleRequest(req *rpcRequest) *rpcResponse {
 		if err != nil {
 			return invalidParamsResponse(req.ID, err)
 		}
-		session, err := c.server.lookupSession(params.SessionID)
+		session, err := c.server.acquireSession(params.SessionID)
 		if err != nil {
 			return appErrorResponse(req.ID, err)
 		}

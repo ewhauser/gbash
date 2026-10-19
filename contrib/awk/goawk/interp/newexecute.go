@@ -127,10 +127,9 @@ func (p *interp) resetVars() {
 
 	// Reset global arrays
 	for _, array := range p.arrays {
-		for k := range array {
-			delete(array, k)
-		}
+		clear(array)
 	}
+	p.arrayBytes = 0
 
 	// Reset special variables
 	p.convertFormat = "%.6g"

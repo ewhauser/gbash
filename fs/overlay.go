@@ -21,6 +21,11 @@ type OverlayFS struct {
 	mu         sync.RWMutex
 	cwd        string
 	tombstones map[string]struct{}
+	// lowerDirs caches lower-layer directories seen while walking path
+	// prefixes. The lower layer is never mutated through the overlay, so
+	// this spares backends such as HostFS from re-resolving every prefix of
+	// every path.
+	lowerDirs map[string]stdfs.FileInfo
 }
 
 // NewOverlay creates a concrete overlay filesystem over lower.
@@ -30,9 +35,10 @@ func NewOverlay(lower FileSystem) *OverlayFS {
 	}
 	return &OverlayFS{
 		lower:      lower,
-		upper:      NewMemory(),
+		upper:      newMemoryWithImplicitParents(),
 		cwd:        "/",
 		tombstones: make(map[string]struct{}),
+		lowerDirs:  make(map[string]stdfs.FileInfo),
 	}
 }
 
@@ -43,60 +49,74 @@ func (o *OverlayFS) Open(ctx context.Context, name string) (File, error) {
 func (o *OverlayFS) OpenFile(ctx context.Context, name string, flag int, perm stdfs.FileMode) (File, error) {
 	abs := o.resolve(name)
 	if !hasWriteIntent(flag) {
-		if _, err := o.upper.Lstat(ctx, abs); err == nil {
-			return o.upper.OpenFile(ctx, abs, flag, perm)
-		} else if !errors.Is(err, stdfs.ErrNotExist) {
-			return nil, err
+		resolved, _, source, err := o.resolveMerged(ctx, abs, true)
+		if err != nil {
+			return nil, toPathError("open", abs, err)
 		}
-		if o.isHidden(abs) {
-			return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrNotExist}
+		if source == overlaySourceUpper {
+			return o.upper.OpenFile(ctx, resolved, flag, perm)
 		}
-		return o.lower.OpenFile(ctx, abs, flag, perm)
+		return o.lower.OpenFile(ctx, resolved, flag, perm)
 	}
 
-	info, source, err := o.visibleInfo(ctx, abs)
+	missing := overlayMissingNone
+	if flag&os.O_CREATE != 0 {
+		missing = overlayMissingFinal
+	}
+	// O_CREATE|O_EXCL never follows a final symlink: an existing link, even a
+	// dangling one, makes the open fail.
+	exclusive := flag&(os.O_CREATE|os.O_EXCL) == os.O_CREATE|os.O_EXCL
+	resolved, info, source, err := o.resolveMergedPath(ctx, abs, !exclusive, missing)
+	if err != nil {
+		if flag&os.O_CREATE != 0 {
+			err = createParentError(err)
+		}
+		return nil, toPathError("open", abs, err)
+	}
+	if exclusive && info != nil {
+		return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrExist}
+	}
 	switch {
-	case err == nil && source == overlaySourceUpper:
-		return o.upper.OpenFile(ctx, abs, flag, perm)
-	case err == nil && source == overlaySourceLower:
-		if info.IsDir() {
-			return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrInvalid}
-		}
-		if err := cloneFile(ctx, o.lower, abs, o.upper, abs, info.Mode().Perm()); err != nil {
-			return nil, err
-		}
-		return o.upper.OpenFile(ctx, abs, flag, perm)
-	case err == nil:
-		return o.upper.OpenFile(ctx, abs, flag, perm)
-	case errors.Is(err, stdfs.ErrNotExist):
+	case info == nil:
 		if flag&os.O_CREATE == 0 {
 			return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrNotExist}
 		}
-		return o.upper.OpenFile(ctx, abs, flag, perm)
-	default:
-		return nil, err
+	case source == overlaySourceLower:
+		if info.IsDir() {
+			return nil, &os.PathError{Op: "open", Path: abs, Err: stdfs.ErrInvalid}
+		}
+		// Copy up the resolved target, never a symlink that led to it.
+		if err := o.copyUpNode(ctx, resolved, info); err != nil {
+			return nil, toPathError("open", abs, err)
+		}
 	}
+	return o.upper.OpenFile(ctx, resolved, flag, perm)
 }
 
 func (o *OverlayFS) Stat(ctx context.Context, name string) (stdfs.FileInfo, error) {
-	return o.statLike(ctx, name)
-}
-
-func (o *OverlayFS) Lstat(ctx context.Context, name string) (stdfs.FileInfo, error) {
-	return o.statLike(ctx, name)
-}
-
-func (o *OverlayFS) statLike(ctx context.Context, name string) (stdfs.FileInfo, error) {
 	abs := o.resolve(name)
-	info, _, err := o.visibleInfo(ctx, abs)
+	_, info, _, err := o.resolveMerged(ctx, abs, true)
 	if err != nil {
 		return nil, toPathError("stat", abs, err)
 	}
 	return info, nil
 }
 
-func (o *OverlayFS) ReadDir(ctx context.Context, name string) ([]stdfs.DirEntry, error) {
+func (o *OverlayFS) Lstat(ctx context.Context, name string) (stdfs.FileInfo, error) {
 	abs := o.resolve(name)
+	_, info, _, err := o.resolveMerged(ctx, abs, false)
+	if err != nil {
+		return nil, toPathError("lstat", abs, err)
+	}
+	return info, nil
+}
+
+func (o *OverlayFS) ReadDir(ctx context.Context, name string) ([]stdfs.DirEntry, error) {
+	requested := o.resolve(name)
+	abs, _, _, err := o.resolveMerged(ctx, requested, true)
+	if err != nil {
+		return nil, toPathError("readdir", requested, err)
+	}
 	upperInfo, upperExists, err := lstatMaybe(ctx, o.upper, abs)
 	if err != nil {
 		return nil, toPathError("readdir", abs, err)
@@ -162,15 +182,11 @@ func (o *OverlayFS) ReadDir(ctx context.Context, name string) ([]stdfs.DirEntry,
 
 func (o *OverlayFS) Readlink(ctx context.Context, name string) (string, error) {
 	abs := o.resolve(name)
-	if _, err := o.upper.Lstat(ctx, abs); err == nil {
-		return o.upper.Readlink(ctx, abs)
-	} else if !errors.Is(err, stdfs.ErrNotExist) {
-		return "", err
+	resolved, _, source, err := o.resolveMerged(ctx, abs, false)
+	if err != nil {
+		return "", toPathError("readlink", abs, err)
 	}
-	if o.isHidden(abs) {
-		return "", &os.PathError{Op: "readlink", Path: abs, Err: stdfs.ErrNotExist}
-	}
-	target, err := o.lower.Readlink(ctx, abs)
+	target, err := o.readlinkAt(ctx, source, resolved)
 	if err != nil {
 		return "", toPathError("readlink", abs, err)
 	}
@@ -179,15 +195,19 @@ func (o *OverlayFS) Readlink(ctx context.Context, name string) (string, error) {
 
 func (o *OverlayFS) Realpath(ctx context.Context, name string) (string, error) {
 	abs := o.resolve(name)
-	resolved, err := o.resolveRealpath(ctx, abs, 0)
+	resolved, _, _, err := o.resolveMerged(ctx, abs, true)
 	if err != nil {
-		return "", &os.PathError{Op: "realpath", Path: abs, Err: err}
+		return "", &os.PathError{Op: "realpath", Path: abs, Err: unwrapPathError(err)}
 	}
 	return resolved, nil
 }
 
 func (o *OverlayFS) Symlink(ctx context.Context, target, linkName string) error {
-	abs := o.resolve(linkName)
+	requested := o.resolve(linkName)
+	abs, _, _, err := o.resolveMergedPath(ctx, requested, false, overlayMissingFinal)
+	if err != nil {
+		return toPathError("symlink", requested, createParentError(err))
+	}
 	if err := o.upper.Symlink(ctx, target, abs); err != nil {
 		return toPathError("symlink", abs, err)
 	}
@@ -196,20 +216,19 @@ func (o *OverlayFS) Symlink(ctx context.Context, target, linkName string) error 
 }
 
 func (o *OverlayFS) Link(ctx context.Context, oldName, newName string) error {
-	oldAbs := o.resolve(oldName)
-	newAbs := o.resolve(newName)
-
-	info, source, err := o.visibleInfo(ctx, oldAbs)
+	oldAbs, info, source, err := o.resolveMerged(ctx, o.resolve(oldName), false)
 	if err != nil {
-		return &os.PathError{Op: "link", Path: oldAbs, Err: stdfs.ErrNotExist}
+		return &os.PathError{Op: "link", Path: o.resolve(oldName), Err: stdfs.ErrNotExist}
 	}
 	if info.IsDir() {
 		return &os.PathError{Op: "link", Path: oldAbs, Err: stdfs.ErrInvalid}
 	}
-	if _, _, err := o.visibleInfo(ctx, newAbs); err == nil {
+	newAbs, newInfo, _, err := o.resolveMergedPath(ctx, o.resolve(newName), false, overlayMissingFinal)
+	if err != nil {
+		return toPathError("link", o.resolve(newName), createParentError(err))
+	}
+	if newInfo != nil {
 		return &os.PathError{Op: "link", Path: newAbs, Err: stdfs.ErrExist}
-	} else if !errors.Is(err, stdfs.ErrNotExist) {
-		return toPathError("link", newAbs, err)
 	}
 
 	switch source {
@@ -219,7 +238,7 @@ func (o *OverlayFS) Link(ctx context.Context, oldName, newName string) error {
 		}
 	case overlaySourceLower:
 		if _, err := o.upper.Lstat(ctx, oldAbs); errors.Is(err, stdfs.ErrNotExist) {
-			if err := clonePath(ctx, o.lower, oldAbs, o.upper, oldAbs); err != nil {
+			if err := o.copyUpNode(ctx, oldAbs, info); err != nil {
 				return toPathError("link", oldAbs, err)
 			}
 		} else if err != nil {
@@ -236,13 +255,13 @@ func (o *OverlayFS) Link(ctx context.Context, oldName, newName string) error {
 }
 
 func (o *OverlayFS) Chmod(ctx context.Context, name string, mode stdfs.FileMode) error {
-	abs := o.resolve(name)
-	_, source, err := o.visibleInfo(ctx, abs)
+	requested := o.resolve(name)
+	abs, info, source, err := o.resolveMerged(ctx, requested, true)
 	if err != nil {
-		return &os.PathError{Op: "chmod", Path: abs, Err: stdfs.ErrNotExist}
+		return toPathError("chmod", requested, err)
 	}
 	if source == overlaySourceLower {
-		if err := clonePath(ctx, o.lower, abs, o.upper, abs); err != nil {
+		if err := o.copyUpNode(ctx, abs, info); err != nil {
 			return toPathError("chmod", abs, err)
 		}
 	}
@@ -253,13 +272,13 @@ func (o *OverlayFS) Chmod(ctx context.Context, name string, mode stdfs.FileMode)
 }
 
 func (o *OverlayFS) Chown(ctx context.Context, name string, uid, gid uint32, follow bool) error {
-	abs := o.resolve(name)
-	_, source, err := o.visibleInfo(ctx, abs)
+	requested := o.resolve(name)
+	abs, info, source, err := o.resolveMerged(ctx, requested, follow)
 	if err != nil {
-		return &os.PathError{Op: "chown", Path: abs, Err: stdfs.ErrNotExist}
+		return toPathError("chown", requested, err)
 	}
 	if source == overlaySourceLower {
-		if err := clonePath(ctx, o.lower, abs, o.upper, abs); err != nil {
+		if err := o.copyUpNode(ctx, abs, info); err != nil {
 			return toPathError("chown", abs, err)
 		}
 	}
@@ -270,13 +289,13 @@ func (o *OverlayFS) Chown(ctx context.Context, name string, uid, gid uint32, fol
 }
 
 func (o *OverlayFS) Chtimes(ctx context.Context, name string, atime, mtime time.Time) error {
-	abs := o.resolve(name)
-	_, source, err := o.visibleInfo(ctx, abs)
+	requested := o.resolve(name)
+	abs, info, source, err := o.resolveMerged(ctx, requested, true)
 	if err != nil {
-		return &os.PathError{Op: "chtimes", Path: abs, Err: stdfs.ErrNotExist}
+		return toPathError("chtimes", requested, err)
 	}
 	if source == overlaySourceLower {
-		if err := clonePath(ctx, o.lower, abs, o.upper, abs); err != nil {
+		if err := o.copyUpNode(ctx, abs, info); err != nil {
 			return toPathError("chtimes", abs, err)
 		}
 	}
@@ -287,13 +306,13 @@ func (o *OverlayFS) Chtimes(ctx context.Context, name string, atime, mtime time.
 }
 
 func (o *OverlayFS) Lchtimes(ctx context.Context, name string, atime, mtime time.Time) error {
-	abs := o.resolve(name)
-	_, source, err := o.visibleInfo(ctx, abs)
+	requested := o.resolve(name)
+	abs, info, source, err := o.resolveMerged(ctx, requested, false)
 	if err != nil {
-		return &os.PathError{Op: "lchtimes", Path: abs, Err: stdfs.ErrNotExist}
+		return toPathError("lchtimes", requested, err)
 	}
 	if source == overlaySourceLower {
-		if err := clonePath(ctx, o.lower, abs, o.upper, abs); err != nil {
+		if err := o.copyUpNode(ctx, abs, info); err != nil {
 			return toPathError("lchtimes", abs, err)
 		}
 	}
@@ -309,28 +328,40 @@ func (o *OverlayFS) MkdirAll(ctx context.Context, name string, perm stdfs.FileMo
 		return nil
 	}
 	current := "/"
-	for part := range strings.SplitSeq(strings.TrimPrefix(abs, "/"), "/") {
-		current = Resolve(current, part)
-		info, _, err := o.visibleInfo(ctx, current)
-		if err == nil {
-			if !info.IsDir() {
-				return &os.PathError{Op: "mkdir", Path: current, Err: stdfs.ErrInvalid}
+	parts := strings.Split(strings.TrimPrefix(abs, "/"), "/")
+	for i, part := range parts {
+		// current is free of symlinks in the merged view, so only the new
+		// component needs to be inspected (and followed if it is a link).
+		next := joinChildPath(current, part)
+		info, _, err := o.visiblePrefixInfo(ctx, next)
+		if errors.Is(err, stdfs.ErrNotExist) {
+			return o.upper.MkdirAll(ctx, Resolve(next, path.Join(parts[i+1:]...)), perm)
+		}
+		if err != nil {
+			return toPathError("mkdir", next, err)
+		}
+		if info.Mode()&stdfs.ModeSymlink != 0 {
+			next, info, _, err = o.resolveMerged(ctx, next, true)
+			if err != nil {
+				return toPathError("mkdir", joinChildPath(current, part), err)
 			}
-			continue
 		}
-		if !errors.Is(err, stdfs.ErrNotExist) {
-			return err
+		if !info.IsDir() {
+			return &os.PathError{Op: "mkdir", Path: joinChildPath(current, part), Err: stdfs.ErrInvalid}
 		}
+		current = next
 	}
-	return o.upper.MkdirAll(ctx, abs, perm)
+	return nil
 }
 
 func (o *OverlayFS) Mkfifo(ctx context.Context, name string, perm stdfs.FileMode) error {
-	abs := o.resolve(name)
-	if _, _, err := o.visibleInfo(ctx, abs); err == nil {
+	requested := o.resolve(name)
+	abs, info, _, err := o.resolveMergedPath(ctx, requested, false, overlayMissingFinal)
+	if err != nil {
+		return toPathError("mkfifo", requested, createParentError(err))
+	}
+	if info != nil {
 		return &os.PathError{Op: "mkfifo", Path: abs, Err: stdfs.ErrExist}
-	} else if !errors.Is(err, stdfs.ErrNotExist) {
-		return toPathError("mkfifo", abs, err)
 	}
 	if err := o.upper.Mkfifo(ctx, abs, perm); err != nil {
 		return toPathError("mkfifo", abs, err)
@@ -340,14 +371,17 @@ func (o *OverlayFS) Mkfifo(ctx context.Context, name string, perm stdfs.FileMode
 }
 
 func (o *OverlayFS) Remove(ctx context.Context, name string, recursive bool) error {
-	abs := o.resolve(name)
-	if abs == "/" {
-		return &os.PathError{Op: "remove", Path: abs, Err: stdfs.ErrPermission}
+	requested := o.resolve(name)
+	if requested == "/" {
+		return &os.PathError{Op: "remove", Path: requested, Err: stdfs.ErrPermission}
 	}
 
-	info, source, err := o.visibleInfo(ctx, abs)
+	abs, info, source, err := o.resolveMerged(ctx, requested, false)
 	if err != nil {
-		return &os.PathError{Op: "remove", Path: abs, Err: stdfs.ErrNotExist}
+		return &os.PathError{Op: "remove", Path: requested, Err: stdfs.ErrNotExist}
+	}
+	if abs == "/" {
+		return &os.PathError{Op: "remove", Path: requested, Err: stdfs.ErrPermission}
 	}
 	if info.IsDir() && !recursive {
 		entries, err := o.ReadDir(ctx, abs)
@@ -373,22 +407,27 @@ func (o *OverlayFS) Remove(ctx context.Context, name string, recursive bool) err
 }
 
 func (o *OverlayFS) Rename(ctx context.Context, oldName, newName string) error {
-	oldAbs := o.resolve(oldName)
-	newAbs := o.resolve(newName)
+	oldRequested := o.resolve(oldName)
+	newRequested := o.resolve(newName)
+	if oldRequested == "/" || newRequested == "/" {
+		return &os.PathError{Op: "rename", Path: oldRequested, Err: stdfs.ErrPermission}
+	}
+	oldAbs, info, _, err := o.resolveMerged(ctx, oldRequested, false)
+	if err != nil {
+		return &os.PathError{Op: "rename", Path: oldRequested, Err: stdfs.ErrNotExist}
+	}
+	newAbs, newInfo, _, err := o.resolveMergedPath(ctx, newRequested, false, overlayMissingFinal)
+	if err != nil {
+		return toPathError("rename", newRequested, createParentError(err))
+	}
 	if oldAbs == "/" || newAbs == "/" {
-		return &os.PathError{Op: "rename", Path: oldAbs, Err: stdfs.ErrPermission}
+		return &os.PathError{Op: "rename", Path: oldRequested, Err: stdfs.ErrPermission}
 	}
 	if oldAbs == newAbs {
 		return nil
 	}
-	info, _, err := o.visibleInfo(ctx, oldAbs)
-	if err != nil {
-		return &os.PathError{Op: "rename", Path: oldAbs, Err: stdfs.ErrNotExist}
-	}
-	if _, _, err := o.visibleInfo(ctx, newAbs); err == nil {
+	if newInfo != nil {
 		return &os.PathError{Op: "rename", Path: newAbs, Err: stdfs.ErrExist}
-	} else if !errors.Is(err, stdfs.ErrNotExist) {
-		return toPathError("rename", newAbs, err)
 	}
 	if info.IsDir() && isDescendantPath(newAbs, oldAbs) {
 		return &os.PathError{Op: "rename", Path: newAbs, Err: stdfs.ErrInvalid}
@@ -411,7 +450,7 @@ func (o *OverlayFS) Getwd() string {
 
 func (o *OverlayFS) Chdir(name string) error {
 	abs := o.resolve(name)
-	info, _, err := o.visibleInfo(context.Background(), abs)
+	_, info, _, err := o.resolveMerged(context.Background(), abs, true)
 	if err != nil {
 		return &os.PathError{Op: "chdir", Path: abs, Err: stdfs.ErrNotExist}
 	}
@@ -432,6 +471,36 @@ const (
 	overlaySourceLower
 )
 
+// copyUpNode copies the node at abs, which the merged view currently takes
+// from the lower layer, into the upper layer so a write, link, or metadata
+// change can be recorded there. Missing upper ancestors are created with their
+// lower metadata. A directory is copied as a bare node: its children stay in the
+// lower layer, where the merged ReadDir still finds them and tombstones keep
+// deleted ones hidden.
+func (o *OverlayFS) copyUpNode(ctx context.Context, abs string, info stdfs.FileInfo) error {
+	parent := parentDir(abs)
+	if parent != "/" {
+		current := "/"
+		for part := range strings.SplitSeq(strings.TrimPrefix(parent, "/"), "/") {
+			current = joinChildPath(current, part)
+			dirInfo, source, err := o.visiblePrefixInfo(ctx, current)
+			if err != nil {
+				return err
+			}
+			if source == overlaySourceUpper {
+				continue
+			}
+			if err := cloneDirNode(ctx, o.upper, current, dirInfo); err != nil {
+				return err
+			}
+		}
+	}
+	if info.IsDir() {
+		return cloneDirNode(ctx, o.upper, abs, info)
+	}
+	return clonePathWithInfo(ctx, o.lower, abs, info, o.upper, abs)
+}
+
 func (o *OverlayFS) visibleInfo(ctx context.Context, abs string) (stdfs.FileInfo, overlaySource, error) {
 	if info, err := o.upper.Lstat(ctx, abs); err == nil {
 		return info, overlaySourceUpper, nil
@@ -448,45 +517,129 @@ func (o *OverlayFS) visibleInfo(ctx context.Context, abs string) (stdfs.FileInfo
 	return info, overlaySourceLower, nil
 }
 
-func (o *OverlayFS) resolveRealpath(ctx context.Context, abs string, depth int) (string, error) {
+// visiblePrefixInfo is visibleInfo for a directory prefix of a longer path:
+// lower-layer directory results are cached because callers only inspect their
+// type.
+func (o *OverlayFS) visiblePrefixInfo(ctx context.Context, abs string) (stdfs.FileInfo, overlaySource, error) {
+	if info, err := o.upper.Lstat(ctx, abs); err == nil {
+		return info, overlaySourceUpper, nil
+	} else if !errors.Is(err, stdfs.ErrNotExist) {
+		return nil, overlaySourceNone, err
+	}
+	if o.isHidden(abs) {
+		return nil, overlaySourceNone, stdfs.ErrNotExist
+	}
+	o.mu.RLock()
+	info, ok := o.lowerDirs[abs]
+	o.mu.RUnlock()
+	if ok {
+		return info, overlaySourceLower, nil
+	}
+	info, err := o.lower.Lstat(ctx, abs)
+	if err != nil {
+		return nil, overlaySourceNone, err
+	}
+	if info.IsDir() {
+		o.mu.Lock()
+		o.lowerDirs[abs] = info
+		o.mu.Unlock()
+	}
+	return info, overlaySourceLower, nil
+}
+
+func (o *OverlayFS) visibleComponentInfo(ctx context.Context, abs string, isLast bool) (stdfs.FileInfo, overlaySource, error) {
+	if isLast {
+		return o.visibleInfo(ctx, abs)
+	}
+	return o.visiblePrefixInfo(ctx, abs)
+}
+
+// overlayMissing controls how resolveMergedPath treats path components that do
+// not exist in the merged view.
+type overlayMissing uint8
+
+const (
+	// overlayMissingNone reports ErrNotExist for any missing component.
+	overlayMissingNone overlayMissing = iota
+	// overlayMissingFinal accepts a missing final component. Creating
+	// operations use it so a missing parent fails with ENOENT instead of being
+	// materialized in the upper layer.
+	overlayMissingFinal
+)
+
+// resolveMergedPath resolves abs against the merged view of both layers. Symlinks
+// in intermediate components are always followed and the final component is
+// followed when followFinal is set. Each link is read from the layer that
+// currently provides it and its target is resolved through the merged view, so
+// a link in one layer may point at an entry that only exists in the other.
+//
+// The returned path contains no symlinks other than an unfollowed final
+// component. When the path is missing and the missing mode allows it, the
+// resolved path is returned with a nil info and overlaySourceNone.
+func (o *OverlayFS) resolveMergedPath(ctx context.Context, abs string, followFinal bool, missing overlayMissing) (string, stdfs.FileInfo, overlaySource, error) {
+	return o.resolveMergedDepth(ctx, abs, followFinal, missing, 0)
+}
+
+// resolveMerged is resolveMergedPath for a path that must exist.
+func (o *OverlayFS) resolveMerged(ctx context.Context, abs string, followFinal bool) (string, stdfs.FileInfo, overlaySource, error) {
+	resolved, info, source, err := o.resolveMergedDepth(ctx, abs, followFinal, overlayMissingNone, 0)
+	if err != nil {
+		return "", nil, overlaySourceNone, err
+	}
+	if info == nil {
+		return "", nil, overlaySourceNone, stdfs.ErrNotExist
+	}
+	return resolved, info, source, nil
+}
+
+func (o *OverlayFS) resolveMergedDepth(ctx context.Context, abs string, followFinal bool, missing overlayMissing, depth int) (string, stdfs.FileInfo, overlaySource, error) {
 	abs = Clean(abs)
 	if depth > maxSymlinkDepth {
-		return "", errTooManySymlinks
+		return "", nil, overlaySourceNone, errTooManySymlinks
 	}
 	if abs == "/" {
-		return "/", nil
+		info, source, err := o.visibleInfo(ctx, abs)
+		if err != nil {
+			return "", nil, overlaySourceNone, err
+		}
+		return abs, info, source, nil
 	}
 
 	current := "/"
 	parts := strings.Split(strings.TrimPrefix(abs, "/"), "/")
 	for i, part := range parts {
-		next := Resolve(current, part)
-		info, source, err := o.visibleInfo(ctx, next)
-		if err != nil {
-			return "", err
-		}
+		next := joinChildPath(current, part)
 		isLast := i == len(parts)-1
-		if info.Mode()&stdfs.ModeSymlink != 0 {
+		info, source, err := o.visibleComponentInfo(ctx, next, isLast)
+		if err != nil {
+			if !errors.Is(err, stdfs.ErrNotExist) {
+				return "", nil, overlaySourceNone, err
+			}
+			if isLast && missing == overlayMissingFinal {
+				return next, nil, overlaySourceNone, nil
+			}
+			return "", nil, overlaySourceNone, stdfs.ErrNotExist
+		}
+		if info.Mode()&stdfs.ModeSymlink != 0 && (!isLast || followFinal) {
 			target, err := o.readlinkAt(ctx, source, next)
 			if err != nil {
-				return "", err
+				return "", nil, overlaySourceNone, unwrapPathError(err)
 			}
-			resolved := Resolve(parentDir(next), target)
+			resolved := Resolve(current, target)
 			if !isLast {
 				resolved = Resolve(resolved, path.Join(parts[i+1:]...))
 			}
-			return o.resolveRealpath(ctx, resolved, depth+1)
+			return o.resolveMergedDepth(ctx, resolved, followFinal, missing, depth+1)
 		}
 		if isLast {
-			return next, nil
+			return next, info, source, nil
 		}
 		if !info.IsDir() {
-			return "", stdfs.ErrInvalid
+			return "", nil, overlaySourceNone, stdfs.ErrInvalid
 		}
 		current = next
 	}
-
-	return "/", nil
+	return abs, nil, overlaySourceNone, stdfs.ErrNotExist
 }
 
 func (o *OverlayFS) readlinkAt(ctx context.Context, source overlaySource, abs string) (string, error) {
@@ -566,6 +719,14 @@ func toPathError(op, name string, err error) error {
 		return pathErr
 	}
 	return &os.PathError{Op: op, Path: name, Err: err}
+}
+
+func unwrapPathError(err error) error {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err
+	}
+	return err
 }
 
 func isDescendantPath(name, parent string) bool {
