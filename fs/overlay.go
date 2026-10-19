@@ -30,7 +30,7 @@ func NewOverlay(lower FileSystem) *OverlayFS {
 	}
 	return &OverlayFS{
 		lower:      lower,
-		upper:      NewMemory(),
+		upper:      newMemoryWithImplicitParents(),
 		cwd:        "/",
 		tombstones: make(map[string]struct{}),
 	}

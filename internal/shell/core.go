@@ -1049,6 +1049,8 @@ func shellPathErrorText(err error) string {
 		return ""
 	case errors.Is(err, syscall.EISDIR):
 		return "Is a directory"
+	case errors.Is(err, syscall.ENOTDIR):
+		return "Not a directory"
 	case errors.Is(err, stdfs.ErrNotExist):
 		return "No such file or directory"
 	}

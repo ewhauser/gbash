@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path"
 	"testing"
 
 	"github.com/ewhauser/gbash"
@@ -173,6 +174,9 @@ func seededFactory(files map[string]string) gbfs.Factory {
 }
 
 func writeFSFile(ctx context.Context, fsys gbfs.FileSystem, name, contents string) error {
+	if err := fsys.MkdirAll(ctx, path.Dir(name), 0o755); err != nil {
+		return err
+	}
 	file, err := fsys.OpenFile(ctx, name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"os"
+	"path"
 	"strings"
 	"testing"
 
@@ -18,6 +19,9 @@ type symlinkFSFactory struct {
 func (f symlinkFSFactory) New(ctx context.Context) (gbfs.FileSystem, error) {
 	mem := gbfs.NewMemory()
 	for name, contents := range f.files {
+		if err := mem.MkdirAll(ctx, path.Dir(name), 0o755); err != nil {
+			return nil, err
+		}
 		file, err := mem.OpenFile(ctx, name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 		if err != nil {
 			return nil, err
@@ -31,6 +35,9 @@ func (f symlinkFSFactory) New(ctx context.Context) (gbfs.FileSystem, error) {
 		}
 	}
 	for linkName, target := range f.symlinks {
+		if err := mem.MkdirAll(ctx, path.Dir(linkName), 0o755); err != nil {
+			return nil, err
+		}
 		if err := mem.Symlink(context.Background(), target, linkName); err != nil { //nolint:contextcheck // test setup
 			return nil, err
 		}

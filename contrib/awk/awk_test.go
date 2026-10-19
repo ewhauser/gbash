@@ -40,7 +40,7 @@ func TestAWKExecutesSystemInSandbox(t *testing.T) {
 func TestAWKPreservesMultiFileNRFNRBoundaries(t *testing.T) {
 	t.Parallel()
 
-	result := mustExecAWK(t, "printf 'a\\nb\\n' > /data/one.txt\nprintf 'c\\nd\\n' > /data/two.txt\nawk 'NR==FNR { next } { print }' /data/one.txt /data/two.txt\n")
+	result := mustExecAWK(t, "mkdir -p /data\nprintf 'a\\nb\\n' > /data/one.txt\nprintf 'c\\nd\\n' > /data/two.txt\nawk 'NR==FNR { next } { print }' /data/one.txt /data/two.txt\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
@@ -86,7 +86,7 @@ func TestAWKSupportsCSVModeFlag(t *testing.T) {
 func TestAWKResetsFilenameAndFNRPerInputFile(t *testing.T) {
 	t.Parallel()
 
-	result := mustExecAWK(t, "printf 'a\\nb\\n' > /data/one.txt\nprintf 'c\\nd\\n' > /data/two.txt\nawk '{ print FILENAME \":\" FNR \":\" $0 }' /data/one.txt /data/two.txt\n")
+	result := mustExecAWK(t, "mkdir -p /data\nprintf 'a\\nb\\n' > /data/one.txt\nprintf 'c\\nd\\n' > /data/two.txt\nawk '{ print FILENAME \":\" FNR \":\" $0 }' /data/one.txt /data/two.txt\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
@@ -99,7 +99,7 @@ func TestAWKResetsFilenameAndFNRPerInputFile(t *testing.T) {
 func TestAWKReadsArbitrarySandboxFilesWithGetline(t *testing.T) {
 	t.Parallel()
 
-	result := mustExecAWK(t, "printf 'extra\\n' > /data/extra.txt\nawk 'BEGIN { getline line < \"/data/extra.txt\"; close(\"/data/extra.txt\"); print line }'\n")
+	result := mustExecAWK(t, "mkdir -p /data\nprintf 'extra\\n' > /data/extra.txt\nawk 'BEGIN { getline line < \"/data/extra.txt\"; close(\"/data/extra.txt\"); print line }'\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
@@ -111,7 +111,7 @@ func TestAWKReadsArbitrarySandboxFilesWithGetline(t *testing.T) {
 func TestAWKWritesRedirectedOutputToSandboxFiles(t *testing.T) {
 	t.Parallel()
 
-	result := mustExecAWK(t, "awk 'BEGIN { print \"hello\" > \"/data/out.txt\"; close(\"/data/out.txt\") }'\ncat /data/out.txt\n")
+	result := mustExecAWK(t, "mkdir -p /data\nawk 'BEGIN { print \"hello\" > \"/data/out.txt\"; close(\"/data/out.txt\") }'\ncat /data/out.txt\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}
@@ -124,6 +124,7 @@ func TestAWKSupportsPipeGetlineAndPipeOutput(t *testing.T) {
 	t.Parallel()
 
 	script := "" +
+		"mkdir -p /data\n" +
 		"printf 'left\\nright\\n' > /data/in.txt\n" +
 		"awk 'BEGIN { \"echo pipe-read\" | getline line; close(\"echo pipe-read\"); print line } { print $0 | \"cat > /data/piped.txt\"; close(\"cat > /data/piped.txt\") }' /data/in.txt\n" +
 		"cat /data/piped.txt\n"
@@ -139,7 +140,7 @@ func TestAWKSupportsPipeGetlineAndPipeOutput(t *testing.T) {
 func TestAWKGNUVarARGIND(t *testing.T) {
 	t.Parallel()
 
-	result := mustExecAWK(t, "printf 'a\\n' > /data/one.txt\nprintf 'b\\n' > /data/two.txt\nawk '{ print ARGIND \":\" FILENAME \":\" $0 }' /data/one.txt /data/two.txt\n")
+	result := mustExecAWK(t, "mkdir -p /data\nprintf 'a\\n' > /data/one.txt\nprintf 'b\\n' > /data/two.txt\nawk '{ print ARGIND \":\" FILENAME \":\" $0 }' /data/one.txt /data/two.txt\n")
 	if result.ExitCode != 0 {
 		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 	}

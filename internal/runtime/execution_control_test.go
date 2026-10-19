@@ -6,6 +6,7 @@ import (
 	"io"
 	stdfs "io/fs"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"testing"
@@ -34,6 +35,9 @@ func newBlockingScriptFactory(t testing.TB, scriptPath string) gbfs.Factory {
 
 	return gbfs.FactoryFunc(func(ctx context.Context) (gbfs.FileSystem, error) {
 		mem := gbfs.NewMemory()
+		if err := mem.MkdirAll(ctx, path.Dir(scriptPath), 0o755); err != nil {
+			return nil, err
+		}
 		file, err := mem.OpenFile(ctx, scriptPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 		if err != nil {
 			return nil, err

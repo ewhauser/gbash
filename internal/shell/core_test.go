@@ -1444,8 +1444,10 @@ func newShellTestFS(t testing.TB, names ...string) gbfs.FileSystem {
 	t.Helper()
 
 	fsys := gbfs.NewMemory()
-	if err := fsys.MkdirAll(context.Background(), "/bin", 0o755); err != nil {
-		t.Fatalf("MkdirAll(/bin) error = %v", err)
+	for _, dir := range []string{"/bin", "/dev"} {
+		if err := fsys.MkdirAll(context.Background(), dir, 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
+		}
 	}
 	for _, name := range names {
 		file, err := fsys.OpenFile(context.Background(), "/bin/"+name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
