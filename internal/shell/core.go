@@ -69,6 +69,7 @@ type Execution struct {
 	SetTime            func(time.Time) error
 	Exec               func(context.Context, *commands.ExecutionRequest) (*commands.ExecutionResult, error)
 	Interact           func(context.Context, *commands.InteractiveRequest) (*commands.InteractiveResult, error)
+	CompatHostRoots    []string
 	activeShellVariant shellvariant.ShellVariant
 	activeLangVariant  syntax.LangVariant
 	procSubst          *procSubstManager
@@ -823,20 +824,21 @@ func invokeResolvedCommand(
 		invocationArgs = append(invocationArgs, argv[1:]...)
 	}
 	invocation := commands.NewInvocation(&commands.InvocationOptions{
-		Args:       invocationArgs,
-		Env:        currentEnv,
-		Cwd:        virtualWD,
-		Stdin:      stdin,
-		Stdout:     stdout,
-		Stderr:     stderr,
-		Now:        exec.Now,
-		SetTime:    exec.SetTime,
-		FileSystem: exec.FS,
-		Network:    exec.Network,
-		Policy:     exec.Policy,
-		Trace:      exec.Trace,
-		Exec:       subexecInvoker(exec.Exec, currentEnv, virtualWD),
-		Interact:   interactiveInvoker(exec.Interact, currentEnv, virtualWD),
+		Args:            invocationArgs,
+		Env:             currentEnv,
+		Cwd:             virtualWD,
+		Stdin:           stdin,
+		Stdout:          stdout,
+		Stderr:          stderr,
+		Now:             exec.Now,
+		SetTime:         exec.SetTime,
+		FileSystem:      exec.FS,
+		Network:         exec.Network,
+		Policy:          exec.Policy,
+		Trace:           exec.Trace,
+		Exec:            subexecInvoker(exec.Exec, currentEnv, virtualWD),
+		Interact:        interactiveInvoker(exec.Interact, currentEnv, virtualWD),
+		CompatHostRoots: exec.CompatHostRoots,
 		GetRegisteredCommands: func() []string {
 			if exec.Registry == nil {
 				return nil

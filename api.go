@@ -122,6 +122,14 @@ type Config struct {
 	// interpreter. The observer is installed at runtime construction time and
 	// applies to both non-interactive and interactive shell execution.
 	AnalysisObserver analysis.Observer
+
+	// CompatHostRoots lists host directories whose absolute paths builtins
+	// remap lexically onto the sandbox root (for example "/tmp/work/src/cp"
+	// becomes "/src/cp" when "/tmp/work" is listed). It exists for
+	// compatibility harnesses that run host-generated scripts inside a
+	// directory-backed sandbox. The remap never consults the host filesystem
+	// and cannot be changed from inside the sandbox. Empty disables it.
+	CompatHostRoots []string
 }
 
 // FileSystemConfig describes how gbash provisions a session filesystem.
@@ -272,6 +280,7 @@ func (cfg *Config) runtimeConfig() *internalruntime.Config {
 		Tracing:          cfg.Tracing,
 		Logger:           cfg.Logger,
 		AnalysisObserver: cfg.AnalysisObserver,
+		CompatHostRoots:  append([]string(nil), cfg.CompatHostRoots...),
 	}
 }
 

@@ -29,6 +29,7 @@ type Config struct {
 	Tracing          TraceConfig
 	Logger           LogCallback
 	AnalysisObserver analysis.Observer
+	CompatHostRoots  []string
 }
 
 type Runtime struct {

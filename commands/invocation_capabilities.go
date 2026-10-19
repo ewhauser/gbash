@@ -40,6 +40,12 @@ type InvocationOptions struct {
 	Exec                  func(context.Context, *ExecutionRequest) (*ExecutionResult, error)
 	Interact              func(context.Context, *InteractiveRequest) (*InteractiveResult, error)
 	GetRegisteredCommands func() []string
+
+	// CompatHostRoots lists embedder-configured host directories whose
+	// absolute paths builtins remap lexically onto the sandbox root. It exists
+	// for compatibility harnesses that run host-generated scripts inside a
+	// directory-backed sandbox and is empty for normal sessions.
+	CompatHostRoots []string
 }
 
 // CommandFS exposes filesystem operations with gbash policy checks and file
@@ -76,6 +82,7 @@ func NewInvocation(opts *InvocationOptions) *Invocation {
 		Interact:              opts.Interact,
 		GetRegisteredCommands: getCommands,
 		trace:                 opts.Trace,
+		compatHostRoots:       append([]string(nil), opts.CompatHostRoots...),
 	}
 	if opts.Policy != nil {
 		inv.Limits = opts.Policy.Limits()

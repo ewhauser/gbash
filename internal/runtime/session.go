@@ -186,6 +186,7 @@ func (s *Session) exec(ctx context.Context, req *ExecutionRequest) (*ExecutionRe
 		SetTime:          s.setTime,
 		Exec:             s.subexecCallback,
 		Interact:         s.interactCallback,
+		CompatHostRoots:  s.cfg.CompatHostRoots,
 	}
 	var (
 		runResult *shell.RunResult
@@ -372,6 +373,7 @@ func (s *Session) interact(ctx context.Context, req *InteractiveRequest) (*Inter
 		SetTime:          s.setTime,
 		Exec:             s.subexecCallback,
 		Interact:         s.interactCallback,
+		CompatHostRoots:  s.cfg.CompatHostRoots,
 	})
 	if err != nil {
 		return normalizeInteractiveResult(result), err
