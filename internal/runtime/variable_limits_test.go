@@ -289,3 +289,25 @@ func TestMaxVariableBytesArgumentListBoundary(t *testing.T) {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 }
+
+func TestMaxVariableBytesCommandSubstitutionRedirects(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+
+	// The capped substitution writer must survive fd duplication when a
+	// script is executed, which compares writers.
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "printf '#!/bin/sh\\necho hi\\n' > /tmp/s.sh; chmod +x /tmp/s.sh\n" +
+			"x=$(/tmp/s.sh 2>&1); y=$({ echo a; /tmp/s.sh; } 2>&1 || true); echo \"$x|$y\"\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	}
+	want := "hi|a\nhi\n"
+	if got := result.Stdout; got != want {
+		t.Fatalf("Stdout = %q, want %q", got, want)
+	}
+}

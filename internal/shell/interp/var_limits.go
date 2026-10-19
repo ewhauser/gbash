@@ -100,15 +100,17 @@ func (r *Runner) cmdSubstLimitContext(ctx context.Context, w io.Writer) (context
 		return ctx, w, func(error) {}
 	}
 	ctx, cancel := context.WithCancelCause(ctx)
-	return ctx, cancelOnLimitWriter{w: w, cancel: cancel}, cancel
+	return ctx, &cancelOnLimitWriter{w: w, cancel: cancel}, cancel
 }
 
+// cancelOnLimitWriter must be used by pointer: file-descriptor code compares
+// writers with ==, which panics on a struct holding a func.
 type cancelOnLimitWriter struct {
 	w      io.Writer
 	cancel context.CancelCauseFunc
 }
 
-func (w cancelOnLimitWriter) Write(p []byte) (int, error) {
+func (w *cancelOnLimitWriter) Write(p []byte) (int, error) {
 	n, err := w.w.Write(p)
 	if errors.Is(err, expand.ErrVariableSizeLimitWrite) {
 		w.cancel(err)
