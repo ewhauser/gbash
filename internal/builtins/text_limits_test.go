@@ -253,3 +253,20 @@ func TestTailZeroSleepIntervalDoesNotPanic(t *testing.T) {
 		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
 	}
 }
+
+func TestExprRegexStopsAtFirstFullMatch(t *testing.T) {
+	t.Parallel()
+	result := execWithDeadline(t, nil, "y=$(printf %02000d 0)\nexpr \"$y\" : '\\(.*\\)\\(.*\\)' | wc -c\nexpr abcabc : '\\(abc\\)\\1'\n")
+	if got, want := result.Stdout, "2001\nabc\n"; result.ExitCode != 0 || got != want {
+		t.Fatalf("ExitCode = %d, Stdout = %q, want 0 %q; stderr=%q", result.ExitCode, got, want, result.Stderr)
+	}
+}
+
+func TestExprRegexBudgetReportsTooComplex(t *testing.T) {
+	t.Parallel()
+	result := execWithDeadline(t, nil, "y=$(printf %02000d 0)\nexpr \"$y\" : '\\(.*\\)\\(.*\\)x'\n")
+	assertExitStderr(t, result, 2, "expr: Regular expression too complex to match")
+	if strings.Contains(result.Stderr, "Invalid regular expression") {
+		t.Fatalf("Stderr = %q, want the too-complex error only", result.Stderr)
+	}
+}
