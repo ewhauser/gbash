@@ -275,7 +275,7 @@ func tsortProcessInput(ctx context.Context, inv *Invocation, name string, graph 
 }
 
 func tsortReadGraph(ctx context.Context, inv *Invocation, name string, reader io.Reader, graph *tsortGraph) error {
-	buffered := bufio.NewReader(reader)
+	buffered := newBoundedLineReader(inv, reader)
 	var pending string
 	hasPending := false
 
@@ -284,7 +284,12 @@ func tsortReadGraph(ctx context.Context, inv *Invocation, name string, reader io
 			return err
 		}
 
-		line, err := buffered.ReadString('\n')
+		raw, err := buffered.ReadLine('\n')
+		var exitErr *ExitError
+		if errors.As(err, &exitErr) {
+			return err
+		}
+		line := string(raw)
 		for token := range strings.FieldsSeq(line) {
 			if hasPending {
 				graph.addEdge(pending, token)

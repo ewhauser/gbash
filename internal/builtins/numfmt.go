@@ -254,7 +254,7 @@ func (c *Numfmt) RunParsed(ctx context.Context, inv *Invocation, matches *Parsed
 	if len(args) > 0 {
 		hadFail, err = numfmtHandleArgs(ctx, writer, inv.Stderr, args, &opts)
 	} else {
-		hadFail, err = numfmtHandleBuffer(ctx, writer, inv.Stderr, inv.Stdin, &opts)
+		hadFail, err = numfmtHandleBuffer(ctx, writer, inv.Stderr, newBoundedLineReader(inv, inv.Stdin), &opts)
 	}
 
 	flushErr := writer.Flush()
@@ -765,13 +765,12 @@ func numfmtHandleArgs(ctx context.Context, writer *bufio.Writer, stderr io.Write
 	return hadFail, nil
 }
 
-func numfmtHandleBuffer(ctx context.Context, writer *bufio.Writer, stderr io.Writer, input io.Reader, opts *numfmtOptions) (bool, error) {
+func numfmtHandleBuffer(ctx context.Context, writer *bufio.Writer, stderr io.Writer, reader *boundedLineReader, opts *numfmtOptions) (bool, error) {
 	terminator := byte('\n')
 	if opts.zeroTerminated {
 		terminator = 0
 	}
 
-	reader := bufio.NewReader(input)
 	hadFail := false
 	lineIndex := 0
 	for {
@@ -779,7 +778,11 @@ func numfmtHandleBuffer(ctx context.Context, writer *bufio.Writer, stderr io.Wri
 			return hadFail, err
 		}
 
-		line, err := reader.ReadBytes(terminator)
+		line, err := reader.ReadLine(terminator)
+		var exitErr *ExitError
+		if errors.As(err, &exitErr) {
+			return hadFail, err
+		}
 		if err != nil && !errors.Is(err, io.EOF) {
 			return hadFail, numfmtIOError(err)
 		}
@@ -1567,6 +1570,10 @@ func numfmtExit(inv *Invocation, err error) error {
 		return nil
 	}
 
+	var exitErr *ExitError
+	if errors.As(err, &exitErr) {
+		return err
+	}
 	var nf *numfmtError
 	if errors.As(err, &nf) {
 		if nf.msg != "" && inv != nil && inv.Stderr != nil {

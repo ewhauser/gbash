@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ewhauser/gbash/policy"
 )
 
 // execWithDeadline runs script in a fresh session and fails the test if it
@@ -190,6 +192,29 @@ func TestSedStreamingPreservesNewlineRules(t *testing.T) {
 		"",
 	}, "\n"))
 	if got, want := result.Stdout, "b\nc|\nA\nb\nb|\na\ny\n"; result.ExitCode != 0 || got != want {
+		t.Fatalf("ExitCode = %d, Stdout = %q, want 0 %q; stderr=%q", result.ExitCode, got, want, result.Stderr)
+	}
+}
+
+func smallFileLimitConfig(maxFileBytes int64) *Config {
+	return &Config{
+		Policy: policy.NewStatic(&policy.Config{
+			ReadRoots:  []string{"/"},
+			WriteRoots: []string{"/"},
+			Limits:     policy.Limits{MaxFileBytes: maxFileBytes},
+		}),
+	}
+}
+
+func TestStreamingLineReadersRejectOversizedLines(t *testing.T) {
+	t.Parallel()
+	for _, cmd := range []string{"uniq", "factor", "numfmt", "tsort"} {
+		result := execWithDeadline(t, smallFileLimitConfig(1024), "head -c 4096 /dev/zero | "+cmd+"\n")
+		assertExitStderr(t, result, 1, "input exceeds maximum file size of 1024 bytes")
+	}
+	// Short lines still stream past the per-line limit in total.
+	result := execWithDeadline(t, smallFileLimitConfig(1024), "count() { n=0; while read -r _; do n=$((n+1)); done; echo \"$n\"; }\nseq 1000 | uniq | count\nseq 1000 | factor | count\nseq 1000 | numfmt | count\nseq 1000 | tsort | count\n")
+	if got, want := result.Stdout, "1000\n1000\n1000\n1000\n"; result.ExitCode != 0 || got != want {
 		t.Fatalf("ExitCode = %d, Stdout = %q, want 0 %q; stderr=%q", result.ExitCode, got, want, result.Stderr)
 	}
 }
