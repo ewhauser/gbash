@@ -610,7 +610,7 @@ Key design decisions:
 - `Script` and `Command` are mutually exclusive; `Args` applies to script mode positional parameters
 - direct filesystem and text-processing commands should prefer `Invocation.FS` over nested shell execution
 - commands that need whole-input reads should use `commands.ReadAll`, `commands.ReadAllStdin`, or `Invocation.FS.ReadFile` so `MaxFileBytes` and diagnostic behavior stay consistent
-- commands that create or grow files without reading an equally large input (`truncate`, `dd` block sizes, seeks and writes, `gunzip`/`tar -x` decompressed output) reject sizes beyond `MaxFileBytes` before allocating and report `File too large`; `split` creates at most 100000 output files per invocation; long copy loops and recursive walks check the invocation context so they stop at the request timeout
+- commands that create or grow files without reading an equally large input (`truncate`, `dd` block sizes, seeks and writes, `gunzip`/`tar -x` decompressed output) reject sizes beyond `MaxFileBytes` before allocating and report `File too large`; buffers sized directly by user input (`dd` block sizes and in-memory seeks, `truncate`) stay under 1 GiB even when `MaxFileBytes` is unlimited; `split` creates at most 100000 output files per invocation, and `split -a`, `csplit -n` and `csplit --suffix-format` widths are capped at 4096; `csplit` input is read through the bounded `commands.ReadAll` path; long copy loops and recursive walks check the invocation context so they stop at the request timeout
 - orchestration-style commands such as `xargs`, `find -exec`, and shell-wrapper helpers should use `Invocation.Exec`
 - policy is an explicit interface so embedders can swap simple allowlists for richer policy engines later
 

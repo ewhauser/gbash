@@ -541,7 +541,7 @@ func parseDdBlockSize(inv *Invocation, label, raw string) (int, error) {
 	if value == 0 {
 		return 0, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(raw))
 	}
-	if value > math.MaxInt || exceedsFileSizeLimit(inv, value) {
+	if value > math.MaxInt || value > uint64(allocationLimit(inv)) {
 		return 0, exitf(inv, 1, "dd: %s=N cannot fit into memory", label)
 	}
 	return int(value), nil
@@ -1240,7 +1240,7 @@ func openDdPathOutput(ctx context.Context, inv *Invocation, settings *ddSettings
 	if cursor64 > math.MaxInt {
 		return nil, exitf(inv, 1, "dd: invalid number: %s", quoteGNUOperand(strconv.FormatInt(cursor64, 10)))
 	}
-	if exceedsFileSizeLimit(inv, uint64(cursor64)) {
+	if cursor64 > allocationLimit(inv) {
 		return nil, exitf(inv, 1, "dd: failed to truncate to %d bytes in output file %s: %v", cursor64, quoteGNUOperand(target), errFileTooLarge)
 	}
 
@@ -1274,7 +1274,7 @@ func openDdPathOutput(ctx context.Context, inv *Invocation, settings *ddSettings
 		buffered: settings.buffered,
 		data:     data,
 		cursor:   cursor,
-		maxBytes: fileSizeLimit(inv),
+		maxBytes: allocationLimit(inv),
 	}, nil
 }
 

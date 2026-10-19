@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -273,5 +274,50 @@ func TestTarCreateDotNamesMembersAndSkipsOwnArchive(t *testing.T) {
 	}
 	if !strings.Contains(result.Stderr, "tar: ./out.tar: file is the archive; not dumped") {
 		t.Fatalf("Stderr = %q, want archive self-skip warning", result.Stderr)
+	}
+}
+
+func TestDdBoundsAllocationsWhenMaxFileBytesIsUnlimited(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{
+		LimitOverrides: policy.Limits{MaxFileBytes: math.MaxInt64},
+	})
+
+	result := execWithTimeout(t, session, ""+
+		"echo a | dd bs=200000000000000 count=1 status=none; echo rc=$?\n"+
+		"echo a | dd ibs=200000000000000 count=1 status=none; echo rc=$?\n"+
+		"echo a | dd cbs=200000000000000 conv=block count=1 status=none; echo rc=$?\n"+
+		"printf a | dd of=/tmp/zz bs=1 seek=2147483648 status=none; echo rc=$?\n"+
+		"echo a | dd bs=1M count=1 status=none; echo rc=$?\n", 30*time.Second)
+	if got, want := result.Stdout, "rc=1\nrc=1\nrc=1\nrc=1\na\nrc=0\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
+	}
+}
+
+func TestSplitAndCsplitRejectHugeSuffixWidths(t *testing.T) {
+	t.Parallel()
+	session := newSession(t, &Config{})
+
+	result := execWithTimeout(t, session, ""+
+		"cd /tmp && printf 'a\\nb\\n' > in\n"+
+		"split -a 4294967296 in big; echo rc=$?\n"+
+		"csplit -n 2000000000 in 2; echo rc=$?\n"+
+		"csplit -b '%0999999999d' in 2; echo rc=$?\n"+
+		"csplit -s -n 3 in 2; echo rc=$?; ls xx*\n", 10*time.Second)
+	if got, want := result.Stdout, "rc=1\nrc=1\nrc=1\nrc=0\nxx000\nxx001\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
+	}
+}
+
+func TestCsplitStopsReadingAtMaxFileBytes(t *testing.T) {
+	t.Parallel()
+	session := newFileLimitSession(t)
+
+	result := execWithTimeout(t, session, "head -c 70000 /dev/zero | csplit - 1; echo rc=$?\n", 10*time.Second)
+	if got, want := result.Stdout, "rc=1\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "exceeds maximum file size") {
+		t.Fatalf("Stderr = %q, want size-limit diagnostic", result.Stderr)
 	}
 }

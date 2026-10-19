@@ -15,6 +15,25 @@ type fileTooLargeError struct{}
 
 func (fileTooLargeError) Error() string { return "File too large" }
 
+// maxOutputNameWidth bounds user-requested file-name suffix widths (split -a,
+// csplit -n and --suffix-format widths) so a huge width cannot allocate
+// gigabytes for one name. It matches the usual PATH_MAX.
+const maxOutputNameWidth = 4096
+
+// unboundedAllocationCap bounds buffers sized directly by user input when
+// MaxFileBytes is unlimited, so a request cannot trigger a fatal Go
+// out-of-memory that kills the embedding process.
+const unboundedAllocationCap = 1 << 30
+
+// allocationLimit returns the largest buffer a builtin may allocate from a
+// user-supplied size: MaxFileBytes when bounded, else unboundedAllocationCap.
+func allocationLimit(inv *Invocation) int64 {
+	if limit := fileSizeLimit(inv); limit > 0 {
+		return limit
+	}
+	return unboundedAllocationCap
+}
+
 // fileSizeLimit returns the positive MaxFileBytes bound for inv, or 0 when
 // file sizes are unbounded.
 func fileSizeLimit(inv *Invocation) int64 {

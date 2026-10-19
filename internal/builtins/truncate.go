@@ -537,7 +537,7 @@ func (c *Truncate) truncatePath(ctx context.Context, inv *Invocation, raw string
 	if !ok {
 		return exitf(inv, 1, "truncate: division by zero")
 	}
-	if exceedsFileSizeLimit(inv, targetSize) {
+	if targetSize > uint64(allocationLimit(inv)) {
 		return exitf(inv, 1, "truncate: failed to truncate %s at %d bytes: %v", quoteGNUOperand(raw), targetSize, errFileTooLarge)
 	}
 
