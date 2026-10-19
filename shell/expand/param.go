@@ -210,21 +210,25 @@ func (cfg *Config) paramPatternExpr(pat string, mode pattern.Mode) (string, erro
 	return expr, err
 }
 
-func (cfg *Config) compileParamPattern(expr string) *compiledParamPattern {
+func (cfg *Config) compileParamPattern(expr string) (*compiledParamPattern, error) {
 	cfg.prepareCompiledParamPatternCache()
 	key := compiledParamPatternCacheKey{
 		expr:       expr,
 		byteLocale: cfg.bashByteLocale(),
 	}
 	if compiled, ok := cfg.compiledParamPatternCache.get(key); ok {
-		return compiled
+		return compiled, nil
+	}
+	rx, err := regexp.Compile(expr)
+	if err != nil {
+		return nil, err
 	}
 	compiled := &compiledParamPattern{
-		rx:         regexp.MustCompile(expr),
+		rx:         rx,
 		byteLocale: key.byteLocale,
 	}
 	cfg.compiledParamPatternCache.set(key, compiled)
-	return compiled
+	return compiled, nil
 }
 
 func consumeParamReplacementLiteralEscapes(s string) string {
@@ -381,8 +385,12 @@ func (cfg *Config) compileParamReplacer(pat, with string, all bool, anchor synta
 		expr += "$"
 		all = false
 	}
+	rx, err := cfg.compileParamPattern(expr)
+	if err != nil {
+		return nil, err
+	}
 	return &compiledParamReplacer{
-		rx:    cfg.compileParamPattern(expr),
+		rx:    rx,
 		with:  with,
 		all:   all,
 		limit: cfg.MaxVariableBytes,
@@ -1229,7 +1237,10 @@ func (cfg *Config) transformCasePattern(arg string, op syntax.ParExpOperator) (f
 	if err != nil {
 		return func(s string) string { return s }, err
 	}
-	rx := cfg.compileParamPattern(expr)
+	rx, err := cfg.compileParamPattern(expr)
+	if err != nil {
+		return func(s string) string { return s }, err
+	}
 	return func(elem string) string {
 		rs := []rune(elem)
 		for ri, r := range rs {
@@ -2634,7 +2645,10 @@ func (cfg *Config) paramExp(pe *syntax.ParamExp, ql quoteLevel) (string, error) 
 				if err != nil {
 					return str, nil
 				}
-				rx := regexp.MustCompile(expr)
+				rx, err := regexp.Compile(expr)
+				if err != nil {
+					return str, nil
+				}
 
 				for i, elem := range elems {
 					rs := []rune(elem)
@@ -2804,7 +2818,11 @@ func (cfg *Config) removePattern(str, pat string, fromEnd, shortest bool) (strin
 		// simple prefix
 		expr = "^(" + expr + ")"
 	}
-	if loc := cfg.compileParamPattern(expr).findStringSubmatchIndex(str); loc != nil {
+	rx, err := cfg.compileParamPattern(expr)
+	if err != nil {
+		return "", err
+	}
+	if loc := rx.findStringSubmatchIndex(str); loc != nil {
 		// remove the original pattern (the submatch)
 		str = str[:loc[2]] + str[loc[3]:]
 	}

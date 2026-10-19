@@ -50,7 +50,10 @@ func ExtendedPatternMatcher(pat string, mode Mode) (func(string) bool, error) {
 
 	expr, err := Regexp(pat, mode)
 	if err == nil {
-		rx := regexp.MustCompile(expr)
+		rx, err := regexp.Compile(expr)
+		if err != nil {
+			return nil, &SyntaxError{msg: "invalid pattern", err: err}
+		}
 		return rx.MatchString, nil
 	}
 	var negErr *NegExtGlobError
@@ -141,6 +144,13 @@ func (p *extParser) parseSeq(i int, stops string) (*extSeq, int, error) {
 		if p.mode&ExtendedOperators != 0 && i+1 < len(p.pat) && p.pat[i+1] == '(' && strings.ContainsRune("!?*+@", rune(c)) {
 			flushLit()
 			tok, next, err := p.parseGroup(i)
+			if errors.Is(err, errUnterminatedExtGlob) {
+				// Like bash, match a group without its closing
+				// parenthesis, and everything after it, literally.
+				lit.WriteString(p.pat[i:])
+				i = len(p.pat)
+				break
+			}
 			if err != nil {
 				return nil, 0, err
 			}
@@ -195,6 +205,8 @@ func (p *extParser) parseSeq(i int, stops string) (*extSeq, int, error) {
 	return seq, i, nil
 }
 
+var errUnterminatedExtGlob = &SyntaxError{msg: "unterminated extglob"}
+
 func (p *extParser) parseGroup(i int) (extToken, int, error) {
 	op := p.pat[i]
 	i += 2 // skip op + '('
@@ -206,7 +218,7 @@ func (p *extParser) parseGroup(i int) (extToken, int, error) {
 		}
 		alts = append(alts, alt)
 		if next >= len(p.pat) {
-			return extToken{}, 0, &SyntaxError{msg: "unterminated extglob"}
+			return extToken{}, 0, errUnterminatedExtGlob
 		}
 		switch p.pat[next] {
 		case '|':
@@ -214,7 +226,7 @@ func (p *extParser) parseGroup(i int) (extToken, int, error) {
 		case ')':
 			return extToken{kind: extGroup, op: op, alts: alts}, next + 1, nil
 		default:
-			return extToken{}, 0, &SyntaxError{msg: "unterminated extglob"}
+			return extToken{}, 0, errUnterminatedExtGlob
 		}
 	}
 }
