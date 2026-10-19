@@ -281,20 +281,25 @@ func uniqWrite(_ context.Context, inv *Invocation, reader io.Reader, writer io.W
 		lineTerminator = 0
 	}
 
-	bufReader := bufio.NewReader(reader)
+	bufReader := newBoundedLineReader(inv, reader)
 	bufWriter := bufio.NewWriter(writer)
 	defer func() { _ = bufWriter.Flush() }()
 
 	var current []byte
-	if !uniqReadRecord(bufReader, &current, lineTerminator) {
-		return nil
+	var readErr error
+	if ok, err := uniqReadRecord(bufReader, &current, lineTerminator); !ok {
+		return err
 	}
 	currentMeta := uniqBuildMeta(current, opts, inv)
 	groupCount := 1
 	firstLinePrinted := false
 
 	var next []byte
-	for uniqReadRecord(bufReader, &next, lineTerminator) {
+	for {
+		var ok bool
+		if ok, readErr = uniqReadRecord(bufReader, &next, lineTerminator); !ok {
+			break
+		}
 		nextMeta := uniqBuildMeta(next, opts, inv)
 		if uniqKeysEqual(current, currentMeta, next, nextMeta, opts) {
 			if opts.allRepeated {
@@ -321,6 +326,10 @@ func uniqWrite(_ context.Context, inv *Invocation, reader io.Reader, writer io.W
 		groupCount = 1
 		next = next[:0]
 	}
+	if readErr != nil {
+		_ = bufWriter.Flush()
+		return readErr
+	}
 
 	if uniqShouldPrintGroup(groupCount, opts) {
 		if err := uniqWriteLine(bufWriter, current, groupCount, firstLinePrinted, opts, lineTerminator); err != nil {
@@ -339,17 +348,26 @@ func uniqWrite(_ context.Context, inv *Invocation, reader io.Reader, writer io.W
 	return nil
 }
 
-func uniqReadRecord(reader *bufio.Reader, dst *[]byte, terminator byte) bool {
+// uniqReadRecord reads the next record into dst. It reports false at end of
+// input, with a non-nil error when a record exceeds MaxFileBytes or the
+// read fails.
+func uniqReadRecord(reader *boundedLineReader, dst *[]byte, terminator byte) (bool, error) {
 	*dst = (*dst)[:0]
-	line, err := reader.ReadBytes(terminator)
-	if len(line) == 0 && err != nil {
-		return false
+	line, err := reader.ReadLine(terminator)
+	var exitErr *ExitError
+	switch {
+	case errors.As(err, &exitErr):
+		return false, err
+	case len(line) == 0 && errors.Is(err, io.EOF):
+		return false, nil
+	case len(line) == 0 && err != nil:
+		return false, &ExitError{Code: 1, Err: err}
 	}
 	if len(line) > 0 && line[len(line)-1] == terminator {
 		line = line[:len(line)-1]
 	}
 	*dst = append(*dst, line...)
-	return true
+	return true, nil
 }
 
 func uniqBuildMeta(line []byte, opts *uniqOptions, inv *Invocation) uniqLineMeta {

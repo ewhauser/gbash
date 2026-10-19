@@ -142,7 +142,7 @@ func formatSignedShell(arg string, present bool, spec *formatSpec) (string, stri
 			value = parsed.value.Int64()
 		}
 	}
-	return fmt.Sprintf(buildNumericFormat(spec, 'd'), value), diag, ""
+	return formatNumeric(spec, 'd', value), diag, ""
 }
 
 func formatSignedGNU(arg string, present bool, spec *formatSpec, opts Options) (string, string, string) {
@@ -165,7 +165,7 @@ func formatSignedGNU(arg string, present bool, spec *formatSpec, opts Options) (
 			value = parsed.value.Int64()
 		}
 	}
-	return fmt.Sprintf(buildNumericFormat(spec, 'd'), value), diag, parsed.warning
+	return formatNumeric(spec, 'd', value), diag, parsed.warning
 }
 
 func formatUnsigned(arg string, present bool, spec *formatSpec, opts Options) (string, string, string) {
@@ -209,7 +209,7 @@ func formatUnsignedShell(arg string, present bool, spec *formatSpec) (string, st
 	if value == 0 && unsignedSpec.alternate && (verb == 'x' || verb == 'X') {
 		unsignedSpec.alternate = false
 	}
-	return fmt.Sprintf(buildNumericFormat(&unsignedSpec, verb), value), diag, ""
+	return formatNumeric(&unsignedSpec, verb, value), diag, ""
 }
 
 func formatUnsignedGNU(arg string, present bool, spec *formatSpec, opts Options) (string, string, string) {
@@ -246,7 +246,7 @@ func formatUnsignedGNU(arg string, present bool, spec *formatSpec, opts Options)
 	if value == 0 && unsignedSpec.alternate && (verb == 'x' || verb == 'X') {
 		unsignedSpec.alternate = false
 	}
-	return fmt.Sprintf(buildNumericFormat(&unsignedSpec, verb), value), diag, parsed.warning
+	return formatNumeric(&unsignedSpec, verb, value), diag, parsed.warning
 }
 
 func formatFloat(arg string, present bool, spec *formatSpec, opts Options) (string, string, string) {
@@ -259,49 +259,49 @@ func formatFloat(arg string, present bool, spec *formatSpec, opts Options) (stri
 func formatFloatShell(arg string, present bool, spec *formatSpec) (string, string, string) {
 	if present {
 		if value, ok := parseQuotedCharArg(arg); ok {
-			return fmt.Sprintf(buildNumericFormat(spec, spec.verb), float64(value)), "", ""
+			return formatNumeric(spec, spec.verb, float64(value)), "", ""
 		}
 	}
 	if !present {
-		return fmt.Sprintf(buildNumericFormat(spec, spec.verb), 0.0), "", ""
+		return formatNumeric(spec, spec.verb, 0.0), "", ""
 	}
 
 	trimmed := strings.TrimLeft(arg, " \t\r\n\v\f")
 	if trimmed == "" {
-		return fmt.Sprintf(buildNumericFormat(spec, spec.verb), 0.0), fmt.Sprintf("%s: invalid number", arg), ""
+		return formatNumeric(spec, spec.verb, 0.0), fmt.Sprintf("%s: invalid number", arg), ""
 	}
 	prefix := floatPrefix(trimmed)
 	if prefix == "" {
-		return fmt.Sprintf(buildNumericFormat(spec, spec.verb), 0.0), fmt.Sprintf("%s: invalid number", arg), ""
+		return formatNumeric(spec, spec.verb, 0.0), fmt.Sprintf("%s: invalid number", arg), ""
 	}
 	value, err := strconv.ParseFloat(prefix, 64)
 	diag := ""
 	if err != nil || prefix != trimmed {
 		diag = fmt.Sprintf("%s: invalid number", arg)
 	}
-	return fmt.Sprintf(buildNumericFormat(spec, spec.verb), value), diag, ""
+	return formatNumeric(spec, spec.verb, value), diag, ""
 }
 
 func formatFloatGNU(arg string, present bool, spec *formatSpec, opts Options) (string, string, string) {
 	if present {
 		if parsed, ok := parseGNUCharacterConstant(arg, opts); ok {
 			if parsed.valid {
-				return fmt.Sprintf(buildNumericFormat(spec, spec.verb), float64(parsed.value)), "", parsed.warning
+				return formatNumeric(spec, spec.verb, float64(parsed.value)), "", parsed.warning
 			}
-			return fmt.Sprintf(buildNumericFormat(spec, spec.verb), 0.0), parsed.diagnose, ""
+			return formatNumeric(spec, spec.verb, 0.0), parsed.diagnose, ""
 		}
 	}
 	if !present {
-		return fmt.Sprintf(buildNumericFormat(spec, spec.verb), 0.0), "", ""
+		return formatNumeric(spec, spec.verb, 0.0), "", ""
 	}
 
 	trimmed := strings.TrimLeft(arg, " \t\r\n\v\f")
 	if trimmed == "" {
-		return fmt.Sprintf(buildNumericFormat(spec, spec.verb), 0.0), fmt.Sprintf("%s: expected a numeric value", quoteGNUDiagnosticOperand(arg)), ""
+		return formatNumeric(spec, spec.verb, 0.0), fmt.Sprintf("%s: expected a numeric value", quoteGNUDiagnosticOperand(arg)), ""
 	}
 	prefix := floatPrefix(trimmed)
 	if prefix == "" {
-		return fmt.Sprintf(buildNumericFormat(spec, spec.verb), 0.0), fmt.Sprintf("%s: expected a numeric value", quoteGNUDiagnosticOperand(arg)), ""
+		return formatNumeric(spec, spec.verb, 0.0), fmt.Sprintf("%s: expected a numeric value", quoteGNUDiagnosticOperand(arg)), ""
 	}
 	value, err := strconv.ParseFloat(prefix, 64)
 	diag := ""
@@ -316,7 +316,7 @@ func formatFloatGNU(arg string, present bool, spec *formatSpec, opts Options) (s
 
 func formatGNUFloat(spec *formatSpec, value float64) string {
 	if !math.IsInf(value, 0) && !math.IsNaN(value) {
-		return fmt.Sprintf(buildNumericFormat(spec, spec.verb), value)
+		return formatNumeric(spec, spec.verb, value)
 	}
 	token := "nan"
 	if math.IsInf(value, 0) {

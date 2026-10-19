@@ -90,6 +90,18 @@ func (c *Basenc) RunParsed(ctx context.Context, inv *Invocation, matches *Parsed
 	if err != nil {
 		return err
 	}
+	if opts.format == basencEncodingBase58 {
+		limit := basencBase58MaxEncodeBytes
+		if opts.decode {
+			limit = basencBase58MaxDecodeBytes
+		}
+		if len(data) > limit {
+			return exitf(inv, 1, "basenc: base58 input too large (limit %d bytes)", limit)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
 
 	if opts.decode {
 		decoded, invalid := opts.format.decode(data, opts.ignoreGarbage)

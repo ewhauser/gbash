@@ -989,6 +989,9 @@ func collectSortInputs(ctx context.Context, inv *Invocation, opts *sortOptions, 
 		return []sortInputRun{{name: "-", lines: decodeSortRecords(data, opts.zeroTerminated)}}, "-", 0, nil
 	}
 
+	// Every operand is decoded into its own run, including repeated "-",
+	// so the budget charges each occurrence. sort fails with status 2.
+	budget := newInputBudget(inv)
 	for idx, file := range inputFiles {
 		var data []byte
 		switch file {
@@ -1010,6 +1013,13 @@ func collectSortInputs(ctx context.Context, inv *Invocation, opts *sortOptions, 
 				continue
 			}
 			data = read
+		}
+		if err := budget.add(len(data)); err != nil {
+			var exitErr *ExitError
+			if errors.As(err, &exitErr) {
+				exitErr.Code = 2
+			}
+			return nil, "", 0, err
 		}
 		if idx == 0 {
 			checkFile = file

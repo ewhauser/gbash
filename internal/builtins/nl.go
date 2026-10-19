@@ -285,6 +285,9 @@ func parseNLWidth(inv *Invocation, value string) (int, error) {
 	if width > uint64(^uint(0)>>1) {
 		return 0, nlInvalidValue(inv, "line number field width", value)
 	}
+	if err := checkFieldWidth(inv, "nl", int64(width)); err != nil {
+		return 0, err
+	}
 	return int(width), nil
 }
 
@@ -375,8 +378,7 @@ func runNL(inv *Invocation, data []byte, stats *nlStats, opts *nlOptions) error 
 			stats.lineNumber = next
 			stats.lineNumberValid = ok
 		} else {
-			prefix := bytes.Repeat([]byte(" "), opts.numberWidth+1)
-			if _, err := inv.Stdout.Write(prefix); err != nil {
+			if err := writePadding(inv.Stdout, ' ', opts.numberWidth+1); err != nil {
 				return &ExitError{Code: 1, Err: err}
 			}
 		}
@@ -440,17 +442,13 @@ func writeNLNumber(w io.Writer, format nlNumberFormat, number int64, width int) 
 		if _, err := io.WriteString(w, text); err != nil {
 			return err
 		}
-		for i := len(text); i < width; i++ {
-			if _, err := w.Write([]byte{' '}); err != nil {
-				return err
-			}
+		if err := writePadding(w, ' ', width-len(text)); err != nil {
+			return err
 		}
 	case nlNumberFormatRight:
 		text := strconv.FormatInt(number, 10)
-		for i := len(text); i < width; i++ {
-			if _, err := w.Write([]byte{' '}); err != nil {
-				return err
-			}
+		if err := writePadding(w, ' ', width-len(text)); err != nil {
+			return err
 		}
 		if _, err := io.WriteString(w, text); err != nil {
 			return err
@@ -461,10 +459,8 @@ func writeNLNumber(w io.Writer, format nlNumberFormat, number int64, width int) 
 				return err
 			}
 			text := strconv.FormatUint(nlUnsignedAbs(number), 10)
-			for i := len(text); i < width-1; i++ {
-				if _, err := w.Write([]byte{'0'}); err != nil {
-					return err
-				}
+			if err := writePadding(w, '0', width-1-len(text)); err != nil {
+				return err
 			}
 			if _, err := io.WriteString(w, text); err != nil {
 				return err
@@ -472,10 +468,8 @@ func writeNLNumber(w io.Writer, format nlNumberFormat, number int64, width int) 
 			return nil
 		}
 		text := strconv.FormatInt(number, 10)
-		for i := len(text); i < width; i++ {
-			if _, err := w.Write([]byte{'0'}); err != nil {
-				return err
-			}
+		if err := writePadding(w, '0', width-len(text)); err != nil {
+			return err
 		}
 		if _, err := io.WriteString(w, text); err != nil {
 			return err

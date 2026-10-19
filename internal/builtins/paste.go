@@ -326,11 +326,15 @@ func loadPasteInputs(ctx context.Context, inv *Invocation, names []string, lineE
 		stdinLoaded  bool
 		inputs       []pasteInput
 	)
+	budget := newInputBudget(inv)
 	for _, name := range names {
 		if name == "-" {
 			if !stdinLoaded {
 				data, err := readAllStdin(ctx, inv)
 				if err != nil {
+					return nil, err
+				}
+				if err := budget.add(len(data)); err != nil {
 					return nil, err
 				}
 				stdinRecords = splitPasteRecords(data, lineEnding)
@@ -345,6 +349,9 @@ func loadPasteInputs(ctx context.Context, inv *Invocation, names []string, lineE
 
 		data, _, err := readAllFile(ctx, inv, name)
 		if err != nil {
+			return nil, err
+		}
+		if err := budget.add(len(data)); err != nil {
 			return nil, err
 		}
 		index := 0

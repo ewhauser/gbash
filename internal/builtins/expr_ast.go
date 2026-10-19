@@ -661,6 +661,10 @@ func exprRegexTooBigError() error {
 	return exprStaticError("Regular expression too big")
 }
 
+func exprRegexTooComplexError() error {
+	return exprStaticError("Regular expression too complex to match")
+}
+
 func exprInvalidRegexExpressionError() error {
 	return exprStaticError("Invalid regular expression")
 }

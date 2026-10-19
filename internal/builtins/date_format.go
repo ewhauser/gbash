@@ -2,6 +2,7 @@ package builtins
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -17,8 +18,17 @@ type dateFormatToken struct {
 }
 
 func formatDateString(current time.Time, format string) (string, error) {
+	return formatDateStringLimit(current, format, defaultMaxFieldBytes)
+}
+
+// formatDateStringLimit renders format like formatDateString but fails before
+// padding any field, or the whole result, past maxBytes.
+func formatDateStringLimit(current time.Time, format string, maxBytes int64) (string, error) {
 	var b strings.Builder
 	for i := 0; i < len(format); {
+		if int64(b.Len()) > maxBytes {
+			return "", dateFieldTooLargeError(maxBytes)
+		}
 		if format[i] != '%' {
 			b.WriteByte(format[i])
 			i++
@@ -33,6 +43,9 @@ func formatDateString(current time.Time, format string) (string, error) {
 			b.WriteString(format[i:])
 			break
 		}
+		if int64(token.width) > maxBytes-int64(b.Len()) {
+			return "", dateFieldTooLargeError(maxBytes)
+		}
 		text, ok := renderDateFormatToken(current, token)
 		if !ok {
 			b.WriteString(token.raw)
@@ -41,7 +54,14 @@ func formatDateString(current time.Time, format string) (string, error) {
 		}
 		i = next
 	}
+	if int64(b.Len()) > maxBytes {
+		return "", dateFieldTooLargeError(maxBytes)
+	}
 	return b.String(), nil
+}
+
+func dateFieldTooLargeError(maxBytes int64) error {
+	return fmt.Errorf("field width too large (limit %d bytes), increase policy.Limits.MaxVariableBytes", maxBytes)
 }
 
 func parseDateFormatToken(format string, start int) (dateFormatToken, int, error) {
@@ -58,7 +78,9 @@ func parseDateFormatToken(format string, start int) (dateFormatToken, int, error
 	if hasWidth {
 		value, err := strconv.Atoi(format[widthStart:i])
 		if err != nil {
-			return dateFormatToken{}, 0, err
+			// Out-of-range widths saturate so the caller's field cap
+			// rejects them instead of treating the directive as literal text.
+			value = math.MaxInt
 		}
 		width = value
 	}
