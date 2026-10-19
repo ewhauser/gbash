@@ -356,6 +356,7 @@ func (f *TrieFS) OpenFile(ctx context.Context, name string, flag int, perm stdfs
 	return &trieFile{
 		fs:     f,
 		path:   abs,
+		inode:  entry.inode,
 		flag:   flag,
 		offset: offset,
 	}, nil
@@ -721,38 +722,31 @@ func (f *TrieFS) materializePath(ctx context.Context, name string, followFinal b
 	}
 }
 
-func (f *TrieFS) materializeResolvedPath(ctx context.Context, abs string) error {
-	for {
-		f.mu.RLock()
-		entry, ok := f.lookupAbsNoFollowLocked(abs)
-		if !ok || entry == nil {
-			f.mu.RUnlock()
-			return stdfs.ErrNotExist
-		}
-		if !isLazyTrieFileNode(entry.inode) {
-			f.mu.RUnlock()
-			return nil
-		}
-		lazy := entry.inode.lazy
-		inodeRef := entry.inode
+// materializeInode loads a lazy inode's content in place. Open handles call it
+// with the inode they are bound to, so it works even after the entry has been
+// renamed or unlinked.
+func (f *TrieFS) materializeInode(ctx context.Context, inode *trieInode) error {
+	f.mu.RLock()
+	if !isLazyTrieFileNode(inode) {
 		f.mu.RUnlock()
-
-		data, err := lazy(ctx)
-		if err != nil {
-			return err
-		}
-		buf := append([]byte(nil), data...)
-
-		f.mu.Lock()
-		current, ok := f.lookupAbsNoFollowLocked(abs)
-		if ok && current != nil && current.inode == inodeRef && isLazyTrieFileNode(current.inode) {
-			current.inode.data = buf
-			current.inode.lazy = nil
-			f.mu.Unlock()
-			return nil
-		}
-		f.mu.Unlock()
+		return nil
 	}
+	lazy := inode.lazy
+	f.mu.RUnlock()
+
+	data, err := lazy(ctx)
+	if err != nil {
+		return err
+	}
+	buf := append([]byte(nil), data...)
+
+	f.mu.Lock()
+	if isLazyTrieFileNode(inode) {
+		inode.data = buf
+		inode.lazy = nil
+	}
+	f.mu.Unlock()
+	return nil
 }
 
 func (f *TrieFS) resolvePathLocked(name string, followFinal, allowMissingFinal bool) (string, *trieDentry, error) {
@@ -989,9 +983,13 @@ func isLazyTrieFileNode(node *trieInode) bool {
 	return node != nil && node.lazy != nil && !node.mode.IsDir() && node.mode&stdfs.ModeSymlink == 0
 }
 
+// trieFile is an open handle bound to its inode, not its path: like a POSIX
+// file descriptor, it keeps reading and writing the same file after the path
+// is renamed, unlinked, or replaced.
 type trieFile struct {
 	fs     *TrieFS
 	path   string
+	inode  *trieInode
 	flag   int
 	offset int64
 	closed atomic.Bool
@@ -1007,27 +1005,23 @@ func (f *trieFile) Read(p []byte) (int, error) {
 
 	for {
 		f.fs.mu.RLock()
-		entry, ok := f.fs.lookupAbsNoFollowLocked(f.path)
-		if !ok || entry == nil {
+		inode := f.inode
+		if isLazyTrieFileNode(inode) {
 			f.fs.mu.RUnlock()
-			return 0, &os.PathError{Op: "read", Path: f.path, Err: stdfs.ErrNotExist}
-		}
-		if isLazyTrieFileNode(entry.inode) {
-			f.fs.mu.RUnlock()
-			if err := f.fs.materializeResolvedPath(context.Background(), f.path); err != nil {
+			if err := f.fs.materializeInode(context.Background(), inode); err != nil {
 				return 0, &os.PathError{Op: "read", Path: f.path, Err: err}
 			}
 			continue
 		}
-		if entry.inode.mode.IsDir() {
+		if inode.mode.IsDir() {
 			f.fs.mu.RUnlock()
 			return 0, &os.PathError{Op: "read", Path: f.path, Err: stdfs.ErrInvalid}
 		}
-		if f.offset >= int64(len(entry.inode.data)) {
+		if f.offset >= int64(len(inode.data)) {
 			f.fs.mu.RUnlock()
 			return 0, io.EOF
 		}
-		n := copy(p, entry.inode.data[f.offset:])
+		n := copy(p, inode.data[f.offset:])
 		f.offset += int64(n)
 		f.fs.mu.RUnlock()
 		return n, nil
@@ -1042,39 +1036,27 @@ func (f *trieFile) Write(p []byte) (int, error) {
 		return 0, &os.PathError{Op: "write", Path: f.path, Err: stdfs.ErrPermission}
 	}
 
+	if err := f.fs.materializeInode(context.Background(), f.inode); err != nil {
+		return 0, &os.PathError{Op: "write", Path: f.path, Err: err}
+	}
+
 	f.fs.mu.Lock()
 	defer f.fs.mu.Unlock()
 
-	entry, ok := f.fs.lookupAbsNoFollowLocked(f.path)
-	if !ok || entry == nil {
-		return 0, &os.PathError{Op: "write", Path: f.path, Err: stdfs.ErrNotExist}
-	}
-	if entry.inode.mode.IsDir() {
+	inode := f.inode
+	if inode.mode.IsDir() {
 		return 0, &os.PathError{Op: "write", Path: f.path, Err: stdfs.ErrInvalid}
 	}
-	if isLazyTrieFileNode(entry.inode) {
-		f.fs.mu.Unlock()
-		if err := f.fs.materializeResolvedPath(context.Background(), f.path); err != nil {
-			f.fs.mu.Lock()
-			return 0, &os.PathError{Op: "write", Path: f.path, Err: err}
-		}
-		f.fs.mu.Lock()
-		entry, ok = f.fs.lookupAbsNoFollowLocked(f.path)
-		if !ok || entry == nil {
-			return 0, &os.PathError{Op: "write", Path: f.path, Err: stdfs.ErrNotExist}
-		}
-	}
-
 	if f.flag&os.O_APPEND != 0 {
-		f.offset = int64(len(entry.inode.data))
+		f.offset = int64(len(inode.data))
 	}
 	end := int(f.offset) + len(p)
-	if end > len(entry.inode.data) {
-		entry.inode.data = growBytes(entry.inode.data, end)
+	if end > len(inode.data) {
+		inode.data = growBytes(inode.data, end)
 	}
-	copy(entry.inode.data[int(f.offset):], p)
+	copy(inode.data[int(f.offset):], p)
 	f.offset += int64(len(p))
-	entry.inode.modTime = time.Now().UTC()
+	inode.modTime = time.Now().UTC()
 	return len(p), nil
 }
 
@@ -1137,7 +1119,12 @@ func (f *trieFile) Stat() (stdfs.FileInfo, error) {
 	if f.closed.Load() {
 		return nil, stdfs.ErrClosed
 	}
-	return f.fs.Stat(context.Background(), f.path)
+	if err := f.fs.materializeInode(context.Background(), f.inode); err != nil {
+		return nil, &os.PathError{Op: "stat", Path: f.path, Err: err}
+	}
+	f.fs.mu.RLock()
+	defer f.fs.mu.RUnlock()
+	return newTrieFileInfo(path.Base(f.path), f.inode), nil
 }
 
 type trieFileInfo struct {

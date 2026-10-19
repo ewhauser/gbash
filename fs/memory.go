@@ -225,37 +225,31 @@ func (m *MemoryFS) materializePath(ctx context.Context, name string, followFinal
 	}
 }
 
-func (m *MemoryFS) materializeResolvedPath(ctx context.Context, abs string) error {
-	for {
-		m.mu.RLock()
-		node, ok := m.nodes[abs]
-		if !ok {
-			m.mu.RUnlock()
-			return stdfs.ErrNotExist
-		}
-		if !isLazyFileNode(node) {
-			m.mu.RUnlock()
-			return nil
-		}
-		lazy := node.lazy
+// materializeNode loads a lazy node's content in place. Open handles call it
+// with the node they are bound to, so it works even after the node has been
+// renamed or unlinked.
+func (m *MemoryFS) materializeNode(ctx context.Context, node *memoryNode) error {
+	m.mu.RLock()
+	if !isLazyFileNode(node) {
 		m.mu.RUnlock()
-
-		data, err := lazy(ctx)
-		if err != nil {
-			return err
-		}
-		buf := append([]byte(nil), data...)
-
-		m.mu.Lock()
-		current, ok := m.nodes[abs]
-		if ok && current == node && isLazyFileNode(current) {
-			current.data = buf
-			current.lazy = nil
-			m.mu.Unlock()
-			return nil
-		}
-		m.mu.Unlock()
+		return nil
 	}
+	lazy := node.lazy
+	m.mu.RUnlock()
+
+	data, err := lazy(ctx)
+	if err != nil {
+		return err
+	}
+	buf := append([]byte(nil), data...)
+
+	m.mu.Lock()
+	if isLazyFileNode(node) {
+		node.data = buf
+		node.lazy = nil
+	}
+	m.mu.Unlock()
+	return nil
 }
 
 func (m *MemoryFS) Symlink(_ context.Context, target, linkName string) error {
@@ -422,6 +416,7 @@ func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm std
 	return &memoryFile{
 		fs:     m,
 		path:   abs,
+		node:   node,
 		flag:   flag,
 		offset: offset,
 	}, nil
@@ -973,9 +968,13 @@ func canRead(flag int) bool {
 	return flag&(os.O_RDONLY|os.O_WRONLY|os.O_RDWR) != os.O_WRONLY
 }
 
+// memoryFile is an open handle bound to its node, not its path: like a POSIX
+// file descriptor, it keeps reading and writing the same file after the path
+// is renamed, unlinked, or replaced.
 type memoryFile struct {
 	fs     *MemoryFS
 	path   string
+	node   *memoryNode
 	flag   int
 	offset int64
 	closed atomic.Bool
@@ -989,20 +988,12 @@ func (f *memoryFile) Read(p []byte) (int, error) {
 		return 0, &os.PathError{Op: "read", Path: f.path, Err: stdfs.ErrPermission}
 	}
 
-	var (
-		node *memoryNode
-		ok   bool
-	)
 	for {
 		f.fs.mu.RLock()
-		node, ok = f.fs.nodes[f.path]
-		if !ok {
-			f.fs.mu.RUnlock()
-			return 0, &os.PathError{Op: "read", Path: f.path, Err: stdfs.ErrNotExist}
-		}
+		node := f.node
 		if isLazyFileNode(node) {
 			f.fs.mu.RUnlock()
-			if err := f.fs.materializeResolvedPath(context.Background(), f.path); err != nil {
+			if err := f.fs.materializeNode(context.Background(), node); err != nil {
 				return 0, &os.PathError{Op: "read", Path: f.path, Err: err}
 			}
 			continue
@@ -1030,27 +1021,16 @@ func (f *memoryFile) Write(p []byte) (int, error) {
 		return 0, &os.PathError{Op: "write", Path: f.path, Err: stdfs.ErrPermission}
 	}
 
+	if err := f.fs.materializeNode(context.Background(), f.node); err != nil {
+		return 0, &os.PathError{Op: "write", Path: f.path, Err: err}
+	}
+
 	f.fs.mu.Lock()
 	defer f.fs.mu.Unlock()
 
-	node, ok := f.fs.nodes[f.path]
-	if !ok {
-		return 0, &os.PathError{Op: "write", Path: f.path, Err: stdfs.ErrNotExist}
-	}
+	node := f.node
 	if node.mode.IsDir() {
 		return 0, &os.PathError{Op: "write", Path: f.path, Err: stdfs.ErrInvalid}
-	}
-	if isLazyFileNode(node) {
-		f.fs.mu.Unlock()
-		if err := f.fs.materializeResolvedPath(context.Background(), f.path); err != nil {
-			f.fs.mu.Lock()
-			return 0, &os.PathError{Op: "write", Path: f.path, Err: err}
-		}
-		f.fs.mu.Lock()
-		node, ok = f.fs.nodes[f.path]
-		if !ok {
-			return 0, &os.PathError{Op: "write", Path: f.path, Err: stdfs.ErrNotExist}
-		}
 	}
 
 	if f.flag&os.O_APPEND != 0 {
@@ -1126,7 +1106,17 @@ func (f *memoryFile) Stat() (stdfs.FileInfo, error) {
 	if f.closed.Load() {
 		return nil, stdfs.ErrClosed
 	}
-	return f.fs.Stat(context.Background(), f.path)
+	f.fs.mu.RLock()
+	needsContent := isLazyFileNode(f.node) && !f.node.lazySized
+	f.fs.mu.RUnlock()
+	if needsContent {
+		if err := f.fs.materializeNode(context.Background(), f.node); err != nil {
+			return nil, &os.PathError{Op: "stat", Path: f.path, Err: err}
+		}
+	}
+	f.fs.mu.RLock()
+	defer f.fs.mu.RUnlock()
+	return newFileInfo(path.Base(f.path), f.node), nil
 }
 
 func growBytes(data []byte, size int) []byte {
