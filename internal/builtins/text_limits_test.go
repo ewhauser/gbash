@@ -245,3 +245,11 @@ func TestBasencBase58CapsInputSize(t *testing.T) {
 	result = execWithDeadline(t, nil, "head -c 400000 /dev/zero | tr '\\0' 2 | basenc --base58 -d\n")
 	assertExitStderr(t, result, 1, "basenc: base58 input too large (limit 393216 bytes)")
 }
+
+func TestTailZeroSleepIntervalDoesNotPanic(t *testing.T) {
+	t.Parallel()
+	result := execWithDeadline(t, nil, "timeout 0.2 tail -s 0 -f /dev/null\necho \"rc=$?\"\n")
+	if got, want := result.Stdout, "rc=124\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
+	}
+}
