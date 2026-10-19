@@ -28,6 +28,9 @@ type captureBuffer struct {
 	spillFile  *os.File
 	spillBytes int64
 	spillDone  bool
+	// spillCut records that overflow was dropped because the spill file
+	// reached spillMax.
+	spillCut bool
 }
 
 func newCaptureBuffer(limit int64) *captureBuffer {
@@ -86,6 +89,7 @@ func (b *captureBuffer) spillLocked(p []byte) {
 	if room := b.spillMax - b.spillBytes; int64(len(p)) > room {
 		p = p[:room]
 		b.spillDone = true
+		b.spillCut = true
 	}
 	n, err := b.spillFile.Write(p)
 	b.spillBytes += int64(n)
@@ -127,6 +131,14 @@ func (b *captureBuffer) SpillPath() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.spillPath
+}
+
+// SpillTruncated reports that the spill file exists but stops short of the
+// full stream because the overflow exceeded spillMax.
+func (b *captureBuffer) SpillTruncated() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.spillCut && b.spillPath != ""
 }
 
 // Close closes the spill file if one was created and stops further spilling,

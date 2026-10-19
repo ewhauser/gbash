@@ -576,6 +576,8 @@ func finishCapturedOutput(result *ExecutionResult, stdout, stderr *captureBuffer
 	stderr.Close()
 	result.StdoutSpillPath = stdout.SpillPath()
 	result.StderrSpillPath = stderr.SpillPath()
+	result.StdoutSpillTruncated = stdout.SpillTruncated()
+	result.StderrSpillTruncated = stderr.SpillTruncated()
 }
 
 func writeExecutionControlMessage(stderr *captureBuffer, message string) {

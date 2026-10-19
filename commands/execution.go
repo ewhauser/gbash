@@ -42,7 +42,8 @@ type ExecutionRequest struct {
 	// be created or written, it is discarded and the stream falls back to
 	// truncation. Empty keeps the legacy truncate-and-drop behavior.
 	SpillDir string
-	// MaxSpillBytes caps each spill file. Overflow past the cap is dropped.
+	// MaxSpillBytes caps each spill file. Overflow past the cap is dropped and
+	// reported via [ExecutionResult.StdoutSpillTruncated].
 	// Zero or negative uses a 64 MiB default.
 	MaxSpillBytes int64
 }
@@ -75,6 +76,11 @@ type ExecutionResult struct {
 	// MaxSpillBytes of overflow. Empty when nothing was spilled.
 	StdoutSpillPath string
 	StderrSpillPath string
+	// StdoutSpillTruncated / StderrSpillTruncated report that the overflow
+	// exceeded MaxSpillBytes, so the spill file was cut short and the bytes
+	// past the cap were dropped.
+	StdoutSpillTruncated bool
+	StderrSpillTruncated bool
 }
 
 // InteractiveRequest describes an interactive nested shell launched through

@@ -288,7 +288,7 @@ The runtime treats the runner's virtual directory plus shell-visible `PWD` as th
 
 Sandbox-facing machine metadata is also runtime-owned: `HOSTNAME`, `hostname`, `OSTYPE`, variant-exposed `BASHPID`, and `PPID` must resolve from sandbox metadata and runner state rather than from host uname or host process inspection.
 
-That metadata now has a supported public adapter boundary. `gbash.Config.Host` and `gbash.WithHost(host.Adapter)` select the logical host implementation, while the public `host` package owns typed platform identity, per-execution PID/PPID/process-group seeds, and the pipe primitive used for pipelines and process substitution. The default adapter remains internal and virtual so zero-config sandbox behavior stays unchanged.
+That metadata now has a supported public adapter boundary. `gbash.Config.Host` and `gbash.WithHost(host.Adapter)` select the logical host implementation, while the public `host` package owns typed platform identity, per-execution PID/PPID/process-group seeds, and the pipe primitive used for pipelines and process substitution. The default adapter remains internal and virtual so zero-config sandbox behavior stays unchanged: it reports PID `1`, PPID `0`, and process group `1`, and never the host's process-group id. Only `host.NewSystem()` exposes the real host PID, PPID, and process group.
 
 Signal identity is part of that runtime-owned metadata. Stable `$$` values, per-shell `BASHPID`, shell-family `PPID`, virtual background job IDs, and internal signal delivery for shell-managed `kill` targets must be derived from runner state rather than host PIDs.
 
@@ -750,6 +750,8 @@ Important properties:
 - host-backed filesystems must still satisfy policy checks and must never imply host command execution
 - a read-write host-backed filesystem may be enabled explicitly for external test harnesses or advanced embedding, but it is not the default runtime backend
 - host-backed filesystem mutations that create entries, including named pipes, must perform the final host operation relative to a resolved sandbox-confined directory handle rather than reusing a post-check absolute host path
+- host-backed filesystems open host entries with `O_NONBLOCK` so `open(2)` never blocks: host named pipes are served by a handle whose open, reads, and writes wait in bounded polls and give up once the caller's context ends, and host devices, sockets, and other special files are refused with `EPERM`
+- in-memory named pipes bind blocking reads and writes to the context they were opened under, so a FIFO without a peer stops at the execution timeout or cancellation instead of hanging
 - shell redirects and command file access share the same filesystem view
 - symlink support is optional and must default to the safer behavior when policy is ambiguous
 - for backends without symlink creation/traversal support, `Lstat` behaves like `Stat`, `Readlink` fails for non-symlinks, and `Realpath` resolves only existing virtual paths
@@ -768,6 +770,9 @@ Implementation detail for the current runtime:
 - `MemoryFS` may also hold lazy regular-file providers that materialize on first content-sensitive access such as `Open`, `Stat`, `Lstat`, or `DirEntry.Info`
 - `MemoryFS` creating operations (`OpenFile` with `O_CREATE`, `Symlink`, `Link`, `Rename`, `Mkfifo`) never create missing parent directories: a missing parent fails with `ENOENT` and a non-directory parent with `ENOTDIR`, so `echo hi > /missing/dir/x` exits 1 with `No such file or directory` as in bash; only `MkdirAll` and initial-file seeding create parents
 - `MemoryFS.Rename` rejects moving a directory into its own subtree with `EINVAL`, matching `rename(2)` and `OverlayFS`
+- `TrieFS` follows the same creating-operation parent rule and rename-into-own-subtree check as `MemoryFS`, and its `Chmod` keeps setuid, setgid, and sticky bits
+- the in-memory backends store only permission, setuid, setgid, and sticky bits from a caller-supplied `perm` or `Chmod` mode; type bits always come from the operation that creates the node
+- `MemoryFS` and `TrieFS` open file handles are bound to the file's node rather than its path, so like a POSIX descriptor a handle keeps reading and writing the same file after the path is renamed, unlinked, or replaced
 - `OverlayFS` creating operations follow the same parent rule against the merged view of both layers (following symlinked parents and honoring tombstones): a parent missing from both layers fails with `ENOENT` and a non-directory parent with `ENOTDIR`, while a parent that exists only in the lower layer is a valid destination and is materialized in the upper layer on write
 
 Current and planned backends:
@@ -793,7 +798,9 @@ Backend boundary for the current implementation:
 - `OverlayFS` is intended for internal session use and is exposed through `gbfs.Overlay(...)`
 - `OverlayFS` resolves symlinks against the merged view of both layers: each link is read from the layer that currently provides it, and its target may live in either layer; `Stat`, `Open`, `ReadDir`, `Realpath`, `Chdir`, `Chmod`, `Chtimes`, and following `Chown` follow the final link, while `Lstat`, `Readlink`, `Remove`, `Rename`, `Link`, and the entry-creating operations only resolve parent directories
 - writes and metadata changes through a symlink copy up and modify the resolved target, never the link itself; `MkdirAll` follows symlinked directory components; `O_CREATE|O_EXCL` fails on any existing link, including a dangling one
-- every copy-up (writes via `OpenFile`, `Link` of a lower file, and `Chmod`, `Chown`, `Chtimes`, `Lchtimes`) creates missing upper ancestors with their lower mode, ownership, and modification time, so upper directories never shadow lower ones with default metadata
+- every upper write (copy-ups via `OpenFile`, `Link`, `Chmod`, `Chown`, `Chtimes`, `Lchtimes`, and new entries from `OpenFile` with `O_CREATE`, `Symlink`, `Link`, `Mkfifo`, `MkdirAll`, and `Rename`) first creates missing upper ancestors with their lower mode, ownership, and modification time, so upper directories never shadow lower ones with default metadata
+- copying up a lower regular file records its mode, ownership, size, and modification time but defers reading its content until the copy is opened for reading or a non-truncating write, so a file above the lower layer's read cap can still be truncated, renamed, linked, or have its metadata changed, while reading or appending to it fails with `EFBIG` as on the lower layer; `Rename` moves upper nodes instead of copying them
+- the overlay caches the type of lower-layer directory prefixes and assumes the lower directory structure stays stable for the session; metadata copied up is always re-read from the lower layer
 - `Chmod`, `Chown`, `Chtimes`, and `Lchtimes` on a lower-layer directory copy up only that directory node (mode, ownership, and modification time), never its children, so tombstoned children stay hidden and the cost does not grow with the subtree
 - `MountableFS` is an opt-in namespace backend exposed through `gbfs.Mountable(...)` and `gbash.MountableFileSystem(...)`; live `mount` and `unmount` behavior remains a concrete-backend capability rather than part of the core filesystem interface
 - `SnapshotFS` is a read-only backend for deterministic fixtures and direct tests
@@ -824,6 +831,8 @@ Initial policy surface:
 - cancellation and timeout handling
 - network disabled unless a sandboxed network client is explicitly configured
 
+The runtime's default limits (below) also back custom policies: any `policy.Limits` field a custom `Policy` leaves at zero inherits the runtime default, so a policy built only to change roots or allowlists keeps every resource cap. A negative field (`policy.Unlimited`) explicitly disables that one limit, for custom policies and for `LimitOverrides` alike; the effective limits reported by `Session.Limits()` and `Invocation.Limits` show a disabled limit as `0`.
+
 Default policy stance for MVP:
 
 - command allowlist derived from the registered command set
@@ -840,7 +849,7 @@ Default policy stance for MVP:
 - symlink traversal denied unless a filesystem backend and policy explicitly allow it
 - request-level timeout is opt-in, but when it fires the execution must stop with exit code `124` and set `ExecutionResult.TimedOut`
 - caller-driven cancellation must stop the execution with exit code `130`
-- captured stdout/stderr beyond `MaxStdoutBytes` / `MaxStderrBytes` is dropped by default; when the embedder sets `ExecutionRequest.SpillDir`, the overflow is instead written to a host temp file in that directory (capped by `MaxSpillBytes`, default 64 MiB per stream) and reported via `StdoutSpillPath` / `StderrSpillPath`. These writes go to the host directly, outside the sandbox `FileSystem`; scripts cannot choose or read the spill location, the embedder owns cleanup, and a spill failure falls back to truncation instead of surfacing as a script write error
+- captured stdout/stderr beyond `MaxStdoutBytes` / `MaxStderrBytes` is dropped by default; when the embedder sets `ExecutionRequest.SpillDir`, the overflow is instead written to a host temp file in that directory (capped by `MaxSpillBytes`, default 64 MiB per stream) and reported via `StdoutSpillPath` / `StderrSpillPath`; when the overflow exceeds that cap the file is cut short and `StdoutSpillTruncated` / `StderrSpillTruncated` are set. These writes go to the host directly, outside the sandbox `FileSystem`; scripts cannot choose or read the spill location, the embedder owns cleanup, and a spill failure falls back to truncation instead of surfacing as a script write error
 - no ambient network access; `curl` is absent unless the runtime enables the sandboxed network client
 
 The policy package should be able to answer three questions:
@@ -852,6 +861,8 @@ The policy package should be able to answer three questions:
 Network policy for the current runtime is enforced by the dedicated `network/` layer rather than by generic shell evaluation. Commands never receive host `http.Client` access directly; they only receive the runtime-owned sandboxed `network.Client`. The default sandboxed HTTP client must not inherit host proxy environment variables, and private-range blocking must be enforced during the actual dial using the same resolver surface used by the preflight URL check.
 
 Allowlist path matching operates on a normalized path. Before matching, the client applies RFC 3986 `remove_dot_segments` to the escaped request path (and to each configured allowlist prefix), and it sends exactly that normalized URL, so `https://api.example.com/v1/a/../b` is checked and sent as `/v1/b`. Paths that would still contain a `.` or `..` segment once a server percent-decodes them (`%2e%2e`), splits on encoded or backslash separators (`..%2f`, `..%5c`, `..\`), or strips `;` path parameters (`..;`) are denied rather than guessed at; an allowlist prefix with such a segment is an invalid config. The same rule applies to every redirect target.
+
+Redirect following matches curl: a `301`, `302`, or `303` response turns any method other than `GET`/`HEAD` into a body-less `GET` (dropping `Content-*` headers), while `307` and `308` keep the method and body. `Authorization`, `Proxy-Authorization`, `Cookie`, and `Cookie2` headers are only sent to hops whose origin (scheme, host, and port with default ports made explicit) matches the initial request.
 
 `DenyPrivateRanges` blocks every non-globally-reachable destination, not just RFC 1918 space: unspecified addresses (`0.0.0.0/8`, `::`), loopback, private, link-local, multicast, shared/CGNAT (`100.64.0.0/10`), IETF/benchmarking/documentation/reserved ranges, deprecated IPv4-compatible and site-local IPv6, and NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`) addresses whose embedded IPv4 destination is itself non-public. IPv4-mapped IPv6 addresses are classified by their IPv4 form.
 
@@ -890,6 +901,7 @@ Implementation detail for the current runtime:
 - the core runtime does not adopt OpenTelemetry as its event schema or transport contract
 - tracing is disabled by default; `ExecutionResult.Events` is empty unless the embedder enables tracing
 - `TraceRedacted` is the recommended default and redacts secret-bearing argv values before events are returned or emitted
+  - redaction is best-effort and command-agnostic: it strips URL userinfo, secret-looking query keys, values of `-u`/`--user`/`--token`-style flags (separate, attached `-uuser:pass`, or ending a short-flag group such as `-su`), headers whose name contains a secret-looking word (`token`, `secret`, `auth`, `cookie`, `key`, ...) or whose value is a `Bearer`/`Basic` credential, and secret-looking `key=value` pairs or JSON string members in `-d`/`--data*`/`-F`/`--form`/`--json` bodies
 - `TraceRaw` preserves full argv and path metadata and is unsafe unless the embedder controls sinks and retention
 - interactive executions only emit trace callbacks; they do not return events
 - every event carries `session_id` and `execution_id`

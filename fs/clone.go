@@ -129,6 +129,49 @@ func cloneFile(ctx context.Context, src FileSystem, srcName string, dst *MemoryF
 	return dst.Chown(ctx, dstName, ownership.UID, ownership.GID, true)
 }
 
+// cloneLazyFile creates dstName as a regular file carrying info's mode,
+// ownership, size, and modification time whose content is loaded from provider
+// on first content access. Nothing is read up front, so copying a file up for a
+// metadata change, rename, or truncating write does not depend on whether the
+// source content may be read.
+func cloneLazyFile(dst *MemoryFS, dstName string, info stdfs.FileInfo, provider LazyFileProvider) error {
+	if !info.Mode().IsRegular() {
+		return &os.PathError{Op: "open", Path: dstName, Err: stdfs.ErrInvalid}
+	}
+	modTime := info.ModTime().UTC()
+	if modTime.IsZero() {
+		modTime = time.Now().UTC()
+	}
+
+	dst.mu.Lock()
+	defer dst.mu.Unlock()
+
+	if _, exists := dst.nodes[dstName]; exists {
+		return &os.PathError{Op: "open", Path: dstName, Err: stdfs.ErrExist}
+	}
+	if err := dst.ensureParentLocked("open", dstName); err != nil {
+		return err
+	}
+	node := &memoryNode{
+		id:        dst.newNodeIDLocked(),
+		mode:      info.Mode() & storedPermBits,
+		lazy:      provider,
+		lazySize:  info.Size(),
+		lazySized: true,
+		atime:     modTime,
+		modTime:   modTime,
+		uid:       DefaultOwnerUID,
+		gid:       DefaultOwnerGID,
+	}
+	if ownership, ok := OwnershipFromFileInfo(info); ok {
+		node.uid = ownership.UID
+		node.gid = ownership.GID
+	}
+	dst.nodes[dstName] = node
+	dst.nodes[parentDir(dstName)].children[path.Base(dstName)] = struct{}{} //nolint:nilaway // parent guaranteed by ensureParentLocked above
+	return nil
+}
+
 func cloneSpecialFile(dst *MemoryFS, dstName string, info stdfs.FileInfo) error {
 	now := info.ModTime().UTC()
 	if now.IsZero() {

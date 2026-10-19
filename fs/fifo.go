@@ -57,19 +57,37 @@ type memoryFIFOFile struct {
 	writable bool
 	closed   atomic.Bool
 
+	// ctxErr reports the error of the context the FIFO was opened under.
+	// Blocking reads and writes give up with it once that context is done, so
+	// a FIFO without a peer cannot outlive the execution timeout or
+	// cancellation.
+	ctxErr   func() error
+	stopWake func() bool
+
 	readerEpoch uint64
 	sawReader   bool
 	writerEpoch uint64
 	sawWriter   bool
 }
 
-func newMemoryFIFOFile(fs *MemoryFS, path string, fifo *memoryFIFO, flag int) *memoryFIFOFile {
+func newMemoryFIFOFile(ctx context.Context, fs *MemoryFS, path string, fifo *memoryFIFO, flag int) *memoryFIFOFile {
 	file := &memoryFIFOFile{
 		fs:       fs,
 		path:     path,
 		fifo:     fifo,
 		readable: canRead(flag),
 		writable: canWrite(flag),
+		ctxErr:   func() error { return nil },
+	}
+	if ctx != nil && ctx.Done() != nil {
+		file.ctxErr = ctx.Err
+		// Wake blocked waiters when the context ends; they re-check ctx.Err()
+		// under the lock before waiting again.
+		file.stopWake = context.AfterFunc(ctx, func() {
+			fifo.mu.Lock()
+			fifo.cond.Broadcast()
+			fifo.mu.Unlock()
+		})
 	}
 	fifo.mu.Lock()
 	if file.readable {
@@ -118,6 +136,9 @@ func (f *memoryFIFOFile) Read(p []byte) (int, error) {
 			return 0, io.EOF
 		}
 		f.sawWriter = f.sawWriter || f.fifo.writers > 0
+		if err := f.ctxErr(); err != nil {
+			return 0, &os.PathError{Op: "read", Path: f.path, Err: err}
+		}
 		f.fifo.cond.Wait()
 	}
 	f.sawWriter = true
@@ -149,6 +170,9 @@ func (f *memoryFIFOFile) Write(p []byte) (int, error) {
 		if f.sawReader || f.fifo.readerEpoch != f.readerEpoch {
 			return 0, &os.PathError{Op: "write", Path: f.path, Err: io.ErrClosedPipe}
 		}
+		if err := f.ctxErr(); err != nil {
+			return 0, &os.PathError{Op: "write", Path: f.path, Err: err}
+		}
 		f.fifo.cond.Wait()
 	}
 	f.sawReader = true
@@ -161,6 +185,9 @@ func (f *memoryFIFOFile) Write(p []byte) (int, error) {
 func (f *memoryFIFOFile) Close() error {
 	if !f.closed.CompareAndSwap(false, true) {
 		return nil
+	}
+	if f.stopWake != nil {
+		f.stopWake()
 	}
 
 	f.fifo.mu.Lock()
