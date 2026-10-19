@@ -155,6 +155,10 @@ func runTarCreate(ctx context.Context, inv *Invocation, opts *tarOptions, operan
 	if err != nil {
 		return err
 	}
+	archiveAbs := ""
+	if opts.archive != "-" {
+		archiveAbs = allowPath(inv, opts.archive)
+	}
 
 	for _, operand := range operands {
 		sourceAbs := gbfs.Resolve(baseDir, operand)
@@ -166,7 +170,7 @@ func runTarCreate(ctx context.Context, inv *Invocation, opts *tarOptions, operan
 		if entryName == "" {
 			entryName = path.Base(sourceAbs)
 		}
-		if err := tarWritePath(ctx, inv, tw, sourceAbs, entryName, info); err != nil {
+		if err := tarWritePath(ctx, inv, tw, archiveAbs, sourceAbs, entryName, info); err != nil {
 			_ = closeArchive()
 			return err
 		}
@@ -182,6 +186,9 @@ func runTarList(ctx context.Context, inv *Invocation, opts *tarOptions) error {
 	defer func() { _ = closeArchive() }()
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			return nil
@@ -214,6 +221,9 @@ func runTarExtract(ctx context.Context, inv *Invocation, opts *tarOptions) error
 	defer func() { _ = closeArchive() }()
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
 			return nil
@@ -234,7 +244,7 @@ func runTarExtract(ctx context.Context, inv *Invocation, opts *tarOptions) error
 		}
 		if opts.toStdout {
 			if tarIsRegularType(header.Typeflag) {
-				if _, err := io.Copy(inv.Stdout, tr); err != nil {
+				if _, err := copyBounded(ctx, inv.Stdout, tr, 0); err != nil {
 					return &ExitError{Code: 1, Err: err}
 				}
 			}
@@ -242,6 +252,9 @@ func runTarExtract(ctx context.Context, inv *Invocation, opts *tarOptions) error
 		}
 
 		targetAbs := gbfs.Resolve(baseDir, entryName)
+		if err := tarCheckContained(ctx, inv, baseDir, entryName, targetAbs, header.Typeflag == tar.TypeDir); err != nil {
+			return err
+		}
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := tarEnsureDir(ctx, inv, targetAbs, stdfs.FileMode(header.Mode)); err != nil {
@@ -256,7 +269,7 @@ func runTarExtract(ctx context.Context, inv *Invocation, opts *tarOptions) error
 				return err
 			}
 		case tar.TypeLink:
-			if err := tarExtractHardlink(ctx, inv, baseDir, targetAbs, header, opts.keepOld); err != nil {
+			if err := tarExtractHardlink(ctx, inv, baseDir, entryName, targetAbs, header, opts.keepOld); err != nil {
 				return err
 			}
 		default:
@@ -352,13 +365,20 @@ func openTarReader(ctx context.Context, inv *Invocation, opts *tarOptions) (*tar
 	}, nil
 }
 
-func tarWritePath(ctx context.Context, inv *Invocation, tw *tar.Writer, abs, name string, info stdfs.FileInfo) error {
+func tarWritePath(ctx context.Context, inv *Invocation, tw *tar.Writer, archiveAbs, abs, name string, info stdfs.FileInfo) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if archiveAbs != "" && abs == archiveAbs {
+		_, _ = fmt.Fprintf(inv.Stderr, "tar: %s: file is the archive; not dumped\n", name)
+		return nil
+	}
 	if err := tarWriteHeader(ctx, inv, tw, abs, name, info); err != nil {
 		return err
 	}
 	if info.Mode()&stdfs.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		if info.IsDir() {
-			return tarWriteDirChildren(ctx, inv, tw, abs, name)
+			return tarWriteDirChildren(ctx, inv, tw, archiveAbs, abs, name)
 		}
 		return nil
 	}
@@ -376,8 +396,8 @@ func tarWritePath(ctx context.Context, inv *Invocation, tw *tar.Writer, abs, nam
 
 func tarWriteHeader(ctx context.Context, inv *Invocation, tw *tar.Writer, abs, name string, info stdfs.FileInfo) error {
 	headerName := path.Clean(name)
-	if headerName == "." {
-		headerName = path.Base(abs)
+	if headerName != "." && strings.HasPrefix(name, "./") {
+		headerName = "./" + headerName
 	}
 	if headerName == "" || headerName == "/" {
 		return nil
@@ -421,7 +441,7 @@ func tarWriteHeader(ctx context.Context, inv *Invocation, tw *tar.Writer, abs, n
 	return nil
 }
 
-func tarWriteDirChildren(ctx context.Context, inv *Invocation, tw *tar.Writer, abs, name string) error {
+func tarWriteDirChildren(ctx context.Context, inv *Invocation, tw *tar.Writer, archiveAbs, abs, name string) error {
 	entries, err := readDir(ctx, inv, abs)
 	if err != nil {
 		return err
@@ -435,7 +455,7 @@ func tarWriteDirChildren(ctx context.Context, inv *Invocation, tw *tar.Writer, a
 		if err != nil {
 			return err
 		}
-		if err := tarWritePath(ctx, inv, tw, childAbs, path.Join(name, entry.Name()), childInfo); err != nil {
+		if err := tarWritePath(ctx, inv, tw, archiveAbs, childAbs, tarChildName(name, entry.Name()), childInfo); err != nil {
 			return err
 		}
 	}
@@ -447,10 +467,23 @@ func tarArchiveName(arg, sourceAbs string) string {
 		return strings.TrimPrefix(path.Clean(arg), "/")
 	}
 	name := path.Clean(arg)
-	if name == "." || name == "/" {
+	if name == "." {
+		// GNU tar names the members of "." as "./" and "./child".
+		return "."
+	}
+	if name == "/" {
 		return path.Base(sourceAbs)
 	}
 	return strings.TrimPrefix(name, "./")
+}
+
+// tarChildName joins a directory member name with a child, keeping the
+// leading "./" that GNU tar uses for members archived from ".".
+func tarChildName(dir, child string) string {
+	if dir == "." || strings.HasPrefix(dir, "./") {
+		return "./" + path.Join(dir, child)
+	}
+	return path.Join(dir, child)
 }
 
 func tarIsRegularType(typeflag byte) bool {
@@ -480,6 +513,9 @@ func tarEnsureDir(ctx context.Context, inv *Invocation, targetAbs string, perm s
 }
 
 func tarExtractFile(ctx context.Context, inv *Invocation, tr *tar.Reader, targetAbs string, header *tar.Header, keepOld bool) error {
+	if header.Size < 0 || exceedsFileSizeLimit(inv, uint64(header.Size)) {
+		return exitf(inv, 1, "tar: %s: Cannot write: %v", targetAbs, errFileTooLarge)
+	}
 	if err := tarEnsureParents(ctx, inv, targetAbs); err != nil {
 		return err
 	}
@@ -498,8 +534,12 @@ func tarExtractFile(ctx context.Context, inv *Invocation, tr *tar.Reader, target
 	if err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	if _, err := io.Copy(file, tr); err != nil {
+	if _, err := copyBounded(ctx, file, tr, fileSizeLimit(inv)); err != nil {
 		_ = file.Close()
+		_ = inv.FS.Remove(ctx, targetAbs, false)
+		if errors.Is(err, errFileTooLarge) {
+			return exitf(inv, 1, "tar: %s: Cannot write: %v", targetAbs, err)
+		}
 		return &ExitError{Code: 1, Err: err}
 	}
 	if err := file.Close(); err != nil {
@@ -528,8 +568,10 @@ func tarExtractSymlink(ctx context.Context, inv *Invocation, entryName, targetAb
 		if keepOld {
 			return exitf(inv, 1, "tar: %s: Cannot create symlink: File exists", targetAbs)
 		}
-		if err := inv.FS.Remove(ctx, targetAbs, true); err != nil {
-			return &ExitError{Code: 1, Err: err}
+		// Like GNU tar, only replace files and empty directories; never
+		// recursively delete existing data to make room for a symlink.
+		if err := inv.FS.Remove(ctx, targetAbs, false); err != nil {
+			return exitf(inv, 1, "tar: %s: Cannot create symlink: File exists", targetAbs)
 		}
 	}
 	if err := inv.FS.Symlink(ctx, header.Linkname, targetAbs); err != nil {
@@ -538,12 +580,15 @@ func tarExtractSymlink(ctx context.Context, inv *Invocation, entryName, targetAb
 	return nil
 }
 
-func tarExtractHardlink(ctx context.Context, inv *Invocation, baseDir, targetAbs string, header *tar.Header, keepOld bool) error {
+func tarExtractHardlink(ctx context.Context, inv *Invocation, baseDir, entryName, targetAbs string, header *tar.Header, keepOld bool) error {
 	linkName, err := sanitizeTarEntryName(header.Linkname)
 	if err != nil {
 		return exitf(inv, 1, "tar: %v", err)
 	}
 	linkAbs := gbfs.Resolve(baseDir, linkName)
+	if err := tarCheckContained(ctx, inv, baseDir, linkName, linkAbs, true); err != nil {
+		return err
+	}
 	if err := tarEnsureParents(ctx, inv, targetAbs); err != nil {
 		return err
 	}
@@ -575,6 +620,45 @@ func tarValidateSymlinkTarget(entryName, target string) error {
 		return fmt.Errorf("unsafe symlink target %q", target)
 	}
 	return nil
+}
+
+// tarCheckContained rejects an extraction path whose deepest existing
+// ancestor (or the path itself when includeTarget is set) resolves outside
+// baseDir, so symlinks created earlier in the archive cannot redirect later
+// writes or hardlink sources out of the extraction root.
+func tarCheckContained(ctx context.Context, inv *Invocation, baseDir, entryName, targetAbs string, includeTarget bool) error {
+	realBase, err := inv.FS.Realpath(ctx, baseDir)
+	if err != nil {
+		return &ExitError{Code: 1, Err: err}
+	}
+	current := targetAbs
+	if !includeTarget {
+		current = path.Dir(targetAbs)
+	}
+	for {
+		if !tarPathWithin(current, baseDir) {
+			return nil
+		}
+		_, _, exists, err := lstatMaybe(ctx, inv, current)
+		if err != nil {
+			return &ExitError{Code: exitCodeForError(err), Err: err}
+		}
+		if exists {
+			resolved, err := inv.FS.Realpath(ctx, current)
+			if err != nil || !tarPathWithin(resolved, realBase) {
+				return exitf(inv, 1, "tar: %s: Cannot open: path escapes extraction directory through a symlink", entryName)
+			}
+			return nil
+		}
+		if current == baseDir {
+			return nil
+		}
+		current = path.Dir(current)
+	}
+}
+
+func tarPathWithin(name, root string) bool {
+	return root == "/" || name == root || strings.HasPrefix(name, root+"/")
 }
 
 func tarEnsureParents(ctx context.Context, inv *Invocation, targetAbs string) error {
