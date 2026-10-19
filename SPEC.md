@@ -222,12 +222,13 @@ This matches the agent workflow we care about: a sequence of shell calls operati
 - the protocol is JSON-RPC 2.0 request/response, not a custom streaming transport
 - the shared CLI requires exactly one transport flag: `--socket` or `--listen`
 - the shared CLI restricts `--listen` to loopback hosts because v1 has no authentication layer
-- the Unix socket helper must chmod the socket to `0600`, reject an already-active socket path, and only replace stale socket files
+- the Unix socket helper must chmod the socket to `0600`, reject an already-active socket path, and only replace stale socket files; on Unix platforms the socket is bound and chmodded inside a fresh `0700` staging directory and then renamed into place, so it is never connectable by other local users, and any missing parent directory is created `0700`
 - `session_id` maps 1:1 to a persistent `Session`
 - filesystem shape is configured once at server startup through the normal runtime options and is not part of the wire protocol
 - the primary remote operation is `session.exec`, which runs one non-interactive `Session.Exec` call and returns the full execution result in one response
 - multiple sessions may be active concurrently across multiple client connections
 - a single session permits at most one active `session.exec` call at a time because `Session.Exec` is serialized
+- `session.exec` looks up and marks its session busy atomically with respect to the session registry, so `session.destroy` and TTL reaping cannot remove a session that is about to run or is running
 - clients are expected to reconnect or open a second socket when they need concurrent requests; v1 does not require multiplexed event streams on one connection
 
 Recommended v1 methods:
