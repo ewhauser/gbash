@@ -276,6 +276,28 @@ func TestOverlayFSCopyUpPreservesAncestorMetadata(t *testing.T) {
 			name:  "Link",
 			apply: func(ctx context.Context, o *OverlayFS) error { return o.Link(ctx, "/p/d/f", "/p/d/g") },
 		},
+		{
+			name: "OpenFileCreate",
+			apply: func(ctx context.Context, o *OverlayFS) error {
+				return overlayWriteFile(ctx, o, "/p/d/new", os.O_WRONLY|os.O_CREATE|os.O_EXCL)
+			},
+		},
+		{
+			name:  "Symlink",
+			apply: func(ctx context.Context, o *OverlayFS) error { return o.Symlink(ctx, "f", "/p/d/l") },
+		},
+		{
+			name:  "Mkfifo",
+			apply: func(ctx context.Context, o *OverlayFS) error { return o.Mkfifo(ctx, "/p/d/q", 0o600) },
+		},
+		{
+			name:  "MkdirAll",
+			apply: func(ctx context.Context, o *OverlayFS) error { return o.MkdirAll(ctx, "/p/d/x/y", 0o755) },
+		},
+		{
+			name:  "Rename",
+			apply: func(ctx context.Context, o *OverlayFS) error { return o.Rename(ctx, "/p/d/f", "/p/d/h") },
+		},
 	}
 	for _, op := range ops {
 		t.Run(op.name, func(t *testing.T) {

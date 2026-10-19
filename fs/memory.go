@@ -34,20 +34,30 @@ type MemoryFS struct {
 }
 
 type memoryNode struct {
-	id       uint64
-	mode     stdfs.FileMode
-	data     []byte
-	fifo     *memoryFIFO
-	lazy     LazyFileProvider
-	target   string
-	children map[string]struct{}
-	atime    time.Time
-	modTime  time.Time
-	uid      uint32
-	gid      uint32
+	id   uint64
+	mode stdfs.FileMode
+	data []byte
+	fifo *memoryFIFO
+	lazy LazyFileProvider
+	// lazySize is the size of a lazy node's content when lazySized is set, so
+	// metadata reads need not materialize it. OverlayFS copy-up uses this for
+	// lower-layer files whose content is only read when opened.
+	lazySize  int64
+	lazySized bool
+	target    string
+	children  map[string]struct{}
+	atime     time.Time
+	modTime   time.Time
+	uid       uint32
+	gid       uint32
 }
 
 const maxSymlinkDepth = 40
+
+// storedPermBits are the mode bits a caller may set on a node: permissions plus
+// setuid, setgid, and sticky. Type bits always come from the operation that
+// creates the node, never from a caller-supplied perm.
+const storedPermBits = stdfs.ModePerm | stdfs.ModeSetuid | stdfs.ModeSetgid | stdfs.ModeSticky
 
 var errTooManySymlinks = errors.New("too many levels of symbolic links")
 
@@ -87,15 +97,17 @@ func (m *MemoryFS) Clone() *MemoryFS {
 	nodes := make(map[string]*memoryNode, len(m.nodes))
 	for name, node := range m.nodes {
 		cloned := &memoryNode{
-			id:      node.id,
-			mode:    node.mode,
-			fifo:    node.fifo.clone(),
-			lazy:    node.lazy,
-			target:  node.target,
-			atime:   node.atime,
-			modTime: node.modTime,
-			uid:     node.uid,
-			gid:     node.gid,
+			id:        node.id,
+			mode:      node.mode,
+			fifo:      node.fifo.clone(),
+			lazy:      node.lazy,
+			lazySize:  node.lazySize,
+			lazySized: node.lazySized,
+			target:    node.target,
+			atime:     node.atime,
+			modTime:   node.modTime,
+			uid:       node.uid,
+			gid:       node.gid,
 		}
 		if len(node.data) > 0 {
 			cloned.data = append([]byte(nil), node.data...)
@@ -178,7 +190,9 @@ func isLazyFileNode(node *memoryNode) bool {
 	return node != nil && node.lazy != nil && !node.mode.IsDir() && node.mode&stdfs.ModeSymlink == 0
 }
 
-func (m *MemoryFS) materializePath(ctx context.Context, name string, followFinal bool) (string, error) {
+// materializePath resolves name and loads a lazy file's content. When
+// metadataOnly is set, a lazy node whose size is already known is left lazy.
+func (m *MemoryFS) materializePath(ctx context.Context, name string, followFinal, metadataOnly bool) (string, error) {
 	for {
 		m.mu.RLock()
 		abs, node, err := m.resolvePathLocked(name, followFinal, false)
@@ -186,7 +200,7 @@ func (m *MemoryFS) materializePath(ctx context.Context, name string, followFinal
 			m.mu.RUnlock()
 			return "", err
 		}
-		if !isLazyFileNode(node) {
+		if !isLazyFileNode(node) || metadataOnly && node.lazySized { //nolint:nilaway // isLazyFileNode guarantees node != nil
 			m.mu.RUnlock()
 			return abs, nil
 		}
@@ -329,7 +343,7 @@ func (m *MemoryFS) Open(ctx context.Context, name string) (File, error) {
 
 func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm stdfs.FileMode) (File, error) {
 	if (flag&os.O_TRUNC == 0 || !canWrite(flag)) && flag&(os.O_CREATE|os.O_EXCL) != (os.O_CREATE|os.O_EXCL) {
-		if _, err := m.materializePath(ctx, name, true); err != nil {
+		if _, err := m.materializePath(ctx, name, true, false); err != nil {
 			if flag&os.O_CREATE == 0 || !errors.Is(err, stdfs.ErrNotExist) {
 				if flag&os.O_CREATE != 0 {
 					err = createParentError(err)
@@ -415,7 +429,7 @@ func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm std
 
 func (m *MemoryFS) Stat(ctx context.Context, name string) (stdfs.FileInfo, error) {
 	requested := Resolve(m.Getwd(), name)
-	abs, err := m.materializePath(ctx, name, true)
+	abs, err := m.materializePath(ctx, name, true, true)
 	if err != nil {
 		return nil, &os.PathError{Op: "stat", Path: requested, Err: err}
 	}
@@ -433,7 +447,7 @@ func (m *MemoryFS) Stat(ctx context.Context, name string) (stdfs.FileInfo, error
 
 func (m *MemoryFS) Lstat(ctx context.Context, name string) (stdfs.FileInfo, error) {
 	requested := Resolve(m.Getwd(), name)
-	abs, err := m.materializePath(ctx, name, false)
+	abs, err := m.materializePath(ctx, name, false, true)
 	if err != nil {
 		return nil, &os.PathError{Op: "lstat", Path: requested, Err: err}
 	}
@@ -1168,6 +1182,8 @@ func (e memoryDirEntry) Info() (stdfs.FileInfo, error) {
 func newFileInfo(name string, node *memoryNode) *fileInfo {
 	size := int64(len(node.data))
 	switch {
+	case isLazyFileNode(node) && node.lazySized:
+		size = node.lazySize
 	case node.mode.IsDir():
 		size = 0
 	case node.mode&stdfs.ModeNamedPipe != 0:
