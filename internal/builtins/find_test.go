@@ -6,7 +6,6 @@ import (
 	stdfs "io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -52,46 +51,33 @@ func TestFindSkipsUnresolvableRelativeSymlinksDuringTraversal(t *testing.T) {
 		t.Fatalf("Stderr = %q, want empty", result.Stderr)
 	}
 
-	result = mustExecSession(t, session, "find /work -name dangling -print\n")
-	if got, want := result.Stdout, "/work/dangling\n"; got != want {
-		t.Fatalf("name Stdout = %q, want %q", got, want)
-	}
-
-	result = mustExecSession(t, session, "find /work -name dangling -o -size 4c\n")
-	lines := strings.Fields(result.Stdout)
-	sort.Strings(lines)
-	if got, want := strings.Join(lines, "\n"), "/work/dangling\n/work/file.txt"; got != want {
-		t.Fatalf("or Stdout lines = %q, want %q", got, want)
-	}
-
-	result = mustExecSession(t, session, "find /work -name dangling ! -size 4c -print\n")
-	if result.Stdout != "" {
-		t.Fatalf("negated metadata Stdout = %q, want empty", result.Stdout)
-	}
-	result = mustExecSession(t, session, "find /work -name dangling ! -type f -print\n")
-	if result.Stdout != "" {
-		t.Fatalf("negated type Stdout = %q, want empty", result.Stdout)
-	}
-
-	result = mustExecSession(t, session, "find /work -mindepth 1 -printf '%p %s\\n'\n")
-	if got, want := result.Stdout, "/work/file.txt 4\n"; got != want {
-		t.Fatalf("printf Stdout = %q, want %q", got, want)
-	}
-	result = mustExecSession(t, session, "find /work -name dangling -print -printf '%s\\n'\n")
-	if got, want := result.Stdout, "/work/dangling\n"; got != want {
-		t.Fatalf("mixed actions Stdout = %q, want %q", got, want)
-	}
-	result = mustExecSession(t, session, "find /work -name dangling -printf '%p\\n' -printf '%s\\n'\n")
-	if got, want := result.Stdout, "/work/dangling\n"; got != want {
-		t.Fatalf("mixed printf Stdout = %q, want %q", got, want)
+	// Like GNU find, a dangling symlink is reported as the link itself, both
+	// by default (-P) and under -L.
+	for _, mode := range []string{"", "-L "} {
+		result = mustExecSession(t, session, "find "+mode+"/work -type l\n")
+		if got, want := result.Stdout, "/work/dangling\n"; got != want || result.ExitCode != 0 {
+			t.Fatalf("find %s-type l Stdout = %q (exit %d), want %q; stderr=%q", mode, got, result.ExitCode, want, result.Stderr)
+		}
+		result = mustExecSession(t, session, "find "+mode+"/work -name dangling ! -type f -print\n")
+		if got, want := result.Stdout, "/work/dangling\n"; got != want {
+			t.Fatalf("find %s! -type f Stdout = %q, want %q", mode, got, want)
+		}
+		result = mustExecSession(t, session, "find "+mode+"/work -name dangling -printf '%p %s\\n'\n")
+		if got, want := result.Stdout, "/work/dangling 11\n"; got != want {
+			t.Fatalf("find %s-printf Stdout = %q, want %q", mode, got, want)
+		}
 	}
 
 	if err := os.Symlink("../../outside.txt", filepath.Join(work, "escaping")); err != nil {
 		t.Fatalf("Symlink(escaping) error = %v", err)
 	}
 	result = mustExecSession(t, session, "find /work -type f\n")
+	if result.ExitCode != 0 {
+		t.Fatalf("default find ExitCode = %d, want 0 (symlinks are not followed); stderr=%q", result.ExitCode, result.Stderr)
+	}
+	result = mustExecSession(t, session, "find -L /work -type f\n")
 	if result.ExitCode == 0 {
-		t.Fatalf("ExitCode = 0, want non-zero; stderr=%q", result.Stderr)
+		t.Fatalf("find -L ExitCode = 0, want non-zero; stderr=%q", result.Stderr)
 	}
 	if !strings.Contains(result.Stderr, "permission denied") {
 		t.Fatalf("Stderr = %q, want permission diagnostic", result.Stderr)
@@ -436,14 +422,27 @@ func TestFindSymlinkBehavior(t *testing.T) {
 		}
 
 		result := mustExecSession(t, session,
-			"find /links/file-link -type f\n"+
-				"find /links/dir-link -type d\n"+
-				"find /links/dir-link -type f\n",
+			"find -L /links/file-link -type f\n"+
+				"find -H /links/dir-link -type d\n"+
+				"find -L /links/dir-link -type f\n",
 		)
 		if result.ExitCode != 0 {
 			t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
 		}
 		if got, want := result.Stdout, "/links/file-link\n/links/dir-link\n/links/dir-link/inner.txt\n"; got != want {
+			t.Fatalf("Stdout = %q, want %q", got, want)
+		}
+
+		// Without -L/-H, find does not follow symlinks (GNU -P).
+		result = mustExecSession(t, session,
+			"find /links/file-link -type l\n"+
+				"find /links/dir-link\n"+
+				"find /links -name '*-link' -type l | sort\n",
+		)
+		if result.ExitCode != 0 {
+			t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+		}
+		if got, want := result.Stdout, "/links/file-link\n/links/dir-link\n/links/dir-link\n/links/file-link\n"; got != want {
 			t.Fatalf("Stdout = %q, want %q", got, want)
 		}
 	})
@@ -462,16 +461,26 @@ func TestFindSymlinkBehavior(t *testing.T) {
 			t.Fatalf("Symlink(file-link) error = %v", err)
 		}
 
-		result := mustExecSession(t, session, "find /links/file-link -type f\n")
+		result := mustExecSession(t, session, "find -L /links/file-link -type f\n")
 		if result.ExitCode != 126 {
 			t.Fatalf("ExitCode = %d, want 126; stderr=%q", result.ExitCode, result.Stderr)
 		}
 		if !strings.Contains(result.Stderr, "symlink traversal denied") {
 			t.Fatalf("Stderr = %q, want symlink denial", result.Stderr)
 		}
+
+		// The default walk does not traverse symlinks, so a symlink in the
+		// tree no longer aborts the whole search.
+		result = mustExecSession(t, session, "find /links\nfind /links -type l\n")
+		if result.ExitCode != 0 {
+			t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+		}
+		if got, want := result.Stdout, "/links\n/links/file-link\n/links/target.txt\n/links/file-link\n"; got != want {
+			t.Fatalf("Stdout = %q, want %q", got, want)
+		}
 	})
 
-	t.Run("dangling symlink still reports missing root", func(t *testing.T) {
+	t.Run("dangling symlink root is reported as a link", func(t *testing.T) {
 		t.Parallel()
 
 		session := newSession(t, &Config{
@@ -492,15 +501,21 @@ func TestFindSymlinkBehavior(t *testing.T) {
 			t.Fatalf("Symlink(dangle) error = %v", err)
 		}
 
-		result := mustExecSession(t, session, "find /links/dangle -type f\n")
+		// GNU find reports a dangling root symlink as the link itself.
+		result := mustExecSession(t, session, "find /links/dangle -type f\nfind -L /links/dangle -type l\n")
+		if result.ExitCode != 0 {
+			t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+		}
+		if got, want := result.Stdout, "/links/dangle\n"; got != want {
+			t.Fatalf("Stdout = %q, want %q", got, want)
+		}
+
+		result = mustExecSession(t, session, "find /links/missing\n")
 		if result.ExitCode != 1 {
 			t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
 		}
-		if got, want := result.Stderr, "find: /links/dangle: No such file or directory\n"; got != want {
+		if got, want := result.Stderr, "find: /links/missing: No such file or directory\n"; got != want {
 			t.Fatalf("Stderr = %q, want %q", got, want)
-		}
-		if result.Stdout != "" {
-			t.Fatalf("Stdout = %q, want empty", result.Stdout)
 		}
 	})
 }
