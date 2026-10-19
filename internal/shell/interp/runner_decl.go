@@ -92,6 +92,7 @@ func (d *declCommand) initVariantState() bool {
 
 func (d *declCommand) processOperands() bool {
 	operands := d.runner.mergeDeclOperands(d.clause.Variant.Value, d.clause.Operands)
+	defer d.runner.braceExpansionScope()()
 	for _, operand := range operands {
 		if !d.processOperand(operand) {
 			return false
@@ -172,6 +173,9 @@ func (d *declCommand) processDynamicWordOperand(operand *syntax.DeclDynamicWord)
 		}
 		return true
 	})
+	if d.runner.stmtAborted() {
+		return false
+	}
 	for _, field := range fields {
 		parsed, err := parseDeclOperandField(d.runner.parserLangVariant(), d.clause.Variant.Value, field)
 		splitFields := []string{field}

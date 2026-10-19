@@ -18,7 +18,81 @@ import (
 //
 // Note that the resulting words may share word parts. Invalid sequence forms
 // may surface expansion errors.
+//
+// Braces does not bound the number of generated words; use [Config]'s
+// MaxBraceExpansionWords through [Fields] to cap it.
 func Braces(word *syntax.Word) ([]*syntax.Word, error) {
+	return braces(word, nil)
+}
+
+// BraceExpansionLimitError is returned when brace expansion would generate
+// more words than [Config].MaxBraceExpansionWords allows.
+type BraceExpansionLimitError struct {
+	Limit int64
+}
+
+func (e BraceExpansionLimitError) Error() string {
+	return fmt.Sprintf("brace expansion: too many words (limit %d)", e.Limit)
+}
+
+// braceBudget counts the words generated across brace expansions that share
+// it. A nil budget is unlimited.
+type braceBudget struct {
+	limit int64
+	used  int64
+}
+
+func newBraceBudget(limit int64) *braceBudget {
+	if limit <= 0 {
+		return nil
+	}
+	return &braceBudget{limit: limit}
+}
+
+// BeginBraceExpansionScope makes [Config].MaxBraceExpansionWords apply to the
+// total across all expansions until the matching
+// [Config.EndBraceExpansionScope], instead of to each [Fields] call. Shells
+// that expand a command's arguments one word at a time use it so that the
+// cap covers the whole command. Scopes nest; only the outermost one resets
+// the count.
+func (cfg *Config) BeginBraceExpansionScope() {
+	if cfg.braceScopeDepth == 0 {
+		cfg.braceScope = braceBudget{}
+	}
+	cfg.braceScopeDepth++
+}
+
+// EndBraceExpansionScope closes a scope opened by
+// [Config.BeginBraceExpansionScope].
+func (cfg *Config) EndBraceExpansionScope() {
+	if cfg.braceScopeDepth > 0 {
+		cfg.braceScopeDepth--
+	}
+}
+
+func (cfg *Config) braceExpansionBudget() *braceBudget {
+	if cfg.MaxBraceExpansionWords <= 0 {
+		return nil
+	}
+	if cfg.braceScopeDepth == 0 {
+		return newBraceBudget(cfg.MaxBraceExpansionWords)
+	}
+	cfg.braceScope.limit = cfg.MaxBraceExpansionWords
+	return &cfg.braceScope
+}
+
+func (b *braceBudget) add(n int64) error {
+	if b == nil {
+		return nil
+	}
+	b.used += n
+	if b.used > b.limit {
+		return BraceExpansionLimitError{Limit: b.limit}
+	}
+	return nil
+}
+
+func braces(word *syntax.Word, budget *braceBudget) ([]*syntax.Word, error) {
 	var all []*syntax.Word
 	var left []syntax.WordPart
 	for i, wp := range word.Parts {
@@ -59,7 +133,7 @@ func Braces(word *syntax.Word) ([]*syntax.Word, error) {
 			if len(br.Elems) > 2 {
 				n, ok := braceSequenceStep(br.Elems[2].Lit())
 				if !ok {
-					return literalBrace(word, left, i, br)
+					return literalBrace(word, left, i, br, budget)
 				}
 				if n != 0 {
 					incr = absInt(n)
@@ -68,14 +142,12 @@ func Braces(word *syntax.Word) ([]*syntax.Word, error) {
 					}
 				}
 			}
+			// The bounds were checked above, so the first element is always
+			// emitted. Compare the remaining distance in unsigned space before
+			// stepping so ranges ending near the int bounds cannot overflow.
+			step := uint(absInt(incr))
 			n := from
 			for {
-				if upward && n > to {
-					break
-				}
-				if !upward && n < to {
-					break
-				}
 				next := *word
 				next.Parts = next.Parts[i+1:]
 				lit := &syntax.Lit{}
@@ -88,7 +160,7 @@ func Braces(word *syntax.Word) ([]*syntax.Word, error) {
 				parts = append(parts, lit)
 				parts = append(parts, next.Parts...)
 				next.Parts = parts
-				exp, err := Braces(&next)
+				exp, err := braces(&next, budget)
 				if err != nil {
 					return nil, err
 				}
@@ -96,6 +168,15 @@ func Braces(word *syntax.Word) ([]*syntax.Word, error) {
 					w.Parts = prependWordParts(left, w.Parts)
 				}
 				all = append(all, exp...)
+				var remaining uint
+				if upward {
+					remaining = uint(to) - uint(n)
+				} else {
+					remaining = uint(n) - uint(to)
+				}
+				if remaining < step {
+					break
+				}
 				n += incr
 			}
 			return all, nil
@@ -107,7 +188,7 @@ func Braces(word *syntax.Word) ([]*syntax.Word, error) {
 			parts = append(parts, elem.Parts...)
 			parts = append(parts, next.Parts...)
 			next.Parts = parts
-			exp, err := Braces(&next)
+			exp, err := braces(&next, budget)
 			if err != nil {
 				return nil, err
 			}
@@ -117,6 +198,9 @@ func Braces(word *syntax.Word) ([]*syntax.Word, error) {
 			all = append(all, exp...)
 		}
 		return all, nil
+	}
+	if err := budget.add(1); err != nil {
+		return nil, err
 	}
 	return []*syntax.Word{{Parts: left}}, nil
 }
@@ -227,11 +311,11 @@ func mixedCaseBraceRangeError(suffix string) error {
 	return fmt.Errorf("bad substitution: no closing %q in `%s", "`", suffix)
 }
 
-func literalBrace(word *syntax.Word, left []syntax.WordPart, i int, br *syntax.BraceExp) ([]*syntax.Word, error) {
+func literalBrace(word *syntax.Word, left []syntax.WordPart, i int, br *syntax.BraceExp, budget *braceBudget) ([]*syntax.Word, error) {
 	next := *word
 	next.Parts = next.Parts[i+1:]
 	next.Parts = prependWordParts([]syntax.WordPart{&syntax.Lit{Value: wordPartsSource([]syntax.WordPart{br})}}, next.Parts)
-	exp, err := Braces(&next)
+	exp, err := braces(&next, budget)
 	if err != nil {
 		return nil, err
 	}

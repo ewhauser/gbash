@@ -680,6 +680,7 @@ Implementation detail for the current runtime:
 - commands inside subshells and pipelines count toward the same execution budget
 - loop iteration limits are enforced by AST instrumentation that prepends an internal guard command to loop bodies before execution
 - command substitution depth and glob-operation budgets are enforced from the shell-core compile pipeline, and glob-operation counts accumulate across all parsed chunks in one execution
+- the brace-expansion word budget is counted while words are expanded rather than estimated at compile time, so the actual generated word count is what is bounded, including inside `eval` and `source`
 - request-level timeouts and caller cancellation are enforced via execution contexts and normalized into shell-style exit codes
 
 ### 9.6 Command execution
@@ -810,6 +811,7 @@ Default policy stance for MVP:
 - maximum loop iterations default to `10000` per loop
 - maximum command substitution depth defaults to `50` per execution
 - maximum glob operations default to `100000` per execution
+- maximum brace-expansion words default to `100000` per command; the cap covers every word of one command's arguments, array assignment, or declaration operands together, and exceeding it prints `brace expansion: too many words (limit N), increase policy.Limits.MaxBraceExpansionWords` and exits the current shell with status `126`. Bash itself only stops when allocation fails, so this is a deliberate sandbox divergence. Brace sequences stop stepping before they would overflow `int`, so ranges ending at the integer bounds terminate.
 - symlink traversal denied unless a filesystem backend and policy explicitly allow it
 - request-level timeout is opt-in, but when it fires the execution must stop with exit code `124`
 - caller-driven cancellation must stop the execution with exit code `130`

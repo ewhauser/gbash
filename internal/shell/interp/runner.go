@@ -206,6 +206,7 @@ func (r *Runner) fillExpandConfig(ctx context.Context) {
 	r.ecfg.LangVariant = r.parserLangVariant()
 	r.ecfg.TildeEnv = tildeExpandEnv{r}
 	r.ecfg.StartupHome = r.startupHome
+	r.ecfg.MaxBraceExpansionWords = r.maxBraceExpansionWords
 	r.ecfg.PreferStartupHomeForArgTilde = r.platform.OS == host.OSDarwin
 	r.updateExpandOpts()
 	r.ecfgInit = true
@@ -389,6 +390,7 @@ func (r *Runner) expandErr(err error) {
 		failGlobErr    expand.FailGlobError
 		arithSyntaxErr expand.ArithmSyntaxError
 		arithDiagErr   *expand.ArithmDiagnosticError
+		braceLimitErr  expand.BraceExpansionLimitError
 	)
 	if errors.As(err, &unsetErr) && unsetErr.Node != nil {
 		if file := r.currentExecFile(); file != "" {
@@ -401,8 +403,21 @@ func (r *Runner) expandErr(err error) {
 			errMsg = name + ": " + errMsg
 		}
 	}
+	if errors.As(err, &braceLimitErr) {
+		errMsg += ", increase policy.Limits.MaxBraceExpansionWords"
+	}
 	fmt.Fprintln(r.stderr, errMsg)
 	switch {
+	case errors.As(err, &braceLimitErr):
+		// A sandbox resource limit: exit the current shell with the same 126
+		// status as the other policy budgets, or just abort the command when
+		// interactive.
+		r.exit.code = 126
+		if r.interactive {
+			r.commandAborted = true
+		} else {
+			r.exit.exiting = true
+		}
 	case errors.As(err, &cmdArithErr):
 		r.exit.code = 1
 	case errors.As(err, &unboundVarErr):
@@ -548,6 +563,14 @@ func (r *Runner) fields(words ...*syntax.Word) []string {
 	strs, err := expand.Fields(&r.ecfg, words...)
 	r.expandErr(err)
 	return strs
+}
+
+// braceExpansionScope makes the brace-expansion word cap cover every
+// r.fields call until the returned func runs, so a command whose words are
+// expanded one at a time is bounded as a whole.
+func (r *Runner) braceExpansionScope() func() {
+	r.ecfg.BeginBraceExpansionScope()
+	return r.ecfg.EndBraceExpansionScope
 }
 
 func (r *Runner) literal(word *syntax.Word) string {
@@ -1638,6 +1661,7 @@ func (r *Runner) renderInlineArrayValue(expr *syntax.ArrayExpr) string {
 	if expr == nil {
 		return ""
 	}
+	defer r.braceExpansionScope()()
 	var b strings.Builder
 	b.WriteByte('(')
 	first := true
