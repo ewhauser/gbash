@@ -709,8 +709,17 @@ type Parser struct {
 	// finished tree: the deepest nesting seen and the number of operators
 	// that deepened a loop-built chain.
 	nestPeak, chainLinks int
+	// nestHigh is the deepest nesting seen since reset. Unlike nestPeak,
+	// checkTreeDepth does not clear it.
+	nestHigh int
 	// nestingFailed reports that err is a nesting-limit error.
 	nestingFailed bool
+
+	// rawParts memoizes parseRawWordPart; see [rawPartCache]. Sub-parsers
+	// share the cache of the parser that created it, which ownsRawParts
+	// marks.
+	rawParts     *rawPartCache
+	ownsRawParts bool
 
 	pendingHeredocWarningPos    Pos
 	pendingHeredocWarningWanted string
@@ -1047,7 +1056,9 @@ func (p *Parser) reset() {
 	p.pendingHeredocWarningWanted = ""
 	p.parenAmbiguityProbeDepth = 0
 	p.nestDepth, p.nestPeak, p.chainLinks = p.nestBase, 0, 0
+	p.nestHigh = p.nestBase
 	p.nestingFailed = false
+	p.rawParts, p.ownsRawParts = nil, false
 	if p.aliasActive != nil {
 		clear(p.aliasActive)
 	}
@@ -4153,6 +4164,9 @@ type rawPatternParser struct {
 	// owner is the parser whose input this re-parses, so that the shell
 	// parts inside the pattern count toward its nesting depth.
 	owner *Parser
+	// skips memoizes where groups end. All the text a rawPatternParser
+	// scans must come from one string, as it is keyed by byte address.
+	skips *patternSkips
 }
 
 type rawWordPartParser struct {
@@ -4165,11 +4179,11 @@ func patternExtGlobEnabled(lang LangVariant, parseExtGlob bool) bool {
 }
 
 func (p *Parser) newRawPatternParser() rawPatternParser {
-	return rawPatternParser{lang: p.lang, allowExtGlob: p.parseExtGlob, owner: p}
+	return rawPatternParser{lang: p.lang, allowExtGlob: p.parseExtGlob, owner: p, skips: &patternSkips{}}
 }
 
 func (p *Parser) newCondPatternParser() rawPatternParser {
-	return rawPatternParser{lang: p.lang, allowExtGlob: p.condPatternExtGlobEnabled(), owner: p}
+	return rawPatternParser{lang: p.lang, allowExtGlob: p.condPatternExtGlobEnabled(), owner: p, skips: &patternSkips{}}
 }
 
 func (p *Parser) extGlobEnabled() bool {
@@ -4183,6 +4197,26 @@ func (p *Parser) condPatternExtGlobEnabled() bool {
 
 func (r rawPatternParser) extGlobEnabled() bool {
 	return patternExtGlobEnabled(r.lang, r.allowExtGlob)
+}
+
+// enterNest counts a nested group of a pattern toward the owner's nesting
+// depth, since groups are parsed recursively.
+func (r rawPatternParser) enterNest(pos Pos) (int, bool) {
+	if r.owner == nil {
+		return 0, true
+	}
+	if r.owner.nestingFailed {
+		// The enclosing groups give up as well, rather than each scanning
+		// the rest of the pattern again.
+		return r.owner.nestDepth, false
+	}
+	return r.owner.enterNestAt(pos)
+}
+
+func (r rawPatternParser) leaveNest(d int) {
+	if r.owner != nil {
+		r.owner.leaveNest(d)
+	}
 }
 
 func (r rawWordPartParser) parse(raw string, base Pos) []WordPart {
@@ -4430,15 +4464,13 @@ func (r rawPatternParser) findInvalidCasePatternOperator(raw string, base Pos) (
 			i = patternCharClassEnd(raw, i)
 			continue
 		case '(':
-			_, end, _ := r.parsePatternGroup(raw, base, i)
-			if end > i {
+			if end, _ := r.skipPatternGroup(raw, base, i); end > i {
 				i = end
 				continue
 			}
 		case '?', '*', '+', '@', '!':
 			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
-				_, end := r.parseExtGlob(raw, base, i)
-				i = end
+				i = r.skipExtGlob(raw, base, i)
 				continue
 			}
 		case '&':
@@ -4477,15 +4509,13 @@ func (r rawPatternParser) findPatternListSplit(raw string, base Pos, start int) 
 			i = patternCharClassEnd(raw, i)
 			continue
 		case '(':
-			_, end, _ := r.parsePatternGroup(raw, base, i)
-			if end > i {
+			if end, _ := r.skipPatternGroup(raw, base, i); end > i {
 				i = end
 				continue
 			}
 		case '?', '*', '+', '@', '!':
 			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
-				_, end := r.parseExtGlob(raw, base, i)
-				i = end
+				i = r.skipExtGlob(raw, base, i)
 				continue
 			}
 		case '|':
@@ -4526,15 +4556,13 @@ func (r rawPatternParser) hasTopLevelWhitespace(raw string, base Pos) bool {
 			i = patternCharClassEnd(raw, i)
 			continue
 		case '(':
-			_, end, _ := r.parsePatternGroup(raw, base, i)
-			if end > i {
+			if end, _ := r.skipPatternGroup(raw, base, i); end > i {
 				i = end
 				continue
 			}
 		case '?', '*', '+', '@', '!':
 			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
-				_, end := r.parseExtGlob(raw, base, i)
-				i = end
+				i = r.skipExtGlob(raw, base, i)
 				continue
 			}
 		}
@@ -4544,129 +4572,194 @@ func (r rawPatternParser) hasTopLevelWhitespace(raw string, base Pos) bool {
 }
 
 func (r rawPatternParser) parsePatternGroup(raw string, base Pos, start int) (*PatternGroup, int, bool) {
-	group := &PatternGroup{Lparen: posAddCol(base, start)}
+	var seen scanSeen
+	return r.patternGroup(raw, base, start, true, &seen)
+}
+
+// skipPatternGroup is parsePatternGroup for callers that only need the end:
+// it does not build the arms, which parsing them would scan once more.
+func (r rawPatternParser) skipPatternGroup(raw string, base Pos, start int) (int, bool) {
+	end, ok, _ := r.skipGroup(raw, base, start, false, nil)
+	return end, ok
+}
+
+func (r rawPatternParser) parseExtGlob(raw string, base Pos, start int) (*ExtGlob, int) {
+	var seen scanSeen
+	return r.extGlob(raw, base, start, true, &seen)
+}
+
+// skipExtGlob is parseExtGlob for callers that only need the end: it does
+// not build the arms. Building them scans each arm again, so building nested
+// groups in every scan took time exponential in their depth.
+func (r rawPatternParser) skipExtGlob(raw string, base Pos, start int) int {
+	end, _, _ := r.skipGroup(raw, base, start, true, nil)
+	return end
+}
+
+// skipGroup returns the end of the extended glob or bare group at
+// raw[start:], memoized in r.skips so that nested groups are scanned once
+// rather than once per enclosing group. It adds what the scan looked at to
+// outer, if not nil.
+func (r rawPatternParser) skipGroup(raw string, base Pos, start int, ext bool, outer *scanSeen) (int, bool, bool) {
+	if e, ok := r.skips.lookup(raw, start, ext, r.owner); ok {
+		outer.add(e.seenIn(raw))
+		return e.endIn(raw), e.ok, true
+	}
+	var seen scanSeen
+	high := r.skips.startHigh(r.owner)
+	var end int
+	var ok bool
+	if ext {
+		_, end = r.extGlob(raw, base, start, false, &seen)
+		ok = true
+	} else {
+		_, end, ok = r.patternGroup(raw, base, start, false, &seen)
+	}
+	r.skips.store(raw, start, ext, end, ok, seen, r.owner, high)
+	outer.add(seen)
+	return end, ok, false
+}
+
+func (r rawPatternParser) patternGroup(raw string, base Pos, start int, build bool, seen *scanSeen) (*PatternGroup, int, bool) {
+	d, ok := r.enterNest(posAddCol(base, start))
+	if !ok {
+		seen.sawEnd()
+		return nil, len(raw), false
+	}
+	defer r.leaveNest(d)
+	var group *PatternGroup
+	if build {
+		group = &PatternGroup{Lparen: posAddCol(base, start)}
+	}
 	innerStart := start + 1
 	i := innerStart
 	armStart := innerStart
-	depth := 1
 	hasTopLevelBar := false
 	appendArm := func(end int) {
-		group.Patterns = append(group.Patterns, r.parseWithBareGroups(raw[armStart:end], posAddCol(base, armStart), true))
+		if group != nil {
+			group.Patterns = append(group.Patterns, r.parseWithBareGroups(raw[armStart:end], posAddCol(base, armStart), true))
+		}
 	}
 	for i <= len(raw) {
 		if i >= len(raw) {
+			seen.sawEnd()
 			return nil, len(raw), false
 		}
+		seen.upTo(i + 1)
 		switch raw[i] {
 		case '\\':
-			if i+1 < len(raw) {
+			if seen.has(raw, i+1) {
 				i += 2
 			} else {
 				i++
 			}
 			continue
 		case '\'', '"', '`', '$':
-			_, consumed, ok := r.parseShellPart(raw[i:], posAddCol(base, i))
-			if ok {
+			if consumed, ok := r.scanShellPart(raw, base, i, seen); ok {
 				i += consumed
 				continue
 			}
 		case '<', '>':
-			if i+1 < len(raw) && raw[i+1] == '(' {
-				_, consumed, ok := r.parseShellPart(raw[i:], posAddCol(base, i))
-				if ok {
+			if seen.has(raw, i+1) && raw[i+1] == '(' {
+				if consumed, ok := r.scanShellPart(raw, base, i, seen); ok {
 					i += consumed
 					continue
 				}
 			}
 		case '[':
-			i = patternCharClassEnd(raw, i)
+			i = seen.charClassEnd(raw, i)
 			continue
 		case '?', '*', '+', '@', '!':
-			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
-				_, end := r.parseExtGlob(raw, base, i)
-				i = end
+			if r.extGlobEnabled() && seen.has(raw, i+1) && raw[i+1] == '(' {
+				i, _, _ = r.skipGroup(raw, base, i, true, seen)
 				continue
 			}
 		case '(':
-			depth++
-			i++
+			// A nested group ends where scanning it on its own ends, so
+			// skip it with the memo instead of counting parentheses.
+			i, _, _ = r.skipGroup(raw, base, i, false, seen)
 			continue
 		case '|':
-			if depth == 1 {
-				appendArm(i)
-				armStart = i + 1
-				hasTopLevelBar = true
-			}
+			appendArm(i)
+			armStart = i + 1
+			hasTopLevelBar = true
 			i++
 			continue
 		case ')':
-			depth--
-			if depth == 0 {
-				if !hasTopLevelBar {
-					return nil, i + 1, false
-				}
-				appendArm(i)
-				group.Rparen = posAddCol(base, i)
-				return group, i + 1, true
+			if !hasTopLevelBar {
+				return nil, i + 1, false
 			}
-			i++
-			continue
+			appendArm(i)
+			if group != nil {
+				group.Rparen = posAddCol(base, i)
+			}
+			return group, i + 1, true
 		}
 		i++
 	}
 	return nil, len(raw), false
 }
 
-func (r rawPatternParser) parseExtGlob(raw string, base Pos, start int) (*ExtGlob, int) {
-	eg := &ExtGlob{OpPos: posAddCol(base, start), Op: globOperatorFromByte(raw[start])}
+func (r rawPatternParser) extGlob(raw string, base Pos, start int, build bool, seen *scanSeen) (*ExtGlob, int) {
+	var eg *ExtGlob
+	if build {
+		eg = &ExtGlob{OpPos: posAddCol(base, start), Op: globOperatorFromByte(raw[start])}
+	}
+	d, ok := r.enterNest(posAddCol(base, start))
+	if !ok {
+		seen.sawEnd()
+		return eg, len(raw)
+	}
+	defer r.leaveNest(d)
 	innerStart := start + 2
 	i := innerStart
 	armStart := innerStart
 	appendArm := func(end int) {
-		eg.Patterns = append(eg.Patterns, r.parseWithBareGroups(raw[armStart:end], posAddCol(base, armStart), false))
+		if eg != nil {
+			eg.Patterns = append(eg.Patterns, r.parseWithBareGroups(raw[armStart:end], posAddCol(base, armStart), false))
+		}
 	}
 	for i <= len(raw) {
 		if i >= len(raw) {
+			seen.sawEnd()
 			appendArm(len(raw))
-			eg.Rparen = posAddCol(base, len(raw))
+			if eg != nil {
+				eg.Rparen = posAddCol(base, len(raw))
+			}
 			return eg, len(raw)
 		}
+		seen.upTo(i + 1)
 		switch raw[i] {
 		case '\\':
-			if i+1 < len(raw) {
+			if seen.has(raw, i+1) {
 				i += 2
 			} else {
 				i++
 			}
 			continue
 		case '\'', '"', '`', '$':
-			_, consumed, ok := r.parseShellPart(raw[i:], posAddCol(base, i))
-			if ok {
+			if consumed, ok := r.scanShellPart(raw, base, i, seen); ok {
 				i += consumed
 				continue
 			}
 		case '<', '>':
-			if i+1 < len(raw) && raw[i+1] == '(' {
-				_, consumed, ok := r.parseShellPart(raw[i:], posAddCol(base, i))
-				if ok {
+			if seen.has(raw, i+1) && raw[i+1] == '(' {
+				if consumed, ok := r.scanShellPart(raw, base, i, seen); ok {
 					i += consumed
 					continue
 				}
 			}
 		case '[':
-			i = patternCharClassEnd(raw, i)
+			i = seen.charClassEnd(raw, i)
 			continue
 		case '(':
-			_, end, _ := r.parsePatternGroup(raw, base, i)
-			if end > i {
+			if end, _, _ := r.skipGroup(raw, base, i, false, seen); end > i {
 				i = end
 				continue
 			}
 		case '?', '*', '+', '@', '!':
-			if r.extGlobEnabled() && i+1 < len(raw) && raw[i+1] == '(' {
-				_, end := r.parseExtGlob(raw, base, i)
-				i = end
+			if r.extGlobEnabled() && seen.has(raw, i+1) && raw[i+1] == '(' {
+				i, _, _ = r.skipGroup(raw, base, i, true, seen)
 				continue
 			}
 		case '|':
@@ -4676,12 +4769,31 @@ func (r rawPatternParser) parseExtGlob(raw string, base Pos, start int) (*ExtGlo
 			continue
 		case ')':
 			appendArm(i)
-			eg.Rparen = posAddCol(base, i)
+			if eg != nil {
+				eg.Rparen = posAddCol(base, i)
+			}
 			return eg, i + 1
 		}
 		i++
 	}
 	return eg, len(raw)
+}
+
+// scanShellPart is parseShellPart for scans that only need the length of
+// the part at raw[i:]. It records how much of raw the sub-parser read.
+func (r rawPatternParser) scanShellPart(raw string, base Pos, i int, seen *scanSeen) (int, bool) {
+	e := rawWordPart(raw[i:], posAddCol(base, i), r.lang, r.owner)
+	seen.upTo(i + e.read)
+	if e.sawEOF {
+		seen.sawEnd()
+	}
+	if !e.ok {
+		return 0, false
+	}
+	if _, ok := e.part.(PatternPart); !ok {
+		return 0, false
+	}
+	return e.consumed, true
 }
 
 func (r rawPatternParser) parseShellPart(raw string, base Pos) (PatternPart, int, bool) {
@@ -4698,13 +4810,37 @@ func (r rawPatternParser) parseShellPart(raw string, base Pos) (PatternPart, int
 
 // parseRawWordPart parses the word part at the start of raw. owner, if not
 // nil, is the parser whose input raw comes from: the nested parse continues
-// its nesting depth and reports a nesting error back to it.
+// its nesting depth and reports a nesting error back to it, and results are
+// memoized in its [rawPartCache].
 func parseRawWordPart(raw string, base Pos, lang LangVariant, owner *Parser) (WordPart, int, bool) {
-	if owner != nil && owner.nestingFailed {
+	e := rawWordPart(raw, base, lang, owner)
+	return e.part, e.consumed, e.ok
+}
+
+// rawWordPart is parseRawWordPart, returning the cache entry for the result.
+func rawWordPart(raw string, base Pos, lang LangVariant, owner *Parser) *rawPartEntry {
+	if owner == nil {
+		return parseRawWordPartFresh(raw, base, lang, nil, nil)
+	}
+	if owner.nestingFailed {
 		// Retrying would only hit the limit again: callers treat a failed
 		// part as literal text and keep scanning into the same nesting.
-		return nil, 0, false
+		return &rawPartEntry{read: len(raw), sawEOF: true}
 	}
+	if owner.rawParts == nil {
+		owner.rawParts, owner.ownsRawParts = newRawPartCache(), true
+	}
+	cache := owner.rawParts
+	if e := cache.lookup(raw, base, lang, owner.nestDepth); e != nil {
+		e.replay(owner)
+		return e
+	}
+	e := parseRawWordPartFresh(raw, base, lang, owner, cache)
+	cache.store(raw, base, lang, e)
+	return e
+}
+
+func parseRawWordPartFresh(raw string, base Pos, lang LangVariant, owner *Parser, cache *rawPartCache) *rawPartEntry {
 	sub := tempParserPool.Get().(*Parser)
 	scratch := parserScratchPool.Get().(*parserScratch)
 	*sub = Parser{
@@ -4726,10 +4862,10 @@ func parseRawWordPart(raw string, base Pos, lang LangVariant, owner *Parser) (Wo
 		owner.subParserNesting(sub)
 	}
 	sub.reset()
+	sub.rawParts = cache
 	var file File
 	sub.f = &file
-	var reader strings.Reader
-	reader.Reset(raw)
+	reader := rawPartReader{s: raw}
 	sub.src = &reader
 	sub.offs = int64(base.Offset())
 	sub.line = int64(base.Line())
@@ -4740,12 +4876,22 @@ func parseRawWordPart(raw string, base Pos, lang LangVariant, owner *Parser) (Wo
 	if owner != nil {
 		owner.absorbSubParserNesting(sub)
 	}
+	e := &rawPartEntry{
+		read:          reader.i,
+		sawEOF:        reader.sawEOF,
+		base:          sub.nestBase,
+		nestPeak:      sub.nestPeak,
+		nestHigh:      sub.nestHigh,
+		chainLinks:    sub.chainLinks,
+		nestingFailed: sub.nestingFailed,
+		err:           sub.err,
+	}
 	if sub.err != nil || part == nil {
-		return nil, 0, false
+		return e
 	}
 	consumed := int(part.End().Offset() - base.Offset())
 	if consumed <= 0 {
-		return nil, 0, false
+		return e
 	}
 	if ar, ok := part.(*ArithmExp); ok && ar.Source == "" {
 		start := int(ar.Left.Offset() - base.Offset())
@@ -4756,10 +4902,13 @@ func parseRawWordPart(raw string, base Pos, lang LangVariant, owner *Parser) (Wo
 			start += 3
 		}
 		if start >= 0 && start <= end && end <= len(raw) {
-			ar.Source = raw[start:end]
+			// raw may be a view of a reused buffer, and the cache keeps
+			// part beyond this call.
+			ar.Source = strings.Clone(raw[start:end])
 		}
 	}
-	return part, consumed, true
+	e.part, e.consumed, e.ok = part, consumed, true
+	return e
 }
 
 func firstPatternGroup(pat *Pattern) *PatternGroup {
@@ -7390,7 +7539,7 @@ func (p *Parser) casePatternUsesOptionalOpener() bool {
 	if tail == "" || tail[0] != '(' {
 		return true
 	}
-	_, groupEnd, grouped := p.newRawPatternParser().parsePatternGroup(tail, p.pos, 0)
+	groupEnd, grouped := p.newRawPatternParser().skipPatternGroup(tail, p.pos, 0)
 	if !grouped {
 		return true
 	}
