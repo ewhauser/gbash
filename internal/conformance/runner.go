@@ -1156,6 +1156,7 @@ func gbashPolicyLimits() policy.Limits {
 		MaxStdoutBytes:         1 << 20,
 		MaxStderrBytes:         1 << 20,
 		MaxFileBytes:           8 << 20,
+		MaxVariableBytes:       32 << 20,
 	}
 }
 

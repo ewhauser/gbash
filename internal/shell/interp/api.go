@@ -278,6 +278,12 @@ type Runner struct {
 	startupHome string
 	analysis    *analysisState
 
+	maxVariableBytes int64
+	// variableLimitHit records that a value went over maxVariableBytes in
+	// the current command, so the 126 status survives builtins that set
+	// their own exit status afterwards.
+	variableLimitHit bool
+
 	maxBraceExpansionWords int64
 
 	origDir     string
@@ -594,6 +600,11 @@ type RunnerConfig struct {
 	ProcSubstHandler ProcSubstHandlerFunc
 	NewPipe          func() (io.ReadCloser, io.WriteCloser, error)
 
+	// MaxVariableBytes caps the size of any one shell variable value, and of
+	// intermediate values such as command substitution output. Zero means
+	// unlimited.
+	MaxVariableBytes int64
+
 	// MaxBraceExpansionWords caps the words brace expansion may generate for
 	// one command's arguments. Zero means unlimited.
 	MaxBraceExpansionWords int64
@@ -700,6 +711,7 @@ func NewRunner(cfg *RunnerConfig) (*Runner, error) {
 	r.Env = cfg.Env
 	r.platform = normalizePlatform(cfg.Platform)
 	r.startupHome = cfg.StartupHome
+	r.maxVariableBytes = cfg.MaxVariableBytes
 	r.maxBraceExpansionWords = cfg.MaxBraceExpansionWords
 	r.Dir = cfg.Dir
 	r.startupVisibleDir = cfg.VisibleDir
@@ -1231,6 +1243,8 @@ func (r *Runner) Reset() {
 		ppid:             r.ppid,
 		startupHome:      r.startupHome,
 
+		maxVariableBytes: r.maxVariableBytes,
+
 		maxBraceExpansionWords: r.maxBraceExpansionWords,
 
 		// These can be set by functions like [Dir] or [Params], but
@@ -1340,7 +1354,7 @@ func (r *Runner) Reset() {
 		Str:      strconv.Itoa(r.euid),
 	})
 	if r.commandStringValue != "" && r.shellProfile().ExposesBashSpecialVar("BASH_EXECUTION_STRING") {
-		r.setVar("BASH_EXECUTION_STRING", expand.Variable{
+		r.setShellManagedVar("BASH_EXECUTION_STRING", expand.Variable{
 			Set:  true,
 			Kind: expand.String,
 			Str:  r.commandStringValue,
@@ -1554,6 +1568,7 @@ func (r *Runner) subshell(_ bool) *Runner {
 		commandHash:               r.commandHash,
 		disabledBuiltins:          r.disabledBuiltins,
 		startupHome:               r.startupHome,
+		maxVariableBytes:          r.maxVariableBytes,
 		maxBraceExpansionWords:    r.maxBraceExpansionWords,
 		origStart:                 r.origStart,
 		origShellStart:            r.origShellStart,
