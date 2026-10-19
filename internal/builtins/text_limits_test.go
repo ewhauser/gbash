@@ -172,3 +172,24 @@ func TestShufWideRangeHeadExitsQuickly(t *testing.T) {
 		t.Fatalf("ExitCode = %d, Stdout = %q, want 0 %q; stderr=%q", result.ExitCode, got, want, result.Stderr)
 	}
 }
+
+func TestSedCapsSubstitutionGrowth(t *testing.T) {
+	t.Parallel()
+	result := execWithDeadline(t, nil, "r=$(printf %0200000d 0)\nprintf %010000d 0 > /tmp/in\nsed \"s/x*/$r/g\" /tmp/in\n")
+	assertExitStderr(t, result, 1, "sed: pattern space too large (limit 33554432 bytes)")
+}
+
+func TestSedStreamingPreservesNewlineRules(t *testing.T) {
+	t.Parallel()
+	result := execWithDeadline(t, nil, strings.Join([]string{
+		"printf 'a\\nb\\nc' | sed -n -e 2p -e '$p'; echo '|'",
+		"printf 'a\\nb\\n' | sed s/a/A/",
+		"printf 'a\\nb' | sed 1d; echo '|'",
+		"printf 'a\\nb\\n' | sed -n 1p",
+		"printf 'x\\n' > /tmp/f; sed -i s/x/y/ /tmp/f; cat /tmp/f",
+		"",
+	}, "\n"))
+	if got, want := result.Stdout, "b\nc|\nA\nb\nb|\na\ny\n"; result.ExitCode != 0 || got != want {
+		t.Fatalf("ExitCode = %d, Stdout = %q, want 0 %q; stderr=%q", result.ExitCode, got, want, result.Stderr)
+	}
+}
