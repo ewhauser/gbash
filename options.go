@@ -136,6 +136,9 @@ func mergeLimitOverrides(base, overrides policy.Limits) policy.Limits {
 	if overrides.MaxGlobOperations != 0 {
 		base.MaxGlobOperations = overrides.MaxGlobOperations
 	}
+	if overrides.MaxBraceExpansionWords != 0 {
+		base.MaxBraceExpansionWords = overrides.MaxBraceExpansionWords
+	}
 	if overrides.MaxLoopIterations != 0 {
 		base.MaxLoopIterations = overrides.MaxLoopIterations
 	}
@@ -150,6 +153,9 @@ func mergeLimitOverrides(base, overrides policy.Limits) policy.Limits {
 	}
 	if overrides.MaxFileBytes != 0 {
 		base.MaxFileBytes = overrides.MaxFileBytes
+	}
+	if overrides.MaxVariableBytes != 0 {
+		base.MaxVariableBytes = overrides.MaxVariableBytes
 	}
 	return base
 }
