@@ -7531,7 +7531,19 @@ func (p *Parser) scanRawPatternSource(start Pos, mode patternScanMode) (*scanned
 	scanned.raw = string(raw[rawStart:end])
 	boundaryPos := posAddCol(start, end)
 	for p.tok != _EOF && p.pos.Offset() < boundaryPos.Offset() {
-		p.next()
+		before := p.cursorSnapshot()
+		if p.tok == bckQuote {
+			// The raw scan already parsed the pattern; a backquote
+			// substitution must still be consumed as a whole.
+			p.wordPart()
+		} else {
+			p.next()
+		}
+		if !before.progressed(p) {
+			// The lexer can stall on a token it will not consume, such
+			// as an unclosed backquote; leave it for the caller to report.
+			break
+		}
 	}
 	if p.pos.Offset() != boundaryPos.Offset() {
 		p.next()
