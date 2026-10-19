@@ -286,6 +286,20 @@ type Runner struct {
 
 	maxBraceExpansionWords int64
 
+	// maxTotalVariableBytes caps the combined size of all variable values.
+	maxTotalVariableBytes int64
+
+	// maxSubshellDepth caps how deeply command substitutions, subshells and
+	// process substitutions nest; subshellDepth is this shell's level, which
+	// starts at baseSubshellDepth for a shell started from another one.
+	maxSubshellDepth  int64
+	subshellDepth     int64
+	baseSubshellDepth int64
+	// maxFunctionDepth caps nested function calls, like bash's FUNCNEST;
+	// funcDepth counts the calls active in this shell.
+	maxFunctionDepth int64
+	funcDepth        int64
+
 	origDir     string
 	origParams  []string
 	origArg0    string
@@ -363,18 +377,20 @@ type funcInfo struct {
 }
 
 type trapState struct {
-	actions             map[trapID]trapAction
-	display             map[trapID]trapAction
-	active              map[trapID]int
+	actions map[trapID]trapAction
+	display map[trapID]trapAction
+	active  map[trapID]int
+	// pending is appended to by goroutines that deliver signals, such as
+	// background jobs running kill, so it is guarded by pendingMu.
+	pendingMu           sync.Mutex
 	pending             []pendingSignalTrap
 	currentSignalNumber int
 	generation          uint64 // bumped on every setTrapAction call
 }
 
 type pendingSignalTrap struct {
-	id     trapID
-	status uint8
-	line   uint
+	id   trapID
+	line uint
 }
 
 type virtualPIDState struct {
@@ -608,6 +624,21 @@ type RunnerConfig struct {
 	// MaxBraceExpansionWords caps the words brace expansion may generate for
 	// one command's arguments. Zero means unlimited.
 	MaxBraceExpansionWords int64
+
+	// MaxTotalVariableBytes caps the combined size of all shell variable
+	// values. Zero means unlimited.
+	MaxTotalVariableBytes int64
+
+	// MaxSubshellDepth caps how deeply command substitutions, subshells and
+	// process substitutions may nest. Zero means unlimited.
+	MaxSubshellDepth int64
+
+	// SubshellDepth is the nesting level the shell starts at, for a shell
+	// started from another shell's command.
+	SubshellDepth int64
+
+	// MaxFunctionDepth caps nested function calls. Zero means unlimited.
+	MaxFunctionDepth int64
 }
 
 func newRunnerBase() *Runner {
@@ -713,6 +744,10 @@ func NewRunner(cfg *RunnerConfig) (*Runner, error) {
 	r.startupHome = cfg.StartupHome
 	r.maxVariableBytes = cfg.MaxVariableBytes
 	r.maxBraceExpansionWords = cfg.MaxBraceExpansionWords
+	r.maxTotalVariableBytes = cfg.MaxTotalVariableBytes
+	r.maxSubshellDepth = cfg.MaxSubshellDepth
+	r.baseSubshellDepth = cfg.SubshellDepth
+	r.maxFunctionDepth = cfg.MaxFunctionDepth
 	r.Dir = cfg.Dir
 	r.startupVisibleDir = cfg.VisibleDir
 	r.analysis = newAnalysisState(cfg.AnalysisObserver, cfg.AnalysisRun)
@@ -1247,6 +1282,13 @@ func (r *Runner) Reset() {
 
 		maxBraceExpansionWords: r.maxBraceExpansionWords,
 
+		maxTotalVariableBytes: r.maxTotalVariableBytes,
+
+		maxSubshellDepth:  r.maxSubshellDepth,
+		subshellDepth:     r.baseSubshellDepth,
+		baseSubshellDepth: r.baseSubshellDepth,
+		maxFunctionDepth:  r.maxFunctionDepth,
+
 		// These can be set by functions like [Dir] or [Params], but
 		// builtins can overwrite them; reset the fields to whatever the
 		// constructor set up.
@@ -1293,7 +1335,9 @@ func (r *Runner) Reset() {
 	r.traps.actions = nil
 	r.traps.display = nil
 	r.traps.active = nil
+	r.traps.pendingMu.Lock()
 	r.traps.pending = nil
+	r.traps.pendingMu.Unlock()
 	r.traps.currentSignalNumber = 0
 	r.trapLineOverride = 0
 	if r.signalOwner == nil {
@@ -1570,6 +1614,12 @@ func (r *Runner) subshell(_ bool) *Runner {
 		startupHome:               r.startupHome,
 		maxVariableBytes:          r.maxVariableBytes,
 		maxBraceExpansionWords:    r.maxBraceExpansionWords,
+		maxTotalVariableBytes:     r.maxTotalVariableBytes,
+		maxSubshellDepth:          r.maxSubshellDepth,
+		subshellDepth:             r.subshellDepth,
+		baseSubshellDepth:         r.baseSubshellDepth,
+		maxFunctionDepth:          r.maxFunctionDepth,
+		funcDepth:                 r.funcDepth,
 		origStart:                 r.origStart,
 		origShellStart:            r.origShellStart,
 		origArg0:                  r.origArg0,

@@ -836,8 +836,10 @@ Initial policy surface:
 - maximum commands per execution
 - maximum loop iterations
 - maximum command substitution depth
+- maximum function call depth
 - maximum glob operations
 - maximum variable value size
+- maximum total variable size
 - symlink policy
 - cancellation and timeout handling
 - network disabled unless a sandboxed network client is explicitly configured
@@ -849,11 +851,13 @@ Default policy stance for MVP:
 - command allowlist derived from the registered command set
 - builtin allowlist permissive for core shell features
 - reads and writes allowed inside `/`
-- maximum command count defaults to `10000` per execution
+- maximum command count defaults to `10000` per execution; shells started by a command such as `bash -c` or `sh -c` share the command, loop and glob budgets of the execution that started them instead of getting fresh ones
 - maximum loop iterations default to `10000` per loop
-- maximum command substitution depth defaults to `50` per execution
+- maximum command substitution depth defaults to `50` per execution (`MaxSubstitutionDepth`). It is checked on the parsed script and again at runtime, where command substitutions, user-written subshells, process substitutions and shells started by a command such as `bash -c` each add a level; pipeline stages run side by side and do not. Going deeper prints `subshell nesting limit exceeded (N), increase policy.Limits.MaxSubstitutionDepth` and exits the shell that tried to nest with status `126`
+- maximum function call depth defaults to `1000` (`MaxFunctionDepth`), counted across subshells like bash's `FUNCNEST`. A deeper call prints `NAME: maximum function nesting level exceeded (N), increase policy.Limits.MaxFunctionDepth` and exits the current shell with status `126`. Bash leaves `FUNCNEST` unset (unlimited) by default, so this is a deliberate sandbox divergence
 - maximum glob operations default to `100000` per execution
 - maximum variable value size defaults to `32 MiB` (`MaxVariableBytes`), with headroom over the `8 MiB` `MaxFileBytes` default so a whole file still fits in one variable. The cap applies to every shell variable write (plain and `+=` assignments, array and associative element writes, array literals and appends, `declare`/`local`/`export`/`readonly`, `read`, `printf -v`, `mapfile`/`readarray`, `${x:=...}`, and `for` variables), where an array counts its element bytes plus 16 bytes per element. It also caps the intermediate values that one step can grow without bound: command substitution output (measured before trailing newlines are stripped), `${x//pattern/replacement}` results, and `printf` output (both the shell builtin and the `printf` command, checked before a padded field is built). A command's expanded argument list and a `for` loop's word list are sized like an indexed array and held to the same cap, which bounds positional parameters and argv doubled with `"$@" "$@"`. `read` and `mapfile` stop buffering input once a value would exceed the cap. Going over prints `NAME: value too large (limit N bytes), increase policy.Limits.MaxVariableBytes`, leaves the variable unchanged, and exits the current shell with status `126` (interactive shells abort only the command). Values the shell derives from already-bounded data (`$_`, `BASH_EXECUTION_STRING`, `BASH_REMATCH`) are exempt. Bash itself only stops when allocation fails, so this is a deliberate sandbox divergence.
+- maximum total variable size defaults to `256 MiB` (`MaxTotalVariableBytes`): the values bound in a shell's variable scopes, sized as for `MaxVariableBytes` and counting a shadowed binding alongside the local that hides it, may not grow past it. Unset, overwritten, and returned-function locals stop counting. A subshell starts from its parent's total and is held to the same cap on its own. A write that would cross it prints `NAME: total variable size too large (limit N bytes), increase policy.Limits.MaxTotalVariableBytes`, leaves the variable unchanged, and exits like the per-variable cap. Shell-managed values such as `$_` are not checked but still count
 - text builtins that build a padded field, line, or set from a user-supplied width or count (`date` field widths, `column -c`, `expand -t`, `nl -w`, `numfmt` padding and precision, `od -w`, `tr` `[c*n]` repeats, and `sed` substitution results) are held to the same `MaxVariableBytes` cap before they allocate, and fail with status `1` and `NAME: field width too large (limit N bytes), increase policy.Limits.MaxVariableBytes` (or the command's equivalent message) instead of exhausting memory
 - `date` and `printf`'s `%(...)T` take their zone from the sandbox `TZ` variable only; when `TZ` is unset or names an unknown zone they use UTC, never the host's local zone, so output stays deterministic and does not reveal where the host runs
 - builtins that buffer every file operand (`sort`, `sed`, `tac`, `paste`, `rev`, `column`, `strings`, and the `base*`/`basenc` encoders) cap the combined size of their operands at `4 × MaxFileBytes` (32 MiB by default) and fail with `combined input exceeds maximum size of N bytes`; streaming line readers (`uniq`, `factor`, `numfmt`, `tsort`) keep no such total but fail with `input exceeds maximum file size of N bytes` when a single line exceeds `MaxFileBytes`

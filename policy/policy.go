@@ -43,10 +43,12 @@ type Limits struct {
 	MaxBraceExpansionWords int64
 	MaxLoopIterations      int64
 	MaxSubstitutionDepth   int64
+	MaxFunctionDepth       int64
 	MaxStdoutBytes         int64
 	MaxStderrBytes         int64
 	MaxFileBytes           int64
 	MaxVariableBytes       int64
+	MaxTotalVariableBytes  int64
 }
 
 type Policy interface {

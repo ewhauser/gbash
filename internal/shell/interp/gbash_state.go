@@ -218,3 +218,12 @@ func (hc HandlerContext) ProcessGroup() (int, bool) {
 	}
 	return shellstate.ProcessGroupFromContext(hc.runner.ectx)
 }
+
+// SubshellDepth reports how deeply the handler's shell is nested in command
+// substitutions, subshells and process substitutions.
+func (hc HandlerContext) SubshellDepth() int64 {
+	if hc.runner == nil {
+		return 0
+	}
+	return hc.runner.subshellDepth
+}

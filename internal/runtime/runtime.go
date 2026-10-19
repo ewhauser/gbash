@@ -120,10 +120,12 @@ func defaultLimits() policy.Limits {
 		MaxBraceExpansionWords: 100000,
 		MaxLoopIterations:      10000,
 		MaxSubstitutionDepth:   50,
+		MaxFunctionDepth:       1000,
 		MaxStdoutBytes:         1 << 20,
 		MaxStderrBytes:         1 << 20,
 		MaxFileBytes:           8 << 20,
 		MaxVariableBytes:       32 << 20,
+		MaxTotalVariableBytes:  256 << 20,
 	}
 }
 
@@ -131,6 +133,8 @@ func defaultLimits() policy.Limits {
 // defaultLimits. Zero fields inherit the layer below; negative fields
 // (policy.Unlimited) disable that limit and are reported as zero, which is
 // how limit consumers spell "no limit".
+//
+//nolint:gocritic // policy.Limits is a small value type passed by value like the rest of the policy API.
 func effectiveLimits(base, overrides policy.Limits) policy.Limits {
 	return normalizedLimits(mergedLimits(mergedLimits(defaultLimits(), base), overrides))
 }
@@ -166,6 +170,8 @@ func (p *limitDefaultsPolicy) SymlinkMode() policy.SymlinkMode {
 // mergedLimits returns base with every non-zero field of overrides applied.
 // It walks the struct reflectively so new policy.Limits fields are merged
 // without having to be listed here.
+//
+//nolint:gocritic // policy.Limits is a small value type passed by value like the rest of the policy API.
 func mergedLimits(base, overrides policy.Limits) policy.Limits {
 	dst := reflect.ValueOf(&base).Elem()
 	src := reflect.ValueOf(overrides)
@@ -178,6 +184,8 @@ func mergedLimits(base, overrides policy.Limits) policy.Limits {
 }
 
 // normalizedLimits maps negative (disabled) integer limits to zero.
+//
+//nolint:gocritic // policy.Limits is a small value type passed by value like the rest of the policy API.
 func normalizedLimits(limits policy.Limits) policy.Limits {
 	for _, field := range reflect.ValueOf(&limits).Elem().Fields() {
 		if field.CanInt() && field.Int() < 0 {

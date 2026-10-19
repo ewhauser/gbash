@@ -74,7 +74,17 @@ func (r *Runner) cmdSubshell(ctx context.Context, cm *syntax.Subshell) {
 		File: r.currentCallFile(),
 	})
 	defer r.analysisScopeExit(r.AnalysisStatus())
+	// The subshells that wrap pipeline stages sit side by side rather than
+	// nested, so only user-written subshells count toward the depth limit.
+	nested := !isSyntheticPipelineSubshell(cm)
+	if nested && r.subshellDepthExceeded() {
+		r.subshellDepthLimitExceeded()
+		return
+	}
 	r2 := r.subshell(false)
+	if nested {
+		r2.subshellDepth++
+	}
 	r2.stmts(ctx, cm.Stmts)
 	r2.exit.exiting = false // subshells don't exit the parent shell
 	r.exit = r2.exit
