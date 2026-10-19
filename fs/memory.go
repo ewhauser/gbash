@@ -391,7 +391,7 @@ func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm std
 		if node.fifo == nil {
 			node.fifo = newMemoryFIFO()
 		}
-		return newMemoryFIFOFile(m, abs, node.fifo, flag), nil
+		return newMemoryFIFOFile(ctx, m, abs, node.fifo, flag), nil
 	}
 
 	if flag&os.O_TRUNC != 0 && canWrite(flag) {
