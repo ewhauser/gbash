@@ -61,7 +61,7 @@ func parseDateValue(value string, base time.Time, loc *time.Location) (time.Time
 
 func parseDateValueInternal(value string, base time.Time, loc *time.Location, allowRelativeSuffix bool) (time.Time, dateParseInfo, error) {
 	if loc == nil {
-		loc = time.Local
+		loc = time.UTC
 	}
 	if base.IsZero() {
 		base = time.Now().In(loc)
@@ -197,6 +197,9 @@ func dateExtractTZPrefix(value string) (string, string, bool) {
 	}
 }
 
+// resolveDateLocationFromEnv picks the zone date uses. Without a valid TZ in
+// the sandbox environment it falls back to UTC, never the host's local zone,
+// so output stays deterministic and does not leak where the host runs.
 func resolveDateLocationFromEnv(env map[string]string, utc bool) *time.Location {
 	if utc {
 		return time.UTC
@@ -208,7 +211,7 @@ func resolveDateLocationFromEnv(env map[string]string, utc bool) *time.Location 
 			}
 		}
 	}
-	return time.Local
+	return time.UTC
 }
 
 func resolveDateLocationValue(value string) (*time.Location, error) {

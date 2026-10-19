@@ -52,3 +52,18 @@ func TestFormatPadsPastFmtWidthCeiling(t *testing.T) {
 func head(s string) string {
 	return s[:min(len(s), 12)] + "..." + s[max(0, len(s)-12):]
 }
+
+func TestFormatTimeDefaultsToUTCWithoutTZ(t *testing.T) {
+	t.Parallel()
+
+	for _, lookup := range []func(string) (string, bool){
+		nil,
+		func(string) (string, bool) { return "", false },
+		func(string) (string, bool) { return "Bogus/Zone", true },
+	} {
+		result := Format("%(%H:%M %Z)T", []string{"0"}, Options{LookupEnv: lookup})
+		if got, want := result.Output, "00:00 UTC"; got != want {
+			t.Fatalf("Output = %q, want %q", got, want)
+		}
+	}
+}

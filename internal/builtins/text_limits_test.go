@@ -270,3 +270,11 @@ func TestExprRegexBudgetReportsTooComplex(t *testing.T) {
 		t.Fatalf("Stderr = %q, want the too-complex error only", result.Stderr)
 	}
 }
+
+func TestDateDefaultsToUTCWithoutTZ(t *testing.T) {
+	t.Parallel()
+	result := execWithDeadline(t, nil, "unset TZ\ndate -d @0 '+%H:%M %Z'\ndate -d '1970-01-01 00:00' +%s\nTZ=Bogus/Zone date -d @0 +%Z\nTZ=Asia/Tokyo date -d @0 +%H\n")
+	if got, want := result.Stdout, "00:00 UTC\n0\nUTC\n09\n"; result.ExitCode != 0 || got != want {
+		t.Fatalf("ExitCode = %d, Stdout = %q, want 0 %q; stderr=%q", result.ExitCode, got, want, result.Stderr)
+	}
+}
