@@ -197,6 +197,13 @@ func factorWriteToken(ctx context.Context, inv *Invocation, writer *bufio.Writer
 		return true, nil //nolint:nilerr // invalid number is a warning, not a fatal error
 	}
 
+	if number.BitLen() > factorMaxBits {
+		if inv != nil && inv.Stderr != nil {
+			_, _ = fmt.Fprintf(inv.Stderr, "factor: %s is too large (limit %d bits)\n", factorQuoteBytes(token), factorMaxBits)
+		}
+		return true, nil
+	}
+
 	factors, err := factorPrimeFactors(ctx, number)
 	if err != nil {
 		return false, err
@@ -206,6 +213,10 @@ func factorWriteToken(ctx context.Context, inv *Invocation, writer *bufio.Writer
 	}
 	return false, nil
 }
+
+// factorMaxBits caps accepted inputs so primality tests and Pollard rho stay
+// bounded; Pollard rho still polls ctx for slow composites.
+const factorMaxBits = 512
 
 func factorWarnInvalid(inv *Invocation, token []byte) {
 	if inv == nil || inv.Stderr == nil {
@@ -294,6 +305,9 @@ func factorFactorRecursive(ctx context.Context, number *big.Int, factors *[]*big
 		return nil
 	}
 	if number.ProbablyPrime(32) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		*factors = append(*factors, new(big.Int).Set(number))
 		return nil
 	}
@@ -306,6 +320,9 @@ func factorFactorRecursive(ctx context.Context, number *big.Int, factors *[]*big
 		return fmt.Errorf("factor: factorization incomplete")
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	quotient := new(big.Int).Quo(new(big.Int).Set(number), divisor)
 	if err := factorFactorRecursive(ctx, divisor, factors); err != nil {
 		return err

@@ -2423,7 +2423,7 @@ func TestUptimeReadsBootTimeAndUsersFromUtmpFile(t *testing.T) {
 	if !defaultPattern.MatchString(lines[0]) {
 		t.Fatalf("first line = %q, want parsed utmp output", lines[0])
 	}
-	wantSince := time.Unix(1716371201, 0).UTC().Local().Format("2006-01-02 15:04:05")
+	wantSince := time.Unix(1716371201, 0).UTC().Format("2006-01-02 15:04:05")
 	if got, want := lines[1], wantSince; got != want {
 		t.Fatalf("since line = %q, want %q", got, want)
 	}
@@ -2582,7 +2582,7 @@ func whoTestUtmpFixture() []byte {
 }
 
 func whoFixtureTimeString(seconds int64, cLocale bool) string {
-	when := time.Unix(seconds, 0).Local()
+	when := time.Unix(seconds, 0).UTC()
 	if cLocale {
 		return when.Format("Jan _2 15:04")
 	}

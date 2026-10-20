@@ -464,7 +464,7 @@ func whoIdleString(inv *Invocation, lastChange int64) string {
 }
 
 func whoTimeString(env map[string]string, timestamp int64) string {
-	when := time.Unix(timestamp, 0).Local()
+	when := time.Unix(timestamp, 0).In(resolveDateLocationFromEnv(env, false))
 	if whoUseCLocale(env) {
 		return when.Format("Jan _2 15:04")
 	}

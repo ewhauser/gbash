@@ -61,13 +61,13 @@ func (c *Uptime) RunParsed(ctx context.Context, inv *Invocation, matches *Parsed
 	if err != nil {
 		return err
 	}
-	now := inv.Now().Local()
+	now := inv.Now().In(resolveDateLocationFromEnv(inv.Env, false))
 	bootAt := uptimeBootTimeFromEnv(inv.Env)
 
 	if opts.path == "" {
 		switch {
 		case opts.since:
-			return uptimeWriteLine(inv.Stdout, bootAt.Local().Format("2006-01-02 15:04:05"))
+			return uptimeWriteLine(inv.Stdout, bootAt.In(resolveDateLocationFromEnv(inv.Env, false)).Format("2006-01-02 15:04:05"))
 		case opts.pretty:
 			return uptimeWriteLine(inv.Stdout, "up "+uptimeFormatPretty(now.Sub(bootAt)))
 		default:
@@ -99,7 +99,7 @@ func (c *Uptime) RunParsed(ctx context.Context, inv *Invocation, matches *Parsed
 	parsedBootAt, userCount, parseErr := uptimeParseUtmp(data)
 	switch {
 	case opts.since && parseErr == nil:
-		return uptimeWriteLine(inv.Stdout, parsedBootAt.Local().Format("2006-01-02 15:04:05"))
+		return uptimeWriteLine(inv.Stdout, parsedBootAt.In(resolveDateLocationFromEnv(inv.Env, false)).Format("2006-01-02 15:04:05"))
 	case opts.since:
 		return c.writeFallback(inv, "uptime: couldn't get boot time")
 	case opts.pretty:
@@ -124,7 +124,7 @@ func (c *Uptime) writeFallback(inv *Invocation, stderrLine string) error {
 	if _, err := fmt.Fprintln(inv.Stderr, stderrLine); err != nil {
 		return &ExitError{Code: 1, Err: err}
 	}
-	now := inv.Now().Local()
+	now := inv.Now().In(resolveDateLocationFromEnv(inv.Env, false))
 	line := fmt.Sprintf(" %s  %s  %s,  %s",
 		now.Format("15:04:05"),
 		uptimeUnknownUptimeText,

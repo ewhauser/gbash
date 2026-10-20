@@ -95,3 +95,15 @@ func TestWhoWriteUserReadsDeviceMetadataWhenRendered(t *testing.T) {
 		t.Fatalf("Stat() calls = %v, want [/dev/pts/0]", devFS.stats)
 	}
 }
+
+func TestWhoTimeStringUsesConfiguredTimezone(t *testing.T) {
+	t.Parallel()
+	env := map[string]string{"TZ": "UTC", "LC_ALL": "C"}
+	if got, want := whoTimeString(env, 0), "Jan  1 00:00"; got != want {
+		t.Fatalf("whoTimeString(UTC) = %q, want %q", got, want)
+	}
+	env["TZ"] = "Asia/Tokyo"
+	if got, want := whoTimeString(env, 0), "Jan  1 09:00"; got != want {
+		t.Fatalf("whoTimeString(Asia/Tokyo) = %q, want %q", got, want)
+	}
+}

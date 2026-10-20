@@ -3,6 +3,8 @@ package builtins
 import (
 	"context"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 )
 
 type Rev struct{}
@@ -49,12 +51,17 @@ func (c *Rev) RunParsed(ctx context.Context, inv *Invocation, matches *ParsedCom
 	return nil
 }
 
+// reverseRunes reverses s by UTF-8 decode units, keeping each invalid byte
+// as its own unit instead of replacing it with U+FFFD.
 func reverseRunes(s string) string {
-	runes := []rune(s)
-	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
-		runes[i], runes[j] = runes[j], runes[i]
+	var b strings.Builder
+	b.Grow(len(s))
+	for end := len(s); end > 0; {
+		_, size := utf8.DecodeLastRuneInString(s[:end])
+		b.WriteString(s[end-size : end])
+		end -= size
 	}
-	return string(runes)
+	return b.String()
 }
 
 var _ Command = (*Rev)(nil)

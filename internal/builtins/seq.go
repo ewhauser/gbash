@@ -680,6 +680,18 @@ func seqFormatWithDirective(value seqValue, format string) (string, error) {
 	return fmt.Sprintf(format, f), nil
 }
 
+// seqMaxFormatNumber is the largest width or precision accepted in a -f
+// directive; Go's fmt rejects anything above it with %!(NOVERB).
+const seqMaxFormatNumber = 1_000_000
+
+func seqNumberTooLarge(digits string) bool {
+	if digits == "" {
+		return false
+	}
+	n, err := strconv.Atoi(digits)
+	return err != nil || n > seqMaxFormatNumber
+}
+
 func seqFindDirective(format string) (start, end int, err error) {
 	directiveStart := -1
 	directiveEnd := -1
@@ -702,13 +714,21 @@ func seqFindDirective(format string) (start, end int, err error) {
 		for j < len(format) && strings.ContainsRune(" +-#0", rune(format[j])) {
 			j++
 		}
+		widthStart := j
 		for j < len(format) && format[j] >= '0' && format[j] <= '9' {
 			j++
 		}
+		if seqNumberTooLarge(format[widthStart:j]) {
+			return -1, -1, fmt.Errorf("format %s: field width too large", quoteGNUOperand(format))
+		}
 		if j < len(format) && format[j] == '.' {
 			j++
+			precStart := j
 			for j < len(format) && format[j] >= '0' && format[j] <= '9' {
 				j++
+			}
+			if seqNumberTooLarge(format[precStart:j]) {
+				return -1, -1, fmt.Errorf("format %s: precision too large", quoteGNUOperand(format))
 			}
 		}
 		if j >= len(format) {
