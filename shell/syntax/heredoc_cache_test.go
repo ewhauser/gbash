@@ -95,3 +95,45 @@ func TestParenAmbiguityHeredocsParseInPolynomialTime(t *testing.T) {
 		})
 	}
 }
+
+// A heredoc body that failed to parse set the error without stopping the
+// lexer, so callExpr kept finding the same token it could not consume and
+// looped forever. A FuzzParseAttackMutations find from process-subst-unclosed.
+func TestHeredocBodyErrorStopsParse(t *testing.T) {
+	t.Parallel()
+	for _, n := range []int{1, 2, 8} {
+		src := "cat <(echo hi\n" + strings.Repeat("${$(EOF\nEOF\n<<EOF\n ${$(EOF\n", n)
+		for _, lang := range []LangVariant{LangZsh, LangBash} {
+			done := make(chan error, 1)
+			go func() {
+				_, err := NewParser(Variant(lang)).Parse(strings.NewReader(src), "")
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Errorf("%v, %d levels: Parse error = nil, want one", lang, n)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatalf("%v, %d levels: Parse did not finish", lang, n)
+			}
+		}
+	}
+}
+
+// After a heredoc body failed, parsing used to go on past the error, and a
+// backquote recovery could then replace it with an error at a position that
+// does not exist, such as column 5 of the three-byte line "EOF".
+func TestHeredocBodyErrorKeepsFirstError(t *testing.T) {
+	t.Parallel()
+	body := "`$((1+2))${x} <<EOF\n $( { EOF\n"
+	for _, src := range []string{
+		"$(x\nEOF\n" + body,
+		"$(x\nEOF\n" + body + "EOF\n" + body,
+	} {
+		_, err := NewParser(Variant(LangBash)).Parse(strings.NewReader(src), "")
+		if got, want := fmt.Sprint(err), "4:5: reached EOF without matching `{` with `}`"; got != want {
+			t.Errorf("Parse(%q) error = %q, want %q", src, got, want)
+		}
+	}
+}

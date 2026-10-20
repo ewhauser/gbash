@@ -1644,7 +1644,7 @@ func (p *Parser) heredocBody(src string, start Pos) *Word {
 	}
 	if p.parenAmbiguityDisabled && p.hdocCache != nil {
 		if e := p.hdocCache.lookupBody(key, p); e != nil {
-			p.err = e.err
+			p.stopAtSubParserErr(e.err)
 			e.replay(p)
 			return e.word
 		}
@@ -1660,8 +1660,8 @@ func (p *Parser) heredocBody(src string, start Pos) *Word {
 	}
 	bodyParser.hdocCache = p.sharedHeredocCache()
 	p.subParserNesting(bodyParser)
-	var word *Word
-	word, p.err = bodyParser.document(strings.NewReader(src), start)
+	word, err := bodyParser.document(strings.NewReader(src), start)
+	p.stopAtSubParserErr(err)
 	p.absorbSubParserNesting(bodyParser)
 	if p.parenAmbiguityDisabled {
 		p.hdocCache.storeBody(key, &hdocBodyEntry{
@@ -1677,6 +1677,21 @@ func (p *Parser) heredocBody(src string, start Pos) *Word {
 		})
 	}
 	return word
+}
+
+// stopAtSubParserErr records err, the error of a sub-parser such as a
+// heredoc body's, as p's error and stops p's lexer as errPass does. Leaving
+// the current token in place let callers that loop until the next token, such
+// as callExpr, spin forever on a token they cannot consume.
+func (p *Parser) stopAtSubParserErr(err error) {
+	if err == nil {
+		return
+	}
+	p.err = err
+	p.bsp = uint(len(p.bs)) + 1
+	p.r = utf8.RuneSelf
+	p.w = 1
+	p.tok = _EOF
 }
 
 func heredocNeedsEOFWarning(delim *HeredocDelim) bool {
