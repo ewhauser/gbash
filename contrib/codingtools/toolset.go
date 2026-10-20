@@ -180,17 +180,23 @@ func (t *Toolset) Edit(ctx context.Context, req EditRequest) (EditResponse, erro
 	if req.OldText == "" {
 		return EditResponse{}, errors.New("oldText must be non-empty")
 	}
+	if len(req.OldText) > MaxEditBytes || len(req.NewText) > MaxEditBytes {
+		return EditResponse{}, fmt.Errorf("oldText and newText must each be at most %d bytes", MaxEditBytes)
+	}
 
 	absolutePath := resolveToCwd(req.Path, t.cfg.workingDir, t.cfg.homeDir)
 	key := mutationQueueKey(ctx, t.cfg.fsys, absolutePath)
 
 	return withMutationQueue(ctx, t.queues, key, func() (EditResponse, error) {
-		buffer, err := readFile(ctx, t.cfg.fsys, absolutePath)
+		buffer, err := readFileAtMost(ctx, t.cfg.fsys, absolutePath, MaxEditBytes)
 		if err != nil {
 			if errors.Is(err, stdfs.ErrNotExist) || errors.Is(err, os.ErrNotExist) {
 				return EditResponse{}, fmt.Errorf("file not found: %s", req.Path)
 			}
 			return EditResponse{}, err
+		}
+		if len(buffer) > MaxEditBytes {
+			return EditResponse{}, fmt.Errorf("%s is too large to edit (over %d bytes)", req.Path, MaxEditBytes)
 		}
 
 		rawContent := string(buffer)
@@ -420,19 +426,25 @@ func parseNonNegativeInt(raw any) (int, error) {
 	}
 }
 
-func readFile(ctx context.Context, fsys gbfs.FileSystem, absolutePath string) ([]byte, error) {
+// MaxEditBytes caps the file, oldText and newText sizes the edit tool
+// accepts. Matching and diffing hold several normalized copies of the
+// content, so peak memory is several times the file size.
+const MaxEditBytes = 16 << 20
+
+// readFileAtMost reads up to limit+1 bytes so callers can detect files over
+// limit without reading them whole.
+func readFileAtMost(ctx context.Context, fsys gbfs.FileSystem, absolutePath string, limit int) ([]byte, error) {
 	file, err := fsys.Open(ctx, absolutePath)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = file.Close() }()
+	reader := io.LimitReader(file, int64(limit)+1)
 	var output []byte
 	buf := make([]byte, 32*1024)
 	for {
-		n, readErr := file.Read(buf)
-		if n > 0 {
-			output = append(output, buf[:n]...)
-		}
+		n, readErr := reader.Read(buf)
+		output = append(output, buf[:n]...)
 		if errors.Is(readErr, io.EOF) {
 			return output, nil
 		}

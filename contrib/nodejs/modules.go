@@ -9,6 +9,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/dop251/goja"
@@ -273,6 +274,13 @@ func (rt *nodeRuntime) rmSync(call goja.FunctionCall) goja.Value {
 func (rt *nodeRuntime) unlinkSync(call goja.FunctionCall) goja.Value {
 	rt.ensureContext()
 	name := rt.stringArg(call, 0, "path")
+	info, err := rt.inv.FS.Lstat(rt.ctx, name)
+	if err != nil {
+		rt.throw(err)
+	}
+	if info.IsDir() {
+		rt.throw(&stdfs.PathError{Op: "unlink", Path: name, Err: syscall.EISDIR})
+	}
 	if err := rt.inv.FS.Remove(rt.ctx, name, false); err != nil {
 		rt.throw(err)
 	}
@@ -290,6 +298,13 @@ func (rt *nodeRuntime) rmdirSync(call goja.FunctionCall) goja.Value {
 		default:
 			recursive = optionValue(arg.ToObject(rt.vm), "recursive").ToBoolean()
 		}
+	}
+	info, err := rt.inv.FS.Lstat(rt.ctx, name)
+	if err != nil {
+		rt.throw(err)
+	}
+	if !info.IsDir() {
+		rt.throw(&stdfs.PathError{Op: "rmdir", Path: name, Err: syscall.ENOTDIR})
 	}
 	if err := rt.inv.FS.Remove(rt.ctx, name, recursive); err != nil {
 		rt.throw(err)
@@ -504,7 +519,7 @@ func (rt *nodeRuntime) ensureParentDir(abs string) error {
 func (rt *nodeRuntime) statObject(info stdfs.FileInfo) goja.Value {
 	obj := rt.vm.NewObject()
 	_ = obj.Set("size", info.Size())
-	_ = obj.Set("mode", int64(info.Mode()))
+	_ = obj.Set("mode", nodeStatMode(info.Mode()))
 	_ = obj.Set("mtimeMs", float64(info.ModTime().UnixNano())/float64(time.Millisecond))
 	_ = obj.Set("isFile", func(goja.FunctionCall) goja.Value {
 		return rt.vm.ToValue(info.Mode().IsRegular())
@@ -590,4 +605,21 @@ func unixModeBits(bits uint64) os.FileMode {
 		mode |= os.ModeSticky
 	}
 	return mode
+}
+
+// nodeStatMode converts Go mode bits to the POSIX st_mode layout that Node
+// exposes, so checks such as (mode & 0o170000) === 0o040000 work.
+func nodeStatMode(mode stdfs.FileMode) int64 {
+	result := int64(mode.Perm())
+	switch {
+	case mode&stdfs.ModeSymlink != 0:
+		result |= 0o120_000
+	case mode.IsDir():
+		result |= 0o040_000
+	case mode&stdfs.ModeNamedPipe != 0:
+		result |= 0o010_000
+	default:
+		result |= 0o100_000
+	}
+	return result
 }

@@ -64,8 +64,11 @@ func TestYQBoundsEvaluationMemory(t *testing.T) {
 		`"aaaaaaaaaaaaaaaa"` + strings.Repeat(" | . + .", 26),
 		// Doubling through in-place assignment.
 		`{"a": [1]}` + strings.Repeat(" | .a += .a", 24),
+		// Assignment past the end pads the array before any result exists.
+		"[1] | .[100000000] = 1",
+		"[1] | .[50000000 * 2] = 1",
 	} {
-		t.Run(expression[:8], func(t *testing.T) {
+		t.Run(expression, func(t *testing.T) {
 			t.Parallel()
 
 			result, _ := runYQWithTimeout(t, newYQRuntime(t), "yq -n '"+expression+"'\n", 60*time.Second, 10*time.Second)
@@ -152,5 +155,14 @@ func TestYQConcurrentEvaluationsAcrossRuntimes(t *testing.T) {
 		if err := <-done; err != nil {
 			t.Error(err)
 		}
+	}
+}
+
+func TestYQAllowsModestArrayIndexAssignment(t *testing.T) {
+	t.Parallel()
+
+	result, _ := runYQWithTimeout(t, newYQRuntime(t), "yq -n -o json -I0 '[1] | .[3] = 2'\n", 30*time.Second, 5*time.Second)
+	if result.ExitCode != 0 || result.Stdout != "[1,null,null,2]\n" {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
 	}
 }

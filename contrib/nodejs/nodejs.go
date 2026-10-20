@@ -395,6 +395,9 @@ func (rt *nodeRuntime) loadModuleSource(name string) ([]byte, error) {
 		}
 		return nil, err
 	}
+	if err := checkNodeSourceNesting(data); err != nil {
+		return nil, fmt.Errorf("nodejs: %s: %w", name, err)
+	}
 	return normalizeModuleSource(data), nil
 }
 
@@ -452,6 +455,9 @@ func (rt *nodeRuntime) ensureContext() {
 func (rt *nodeRuntime) storeInlineSource(name string, data []byte) error {
 	if limit := maxFileBytes(rt.inv); limit > 0 && int64(len(data)) > limit {
 		return commands.Exitf(rt.inv, 1, "nodejs: inline script too large (%d bytes, max %d)", len(data), limit)
+	}
+	if err := checkNodeSourceNesting(data); err != nil {
+		return commands.Exitf(rt.inv, 1, "nodejs: inline script: %v", err)
 	}
 	rt.extraSources[gbfs.Clean(name)] = normalizeModuleSource(data)
 	return nil

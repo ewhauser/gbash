@@ -14,6 +14,9 @@ import (
 func Parse(src string) (*Query, error) {
 	l := newLexer(src)
 	if yyParse(l) > 0 {
+		if l.depthErr != nil {
+			return nil, l.depthErr
+		}
 		return nil, l.err
 	}
 	return l.result, nil

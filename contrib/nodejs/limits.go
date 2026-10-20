@@ -1,6 +1,7 @@
 package nodejs
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"runtime"
@@ -32,6 +33,11 @@ const (
 	// budgets.
 	nodeDefaultMaxDuration = 60 * time.Second
 
+	// nodeMaxNesting caps bracket nesting in source text and JSON. goja's
+	// parsers recurse once per level, and overflowing the Go stack is a
+	// fatal error for the whole process.
+	nodeMaxNesting = 10000
+
 	nodeHeapSampleInterval = 10 * time.Millisecond
 	nodeHeapMetric         = "/memory/classes/heap/objects:bytes"
 )
@@ -43,7 +49,7 @@ var (
 
 // nodeAllocLimitsScript wraps the builtins that allocate a caller-chosen
 // size up front or loop natively over a caller-chosen length.
-const nodeAllocLimitsScript = `(function (maxBytes, maxArrayLength) {
+const nodeAllocLimitsScript = `(function (maxBytes, maxArrayLength, maxNesting) {
 	"use strict";
 	const tooLarge = (what) => new RangeError(what + " exceeds the sandbox limit of " + maxBytes + " bytes");
 	const tooLong = (what) => new RangeError(what + " exceeds the sandbox limit of " + maxArrayLength + " elements");
@@ -157,6 +163,113 @@ const nodeAllocLimitsScript = `(function (maxBytes, maxArrayLength) {
 		}[name]);
 	}
 
+	// join and JSON.stringify run natively, so a single call cannot be
+	// interrupted. join is reimplemented as an interruptible loop with a
+	// running length check; stringify gets a replacer, which goja calls back
+	// into the VM for every value.
+	const join = OriginalArray.prototype.join;
+	define(OriginalArray.prototype, "join", function join_(separator) {
+		const o = Object(this);
+		const len = Number(o.length) >>> 0;
+		checkArrayLength("Array.prototype.join receiver length", len);
+		const sep = separator === undefined ? "," : String(separator);
+		let total = len > 0 ? (len - 1) * sep.length : 0;
+		if (total > maxBytes) throw tooLarge("Array.prototype.join result");
+		const parts = new OriginalArray(len);
+		for (let i = 0; i < len; i++) {
+			const el = o[i];
+			const part = el === undefined || el === null ? "" : String(el);
+			total += part.length;
+			if (total > maxBytes) throw tooLarge("Array.prototype.join result");
+			parts[i] = part;
+		}
+		return Reflect.apply(join, parts, [sep]);
+	});
+
+	const stringify = JSON.stringify;
+	define(JSON, "stringify", function stringify_(value, replacer, space) {
+		let total = 0;
+		const add = (n) => {
+			total += n;
+			if (total > maxBytes) throw tooLarge("JSON.stringify result");
+		};
+		let userFn = typeof replacer === "function" ? replacer : undefined;
+		if (!userFn && Array.isArray(replacer)) {
+			const keys = [];
+			for (const k of replacer) {
+				if (typeof k === "string" || typeof k === "number" || k instanceof String || k instanceof Number) {
+					const key = String(k);
+					if (!keys.includes(key)) keys.push(key);
+				}
+			}
+			userFn = function (key, v) {
+				if (v === null || typeof v !== "object" || Array.isArray(v)) return v;
+				const picked = {};
+				for (const k of keys) if (Object.prototype.hasOwnProperty.call(v, k)) picked[k] = v[k];
+				return picked;
+			};
+		}
+		const guard = function (key, v) {
+			if (userFn) v = Reflect.apply(userFn, this, [key, v]);
+			add(String(key).length + 4);
+			if (typeof v === "string") add(v.length + 2);
+			else if (Array.isArray(v)) checkArrayLength("JSON.stringify array length", v.length);
+			return v;
+		};
+		return Reflect.apply(stringify, this, [value, guard, space]);
+	});
+
+	// nestingDepth returns the deepest bracket nesting in text, skipping
+	// string literals (and, for source, comments).
+	const backtick = String.fromCharCode(96);
+	const nestingDepth = (text, source) => {
+		let depth = 0;
+		for (let i = 0; i < text.length; i++) {
+			const ch = text[i];
+			if (ch === '"' || (source && (ch === "'" || ch === backtick))) {
+				for (i++; i < text.length && text[i] !== ch; i++) if (text[i] === "\\") i++;
+			} else if (source && ch === "/" && text[i + 1] === "/") {
+				while (i < text.length && text[i] !== "\n") i++;
+			} else if (source && ch === "/" && text[i + 1] === "*") {
+				const end = text.indexOf("*/", i + 2);
+				i = end < 0 ? text.length : end + 1;
+			} else if (ch === "(" || ch === "[" || ch === "{") {
+				if (++depth > maxNesting) return depth;
+			} else if ((ch === ")" || ch === "]" || ch === "}") && depth > 0) {
+				depth--;
+			}
+		}
+		return 0;
+	};
+	const tooDeep = (what) => new RangeError(what + " nesting exceeds the sandbox limit of " + maxNesting + " levels");
+	const parse = JSON.parse;
+	define(JSON, "parse", function parse_(text, reviver) {
+		const s = String(text);
+		if (nestingDepth(s, false) > maxNesting) throw tooDeep("JSON.parse input");
+		return Reflect.apply(parse, this, [s, reviver]);
+	});
+	// Replacing eval makes every eval call indirect (global scope). That is
+	// the price of checking its source before goja's parser recurses on it.
+	const originalEval = globalThis.eval;
+	define(globalThis, "eval", {
+		eval(source) {
+			if (typeof source === "string" && nestingDepth(source, true) > maxNesting) throw tooDeep("eval source");
+			return originalEval(source);
+		},
+	}.eval);
+	const OriginalFunction = Function;
+	const FunctionWrapper = {
+		Function: function (...args) {
+			for (const arg of args) if (nestingDepth(String(arg), true) > maxNesting) throw tooDeep("Function source");
+			return Reflect.construct(OriginalFunction, args, new.target === undefined || new.target === FunctionWrapper ? OriginalFunction : new.target);
+		},
+	}.Function;
+	Object.setPrototypeOf(FunctionWrapper, Object.getPrototypeOf(OriginalFunction));
+	Object.defineProperty(FunctionWrapper, "prototype", { value: OriginalFunction.prototype, writable: false, enumerable: false, configurable: false });
+	Object.defineProperty(FunctionWrapper, "length", { value: OriginalFunction.length, configurable: true });
+	Object.defineProperty(OriginalFunction.prototype, "constructor", { value: FunctionWrapper, writable: true, enumerable: false, configurable: true });
+	Object.defineProperty(globalThis, "Function", { value: FunctionWrapper, writable: true, enumerable: false, configurable: true });
+
 	if (typeof Buffer === "function") {
 		const alloc = Buffer.alloc;
 		define(Buffer, "alloc", function alloc_(size) {
@@ -194,7 +307,7 @@ func (rt *nodeRuntime) installAllocLimits() error {
 	if !ok {
 		return fmt.Errorf("nodejs: allocation limit installer is not a function")
 	}
-	_, err = fn(goja.Undefined(), rt.vm.ToValue(nodeMaxAllocBytes), rt.vm.ToValue(nodeMaxArrayLength))
+	_, err = fn(goja.Undefined(), rt.vm.ToValue(nodeMaxAllocBytes), rt.vm.ToValue(nodeMaxArrayLength), rt.vm.ToValue(nodeMaxNesting))
 	return err
 }
 
@@ -256,4 +369,40 @@ func watchNodeExecution(ctx context.Context, vm *goja.Runtime, maxDuration time.
 		}
 	}()
 	return func() { close(done) }
+}
+
+// checkNodeSourceNesting rejects module source (JavaScript or JSON) whose
+// bracket nesting exceeds nodeMaxNesting, skipping strings and comments.
+func checkNodeSourceNesting(src []byte) error {
+	depth := 0
+	for i := 0; i < len(src); i++ {
+		switch ch := src[i]; {
+		case ch == '"' || ch == '\'' || ch == '`':
+			for i++; i < len(src) && src[i] != ch; i++ {
+				if src[i] == '\\' {
+					i++
+				}
+			}
+		case ch == '/' && i+1 < len(src) && src[i+1] == '/':
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+		case ch == '/' && i+1 < len(src) && src[i+1] == '*':
+			end := bytes.Index(src[i+2:], []byte("*/"))
+			if end < 0 {
+				return nil
+			}
+			i += end + 3
+		case ch == '(' || ch == '[' || ch == '{':
+			depth++
+			if depth > nodeMaxNesting {
+				return fmt.Errorf("nesting exceeds the sandbox limit of %d levels", nodeMaxNesting)
+			}
+		case ch == ')' || ch == ']' || ch == '}':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return nil
 }

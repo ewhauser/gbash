@@ -52,6 +52,13 @@ func TestNodeJSRejectsOversizedAllocations(t *testing.T) {
 		{name: "array-like method", js: `Array.prototype.indexOf.call({ length: 1e12 }, 1)`},
 		{name: "Array.from array-like", js: `Array.from({ length: 1e9 })`},
 		{name: "split", js: `'x'.repeat(32 * 1024 * 1024).split('')`},
+		{name: "join cumulative", js: `Array.from({ length: 100 }, () => 'x'.repeat(1 << 20)).join('')`},
+		{name: "fill then join", js: `new Array(1 << 24).fill('xxxxxxxx').join('')`},
+		{name: "stringify strings", js: `JSON.stringify(Array.from({ length: 100 }, () => 'x'.repeat(1 << 20)))`},
+		{name: "stringify with array replacer", js: `JSON.stringify({ a: Array.from({ length: 100 }, () => 'x'.repeat(1 << 20)) }, ['a'])`},
+		{name: "JSON.parse deep", js: `JSON.parse('['.repeat(4000000))`},
+		{name: "eval deep", js: `eval('('.repeat(4000000))`},
+		{name: "Function deep", js: `new Function('return ' + '['.repeat(4000000))`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -127,5 +134,31 @@ func TestNodeJSWatchdogStopsInfiniteLoopWithoutDeadline(t *testing.T) {
 	signal, ok := interrupted.Value().(interruptSignal)
 	if !ok || !signal.limit || !errors.Is(signal.err, errNodeTimeLimit) {
 		t.Fatalf("interrupt value = %#v, want time limit", interrupted.Value())
+	}
+}
+
+func TestNodeJSWrappedBuiltinsKeepSemantics(t *testing.T) {
+	t.Parallel()
+
+	result := runNodeScript(t, `
+console.log([1, null, undefined, 'a', [2, 3]].join('-'));
+console.log([1, 2].join());
+console.log(JSON.stringify({ b: 1, a: [1, 'x'], c: { a: 2, z: 3 } }, ['a', 'b']));
+console.log(JSON.stringify({ a: 1, b: 2 }, (k, v) => (k === 'b' ? undefined : v), 1));
+console.log(JSON.parse('{"x": "[[[[", "y": [1, {"z": 2}]}').y[1].z);
+console.log(eval('1 + 2'), new Function('a', 'return a * 2')(21), (function () {}).constructor === Function);
+`)
+	want := "1---a-2,3\n1,2\n{\"a\":[1,\"x\"],\"b\":1}\n{\n \"a\": 1\n}\n2\n3 42 true\nafter=0\n"
+	if result.Stdout != want {
+		t.Fatalf("Stdout = %q, want %q; stderr=%q", result.Stdout, want, result.Stderr)
+	}
+}
+
+func TestNodeJSRejectsDeeplyNestedModuleSource(t *testing.T) {
+	t.Parallel()
+
+	result := runNodeScript(t, "const x = "+strings.Repeat("[", 4000000)+";\n")
+	if !strings.Contains(result.Stderr, "nesting exceeds") || strings.Contains(result.Stdout, "after=0") {
+		t.Fatalf("stdout=%q stderr=%.300q, want nesting error", result.Stdout, result.Stderr)
 	}
 }
