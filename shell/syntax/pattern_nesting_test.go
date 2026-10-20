@@ -35,7 +35,8 @@ func TestNestedPatternsParseInLinearTime(t *testing.T) {
 		// otherErr allows the deep input to fail for another reason.
 		otherErr bool
 		// shell nests patterns through shell parts. These are also parsed
-		// past MaxPatternNestingDepth, where they must fail on it.
+		// at MaxNestingDepth, where they must fail on
+		// MaxPatternNestingDepth.
 		shell bool
 	}{
 		{name: "conditional extglob", groups: true, ok: 500, src: func(n int) string { return "[[ x == " + extGlob(n) + " ]]" }},
@@ -87,7 +88,7 @@ func TestNestedPatternsParseInLinearTime(t *testing.T) {
 				depths = append(depths, 2*MaxNestingDepth)
 			}
 			if tc.shell {
-				depths = append(depths, 4*MaxPatternNestingDepth)
+				depths = append(depths, MaxNestingDepth)
 			}
 			for _, n := range depths {
 				src := tc.src(n) + "\n"
@@ -118,7 +119,8 @@ func TestNestedPatternsParseInLinearTime(t *testing.T) {
 // Each shell part in a pattern is re-parsed by a sub-parser that reads the
 // text of every level inside it, so patterns nested through shell parts took
 // time quadratic in their depth: minutes for case statements at
-// MaxNestingDepth. Their depth is capped at MaxPatternNestingDepth.
+// MaxNestingDepth. Their depth is capped at MaxPatternNestingDepth, and
+// deeper input fails quickly.
 func TestPatternShellNestingIsCapped(t *testing.T) {
 	t.Parallel()
 	shapes := []string{
@@ -139,8 +141,9 @@ func TestPatternShellNestingIsCapped(t *testing.T) {
 	for _, shape := range shapes {
 		t.Run(shape, func(t *testing.T) {
 			t.Parallel()
-			for _, n := range []int{MaxPatternNestingDepth + 1, 4 * MaxPatternNestingDepth} {
+			for _, n := range []int{MaxPatternNestingDepth + 1, MaxNestingDepth} {
 				src := nestCaseInCmdSubst(n, shape) + "\n"
+				start := time.Now()
 				done := make(chan error, 1)
 				go func() {
 					_, err := NewParser().Parse(strings.NewReader(src), "")
@@ -149,35 +152,15 @@ func TestPatternShellNestingIsCapped(t *testing.T) {
 				select {
 				case err := <-done:
 					requirePatternNestingError(t, err)
+					// Generous for slow CI; these took over a minute.
+					if d := time.Since(start); d > 5*time.Second {
+						t.Errorf("depth %d: Parse took %v", n, d)
+					}
 				case <-time.After(30 * time.Second):
 					t.Fatalf("depth %d: Parse did not finish", n)
 				}
 			}
 		})
-	}
-}
-
-// Past the cap, the levels outside it still read the text of every level
-// inside, so input at MaxNestingDepth costs MaxPatternNestingDepth times its
-// length instead of its depth times its length. Not parallel, so that other
-// tests do not skew the time.
-func TestPatternShellNestingFailsFastAtNestingLimit(t *testing.T) {
-	for _, shape := range []string{
-		// Took minutes before the cap.
-		"case x in $(X) ) ;; esac",
-		// Each level is two nesting levels, so this reaches
-		// MaxNestingDepth at half the depth.
-		"[[ x == $(X) ]]",
-	} {
-		src := nestCaseInCmdSubst(MaxNestingDepth, shape) + "\n"
-		start := time.Now()
-		_, err := NewParser().Parse(strings.NewReader(src), "")
-		requirePatternNestingError(t, err)
-		// Well under a second without the race detector; generous for
-		// slow CI runners.
-		if d := time.Since(start); d > 30*time.Second {
-			t.Errorf("%q: Parse took %v", shape, d)
-		}
 	}
 }
 
