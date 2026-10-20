@@ -5,6 +5,7 @@ package syntax
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -720,6 +721,19 @@ type Parser struct {
 	// marks.
 	rawParts     *rawPartCache
 	ownsRawParts bool
+
+	// inputCut reports that this parser scans text that may be cut off at
+	// offset cutEnd before the input ends, to find out how much more it
+	// needs; anything that runs into the cut gives up rather than parse
+	// the rest. rawSrc is the input of a sub-parser started by
+	// parseRawWordPart.
+	inputCut bool
+	cutEnd   uint
+	rawSrc   *rawPartReader
+
+	// keepTokenStart makes fill keep the current token in the buffer, so
+	// that a case pattern can be scanned from its first token on.
+	keepTokenStart bool
 
 	pendingHeredocWarningPos    Pos
 	pendingHeredocWarningWanted string
@@ -4786,6 +4800,10 @@ func (r rawPatternParser) scanShellPart(raw string, base Pos, i int, seen *scanS
 	seen.upTo(i + e.read)
 	if e.sawEOF {
 		seen.sawEnd()
+		if r.owner != nil && r.owner.endsAtCut(base, len(raw)) {
+			// The text may go on; scanning the rest is no use.
+			return len(raw) - i, true
+		}
 	}
 	if !e.ok {
 		return 0, false
@@ -4822,9 +4840,10 @@ func rawWordPart(raw string, base Pos, lang LangVariant, owner *Parser) *rawPart
 	if owner == nil {
 		return parseRawWordPartFresh(raw, base, lang, nil, nil)
 	}
-	if owner.nestingFailed {
-		// Retrying would only hit the limit again: callers treat a failed
-		// part as literal text and keep scanning into the same nesting.
+	if owner.nestingFailed || owner.err == errInputCut {
+		// Retrying would only hit the limit or the cut again: callers
+		// treat a failed part as literal text and keep scanning into the
+		// same nesting.
 		return &rawPartEntry{read: len(raw), sawEOF: true}
 	}
 	if owner.rawParts == nil {
@@ -4836,6 +4855,14 @@ func rawWordPart(raw string, base Pos, lang LangVariant, owner *Parser) *rawPart
 		return e
 	}
 	e := parseRawWordPartFresh(raw, base, lang, owner, cache)
+	if e.sawEOF && owner.endsAtCut(base, len(raw)) {
+		// The part may have given up at the cut, and its owner's result
+		// depends on that: neither may be reused once the input goes on.
+		if owner.rawSrc != nil {
+			owner.rawSrc.sawEOF = true
+		}
+		return e
+	}
 	cache.store(raw, base, lang, e)
 	return e
 }
@@ -4865,8 +4892,12 @@ func parseRawWordPartFresh(raw string, base Pos, lang LangVariant, owner *Parser
 	sub.rawParts = cache
 	var file File
 	sub.f = &file
-	reader := rawPartReader{s: raw}
+	reader := rawPartReader{s: raw, offs: base.Offset(), cut: owner != nil && owner.endsAtCut(base, len(raw))}
 	sub.src = &reader
+	sub.rawSrc = &reader
+	if reader.cut {
+		sub.inputCut, sub.cutEnd = true, owner.cutEnd
+	}
 	sub.offs = int64(base.Offset())
 	sub.line = int64(base.Line())
 	sub.col = int64(base.Col())
@@ -4877,7 +4908,7 @@ func parseRawWordPartFresh(raw string, base Pos, lang LangVariant, owner *Parser
 		owner.absorbSubParserNesting(sub)
 	}
 	e := &rawPartEntry{
-		read:          reader.i,
+		read:          max(reader.i, reader.ahead),
 		sawEOF:        reader.sawEOF,
 		base:          sub.nestBase,
 		nestPeak:      sub.nestPeak,
@@ -7535,15 +7566,24 @@ func (p *Parser) casePatternUsesOptionalOpener() bool {
 	if p.tok != leftParen {
 		return false
 	}
-	tail := p.sourceFromPos(p.pos)
-	if tail == "" || tail[0] != '(' {
+	var groupEnd, end int
+	var grouped bool
+	tail := p.patternSourceAhead(p.pos, func(tail string) bool {
+		if tail == "" || tail[0] != '(' {
+			return false
+		}
+		var seen scanSeen
+		groupEnd, grouped, _ = p.newRawPatternParser().skipGroup(tail, p.pos, 0, false, &seen)
+		if !grouped {
+			return seen.end
+		}
+		var sawEnd bool
+		_, end, sawEnd = scanPatternText(tail, p.pos, patternScanCase, p.lang, p.parseExtGlob, p)
+		return sawEnd || end >= len(tail)
+	})
+	if tail == "" || tail[0] != '(' || !grouped {
 		return true
 	}
-	groupEnd, grouped := p.newRawPatternParser().skipPatternGroup(tail, p.pos, 0)
-	if !grouped {
-		return true
-	}
-	_, end := scanPatternText(tail, p.pos, patternScanCase, p.lang, p.parseExtGlob, p)
 	if !p.readEOF && end == len(tail) {
 		return true
 	}
@@ -7575,7 +7615,11 @@ func patternTextBoundary(raw string, i int, mode patternScanMode, hardParenDepth
 	}
 }
 
-func scanPatternText(raw string, base Pos, mode patternScanMode, lang LangVariant, parseExtGlob bool, owner *Parser) (*scannedRawPattern, int) {
+// scanPatternText finds where the pattern at the start of raw ends. sawEnd
+// reports that a shell part or bracket expression in it ran into the end of
+// raw, so that more text could change where the pattern ends even when that
+// is before the end of raw.
+func scanPatternText(raw string, base Pos, mode patternScanMode, lang LangVariant, parseExtGlob bool, owner *Parser) (scanned *scannedRawPattern, end int, sawEnd bool) {
 	start := 0
 	for start < len(raw) {
 		switch raw[start] {
@@ -7591,15 +7635,16 @@ func scanPatternText(raw string, base Pos, mode patternScanMode, lang LangVarian
 		}
 	}
 scan:
-	scanned := &scannedRawPattern{start: advancePosBytes(base, []byte(raw[:start]))}
+	scanned = &scannedRawPattern{start: advancePosBytes(base, []byte(raw[:start]))}
 	parenStack := make([]byte, 0, 8)
 	extglobDepth := 0
 	hardParenDepth := 0
 	softParenDepth := 0
 	rawParser := rawPatternParser{lang: lang, allowExtGlob: parseExtGlob, owner: owner}
+	var seen scanSeen
 	for i := start; ; {
 		if patternTextBoundary(raw, i, mode, hardParenDepth, softParenDepth) {
-			return scanned, i
+			return scanned, i, seen.end
 		}
 		switch raw[i] {
 		case '\\':
@@ -7610,7 +7655,7 @@ scan:
 			}
 		case '<', '>':
 			if i+1 < len(raw) && raw[i+1] == '(' {
-				if _, consumed, ok := rawParser.parseShellPart(raw[i:], posAddCol(base, i)); ok {
+				if consumed, ok := rawParser.scanShellPart(raw, base, i, &seen); ok {
 					i += consumed
 					continue
 				}
@@ -7652,11 +7697,11 @@ scan:
 				i++
 				continue
 			}
-			return scanned, i
+			return scanned, i, seen.end
 		case '[':
-			i = patternCharClassEnd(raw, i)
+			i = seen.charClassEnd(raw, i)
 		case '\'', '"', '`', '$':
-			if _, consumed, ok := rawParser.parseShellPart(raw[i:], posAddCol(base, i)); ok {
+			if consumed, ok := rawParser.scanShellPart(raw, base, i, &seen); ok {
 				i += consumed
 				continue
 			}
@@ -7667,17 +7712,211 @@ scan:
 	}
 }
 
-func (p *Parser) scanRawPatternSource(start Pos, mode patternScanMode) (*scannedRawPattern, bool) {
+// patternSourceAhead returns the source from start on, for scan to find
+// where the pattern there ends. The returned text may be a view of the read
+// buffer, valid only until the lexer moves on.
+//
+// The read buffer only holds bufSize bytes, and a pattern can run past it.
+// A sub-parser reads a string, so it scans the rest of that at once. Other
+// input is read ahead while scan reports that it ran into the end of the
+// text, doubling the text each time, and scan is called again; until the
+// input ends, such scans give up as soon as they run into the end of the
+// text (see [Parser.inputCut]). The bytes read ahead are handed back to the
+// input for the lexer, so that only what the pattern needs is read early.
+func (p *Parser) patternSourceAhead(start Pos, scan func(raw string) (needMore bool)) string {
 	raw := p.sourceBytesFromPos(start)
-	scanned, end := scanPatternText(bytesToStringView(raw), start, mode, p.lang, p.parseExtGlob, p)
-	if mode == patternScanCase && !p.readEOF && end == len(raw) {
+	if raw == nil {
+		// start is no longer buffered; reading ahead would scan the
+		// wrong text.
+		scan("")
+		return ""
+	}
+	if src, r := p.rawSourceFrom(start, raw); r != nil {
+		if scan(src) {
+			// The scan depends on the input ending here.
+			r.sawEOF = true
+			if r.cut {
+				p.errPass(errInputCut)
+			}
+		}
+		return src
+	}
+	wasCut, wasCutEnd := p.inputCut, p.cutEnd
+	defer func() { p.inputCut, p.cutEnd = wasCut, wasCutEnd }()
+	if replay := p.sourceReplay; replay != nil {
+		// The replay buffer keeps everything read so far, so it can grow in
+		// place, and the lexer reads on from it.
+		for {
+			if !wasCut {
+				p.cutAt(start, len(raw), !replay.readEOF && replay.readErr == nil)
+			}
+			if !scan(bytesToStringView(raw)) || !p.inputCut || wasCut {
+				return bytesToStringView(raw)
+			}
+			had := len(raw)
+			for want := had + max(had, bufSize); len(raw) < want; {
+				if n, _ := replay.grow(); n == 0 {
+					break
+				}
+				raw = p.sourceBytesFromPos(start)
+			}
+		}
+	}
+	if p.sourceBs != nil || p.src == nil || p.readEOF || p.readErr != nil || p.r == utf8.RuneSelf || interactiveReader(p.src) {
+		scan(bytesToStringView(raw))
+		return bytesToStringView(raw)
+	}
+	if wasCut {
+		scan(bytesToStringView(raw))
+		return bytesToStringView(raw)
+	}
+	p.cutAt(start, len(raw), true)
+	if !scan(bytesToStringView(raw)) {
+		return bytesToStringView(raw)
+	}
+	buf := make([]byte, len(raw), 2*len(raw)+bufSize)
+	copy(buf, raw)
+	window := len(raw)
+	var readErr error
+	for {
+		buf = slices.Grow(buf, max(len(buf), bufSize))
+		for len(buf) < cap(buf) && readErr == nil {
+			var n int
+			n, readErr = p.src.Read(buf[len(buf):cap(buf)])
+			buf = buf[:len(buf)+n]
+		}
+		p.cutAt(start, len(buf), readErr == nil)
+		if !scan(bytesToStringView(buf)) || readErr != nil {
+			break
+		}
+	}
+	p.unreadSource(buf[window:], readErr)
+	return bytesToStringView(buf)
+}
+
+// unreadSource hands bytes read ahead back to the input, followed by how it
+// ended, if readErr says it did.
+func (p *Parser) unreadSource(ahead []byte, readErr error) {
+	var tail io.Reader
+	switch readErr {
+	case nil:
+		tail = p.src
+		if pr, ok := tail.(*prependReader); ok && (pr.prefix == nil || pr.prefix.Len() == 0) {
+			// Don't stack a reader for each read ahead.
+			tail = pr.tail
+		}
+	case io.EOF:
+		tail = bytes.NewReader(nil)
+	default:
+		tail = errReader{readErr}
+	}
+	p.src = newPrependReader(ahead, tail)
+}
+
+// cutAt sets whether the n bytes of text from start on may be cut off.
+func (p *Parser) cutAt(start Pos, n int, cut bool) {
+	p.inputCut, p.cutEnd = cut, start.Offset()+uint(n)
+}
+
+// endsAtCut reports whether the n bytes of text from start on run into
+// where the text this parser scans may be cut off.
+func (p *Parser) endsAtCut(start Pos, n int) bool {
+	return p.inputCut && start.Offset()+uint(n) == p.cutEnd
+}
+
+// errInputCut stops a sub-parser that ran into the end of text that may be
+// cut off; see [Parser.inputCut].
+var errInputCut = errors.New("syntax: input cut off")
+
+// rawSourceFrom returns the rest of a sub-parser's input from start on, given
+// window, the buffered source from there, along with the reader of that
+// input. Its reader is nil if the parser is not a sub-parser reading on from
+// window. The rest is read at once, as the input is a string anyway: reading
+// ahead in doubling steps would scan the shell parts of each pattern once per
+// step, each step at every level of nesting.
+func (p *Parser) rawSourceFrom(start Pos, window []byte) (string, *rawPartReader) {
+	r := p.rawSrc
+	if r == nil || p.sourceReplay != nil || p.sourceBs != nil || p.readErr != nil {
+		return "", nil
+	}
+	src := p.src
+	handedBack := false
+	for {
+		pr, ok := src.(*prependReader)
+		if !ok {
+			break
+		}
+		handedBack = handedBack || pr.prefix != nil && pr.prefix.Len() > 0
+		src = pr.tail
+	}
+	if src != r {
+		return "", nil
+	}
+	if handedBack {
+		// Bytes were handed back to the input, so read the rest.
+		rest := make([]byte, len(window), len(window)+p.src.(lenReader).Len())
+		copy(rest, window)
+		for len(rest) < cap(rest) {
+			n, err := p.src.Read(rest[len(rest):cap(rest)])
+			rest = rest[:len(rest)+n]
+			if err != nil {
+				break
+			}
+		}
+		p.unreadSource(rest[len(window):], nil)
+		// The scan may look at any of it.
+		r.ahead = len(r.s)
+		return bytesToStringView(rest), r
+	}
+	// The buffer holds what the string does there, unless the parser
+	// switched input.
+	from := int(start.Offset()) - int(r.offs)
+	if from < 0 || from+len(window) != r.i || r.s[from:r.i] != bytesToStringView(window) {
+		return "", nil
+	}
+	// The scan may look at any of the rest; the cache entry for this
+	// sub-parse must only be reused where all of it is the same.
+	r.ahead = len(r.s)
+	return r.s[from:], r
+}
+
+// interactiveReader reports whether r reads from an interactive session,
+// where reading ahead could block on input the user has not typed yet.
+func interactiveReader(r io.Reader) bool {
+	for {
+		switch rd := r.(type) {
+		case *wrappedReader:
+			return true
+		case *prependReader:
+			r = rd.tail
+		default:
+			return false
+		}
+	}
+}
+
+// errReader is a reader that fails with err.
+type errReader struct{ err error }
+
+func (r errReader) Read([]byte) (int, error) { return 0, r.err }
+
+func (p *Parser) scanRawPatternSource(start Pos, mode patternScanMode) (*scannedRawPattern, bool) {
+	var scanned *scannedRawPattern
+	var end int
+	raw := p.patternSourceAhead(start, func(raw string) bool {
+		var sawEnd bool
+		scanned, end, sawEnd = scanPatternText(raw, start, mode, p.lang, p.parseExtGlob, p)
+		return sawEnd || end >= len(raw)
+	})
+	if scanned == nil || mode == patternScanCase && !p.readEOF && end == len(raw) {
 		return nil, false
 	}
 	rawStart := int(scanned.start.Offset() - start.Offset())
 	if rawStart < 0 || rawStart > end || end > len(raw) {
 		return nil, false
 	}
-	scanned.raw = string(raw[rawStart:end])
+	// raw may be a view of the read buffer.
+	scanned.raw = strings.Clone(raw[rawStart:end])
 	boundaryPos := posAddCol(start, end)
 	for p.tok != _EOF && p.pos.Offset() < boundaryPos.Offset() {
 		before := p.cursorSnapshot()
@@ -7714,6 +7953,8 @@ func (p *Parser) caseClause(s *Stmt) {
 		}
 	}
 	end := rsrvEsac
+	oldKeep := p.keepTokenStart
+	p.keepTokenStart = true
 	p.got(_Newl)
 	if pos, ok := p.gotRsrv(rsrvLeftBrace); ok {
 		cc.In = pos
@@ -7724,6 +7965,7 @@ func (p *Parser) caseClause(s *Stmt) {
 		cc.In = p.followRsrv(cc.Case, "case x", rsrvIn)
 	}
 	cc.Items = p.caseItems(end)
+	p.keepTokenStart = oldKeep
 	cc.Last, p.accComs = p.accComs, nil
 	cc.Esac = p.stmtEnd(cc, "case", end)
 	s.Cmd = cc
@@ -7811,6 +8053,7 @@ func (p *Parser) caseItems(stop reservedWord) (items []*CaseItem) {
 			}
 		}
 		old := p.preNested(switchCase)
+		p.keepTokenStart = false
 		p.next()
 		ci.Stmts, ci.Last = p.stmtList(stop)
 		p.postNested(old)
@@ -7825,6 +8068,7 @@ func (p *Parser) caseItems(stop reservedWord) (items []*CaseItem) {
 		p.accComs = nil
 		ci.OpPos = p.pos
 		ci.Op = CaseOperator(p.tok)
+		p.keepTokenStart = true
 		p.next()
 		p.got(_Newl)
 

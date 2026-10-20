@@ -112,6 +112,15 @@ type rawPartReader struct {
 	s      string
 	i      int
 	sawEOF bool
+
+	// offs is the source offset of s. ahead is how much of s the parser
+	// looked at without reading it; see [Parser.rawSourceFrom].
+	offs  uint
+	ahead int
+
+	// cut reports that s may be cut off before the input ends; see
+	// [Parser.inputCut].
+	cut bool
 }
 
 func (r *rawPartReader) Read(b []byte) (int, error) {

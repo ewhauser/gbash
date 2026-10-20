@@ -178,7 +178,9 @@ decodeRune:
 
 // fill reads more bytes from the input src into readBuf.
 // Any bytes that had not yet been used at the end of the buffer
-// are slid into the beginning of the buffer.
+// are slid into the beginning of the buffer, as is the current token
+// when keepTokenStart is set; a buffer that cannot hold it as well as
+// room to read into is replaced by a larger one.
 // The number of read bytes is returned, which is at least one
 // unless a read error occurred, such as [io.EOF].
 func (p *Parser) fill() (n int) {
@@ -187,14 +189,24 @@ func (p *Parser) fill() (n int) {
 		// If we decided to stop for any reason, do not bother reading either.
 		return 0
 	}
-	p.offs += int64(p.bsp)
-	left := len(p.bs) - int(p.bsp)
+	keep := int(p.bsp)
+	if p.keepTokenStart {
+		if i := int(int64(p.pos.Offset()) - p.offs); i >= 0 && i < keep {
+			keep = i
+		}
+	}
+	p.offs += int64(keep)
+	left := len(p.bs) - keep
 	scratch := p.ensureScratch()
-	copy(scratch.readBuf[:left], p.bs[p.bsp:])
+	buf := scratch.readBuf[:]
+	if left > bufSize/2 {
+		buf = make([]byte, 2*left+bufSize)
+	}
+	copy(buf[:left], p.bs[keep:])
 readAgain:
 	n, err := 0, p.readErr
 	if err == nil {
-		n, err = p.src.Read(scratch.readBuf[left:])
+		n, err = p.src.Read(buf[left:])
 		p.readErr = err
 		if err == io.EOF {
 			p.readEOF = true
@@ -209,14 +221,14 @@ readAgain:
 			p.err = err
 		}
 		if left > 0 {
-			p.bs = scratch.readBuf[:left]
+			p.bs = buf[:left]
 		} else {
 			p.bs = nil
 		}
 	} else {
-		p.bs = scratch.readBuf[:left+n]
+		p.bs = buf[:left+n]
 	}
-	p.bsp = 0
+	p.bsp -= uint(keep)
 	return n
 }
 

@@ -31,8 +31,6 @@ func TestNestedPatternsParseInLinearTime(t *testing.T) {
 		// parsed at twice MaxNestingDepth, where they must fail.
 		ok     int
 		groups bool
-		// otherErr allows the deep input to fail for another reason.
-		otherErr bool
 	}{
 		{name: "conditional extglob", groups: true, ok: 500, src: func(n int) string { return "[[ x == " + extGlob(n) + " ]]" }},
 		{name: "case extglob", groups: true, ok: 500, src: func(n int) string { return "case x in " + extGlob(n) + ") ;; esac" }},
@@ -43,16 +41,12 @@ func TestNestedPatternsParseInLinearTime(t *testing.T) {
 		{name: "bare groups", groups: true, ok: 300, opts: zsh, src: func(n int) string {
 			return "[[ x == " + rep("(a|", n) + "x" + rep(")", n) + " ]]"
 		}},
-		// Past 1KiB this case pattern crosses the parser's 1KiB read
-		// buffer, which it cannot parse yet.
-		{name: "case bare groups", groups: true, otherErr: true, ok: 200, opts: zsh, src: func(n int) string {
+		{name: "case bare groups", groups: true, ok: 300, opts: zsh, src: func(n int) string {
 			return "case x in y" + rep("(a|", n) + "x" + rep(")", n) + ") ;; esac"
 		}},
 		// Shell parts are parsed once each, but every level still copies
 		// and re-reads the text of the levels inside it, so these are
-		// quadratic in their depth and only checked shallow. Case
-		// statements stay within 1KiB: a case pattern that crosses the
-		// parser's 1KiB read buffer can fail to parse.
+		// quadratic in their depth and only checked shallow.
 		{name: "case in command substitution", ok: 30, src: func(n int) string {
 			return nestCaseInCmdSubst(n, "case x in $(X) ) ;; esac")
 		}},
@@ -91,7 +85,7 @@ func TestNestedPatternsParseInLinearTime(t *testing.T) {
 					if n == tc.ok && err != nil {
 						t.Errorf("depth %d: Parse error = %v, want nil", n, err)
 					}
-					if n > MaxNestingDepth && !tc.otherErr {
+					if n > MaxNestingDepth {
 						requireNestingError(t, err, MaxNestingDepth)
 					}
 				case <-time.After(10 * time.Second):
