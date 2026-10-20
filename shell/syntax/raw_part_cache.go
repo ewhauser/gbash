@@ -45,9 +45,13 @@ type rawPartEntry struct {
 	// The sub-parser's nesting state, so that a hit leaves its owner as a
 	// fresh parse would. A parse does not otherwise depend on the depth it
 	// starts at, so an entry serves any base that cannot reach the limit.
+	// The same goes for patternBase and patternHigh, the owner's
+	// patternDepth and the deepest sub-parser's, and MaxPatternNestingDepth.
 	base          int
 	nestPeak      int
 	nestHigh      int
+	patternBase   int
+	patternHigh   int
 	chainLinks    int
 	nestingFailed bool
 	err           error
@@ -61,18 +65,20 @@ func newRawPartCache() *rawPartCache {
 }
 
 // lookup returns an entry that parsing raw at base would reproduce exactly,
-// for an owner whose nesting depth is depth, or nil.
-func (c *rawPartCache) lookup(raw string, base Pos, lang LangVariant, depth int) *rawPartEntry {
+// for owner at its current nesting depths, or nil.
+func (c *rawPartCache) lookup(raw string, base Pos, lang LangVariant, owner *Parser) *rawPartEntry {
+	depth, patternDepth := owner.nestDepth, owner.patternDepth
 	for _, e := range c.entries[rawPartKey{pos: base, lang: lang}] {
 		if e.sawEOF && len(raw) != e.read || len(raw) < e.read {
 			continue
 		}
 		if e.nestingFailed {
 			// Keep the error at the position a fresh parse reports.
-			if depth != e.base {
+			if depth != e.base || patternDepth != e.patternBase {
 				continue
 			}
-		} else if depth+e.nestHigh-e.base > MaxNestingDepth {
+		} else if depth+e.nestHigh-e.base > MaxNestingDepth ||
+			patternDepth+e.patternHigh-e.patternBase > MaxPatternNestingDepth {
 			continue
 		}
 		if maphash.String(c.seed, raw[:e.read]) == e.readHash {
@@ -99,6 +105,7 @@ func (e *rawPartEntry) replay(owner *Parser) {
 	}
 	owner.nestPeak = max(owner.nestPeak, shift(e.nestPeak))
 	owner.nestHigh = max(owner.nestHigh, shift(e.nestHigh))
+	owner.patternHigh = max(owner.patternHigh, e.patternHigh-e.patternBase+owner.patternDepth)
 	owner.chainLinks += e.chainLinks
 	if e.nestingFailed {
 		owner.errPass(e.err)
