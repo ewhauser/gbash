@@ -726,6 +726,12 @@ type Parser struct {
 	rawParts     *rawPartCache
 	ownsRawParts bool
 
+	// hdocCache memoizes repeated heredoc work; see [heredocCache]. Probes
+	// and heredoc body sub-parsers share the cache of the parser that
+	// created it, which ownsHdocCache marks.
+	hdocCache     *heredocCache
+	ownsHdocCache bool
+
 	// inputCut reports that this parser scans text that may be cut off at
 	// offset cutEnd before the input ends, to find out how much more it
 	// needs; anything that runs into the cut gives up rather than parse
@@ -1078,6 +1084,10 @@ func (p *Parser) reset() {
 	p.patternHigh = p.patternDepth
 	p.nestingFailed = false
 	p.rawParts, p.ownsRawParts = nil, false
+	if p.ownsHdocCache {
+		// A heredoc body sub-parser keeps the cache its owner handed it.
+		p.hdocCache, p.ownsHdocCache = nil, false
+	}
 	if p.aliasActive != nil {
 		clear(p.aliasActive)
 	}
@@ -1440,7 +1450,7 @@ func (p *Parser) updateHeredocStop(stop *heredocStop, rawPos, end Pos, rawLine, 
 	matched := bytes.Equal(normalized, stop.word)
 	var candidate *HeredocCloseCandidate
 	if prefix || heredocCloseCandidateMayMatch(rawLine, stop.word) {
-		candidate = newHeredocCloseCandidate(rawPos, rawLine, stop.word, p.lang, p.parseExtGlob, p.legacyBashCompat)
+		candidate = p.heredocCloseCandidate(rawPos, rawLine, stop.word)
 	}
 	if prefix || candidate != nil {
 		close := heredocCloseCapture{
@@ -1590,18 +1600,7 @@ func (p *Parser) doHeredocs() {
 			break
 		}
 		if r.HdocDelim != nil && r.HdocDelim.BodyExpands && raw != nil {
-			bodyOpts := []ParserOption{Variant(p.lang), KeepComments(p.keepComments)}
-			if p.aliasResolver != nil {
-				bodyOpts = append(bodyOpts, ExpandAliases(p.aliasResolver))
-			}
-			bodyParser := NewParser(bodyOpts...)
-			if p.parenAmbiguityDisabled {
-				bodyParser.parenAmbiguityDisabled = true
-				bodyParser.parenAmbiguityProbeDepth = p.parenAmbiguityProbeDepth
-			}
-			p.subParserNesting(bodyParser)
-			r.Hdoc, p.err = bodyParser.document(strings.NewReader(raw.Lit()), bodyStart)
-			p.absorbSubParserNesting(bodyParser)
+			r.Hdoc = p.heredocBody(raw.Lit(), bodyStart)
 			if p.err == nil && r.Hdoc != nil {
 				setWordEnd(r.Hdoc, raw.End())
 			}
@@ -1632,6 +1631,67 @@ func (p *Parser) doHeredocs() {
 		p.hdocStops = p.hdocStops[:len(p.hdocStops)-1]
 	}
 	p.quote = old
+}
+
+// heredocBody parses the body src of an expanding heredoc, which starts at
+// start, with a sub-parser. Probes reuse earlier parses; see [heredocCache].
+func (p *Parser) heredocBody(src string, start Pos) *Word {
+	key := hdocBodyKey{
+		src:          src,
+		start:        start,
+		lang:         p.lang,
+		keepComments: p.keepComments,
+	}
+	if p.parenAmbiguityDisabled && p.hdocCache != nil {
+		if e := p.hdocCache.lookupBody(key, p); e != nil {
+			p.stopAtSubParserErr(e.err)
+			e.replay(p)
+			return e.word
+		}
+	}
+	bodyOpts := []ParserOption{Variant(p.lang), KeepComments(p.keepComments)}
+	if p.aliasResolver != nil {
+		bodyOpts = append(bodyOpts, ExpandAliases(p.aliasResolver))
+	}
+	bodyParser := NewParser(bodyOpts...)
+	if p.parenAmbiguityDisabled {
+		bodyParser.parenAmbiguityDisabled = true
+		bodyParser.parenAmbiguityProbeDepth = p.parenAmbiguityProbeDepth
+	}
+	bodyParser.hdocCache = p.sharedHeredocCache()
+	p.subParserNesting(bodyParser)
+	word, err := bodyParser.document(strings.NewReader(src), start)
+	p.stopAtSubParserErr(err)
+	p.absorbSubParserNesting(bodyParser)
+	if p.parenAmbiguityDisabled {
+		p.hdocCache.storeBody(key, &hdocBodyEntry{
+			word:          word,
+			err:           bodyParser.err,
+			base:          bodyParser.nestBase,
+			nestPeak:      bodyParser.nestPeak,
+			nestHigh:      bodyParser.nestHigh,
+			patternBase:   p.patternDepth,
+			patternHigh:   bodyParser.patternHigh,
+			chainLinks:    bodyParser.chainLinks,
+			nestingFailed: bodyParser.nestingFailed,
+		})
+	}
+	return word
+}
+
+// stopAtSubParserErr records err, the error of a sub-parser such as a
+// heredoc body's, as p's error and stops p's lexer as errPass does. Leaving
+// the current token in place let callers that loop until the next token, such
+// as callExpr, spin forever on a token they cannot consume.
+func (p *Parser) stopAtSubParserErr(err error) {
+	if err == nil {
+		return
+	}
+	p.err = err
+	p.bsp = uint(len(p.bs)) + 1
+	p.r = utf8.RuneSelf
+	p.w = 1
+	p.tok = _EOF
 }
 
 func heredocNeedsEOFWarning(delim *HeredocDelim) bool {
@@ -3475,6 +3535,7 @@ func (p *Parser) parenAmbiguityClone() *Parser {
 	clone.aliasActive = copyAliasActive(p.aliasActive)
 	clone.tokAliasChain = nil
 	clone.parenAmbiguityDisabled = true
+	clone.hdocCache, clone.ownsHdocCache = p.sharedHeredocCache(), false
 	return &clone
 }
 

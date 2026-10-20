@@ -1,0 +1,5 @@
+go test fuzz v1
+[]byte("d07&0$0101")
+byte('E')
+bool(false)
+byte('Z')

@@ -107,6 +107,9 @@ func (p *Parser) checkTreeDepth(node Node) {
 		// result, so stop keeping them alive.
 		p.rawParts, p.ownsRawParts = nil, false
 	}
+	if p.ownsHdocCache {
+		p.hdocCache, p.ownsHdocCache = nil, false
+	}
 	seen := p.nestPeak + p.chainLinks
 	p.nestPeak, p.chainLinks = 0, 0
 	if p.err != nil || seen < treeCheckThreshold || isNilNode(node) {
