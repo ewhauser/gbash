@@ -1,6 +1,6 @@
 {
   "name": "@ewhauser/gbash-wasm",
-  "version": "0.0.39",
+  "version": "0.0.40",
   "description": "JavaScript-hosted WebAssembly bridge for gbash",
   "type": "module",
   "files": [

@@ -7,9 +7,10 @@ import (
 
 // MaxNestingDepth bounds how deeply the parser recurses into nested
 // constructs such as subshells, blocks, command substitutions, parameter
-// expansions, arithmetic parentheses and unary operators, and [[ ]]
-// negations. Deeper input fails with a [ParseError] instead of overflowing
-// the goroutine stack, which Go cannot recover from.
+// expansions, arithmetic parentheses and unary operators, [[ ]] negations,
+// and groups in patterns such as @(...). Deeper input fails with a
+// [ParseError] instead of overflowing the goroutine stack, which Go cannot
+// recover from.
 const MaxNestingDepth = 16000
 
 // MaxTreeDepth bounds the depth of a parsed syntax tree. Lists such as
@@ -27,13 +28,19 @@ const treeCheckThreshold = 256
 // to restore with leaveNest, and false once the input nests deeper than
 // MaxNestingDepth, after recording a parse error that stops parsing.
 func (p *Parser) enterNest() (int, bool) {
+	return p.enterNestAt(p.pos)
+}
+
+// enterNestAt is like enterNest, reporting an error at pos.
+func (p *Parser) enterNestAt(pos Pos) (int, bool) {
 	d := p.nestDepth
 	if d >= MaxNestingDepth {
-		p.nestingErr(p.pos, MaxNestingDepth)
+		p.nestingErr(pos, MaxNestingDepth)
 		return d, false
 	}
 	p.nestDepth = d + 1
 	p.nestPeak = max(p.nestPeak, p.nestDepth)
+	p.nestHigh = max(p.nestHigh, p.nestDepth)
 	return d, true
 }
 
@@ -64,6 +71,7 @@ func (p *Parser) subParserNesting(sub *Parser) {
 // the sub-parser's input as literal text.
 func (p *Parser) absorbSubParserNesting(sub *Parser) {
 	p.nestPeak = max(p.nestPeak, sub.nestPeak)
+	p.nestHigh = max(p.nestHigh, sub.nestHigh)
 	p.chainLinks += sub.chainLinks
 	if sub.nestingFailed {
 		p.errPass(sub.err)
@@ -75,6 +83,11 @@ func (p *Parser) absorbSubParserNesting(sub *Parser) {
 // deeper than MaxTreeDepth. It only walks the tree when this parse saw
 // enough nesting or chained operators for that to be possible.
 func (p *Parser) checkTreeDepth(node Node) {
+	if p.ownsRawParts {
+		// No later scan re-parses the shell parts of a finished top-level
+		// result, so stop keeping them alive.
+		p.rawParts, p.ownsRawParts = nil, false
+	}
 	seen := p.nestPeak + p.chainLinks
 	p.nestPeak, p.chainLinks = 0, 0
 	if p.err != nil || seen < treeCheckThreshold || isNilNode(node) {
