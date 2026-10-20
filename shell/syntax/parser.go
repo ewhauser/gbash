@@ -713,6 +713,10 @@ type Parser struct {
 	// nestHigh is the deepest nesting seen since reset. Unlike nestPeak,
 	// checkTreeDepth does not clear it.
 	nestHigh int
+	// patternDepth is how many pattern shell parts, each re-parsed by its
+	// own sub-parser, enclose this parser; see [MaxPatternNestingDepth].
+	// patternHigh is the deepest patternDepth of any sub-parser since reset.
+	patternDepth, patternHigh int
 	// nestingFailed reports that err is a nesting-limit error.
 	nestingFailed bool
 
@@ -1071,6 +1075,7 @@ func (p *Parser) reset() {
 	p.parenAmbiguityProbeDepth = 0
 	p.nestDepth, p.nestPeak, p.chainLinks = p.nestBase, 0, 0
 	p.nestHigh = p.nestBase
+	p.patternHigh = p.patternDepth
 	p.nestingFailed = false
 	p.rawParts, p.ownsRawParts = nil, false
 	if p.aliasActive != nil {
@@ -4846,11 +4851,15 @@ func rawWordPart(raw string, base Pos, lang LangVariant, owner *Parser) *rawPart
 		// same nesting.
 		return &rawPartEntry{read: len(raw), sawEOF: true}
 	}
+	if owner.patternDepth >= MaxPatternNestingDepth {
+		owner.patternNestingErr(base)
+		return &rawPartEntry{read: len(raw), sawEOF: true}
+	}
 	if owner.rawParts == nil {
 		owner.rawParts, owner.ownsRawParts = newRawPartCache(), true
 	}
 	cache := owner.rawParts
-	if e := cache.lookup(raw, base, lang, owner.nestDepth); e != nil {
+	if e := cache.lookup(raw, base, lang, owner); e != nil {
 		e.replay(owner)
 		return e
 	}
@@ -4888,6 +4897,7 @@ func parseRawWordPartFresh(raw string, base Pos, lang LangVariant, owner *Parser
 	if owner != nil {
 		owner.subParserNesting(sub)
 	}
+	sub.patternDepth++
 	sub.reset()
 	sub.rawParts = cache
 	var file File
@@ -4913,6 +4923,8 @@ func parseRawWordPartFresh(raw string, base Pos, lang LangVariant, owner *Parser
 		base:          sub.nestBase,
 		nestPeak:      sub.nestPeak,
 		nestHigh:      sub.nestHigh,
+		patternBase:   sub.patternDepth - 1,
+		patternHigh:   sub.patternHigh,
 		chainLinks:    sub.chainLinks,
 		nestingFailed: sub.nestingFailed,
 		err:           sub.err,
