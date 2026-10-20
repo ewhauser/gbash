@@ -22,9 +22,18 @@ package syntax
 //     pattern nesting depth that cannot reach the limits, as probes reach
 //     the same body at many depths.
 //   - closes holds newHeredocCloseCandidate results. A hit returns a copy.
+//   - suffixes holds the probe parses of arithmetic tails salvaged as words,
+//     like bodies. Each level of "$( ((" salvages the tails of the levels
+//     below it once per probe, which made the parse quadratic in the depth.
 type heredocCache struct {
-	bodies map[hdocBodyKey][]*hdocBodyEntry
-	closes map[hdocCloseKey]*HeredocCloseCandidate
+	bodies   map[hdocBodyKey][]*hdocBodyEntry
+	closes   map[hdocCloseKey]*HeredocCloseCandidate
+	suffixes map[arithSuffixKey][]*hdocBodyEntry
+}
+
+type arithSuffixKey struct {
+	hdocBodyKey
+	stopAt string
 }
 
 type hdocBodyKey struct {
@@ -69,8 +78,30 @@ func (p *Parser) sharedHeredocCache() *heredocCache {
 // lookupBody returns an entry that parsing the body key holds would
 // reproduce for owner at its current nesting depths, or nil.
 func (c *heredocCache) lookupBody(key hdocBodyKey, owner *Parser) *hdocBodyEntry {
+	return lookupSubParse(c.bodies[key], owner)
+}
+
+// cachedArithSuffix returns the cached probe parse of the arithmetic tail key
+// holds that p may reuse, or nil. Only probes use the cache.
+func (p *Parser) cachedArithSuffix(key arithSuffixKey) *hdocBodyEntry {
+	if !p.parenAmbiguityDisabled || p.hdocCache == nil {
+		return nil
+	}
+	return lookupSubParse(p.hdocCache.suffixes[key], p)
+}
+
+func (c *heredocCache) storeArithSuffix(key arithSuffixKey, e *hdocBodyEntry) {
+	if c.suffixes == nil {
+		c.suffixes = make(map[arithSuffixKey][]*hdocBodyEntry)
+	}
+	c.suffixes[key] = append(c.suffixes[key], e)
+}
+
+// lookupSubParse returns the entry of entries that a fresh sub-parse would
+// reproduce for owner at its current nesting depths, or nil.
+func lookupSubParse(entries []*hdocBodyEntry, owner *Parser) *hdocBodyEntry {
 	depth, patternDepth := owner.nestDepth, owner.patternDepth
-	for _, e := range c.bodies[key] {
+	for _, e := range entries {
 		if e.nestingFailed {
 			// Keep the error at the position a fresh parse reports.
 			if depth == e.base && patternDepth == e.patternBase {

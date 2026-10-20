@@ -332,21 +332,54 @@ func (p *Parser) arithmWordSuffixEnd(compact bool) Pos {
 	}
 }
 
+// arithmSuffixWord parses src, an arithmetic tail salvaged as a word, with a
+// sub-parser. Probes reuse earlier parses of the same tail; see
+// [heredocCache].
 func (p *Parser) arithmSuffixWord(start, end Pos, src string) *Word {
-	doc := NewParser(Variant(p.lang), KeepComments(p.keepComments))
-	if p.parenAmbiguityDisabled {
-		doc.parenAmbiguityDisabled = true
-		doc.parenAmbiguityProbeDepth = p.parenAmbiguityProbeDepth
-	}
-	if len(p.stopAt) > 0 {
-		doc.stopAt = append([]byte(nil), p.stopAt...)
-	}
 	if src == "" {
 		return p.wordOne(p.rawLit(start, end, ""))
 	}
-	p.subParserNesting(doc)
-	word, err := doc.document(strings.NewReader(src), start)
-	p.absorbSubParserNesting(doc)
+	key := arithSuffixKey{
+		hdocBodyKey: hdocBodyKey{
+			src:          src,
+			start:        start,
+			lang:         p.lang,
+			keepComments: p.keepComments,
+		},
+		stopAt: string(p.stopAt),
+	}
+	var word *Word
+	var err error
+	if e := p.cachedArithSuffix(key); e != nil {
+		e.replay(p)
+		word, err = e.word, e.err
+	} else {
+		doc := NewParser(Variant(p.lang), KeepComments(p.keepComments))
+		if p.parenAmbiguityDisabled {
+			doc.parenAmbiguityDisabled = true
+			doc.parenAmbiguityProbeDepth = p.parenAmbiguityProbeDepth
+		}
+		if len(p.stopAt) > 0 {
+			doc.stopAt = append([]byte(nil), p.stopAt...)
+		}
+		doc.hdocCache = p.sharedHeredocCache()
+		p.subParserNesting(doc)
+		word, err = doc.document(strings.NewReader(src), start)
+		p.absorbSubParserNesting(doc)
+		if p.parenAmbiguityDisabled {
+			p.hdocCache.storeArithSuffix(key, &hdocBodyEntry{
+				word:          word,
+				err:           err,
+				base:          doc.nestBase,
+				nestPeak:      doc.nestPeak,
+				nestHigh:      doc.nestHigh,
+				patternBase:   p.patternDepth,
+				patternHigh:   doc.patternHigh,
+				chainLinks:    doc.chainLinks,
+				nestingFailed: doc.nestingFailed,
+			})
+		}
+	}
 	if err == nil && word != nil {
 		return word
 	}
