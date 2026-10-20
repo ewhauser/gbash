@@ -32,8 +32,6 @@ func TestNestedPatternsParseInLinearTime(t *testing.T) {
 		// parsed at twice MaxNestingDepth, where they must fail.
 		ok     int
 		groups bool
-		// otherErr allows the deep input to fail for another reason.
-		otherErr bool
 		// shell nests patterns through shell parts. These are also parsed
 		// past MaxPatternNestingDepth, where they must fail on it.
 		shell bool
@@ -47,16 +45,12 @@ func TestNestedPatternsParseInLinearTime(t *testing.T) {
 		{name: "bare groups", groups: true, ok: 300, opts: zsh, src: func(n int) string {
 			return "[[ x == " + rep("(a|", n) + "x" + rep(")", n) + " ]]"
 		}},
-		// Past 1KiB this case pattern crosses the parser's 1KiB read
-		// buffer, which it cannot parse yet.
-		{name: "case bare groups", groups: true, otherErr: true, ok: 200, opts: zsh, src: func(n int) string {
+		{name: "case bare groups", groups: true, ok: 300, opts: zsh, src: func(n int) string {
 			return "case x in y" + rep("(a|", n) + "x" + rep(")", n) + ") ;; esac"
 		}},
 		// Shell parts are parsed once each, but every level re-parses the
 		// text of the levels inside it, so their depth has its own, lower
-		// limit; see TestPatternShellNestingIsCapped. Case statements stay
-		// within 1KiB: a case pattern that crosses the parser's 1KiB read
-		// buffer can fail to parse.
+		// limit; see TestPatternShellNestingIsCapped.
 		{name: "case in command substitution", shell: true, ok: 30, src: func(n int) string {
 			return nestCaseInCmdSubst(n, "case x in $(X) ) ;; esac")
 		}},
@@ -101,7 +95,7 @@ func TestNestedPatternsParseInLinearTime(t *testing.T) {
 					if n == tc.ok && err != nil {
 						t.Errorf("depth %d: Parse error = %v, want nil", n, err)
 					}
-					if n > MaxNestingDepth && !tc.otherErr {
+					if n > MaxNestingDepth {
 						requireNestingError(t, err, MaxNestingDepth)
 					}
 					if tc.shell && n > MaxPatternNestingDepth {
