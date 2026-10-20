@@ -106,9 +106,9 @@ type AccessDeniedError struct {
 
 func (e *AccessDeniedError) Error() string {
 	if e.Reason == "" {
-		return fmt.Sprintf("network access denied: %s", e.URL)
+		return fmt.Sprintf("network access denied: %s", redactForError(e.URL))
 	}
-	return fmt.Sprintf("network access denied: %s: %s", e.Reason, e.URL)
+	return fmt.Sprintf("network access denied: %s: %s", e.Reason, redactForError(e.URL))
 }
 
 func (*AccessDeniedError) networkDenied() {}
@@ -128,7 +128,7 @@ type RedirectNotAllowedError struct {
 }
 
 func (e *RedirectNotAllowedError) Error() string {
-	return fmt.Sprintf("network redirect denied: %s", e.URL)
+	return fmt.Sprintf("network redirect denied: %s", redactForError(e.URL))
 }
 
 func (*RedirectNotAllowedError) networkDenied() {}
@@ -376,7 +376,7 @@ func (c *HTTPClient) Do(ctx context.Context, req *Request) (*Response, error) {
 		// Send exactly the normalized URL that passed the allowlist check.
 		httpReq.URL = target
 		for name, value := range req.Headers {
-			if !sameOrigin && isCredentialHeader(name) {
+			if !sameOrigin && (isCredentialHeader(name) || IsSensitiveName(name)) {
 				continue
 			}
 			if dropBodyHeaders && isBodyHeader(name) {
@@ -533,6 +533,9 @@ func removeDotSegments(escaped string) string {
 }
 
 func hasAmbiguousDotSegment(escaped string) bool {
+	if hasDoubleEncodedSeparator(escaped) {
+		return true
+	}
 	for segment := range strings.SplitSeq(escaped, "/") {
 		decoded, err := url.PathUnescape(segment)
 		if err != nil {
@@ -690,6 +693,32 @@ func urlOrigin(u *url.URL) string {
 		}
 	}
 	return scheme + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port)
+}
+
+// hasDoubleEncodedSeparator reports whether escaped contains "%25" followed
+// by an encoded ".", "/" or "\\", which a server that decodes twice would
+// turn into a dot segment or separator.
+func hasDoubleEncodedSeparator(escaped string) bool {
+	lower := strings.ToLower(escaped)
+	for {
+		i := strings.Index(lower, "%25")
+		if i < 0 {
+			return false
+		}
+		rest := lower[i+3:]
+		if strings.HasPrefix(rest, "2e") || strings.HasPrefix(rest, "2f") || strings.HasPrefix(rest, "5c") {
+			return true
+		}
+		lower = rest
+	}
+}
+
+// redactForError hides secrets in a URL included in error text.
+func redactForError(rawURL string) string {
+	if redacted, ok := RedactURL(rawURL); ok {
+		return redacted
+	}
+	return rawURL
 }
 
 // isCredentialHeader reports whether a request header carries credentials

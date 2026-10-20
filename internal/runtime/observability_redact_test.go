@@ -13,6 +13,31 @@ func TestRedactArgvCoversCommonSecretForms(t *testing.T) {
 		want []string
 	}{
 		{
+			name: "bash -c script",
+			argv: []string{"bash", "-c", "curl -u admin:HUNTER2 https://example.test/"},
+			want: []string{"bash", "-c", "curl -u '[REDACTED]' https://example.test/"},
+		},
+		{
+			name: "sh -ec quoted script",
+			argv: []string{"sh", "-ec", `curl -H "X-Api-Key: HUNTER2" https://example.test/`},
+			want: []string{"sh", "-ec", `curl -H 'X-Api-Key: [REDACTED]' https://example.test/`},
+		},
+		{
+			name: "eval",
+			argv: []string{"eval", "curl --token HUNTER2 x"},
+			want: []string{"eval", "curl --token '[REDACTED]' x"},
+		},
+		{
+			name: "cookie and cert flags",
+			argv: []string{"curl", "-b", "session=abc", "--cookie=s=1", "-E", "c.pem:pw", "--pass", "pw", "-bsid=x"},
+			want: []string{"curl", "-b", "[REDACTED]", "--cookie=[REDACTED]", "-E", "[REDACTED]", "--pass", "[REDACTED]", "-b[REDACTED]"},
+		},
+		{
+			name: "unparseable URL userinfo",
+			argv: []string{"curl", "https://admin:p%zz@example.test/x?token=abc"},
+			want: []string{"curl", "https://[REDACTED]@example.test/x?token=[REDACTED]"},
+		},
+		{
 			name: "userinfo without query",
 			argv: []string{"curl", "https://user:pass@example.test/"},
 			want: []string{"curl", "https://[REDACTED]@example.test/"},

@@ -199,8 +199,8 @@ func WithHost(adapter host.Adapter) Option {
 // WithHTTPAccess enables curl with a URL allowlist and the default HTTP policy.
 //
 // This is the simplest way to turn on network access. Requests are restricted
-// to the provided URL prefixes, and all other HTTP settings use the defaults
-// from the network package.
+// to the provided URL prefixes. Other settings from an earlier WithNetwork are
+// kept; unset ones use the defaults from the network package.
 func WithHTTPAccess(prefixes ...string) Option {
 	return func(target *Config) error {
 		if len(prefixes) == 0 {
@@ -216,9 +216,12 @@ func WithHTTPAccess(prefixes ...string) Option {
 		if len(cleaned) == 0 {
 			return fmt.Errorf("at least one allowed URL prefix is required")
 		}
-		target.Network = &NetworkConfig{
-			AllowedURLPrefixes: cleaned,
+		var cfg NetworkConfig
+		if target.Network != nil {
+			cfg = *target.Network
 		}
+		cfg.AllowedURLPrefixes = cleaned
+		target.Network = &cfg
 		return nil
 	}
 }

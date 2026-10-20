@@ -2,39 +2,21 @@ package runtime
 
 import (
 	"context"
-	"net/url"
+	"path"
 	"regexp"
 	"strings"
 
+	"github.com/ewhauser/gbash/network"
 	"github.com/ewhauser/gbash/trace"
 )
 
-const redactedValue = "[REDACTED]"
+const redactedValue = network.RedactedValue
 
-var sensitiveQueryKeys = map[string]struct{}{
-	"access_token":         {},
-	"api_key":              {},
-	"apikey":               {},
-	"auth":                 {},
-	"authorization":        {},
-	"bearer":               {},
-	"credential":           {},
-	"id_token":             {},
-	"key":                  {},
-	"password":             {},
-	"passwd":               {},
-	"refresh_token":        {},
-	"secret":               {},
-	"sig":                  {},
-	"signature":            {},
-	"token":                {},
-	"x-amz-credential":     {},
-	"x-amz-security-token": {},
-	"x-amz-signature":      {},
-	"x-goog-credential":    {},
-	"x-goog-signature":     {},
-	"x-ms-signature":       {},
-}
+func isSensitiveName(name string) bool { return network.IsSensitiveName(name) }
+
+func redactURLValue(value string) (string, bool) { return network.RedactURL(value) }
+
+func redactRawQuery(raw string) (string, bool) { return network.RedactQuery(raw) }
 
 func tracingEnabled(cfg TraceConfig) bool {
 	return cfg.Mode != TraceOff
@@ -265,7 +247,130 @@ func redactArgv(argv []string) ([]string, bool) {
 		}
 	}
 
+	if redacted, ok := redactInlineScripts(out); ok {
+		out = redacted
+		changed = true
+	}
 	return out, changed
+}
+
+// redactInlineScripts redacts command lines embedded in the script argument
+// of "bash -c", "sh -c" and friends, and in the arguments of "eval".
+func redactInlineScripts(argv []string) ([]string, bool) {
+	if len(argv) == 0 {
+		return argv, false
+	}
+	name := path.Base(argv[0])
+	changed := false
+	switch name {
+	case "eval":
+		for i := 1; i < len(argv); i++ {
+			if redacted, ok := redactScriptString(argv[i]); ok {
+				argv[i] = redacted
+				changed = true
+			}
+		}
+	case "sh", "bash", "dash", "zsh", "ksh", "mksh":
+		for i := 1; i < len(argv)-1; i++ {
+			arg := argv[i]
+			if !isShortFlagGroup(arg) || !strings.Contains(arg, "c") {
+				continue
+			}
+			if redacted, ok := redactScriptString(argv[i+1]); ok {
+				argv[i+1] = redacted
+				changed = true
+			}
+			break
+		}
+	}
+	return argv, changed
+}
+
+// redactScriptString splits script into whitespace-separated words, strips
+// simple quoting, redacts the words as an argv, and splices redacted words
+// back in. It is best-effort: it does not parse the shell grammar.
+func redactScriptString(script string) (string, bool) {
+	raw := scriptWords(script)
+	if len(raw) == 0 {
+		return "", false
+	}
+	words := make([]string, len(raw))
+	for i, w := range raw {
+		words[i] = unquoteWord(script[w[0]:w[1]])
+	}
+	redacted, changed := redactArgv(words)
+	if !changed || len(redacted) != len(words) {
+		return "", false
+	}
+	var b strings.Builder
+	last := 0
+	for i, w := range raw {
+		if redacted[i] == words[i] {
+			continue
+		}
+		b.WriteString(script[last:w[0]])
+		b.WriteString("'" + strings.ReplaceAll(redacted[i], "'", `'\''`) + "'")
+		last = w[1]
+	}
+	b.WriteString(script[last:])
+	return b.String(), true
+}
+
+// scriptWords returns [start, end) offsets of whitespace-separated words in
+// script, keeping single- and double-quoted runs inside one word.
+func scriptWords(script string) [][2]int {
+	var words [][2]int
+	start := -1
+	var quote byte
+	for i := 0; i < len(script); i++ {
+		c := script[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			} else if c == '\\' && quote == '"' && i+1 < len(script) {
+				i++
+			}
+		case c == '\'' || c == '"':
+			if start < 0 {
+				start = i
+			}
+			quote = c
+		case c == ' ' || c == '\t' || c == '\n' || c == ';' || c == '|' || c == '&':
+			if start >= 0 {
+				words = append(words, [2]int{start, i})
+				start = -1
+			}
+		default:
+			if start < 0 {
+				start = i
+			}
+		}
+	}
+	if start >= 0 {
+		words = append(words, [2]int{start, len(script)})
+	}
+	return words
+}
+
+func unquoteWord(word string) string {
+	var b strings.Builder
+	var quote byte
+	for i := 0; i < len(word); i++ {
+		c := word[i]
+		switch {
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote == 0 && (c == '\'' || c == '"'):
+			quote = c
+		case c == '\\' && quote != '\'' && i+1 < len(word):
+			i++
+			b.WriteByte(word[i])
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // flagValueKind classifies how the value of a flag is redacted.
@@ -291,6 +396,11 @@ var longFlagValueKinds = map[string]flagValueKind{
 	"--password":       flagValueSecret,
 	"--passwd":         flagValueSecret,
 	"--token":          flagValueSecret,
+	"--cookie":         flagValueSecret,
+	"--cert":           flagValueSecret,
+	"--pass":           flagValueSecret,
+	"--proxy-pass":     flagValueSecret,
+	"--key":            flagValueSecret,
 	"--access-token":   flagValueSecret,
 	"--data":           flagValueData,
 	"--data-ascii":     flagValueData,
@@ -307,7 +417,7 @@ var longFlagValueKinds = map[string]flagValueKind{
 // attached value (-uuser:pass).
 func shortFlagValueKind(flag byte) flagValueKind {
 	switch flag {
-	case 'u', 'U':
+	case 'u', 'U', 'b', 'E':
 		return flagValueSecret
 	case 'H':
 		return flagValueHeader
@@ -393,8 +503,9 @@ func redactAttachedShortFlagValue(arg string) (string, bool) {
 		prefix, value := arg[:i+1], arg[i+1:]
 		if kind == flagValueSecret {
 			// "user:pass" is the secret-bearing form; requiring the colon
-			// keeps grouped flags such as "sort -ur" readable.
-			if !strings.Contains(value, ":") {
+			// keeps grouped flags such as "sort -ur" readable. Cookies (-bname=v) and
+			// certs (-Ecert:pass) are recognized the same way.
+			if !strings.ContainsAny(value, ":=") {
 				return "", false
 			}
 			return prefix + redactedValue, true
@@ -453,52 +564,6 @@ func isHeaderName(name string) bool {
 	return true
 }
 
-// sensitiveNameFragments mark a header, query, or form key as secret when
-// they appear anywhere in it (PRIVATE-TOKEN, client_secret, X-Auth-User).
-var sensitiveNameFragments = []string{
-	"token",
-	"secret",
-	"passw",
-	"auth",
-	"cookie",
-	"credential",
-	"signature",
-	"apikey",
-	"session",
-}
-
-// sensitiveNameComponents mark a key as secret when they appear as a whole
-// "-", "_", or "." separated component (X-Api-Key, api_key, sig).
-var sensitiveNameComponents = map[string]struct{}{
-	"key": {},
-	"sig": {},
-	"pwd": {},
-	"jwt": {},
-}
-
-func isSensitiveName(name string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	if normalized == "" {
-		return false
-	}
-	if _, ok := sensitiveQueryKeys[normalized]; ok {
-		return true
-	}
-	for _, fragment := range sensitiveNameFragments {
-		if strings.Contains(normalized, fragment) {
-			return true
-		}
-	}
-	for component := range strings.FieldsFuncSeq(normalized, func(r rune) bool {
-		return r == '-' || r == '_' || r == '.'
-	}) {
-		if _, ok := sensitiveNameComponents[component]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 func looksSensitiveHeaderValue(value string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	return strings.HasPrefix(normalized, "bearer ") ||
@@ -517,70 +582,6 @@ func redactBearerValue(value string) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-func redactURLValue(value string) (string, bool) {
-	parsed, err := url.Parse(value)
-	if err != nil {
-		return "", false
-	}
-	if parsed.Scheme == "" && parsed.Host == "" {
-		return "", false
-	}
-
-	changed := false
-	hadUserinfo := parsed.User != nil && parsed.Host != ""
-	if hadUserinfo {
-		parsed.User = nil
-		changed = true
-	}
-	if parsed.RawQuery != "" {
-		if redactedQuery, queryChanged := redactRawQuery(parsed.RawQuery); queryChanged {
-			parsed.RawQuery = redactedQuery
-			changed = true
-		}
-	}
-	if !changed {
-		return "", false
-	}
-
-	out := parsed.String()
-	if hadUserinfo {
-		// url.Userinfo would percent-encode the brackets, so splice the
-		// marker in after the authority's "//".
-		out = strings.Replace(out, "//", "//"+redactedValue+"@", 1)
-	}
-	return out, true
-}
-
-func redactRawQuery(raw string) (string, bool) {
-	parts := strings.Split(raw, "&")
-	changed := false
-	for i, part := range parts {
-		if part == "" {
-			continue
-		}
-
-		key, value, ok := strings.Cut(part, "=")
-		if !ok {
-			continue
-		}
-
-		decodedKey, err := url.QueryUnescape(key)
-		if err != nil {
-			decodedKey = key
-		}
-		if !isSensitiveName(decodedKey) {
-			continue
-		}
-
-		if value != redactedValue {
-			parts[i] = key + "=" + redactedValue
-			changed = true
-		}
-	}
-
-	return strings.Join(parts, "&"), changed
 }
 
 // jsonStringMember matches a "key": "value" member of a JSON object body.

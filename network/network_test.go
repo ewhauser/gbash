@@ -393,6 +393,9 @@ func TestClientBlocksDotSegmentEscapesFromAllowListPrefix(t *testing.T) {
 		"https://api.example.com/v1/..;/admin",
 		"https://api.example.com/v1/%2e%2e;/admin",
 		"https://api.example.com/v1/users%2f%2e%2e%2f%2e%2e%2fadmin",
+		"https://api.example.com/v1/%252e%252e/admin",
+		"https://api.example.com/v1/..%252fadmin",
+		"https://api.example.com/v1/..%255Cadmin",
 	} {
 		_, err := client.Do(context.Background(), &Request{URL: target})
 		if !IsDenied(err) {
@@ -628,6 +631,7 @@ type recordedRequest struct {
 	ProxyAuth     string
 	ContentType   string
 	Custom        string
+	APIKey        string
 	Body          string
 }
 
@@ -640,6 +644,7 @@ func recordRequest(r *http.Request) recordedRequest {
 		ProxyAuth:     r.Header.Get("Proxy-Authorization"),
 		ContentType:   r.Header.Get("Content-Type"),
 		Custom:        r.Header.Get("X-Trace"),
+		APIKey:        r.Header.Get("X-Api-Key"),
 		Body:          string(body),
 	}
 }
@@ -654,6 +659,7 @@ func credentialedPost(target string) *Request {
 			"Proxy-Authorization": "Basic secret",
 			"Content-Type":        "application/json",
 			"X-Trace":             "abc",
+			"X-Api-Key":           "secret-key",
 		},
 		Body:            []byte(`{"password":"hunter2"}`),
 		FollowRedirects: true,
@@ -719,6 +725,7 @@ func TestClientRedirectPreservesMethodAndBodyFor307And308(t *testing.T) {
 			ProxyAuth:     "Basic secret",
 			ContentType:   "application/json",
 			Custom:        "abc",
+			APIKey:        "secret-key",
 			Body:          `{"password":"hunter2"}`,
 		}
 		if got != want {
@@ -789,6 +796,7 @@ func TestClientRedirect302SameOriginSwitchesToGetKeepingCredentials(t *testing.T
 		Cookie:        "session=secret",
 		ProxyAuth:     "Basic secret",
 		Custom:        "abc",
+		APIKey:        "secret-key",
 	}
 	if got != want {
 		t.Fatalf("redirected request = %+v, want %+v", got, want)
@@ -809,5 +817,21 @@ func TestURLOriginNormalizesDefaultPorts(t *testing.T) {
 	}
 	if a, b := urlOrigin(parse("https://example.com/")), urlOrigin(parse("http://example.com/")); a == b {
 		t.Fatalf("urlOrigin(%q) should differ across schemes", a)
+	}
+}
+
+func TestDeniedErrorsRedactURLSecrets(t *testing.T) {
+	t.Parallel()
+	client, err := New(&Config{AllowedURLPrefixes: []string{"https://api.example.com/v1/"}}, WithDoer(&recordingHTTPDoer{}))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	_, err = client.Do(context.Background(), &Request{URL: "https://user:pw@other.example/x?sig=SECRET&a=1"})
+	if err == nil || strings.Contains(err.Error(), "SECRET") || strings.Contains(err.Error(), "pw@") {
+		t.Fatalf("error = %v, want redacted URL", err)
+	}
+	msg := (&RedirectNotAllowedError{URL: "https://x.example/?token=SECRET"}).Error()
+	if strings.Contains(msg, "SECRET") {
+		t.Fatalf("redirect error = %q, want redacted", msg)
 	}
 }
