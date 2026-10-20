@@ -26,18 +26,7 @@ func Match(pat, name string, mode Mode) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	m := extMatcher{
-		mode:       mode,
-		memo:       make(map[extMemoKey][]int),
-		repeatMemo: make(map[extMemoKey][]int),
-		stack:      make(map[extMemoKey]struct{}),
-	}
-	for _, end := range m.ends(root, 0, name, 0) {
-		if end == len(name) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return newExtMatcher(mode, name).matches(root), nil
 }
 
 // ExtendedPatternMatcher returns a [regexp.Regexp.MatchString]-like function.
@@ -65,18 +54,7 @@ func ExtendedPatternMatcher(pat string, mode Mode) (func(string) bool, error) {
 		return nil, err
 	}
 	return func(name string) bool {
-		m := extMatcher{
-			mode:       mode,
-			memo:       make(map[extMemoKey][]int),
-			repeatMemo: make(map[extMemoKey][]int),
-			stack:      make(map[extMemoKey]struct{}),
-		}
-		for _, end := range m.ends(root, 0, name, 0) {
-			if end == len(name) {
-				return true
-			}
-		}
-		return false
+		return newExtMatcher(mode, name).matches(root)
 	}, nil
 }
 
@@ -163,11 +141,15 @@ func (p *extParser) parseSeq(i int, stops string) (*extSeq, int, error) {
 			if i+1 >= len(p.pat) {
 				return nil, 0, &SyntaxError{msg: `\ at end of pattern`}
 			}
-			lit.WriteByte(p.pat[i+1])
-			i += 2
+			_, size := utf8.DecodeRuneInString(p.pat[i+1:])
+			lit.WriteString(p.pat[i+1 : i+1+size])
+			i += 1 + size
 		case '*':
 			flushLit()
-			if i+1 < len(p.pat) && p.pat[i+1] == '*' {
+			// Collapse "**" unless the second star opens an extglob
+			// group, as in a**(b).
+			if i+1 < len(p.pat) && p.pat[i+1] == '*' &&
+				(p.mode&ExtendedOperators == 0 || i+2 >= len(p.pat) || p.pat[i+2] != '(') {
 				i++
 			}
 			seq.tokens = append(seq.tokens, extToken{kind: extAnyMany})
@@ -182,7 +164,7 @@ func (p *extParser) parseSeq(i int, stops string) (*extSeq, int, error) {
 			if err != nil {
 				return nil, 0, err
 			}
-			expr := "^" + raw + "$"
+			expr := "^" + charClassRegexp(raw) + "$"
 			if p.mode&NoGlobCase != 0 {
 				expr = "(?i)" + expr
 			}
@@ -265,121 +247,170 @@ func scanCharClassToken(pat string, i int) (string, int, error) {
 	return "", 0, &SyntaxError{msg: "[ was not matched with a closing ]"}
 }
 
+// extMatcher simulates a parsed pattern forward over name, tracking the set
+// of byte offsets each token can end at. Every token step is linear in the
+// name, so patterns without groups match in O(tokens*len(name)).
+type extMatcher struct {
+	mode Mode
+	name string
+	memo map[extMemoKey][]int
+}
+
 type extMemoKey struct {
 	seqID int
-	ti    int
-	ni    int
+	start int
 }
 
-type extMatcher struct {
-	mode       Mode
-	memo       map[extMemoKey][]int
-	repeatMemo map[extMemoKey][]int
-	stack      map[extMemoKey]struct{}
+func newExtMatcher(mode Mode, name string) *extMatcher {
+	return &extMatcher{mode: mode, name: name, memo: make(map[extMemoKey][]int)}
 }
 
-func (m *extMatcher) ends(seq *extSeq, ti int, name string, ni int) []int {
-	key := extMemoKey{seqID: seq.id, ti: ti, ni: ni}
+func (m *extMatcher) matches(root *extSeq) bool {
+	set := make([]bool, len(m.name)+1)
+	set[0] = true
+	return m.run(root, set)[len(m.name)]
+}
+
+// seqEnds returns the sorted offsets at which seq can finish when it starts
+// matching at start.
+func (m *extMatcher) seqEnds(seq *extSeq, start int) []int {
+	key := extMemoKey{seqID: seq.id, start: start}
 	if cached, ok := m.memo[key]; ok {
 		return cached
 	}
-	if _, ok := m.stack[key]; ok {
-		return nil
-	}
-	m.stack[key] = struct{}{}
-	defer delete(m.stack, key)
-
+	set := make([]bool, len(m.name)+1)
+	set[start] = true
 	var out []int
-	if ti >= len(seq.tokens) {
-		out = append(out, ni)
-		m.memo[key] = out
-		return out
-	}
-
-	tok := seq.tokens[ti]
-	switch tok.kind {
-	case extLiteral:
-		if end, ok := m.matchLiteral(tok.lit, name, ni); ok {
-			out = append(out, m.ends(seq, ti+1, name, end)...)
-		}
-	case extAnyOne:
-		if end, ok := m.matchSingle(name, ni, true); ok {
-			out = append(out, m.ends(seq, ti+1, name, end)...)
-		}
-	case extAnyMany:
-		for _, end := range m.candidateEnds(name, ni, true) {
-			out = append(out, m.ends(seq, ti+1, name, end)...)
-		}
-	case extCharClass:
-		if end, ok := m.matchCharClass(tok.class, name, ni); ok {
-			out = append(out, m.ends(seq, ti+1, name, end)...)
-		}
-	case extGroup:
-		switch tok.op {
-		case '@':
-			out = append(out, m.groupOnce(tok, seq, ti, name, ni)...)
-		case '?':
-			out = append(out, m.ends(seq, ti+1, name, ni)...)
-			out = append(out, m.groupOnce(tok, seq, ti, name, ni)...)
-		case '*':
-			out = append(out, m.ends(seq, ti+1, name, ni)...)
-			out = append(out, m.groupRepeat(tok, seq, ti, name, ni)...)
-		case '+':
-			out = append(out, m.groupRepeat(tok, seq, ti, name, ni)...)
-		case '!':
-			for _, end := range m.candidateEnds(name, ni, true) {
-				if m.groupAltMatchesExactly(tok, name, ni, end) {
-					continue
-				}
-				out = append(out, m.ends(seq, ti+1, name, end)...)
-			}
+	for i, ok := range m.run(seq, set) {
+		if ok {
+			out = append(out, i)
 		}
 	}
-
-	out = uniqSortedInts(out)
 	m.memo[key] = out
 	return out
 }
 
-func (m *extMatcher) groupOnce(tok extToken, seq *extSeq, ti int, name string, ni int) []int {
-	var out []int
-	for _, alt := range tok.alts {
-		for _, end := range m.ends(alt, 0, name, ni) {
-			out = append(out, m.ends(seq, ti+1, name, end)...)
+// run advances the start offsets in set through every token of seq and
+// returns the set of offsets where seq can end.
+func (m *extMatcher) run(seq *extSeq, set []bool) []bool {
+	for _, tok := range seq.tokens {
+		next := make([]bool, len(set))
+		any := false
+		mark := func(i int) {
+			next[i] = true
+			any = true
 		}
+		switch tok.kind {
+		case extLiteral:
+			for ni, ok := range set {
+				if ok {
+					if end, ok := m.matchLiteral(tok.lit, m.name, ni); ok {
+						mark(end)
+					}
+				}
+			}
+		case extAnyOne:
+			for ni, ok := range set {
+				if ok {
+					if end, ok := m.matchSingle(m.name, ni, true); ok {
+						mark(end)
+					}
+				}
+			}
+		case extCharClass:
+			for ni, ok := range set {
+				if ok {
+					if end, ok := m.matchCharClass(tok.class, m.name, ni); ok {
+						mark(end)
+					}
+				}
+			}
+		case extAnyMany:
+			for ni, ok := range set {
+				// A start already reached by an earlier star run would
+				// only re-mark a subset of that run.
+				if !ok || next[ni] {
+					continue
+				}
+				for _, end := range m.candidateEnds(m.name, ni, true) {
+					mark(end)
+				}
+			}
+		case extGroup:
+			m.runGroup(tok, set, mark)
+		}
+		if !any {
+			return next
+		}
+		set = next
 	}
-	return out
+	return set
 }
 
-func (m *extMatcher) groupRepeat(tok extToken, seq *extSeq, ti int, name string, ni int) []int {
-	key := extMemoKey{seqID: seq.id, ti: ti, ni: ni}
-	if cached, ok := m.repeatMemo[key]; ok {
-		return cached
-	}
-	var out []int
-	for _, alt := range tok.alts {
-		for _, end := range m.ends(alt, 0, name, ni) {
-			if end == ni {
+func (m *extMatcher) runGroup(tok extToken, set []bool, mark func(int)) {
+	switch tok.op {
+	case '@', '?':
+		for ni, ok := range set {
+			if !ok {
 				continue
 			}
-			out = append(out, m.ends(seq, ti+1, name, end)...)
-			out = append(out, m.groupRepeat(tok, seq, ti, name, end)...)
+			if tok.op == '?' {
+				mark(ni)
+			}
+			for _, end := range m.groupOnce(tok, ni) {
+				mark(end)
+			}
 		}
-	}
-	out = uniqSortedInts(out)
-	m.repeatMemo[key] = out
-	return out
-}
-
-func (m *extMatcher) groupAltMatchesExactly(tok extToken, name string, start, end int) bool {
-	for _, alt := range tok.alts {
-		for _, altEnd := range m.ends(alt, 0, name, start) {
-			if altEnd == end {
-				return true
+	case '*', '+':
+		seen := make([]bool, len(set))
+		var work []int
+		for ni, ok := range set {
+			if !ok {
+				continue
+			}
+			if tok.op == '*' {
+				mark(ni)
+			}
+			work = append(work, ni)
+		}
+		for len(work) > 0 {
+			ni := work[len(work)-1]
+			work = work[:len(work)-1]
+			for _, end := range m.groupOnce(tok, ni) {
+				if end == ni || seen[end] {
+					continue
+				}
+				seen[end] = true
+				mark(end)
+				work = append(work, end)
+			}
+		}
+	case '!':
+		for ni, ok := range set {
+			if !ok {
+				continue
+			}
+			excluded := m.groupOnce(tok, ni)
+			for _, end := range m.candidateEnds(m.name, ni, true) {
+				if _, found := slices.BinarySearch(excluded, end); !found {
+					mark(end)
+				}
 			}
 		}
 	}
-	return false
+}
+
+// groupOnce returns the sorted offsets at which one alternative of tok can
+// end when it starts at start.
+func (m *extMatcher) groupOnce(tok extToken, start int) []int {
+	if len(tok.alts) == 1 {
+		return m.seqEnds(tok.alts[0], start)
+	}
+	var out []int
+	for _, alt := range tok.alts {
+		out = append(out, m.seqEnds(alt, start)...)
+	}
+	return uniqSortedInts(out)
 }
 
 func (m *extMatcher) matchLiteral(lit, name string, ni int) (int, bool) {
@@ -457,4 +488,28 @@ func uniqSortedInts(values []int) []int {
 	}
 	slices.Sort(values)
 	return slices.Compact(values)
+}
+
+// charClassRegexp converts a bracket expression scanned by
+// scanCharClassToken into Go regexp syntax: a leading ! negates like ^, and
+// backslash escapes stay literal rather than becoming regexp escapes like \w.
+func charClassRegexp(raw string) string {
+	var sb strings.Builder
+	sb.WriteByte('[')
+	i := 1
+	if i < len(raw) && raw[i] == '!' {
+		sb.WriteByte('^')
+		i++
+	}
+	for i < len(raw) {
+		if raw[i] == '\\' && i+1 < len(raw) {
+			_, size := utf8.DecodeRuneInString(raw[i+1:])
+			sb.WriteString(quoteClassChar(raw[i+1 : i+1+size]))
+			i += 1 + size
+			continue
+		}
+		sb.WriteByte(raw[i])
+		i++
+	}
+	return sb.String()
 }
