@@ -512,7 +512,10 @@ func (cfg *Config) arithmStringValue(root, tokenExpr syntax.ArithmExpr, word *sy
 		s = val
 	}
 
-	if depth <= maxNameRefDepth {
+	// No depth cap here: a value that keeps re-parsing into a new
+	// expression (x="x+1") must hit enterArith's recursion error rather
+	// than silently evaluating to zero.
+	{
 		p := syntax.NewParser()
 		if nested, err := p.Arithmetic(strings.NewReader(s)); err == nil {
 			if nested != nil {
@@ -560,15 +563,23 @@ func arithExpandedWordError(err error, root, tokenExpr syntax.ArithmExpr, word *
 
 func arithm(cfg *Config, root, expr syntax.ArithmExpr, depth int) (int, error) {
 	if depth <= maxNameRefDepth {
-		if parsed, ok, err := arithmRuntimeParse(cfg, expr); err != nil {
+		parsed, ok, src, err := arithmRuntimeParse(cfg, expr)
+		if err != nil {
 			return 0, err
-		} else if ok {
+		}
+		if ok {
 			leave, err := cfg.enterArith(maxArithRecursionDepth, expr, "")
 			if err != nil {
 				return 0, err
 			}
 			defer leave()
 			return arithm(cfg, root, parsed, depth+1)
+		}
+		if word, isWord := expr.(*syntax.Word); isWord && src != "" && !arithWordHasQuotes(word) {
+			// The runtime parse already expanded this word to a plain
+			// literal; reuse it instead of expanding (and running nested
+			// command or arithmetic substitutions) a second time.
+			return cfg.arithmStringValue(root, word, word, src, depth)
 		}
 	}
 	switch expr := expr.(type) {
@@ -999,26 +1010,26 @@ func arithRuntimeSource(cfg *Config, expr syntax.ArithmExpr, cache map[syntax.Ar
 	return val, nil
 }
 
-func arithmRuntimeParse(cfg *Config, expr syntax.ArithmExpr) (syntax.ArithmExpr, bool, error) {
+func arithmRuntimeParse(cfg *Config, expr syntax.ArithmExpr) (syntax.ArithmExpr, bool, string, error) {
 	switch expr.(type) {
 	case *syntax.Word, *syntax.BinaryArithm, *syntax.UnaryArithm, *syntax.ParenArithm:
 	default:
-		return nil, false, nil
+		return nil, false, "", nil
 	}
 	if !arithExprUsesExpandedValue(expr) {
-		return nil, false, nil
+		return nil, false, "", nil
 	}
 	sourceCache := make(map[syntax.ArithmExpr]string)
 	src, err := arithRuntimeSource(cfg, expr, sourceCache)
 	if err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
 	replacements, err := arithRuntimeDiagnosticReplacements(cfg, expr, sourceCache)
 	if err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
 	if arithHasLeadingInvalidControl(src) {
-		return nil, false, &ArithmDiagnosticError{
+		return nil, false, "", &ArithmDiagnosticError{
 			Expr:         expr,
 			Token:        expr,
 			Message:      "arithmetic syntax error: operand expected",
@@ -1030,21 +1041,33 @@ func arithmRuntimeParse(cfg *Config, expr syntax.ArithmExpr) (syntax.ArithmExpr,
 	if err != nil {
 		var parseErr syntax.ParseError
 		if errors.As(err, &parseErr) {
-			return nil, false, arithRuntimeParseError(src, parseErr)
+			return nil, false, "", arithRuntimeParseError(src, parseErr)
 		}
-		return nil, false, &ArithmDiagnosticError{
+		return nil, false, "", &ArithmDiagnosticError{
 			ExprText:  src,
 			TokenText: src,
 			Message:   "arithmetic syntax error: invalid arithmetic operator",
 		}
 	}
 	if parsed == nil {
-		return nil, false, nil
+		return nil, false, "", nil
 	}
 	if word, ok := parsed.(*syntax.Word); ok && word.Lit() == src {
-		return nil, false, nil
+		return nil, false, src, nil
 	}
-	return parsed, true, nil
+	return parsed, true, src, nil
+}
+
+// arithWordHasQuotes reports whether word has quoted parts, whose value the
+// evaluation path derives without quote removal.
+func arithWordHasQuotes(word *syntax.Word) bool {
+	for _, part := range word.Parts {
+		switch part.(type) {
+		case *syntax.SglQuoted, *syntax.DblQuoted:
+			return true
+		}
+	}
+	return false
 }
 
 func arithHasLeadingInvalidControl(src string) bool {
