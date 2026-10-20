@@ -35,6 +35,9 @@ func validateInterpreterSafety(program *syntax.File, variant shellvariant.ShellV
 	if invalid := validateSupportedFunctionDeclarations(program); invalid != nil {
 		return invalid
 	}
+	if invalid := validateNoReservedNamesOrCoprocs(program); invalid != nil {
+		return invalid
+	}
 	return validateSupportedVariantCommands(program, variant)
 }
 
@@ -128,6 +131,38 @@ func validateSupportedFunctionDeclarations(program *syntax.File) error {
 		}
 		if fn.Body == nil || !hasSupportedFunctionName(fn) {
 			return &shellValidationError{message: "invalid function declaration"}
+		}
+	}
+	return nil
+}
+
+// validateNoReservedNamesOrCoprocs rejects calls to and definitions of the
+// runtime's reserved helper names, and coprocesses, which are not supported.
+func validateNoReservedNamesOrCoprocs(program *syntax.File) error {
+	if program == nil {
+		return nil
+	}
+	for node := range syntax.All(program) {
+		switch node := node.(type) {
+		case *syntax.CallExpr:
+			if len(node.Args) > 0 && strings.HasPrefix(wordLiteral(node.Args[0]), reservedHelperPrefix) {
+				return &shellValidationError{message: fmt.Sprintf("%s: reserved command name", wordLiteral(node.Args[0]))}
+			}
+		case *syntax.FuncDecl:
+			if node.Name != nil && strings.HasPrefix(node.Name.Value, reservedHelperPrefix) {
+				return &shellValidationError{message: fmt.Sprintf("%s: reserved function name", node.Name.Value)}
+			}
+			for _, name := range node.Names {
+				if name != nil && strings.HasPrefix(name.Value, reservedHelperPrefix) {
+					return &shellValidationError{message: fmt.Sprintf("%s: reserved function name", name.Value)}
+				}
+			}
+		case *syntax.CoprocClause:
+			return &shellValidationError{message: "coproc: coprocesses are not supported"}
+		case *syntax.Stmt:
+			if node.Coprocess {
+				return &shellValidationError{message: "|&: coprocesses are not supported"}
+			}
 		}
 	}
 	return nil

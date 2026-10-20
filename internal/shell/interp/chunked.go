@@ -16,6 +16,23 @@ import (
 // return any synthetic pipeline metadata for that chunk.
 type ChunkTransformer func(file *syntax.File) (map[*syntax.Stmt]*syntax.Stmt, error)
 
+// LoopGuardFunc looks up a loop guard call inserted by a [ChunkTransformer].
+// It returns nil when call is not a guard, and otherwise the check to run in
+// place of the call.
+type LoopGuardFunc func(call *syntax.CallExpr) func(ctx context.Context) error
+
+// ChunkCompileError is returned by a nested [ChunkTransformer] to reject a
+// chunk; the runner reports Err and sets Status as the exit status. A
+// Status of 126 (a budget violation) also exits the shell.
+type ChunkCompileError struct {
+	Status uint8
+	Err    error
+}
+
+func (e *ChunkCompileError) Error() string { return e.Err.Error() }
+
+func (e *ChunkCompileError) Unwrap() error { return e.Err }
+
 // RunReaderWithMetadata parses and executes shell input incrementally so alias
 // and shopt state can affect later complete commands in the same script.
 func (r *Runner) RunReaderWithMetadata(ctx context.Context, reader io.Reader, name, topLevelScriptPath string, transform ChunkTransformer) error {
@@ -23,7 +40,7 @@ func (r *Runner) RunReaderWithMetadata(ctx context.Context, reader io.Reader, na
 }
 
 func (r *Runner) runShellReader(ctx context.Context, reader io.Reader, name string, frame *execFrame) error {
-	return r.runChunked(ctx, reader, name, "", nil, false, frame)
+	return r.runChunked(ctx, reader, name, "", r.nestedChunkTransform, false, frame)
 }
 
 func (r *Runner) runChunked(ctx context.Context, reader io.Reader, name, topLevelScriptPath string, transform ChunkTransformer, runExitTrap bool, frame *execFrame) error {
@@ -162,6 +179,15 @@ func (r *Runner) runChunked(ctx context.Context, reader io.Reader, name, topLeve
 			if transformErr != nil {
 				r.analysisFileFinish(r.analysisStatusForError(transformErr))
 				r.analysisRestoreFile(prevFile)
+				var compileErr *ChunkCompileError
+				if errors.As(transformErr, &compileErr) {
+					r.errf("%s\n", formatParseError(compileErr.Err, r.shellVariantName()))
+					r.exit = exitStatus{code: compileErr.Status}
+					if compileErr.Status == 126 {
+						r.exit.exiting = true
+					}
+					return finish(nil)
+				}
 				return finish(transformErr)
 			}
 		}

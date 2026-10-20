@@ -92,6 +92,13 @@ func (r *Runner) cmdSubshell(ctx context.Context, cm *syntax.Subshell) {
 }
 
 func (r *Runner) cmdCall(ctx context.Context, cm *syntax.CallExpr, tracingEnabled bool, trace *tracer) {
+	if r.loopGuard != nil {
+		if check := r.loopGuard(cm); check != nil {
+			r.exit = exitStatus{}
+			r.exit.fromHandlerError(check(r.handlerCtx(ctx, handlerKindCall, cm.Pos())))
+			return
+		}
+	}
 	if callShouldRunDebugTrap(cm) && r.runCommandDebugTrap(ctx, cm) {
 		return
 	}

@@ -19,7 +19,7 @@ func compileChunk(program *syntax.File, pol policy.Policy, budget *executionBudg
 		return nil, err
 	}
 	synthetic := normalizeExecutionProgram(program)
-	if err := instrumentLoopBudgets(program, pol, loopNamespace); err != nil {
+	if err := instrumentLoopBudgets(program, pol, budget, loopNamespace); err != nil {
 		return nil, err
 	}
 	return synthetic, nil

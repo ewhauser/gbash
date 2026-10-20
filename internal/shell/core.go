@@ -101,10 +101,6 @@ type core struct{}
 
 var defaultShellCore = newShellCore()
 
-var internalHelperCommands = map[string]struct{}{
-	loopIterCommandName: {},
-}
-
 func newShellCore() *core {
 	return &core{}
 }
@@ -182,6 +178,9 @@ func (m *core) Run(ctx context.Context, exec *Execution) (result *RunResult, run
 	}
 	cleanupProcSubst := withProcSubstScope(&effectiveExec)
 	defer cleanupProcSubst()
+	// Background jobs and process substitutions use effectiveExec, so stop
+	// and join them before the deferred cleanup above restores its FS.
+	defer func() { runner.StopJobs(effectiveExec.procSubst.Close) }()
 
 	var err error
 	runner, err = m.newRunner(ctx, &effectiveExec, budget)
@@ -281,9 +280,20 @@ func (m *core) runnerConfig(exec *Execution, budget *executionBudget) *interp.Ru
 		StatHandler:      m.statHandler(exec),
 		RealpathHandler:  m.realpathHandler(exec),
 		ProcSubstHandler: m.procSubstHandler(exec),
+		LoopGuard:        budget.loopGuard,
 	}
 	if exec == nil {
 		return cfg
+	}
+	cfg.NestedChunkTransformer = func(file *syntax.File) (map[*syntax.Stmt]*syntax.Stmt, error) {
+		synthetic, err := compileChunk(file, exec.Policy, budget, budget.nextLoopNamespace(), executionShellVariant(exec))
+		if err == nil {
+			return synthetic, nil
+		}
+		if code, ok := compilationExitStatus(err); ok {
+			return nil, &interp.ChunkCompileError{Status: uint8(code), Err: err}
+		}
+		return nil, err
 	}
 	if exec.Policy != nil {
 		cfg.MaxVariableBytes = exec.Policy.Limits().MaxVariableBytes
@@ -631,9 +641,6 @@ func (m *core) callHandler(exec *Execution, budget *executionBudget) interp.Call
 		if len(args) == 0 {
 			return args, nil
 		}
-		if isInternalHelperCommand(args[0]) {
-			return args, nil
-		}
 		hc, ok := interp.LookupHandlerContext(ctx)
 		if !ok {
 			return nil, fmt.Errorf("missing handler context")
@@ -769,17 +776,12 @@ func (m *core) execHandler(exec *Execution, budget *executionBudget) interp.Exec
 		if len(args) == 0 {
 			return nil
 		}
-		if args[0] == loopIterCommandName {
-			return budget.beforeLoopIteration(ctx, args[1:])
-		}
-
 		hc, ok := interp.LookupHandlerContext(ctx)
 		if !ok {
 			return fmt.Errorf("missing handler context")
 		}
 		virtualWD := commandVirtualWorkDir(args, hc)
 		currentEnv := envMap(hc.Env)
-		internal := isInternalHelperCommand(args[0])
 		fromBootstrap := hc.Internal
 		shellVars := shellstate.NewShellVarAssignments()
 		shellVarLookup := shellstate.ShellVarLookup(func(name string) (string, bool) {
@@ -798,7 +800,6 @@ func (m *core) execHandler(exec *Execution, budget *executionBudget) interp.Exec
 			Stdout:        hc.Stdout,
 			Stderr:        hc.Stderr,
 			Position:      hc.Pos.String(),
-			Internal:      internal,
 			FromBootstrap: fromBootstrap,
 			PrepareInvoke: func(callCtx context.Context) context.Context {
 				callCtx = context.WithValue(callCtx, nestedExecutionKey{}, nestedExecution{
@@ -1121,18 +1122,6 @@ func lookupRegistryCommand(exec *Execution, name string) (commands.Command, bool
 }
 
 func lookupCommand(ctx context.Context, exec *Execution, dir string, env expand.Environ, name string) (_ *resolvedCommand, ok bool, err error) {
-	if isInternalHelperCommand(name) {
-		cmd, ok := lookupRegistryCommand(exec, name)
-		if !ok {
-			return nil, false, nil
-		}
-		return &resolvedCommand{
-			command: cmd,
-			name:    name,
-			path:    name,
-			source:  "internal-helper",
-		}, true, nil
-	}
 	if strings.Contains(name, "/") {
 		return lookupCommandPath(ctx, exec, dir, name, "path", name)
 	}
@@ -1831,6 +1820,8 @@ type executionBudget struct {
 	loopNamespaces    atomic.Int64
 	mu                sync.Mutex
 	loopCounts        map[string]int64
+	// loopGuards maps each guard call the instrumenter inserted to its loop.
+	loopGuards sync.Map // *syntax.CallExpr -> loopGuard
 }
 
 func newExecutionBudget(pol policy.Policy) *executionBudget {
@@ -1859,29 +1850,38 @@ func (b *executionBudget) beforeCommand(ctx context.Context) error {
 	return shellFailure(ctx, 126, "too many commands executed (>%d), increase policy.Limits.MaxCommandCount", b.maxCommandCount)
 }
 
-func (b *executionBudget) beforeLoopIteration(ctx context.Context, args []string) error {
-	if len(args) != 2 {
-		return shellFailure(ctx, 2, "%s: invalid invocation", loopIterCommandName)
+// loopGuard handles a guard call inserted by the instrumenter, identified by
+// node identity. It returns nil for calls that are not guards.
+func (b *executionBudget) loopGuard(call *syntax.CallExpr) func(context.Context) error {
+	if b == nil || call == nil {
+		return nil
 	}
-	if b == nil || b.maxLoopIterations <= 0 {
+	value, ok := b.loopGuards.Load(call)
+	if !ok {
+		return nil
+	}
+	return func(ctx context.Context) error {
+		return b.beforeLoopIteration(ctx, value.(loopGuard))
+	}
+}
+
+func (b *executionBudget) beforeLoopIteration(ctx context.Context, guard loopGuard) error {
+	if b.maxLoopIterations <= 0 {
 		return nil
 	}
 	if b.disabled.Load() > 0 {
 		return nil
 	}
 
-	loopKind := args[0]
-	loopID := args[1]
-
 	b.mu.Lock()
-	b.loopCounts[loopID]++
-	count := b.loopCounts[loopID]
+	b.loopCounts[guard.id]++
+	count := b.loopCounts[guard.id]
 	b.mu.Unlock()
 
 	if count <= b.maxLoopIterations {
 		return nil
 	}
-	return shellFailure(ctx, 126, "%s loop: too many iterations (%d), increase policy.Limits.MaxLoopIterations", loopKind, b.maxLoopIterations)
+	return shellFailure(ctx, 126, "%s loop: too many iterations (%d), increase policy.Limits.MaxLoopIterations", guard.kind, b.maxLoopIterations)
 }
 
 func (b *executionBudget) beforeGlob(ops int64) error {
@@ -1904,11 +1904,6 @@ func (b *executionBudget) nextLoopNamespace() string {
 		return ""
 	}
 	return fmt.Sprintf("chunk%d", b.loopNamespaces.Add(1))
-}
-
-func isInternalHelperCommand(name string) bool {
-	_, ok := internalHelperCommands[name]
-	return ok
 }
 
 const umaskEnvVar = "GBASH_UMASK"

@@ -308,7 +308,9 @@ func (r *Runner) runProcSubst(ctx context.Context, ps *syntax.ProcSubst, path st
 		waitAtStmtEnd: r.inRedirectWord > 0 && ps.Op == syntax.CmdOut,
 	}
 	r.bgProcs = append(r.bgProcs, bg)
+	jobDone := r.jobs.startProcSubst()
 	go func() {
+		defer jobDone()
 		defer func() {
 			*bg.exit = r2.exit
 			close(bg.done)
@@ -1075,6 +1077,15 @@ func (r *Runner) stmt(ctx context.Context, st *syntax.Stmt) {
 		r.currentStmtLine = 0
 	}()
 	if st.Background || st.Disown {
+		jctx, jobDone, ok := r.jobs.startBackground(ctx)
+		if !ok {
+			r.errf("fork: background job limit reached (%d)\n", maxLiveBackgroundJobs)
+			r.exit = exitStatus{code: 1}
+			r.setPipeStatuses(1)
+			r.lastStmtLine = line
+			r.lastExit = r.exit
+			return
+		}
 		r2 := r.subshell(true)
 		r2.suppressTopLevelErrTrap = true
 		st2 := *st
@@ -1087,10 +1098,11 @@ func (r *Runner) stmt(ctx context.Context, st *syntax.Stmt) {
 		}
 		r.bgProcs = append(r.bgProcs, bg)
 		go func() {
+			defer jobDone()
 			defer close(bg.done)
 			func() {
 				defer r2.recoverAsyncPanic()
-				r2.Run(ctx, &st2)
+				r2.Run(jctx, &st2)
 			}()
 			r2.exit.exiting = false // subshells don't exit the parent shell
 			*bg.exit = r2.exit
@@ -1230,8 +1242,10 @@ func (r *Runner) stmtSync(ctx context.Context, st *syntax.Stmt, hadPipeStatus bo
 		for i := len(closers) - 1; i >= 0; i-- {
 			_ = closers[i].Close()
 		}
+		r.waitProcSubsts(procSubstStart)
 	}
-	r.waitProcSubsts(procSubstStart)
+	// After exec keeps a >(cmd) redirection open, cmd reads until the shell
+	// exits, so it is joined by [Runner.StopJobs] rather than here.
 	if !r.exit.ok() && r.noErrExit {
 		r.exit.errExitIgnored = true
 	}
