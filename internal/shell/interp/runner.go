@@ -1481,7 +1481,7 @@ func (r *Runner) runCallAssignOverlay(assigns []*syntax.Assign, forceExport, con
 	}
 	// Enable tempScope after bindings are populated so that Set during
 	// binding populates the overlay rather than passing through.
-	overlay.tempScope = true
+	overlay.enableTempScope()
 	return overlay, true
 }
 
