@@ -25,7 +25,7 @@ type Curl struct{}
 type curlOptions struct {
 	method          string
 	headers         map[string]string
-	data            string
+	dataParts       []curlDataPart
 	hasData         bool
 	dataBinary      bool
 	formFields      []curlFormField
@@ -276,13 +276,14 @@ func parseCurlMatches(matches *ParsedCommand) (*curlOptions, error) {
 			opts.method = value
 		case "header":
 			parseCurlHeader(opts.headers, value)
-		case "data", "data-raw":
-			opts.data = value
-			opts.hasData = true
+		case "data":
+			curlAppendData(opts, value, true, true)
+			impliesPost = true
+		case "data-raw":
+			curlAppendData(opts, value, false, false)
 			impliesPost = true
 		case "data-binary":
-			opts.data = value
-			opts.hasData = true
+			curlAppendData(opts, value, true, false)
 			opts.dataBinary = true
 			impliesPost = true
 		case "data-urlencode":
@@ -387,12 +388,55 @@ func curlMissingValueFallback(arg string) (fallback string, ok bool) {
 	}
 }
 
-func curlAppendURLEncodedData(opts *curlOptions, value string) {
-	if opts.hasData && opts.data != "" {
-		opts.data += "&"
+// curlDataPart is one -d/--data-*/--data-urlencode value. Parts are joined
+// with "&" when the body is built, matching curl's handling of repeats.
+type curlDataPart struct {
+	text          string
+	file          string
+	stripNewlines bool
+}
+
+// curlAppendData records a data option. When allowFile is set, a leading "@"
+// names a file read at request time; stripNewlines drops CR and LF from that
+// file as curl does for plain -d.
+func curlAppendData(opts *curlOptions, value string, allowFile, stripNewlines bool) {
+	part := curlDataPart{text: value}
+	if allowFile && strings.HasPrefix(value, "@") {
+		part = curlDataPart{file: value[1:], stripNewlines: stripNewlines}
 	}
-	opts.data += encodeCurlFormData(value)
+	opts.dataParts = append(opts.dataParts, part)
 	opts.hasData = true
+}
+
+func curlAppendURLEncodedData(opts *curlOptions, value string) {
+	opts.dataParts = append(opts.dataParts, curlDataPart{text: encodeCurlFormData(value)})
+	opts.hasData = true
+}
+
+func curlBuildData(ctx context.Context, inv *Invocation, parts []curlDataPart) ([]byte, error) {
+	var buf bytes.Buffer
+	for _, part := range parts {
+		chunk := []byte(part.text)
+		if part.file != "" {
+			data, _, err := readAllFile(ctx, inv, part.file)
+			if err != nil {
+				if !errors.Is(err, stdfs.ErrNotExist) {
+					return nil, err
+				}
+				_, _ = fmt.Fprintf(inv.Stderr, "Warning: Couldn't read data from file \"%s\", this makes an empty POST.\n", part.file)
+				data = nil
+			}
+			if part.stripNewlines {
+				data = bytes.ReplaceAll(bytes.ReplaceAll(data, []byte{'\r'}, nil), []byte{'\n'}, nil)
+			}
+			chunk = data
+		}
+		if buf.Len() > 0 {
+			buf.WriteByte('&')
+		}
+		buf.Write(chunk)
+	}
+	return buf.Bytes(), nil
 }
 
 func parseCurlTimeout(value string) time.Duration {
@@ -482,8 +526,7 @@ func prepareCurlRequestBody(ctx context.Context, inv *Invocation, opts *curlOpti
 			data, _, err := readAllFile(ctx, inv, target)
 			if err != nil {
 				if errors.Is(err, stdfs.ErrNotExist) {
-					fileContents[target] = nil
-					continue
+					return nil, "", exitf(inv, 26, "curl: (26) Failed to open/read local data from file/application")
 				}
 				return nil, "", err
 			}
@@ -493,7 +536,11 @@ func prepareCurlRequestBody(ctx context.Context, inv *Invocation, opts *curlOpti
 	}
 
 	if opts.hasData {
-		return []byte(opts.data), "", nil
+		data, err := curlBuildData(ctx, inv, opts.dataParts)
+		if err != nil {
+			return nil, "", err
+		}
+		return data, "", nil
 	}
 
 	return nil, "", nil

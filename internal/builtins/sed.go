@@ -430,6 +430,9 @@ func parseSedCommand(script string, regexExtended bool) (sedCommand, error) {
 		if err != nil {
 			return sedCommand{}, err
 		}
+		if err := validateSedReplacementRefs(replacement, command.pattern.NumSubexp()); err != nil {
+			return sedCommand{}, err
+		}
 	default:
 		return sedCommand{}, fmt.Errorf("unsupported sed command %q", script)
 	}
@@ -726,6 +729,22 @@ func sedReplace(ctx context.Context, run *sedRun, pattern *regexp.Regexp, line, 
 		return "", false, errSedPatternSpaceTooLarge
 	}
 	return out.String(), true, nil
+}
+
+// validateSedReplacementRefs rejects \N references to groups the pattern
+// does not define, as GNU sed does.
+func validateSedReplacementRefs(replacement string, groups int) error {
+	for index := 0; index+1 < len(replacement); index++ {
+		if replacement[index] != '\\' {
+			continue
+		}
+		index++
+		next := replacement[index]
+		if next >= '1' && next <= '9' && int(next-'0') > groups {
+			return fmt.Errorf("invalid reference \\%c on `s' command's RHS", next)
+		}
+	}
+	return nil
 }
 
 func expandSedReplacement(replacement, line string, match []int) string {

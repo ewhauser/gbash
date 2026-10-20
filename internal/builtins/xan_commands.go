@@ -243,7 +243,7 @@ func xanRunSample(ctx context.Context, inv *Invocation, args []string) error {
 		indices[i] = i
 	}
 	for i := len(indices) - 1; i > 0; i-- {
-		j := int(xanSeededStep(&rng) * float64(i+1))
+		j := min(int(xanSeededStep(&rng)*float64(i+1)), i)
 		indices[i], indices[j] = indices[j], indices[i]
 	}
 	indices = indices[:*size]
@@ -2012,7 +2012,7 @@ func xanRunShuffle(ctx context.Context, inv *Invocation, args []string) error {
 		rng = *seed
 	}
 	for i := len(rows) - 1; i > 0; i-- {
-		j := int(xanSeededStep(&rng) * float64(i+1))
+		j := min(int(xanSeededStep(&rng)*float64(i+1)), i)
 		rows[i], rows[j] = rows[j], rows[i]
 	}
 	return xanWriteCSV(inv.Stdout, table.Headers, rows)
@@ -2028,6 +2028,12 @@ func xanRunFixlengths(ctx context.Context, inv *Invocation, args []string) error
 		case "-l", "--length":
 			if i+1 < len(args) {
 				if parsed, err := strconv.Atoi(args[i+1]); err == nil {
+					if parsed < 0 {
+						return exitf(inv, 1, "xan fixlengths: invalid length %q", args[i+1])
+					}
+					if err := checkFieldWidth(inv, "xan fixlengths", int64(parsed)); err != nil {
+						return err
+					}
 					targetLen = &parsed
 					i++
 					continue
@@ -2059,6 +2065,11 @@ func xanRunFixlengths(ctx context.Context, inv *Invocation, args []string) error
 	}
 	if targetLen != nil {
 		width = *targetLen
+	}
+	// Bound the total output cells so a wide -l over many records cannot
+	// exhaust memory before anything is written.
+	if width > 0 && int64(len(records)) > maxFieldBytes(inv)/int64(width) {
+		return exitf(inv, 1, "xan fixlengths: output too large (%d records x %d cells exceeds limit %d)", len(records), width, maxFieldBytes(inv))
 	}
 	fixed := make([][]string, 0, len(records))
 	for _, record := range records {
