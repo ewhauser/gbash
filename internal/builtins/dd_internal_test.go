@@ -297,7 +297,7 @@ func TestDdDiscardClampsHugeSkipBeforeIntConversion(t *testing.T) {
 	t.Parallel()
 
 	reader := &ddEOFReader{}
-	discarded, err := ddDiscard(reader, ^uint64(0))
+	discarded, err := ddDiscard(context.Background(), reader, ^uint64(0))
 	if err != nil {
 		t.Fatalf("ddDiscard() error = %v", err)
 	}
@@ -445,4 +445,20 @@ func TestParseDdSizeAllowsHugeFactorAfterZeroMultiplier(t *testing.T) {
 	if value != 0 {
 		t.Fatalf("parseDdSize() = %d, want 0", value)
 	}
+}
+
+func TestDdDiscardObservesContext(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := ddDiscard(ctx, zeroReader{}, ^uint64(0)); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ddDiscard() error = %v, want context.Canceled", err)
+	}
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
 }

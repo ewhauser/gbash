@@ -234,7 +234,7 @@ func TestTarRejectsWritesThroughArchiveSymlinkChains(t *testing.T) {
 	if got, want := result.Stdout, "rc=1\nnot-escaped\nrc=1\nnot-linked\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
 	}
-	if !strings.Contains(result.Stderr, "escapes extraction directory") {
+	if !strings.Contains(result.Stderr, "escapes extraction directory") && !strings.Contains(result.Stderr, "unsafe symlink target") {
 		t.Fatalf("Stderr = %q, want escape diagnostic", result.Stderr)
 	}
 

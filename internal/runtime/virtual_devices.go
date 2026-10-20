@@ -553,6 +553,19 @@ func (f *virtualDeviceFile) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// Seek is a no-op on readable character devices, matching lseek on Linux,
+// so dd skip= never has to read through an endless device. Write-only
+// handles keep reporting an illegal seek for dd seek=.
+func (f *virtualDeviceFile) Seek(int64, int) (int64, error) {
+	if f.closed.Load() {
+		return 0, stdfs.ErrClosed
+	}
+	if !canReadVirtualDevice(f.flag) {
+		return 0, &os.PathError{Op: "seek", Path: f.path, Err: syscall.ESPIPE}
+	}
+	return 0, nil
+}
+
 func (f *virtualDeviceFile) Close() error {
 	f.closed.Store(true)
 	return nil
