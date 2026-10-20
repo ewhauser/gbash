@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -102,12 +103,53 @@ func TestFunctionDepthDefaultAllowsDeepRecursion(t *testing.T) {
 	if got, want := result.Stdout, "1000\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
-	// Writes from deep function scopes used to cost O(depth^2), which took
-	// over ten seconds here without the race detector. It now takes under a
-	// second, but CI runs this with -race next to the rest of the package,
-	// which stretches it to about ten seconds, so allow more than that.
-	if elapsed := time.Since(start); elapsed > 25*time.Second {
-		t.Fatalf("recursion to depth 1000 took %v, want well under 25s", elapsed)
+	// Variable lookups and writes from deep function scopes used to walk
+	// every scope, which took over ten seconds here without the race detector
+	// and about ten seconds with it in CI. It now takes well under a second.
+	// TestFunctionRecursionCostIsLinearInDepth checks the growth directly.
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("recursion to depth 1000 took %v, want well under 10s", elapsed)
+	}
+}
+
+func TestFunctionRecursionCostIsLinearInDepth(t *testing.T) { //nolint:paralleltest // timing ratios need the package to themselves
+	rt := newRuntimeWithLimits(t, policy.Limits{MaxFunctionDepth: 2000})
+
+	const shallow, deep = 500, 2000
+	for _, tc := range []struct { //nolint:paralleltest // see above
+		name   string
+		script string
+	}{
+		{"globals", "n=0; f(){ n=$((n+1)); [ $n -lt %d ] && f; }; f; echo $n\n"},
+		{"temp bindings", "n=0; f(){ n=$((n+1)); [ $n -lt %d ] && y=$n f; }; f; echo $n\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := func(depth int) time.Duration {
+				start := time.Now()
+				result := runNestingScript(t, rt, fmt.Sprintf(tc.script, depth))
+				elapsed := time.Since(start)
+				if got, want := result.Stdout, fmt.Sprintf("%d\n", depth); got != want {
+					t.Fatalf("depth %d: Stdout = %q, want %q; stderr=%q", depth, got, want, result.Stderr)
+				}
+				return elapsed
+			}
+			// Take the fastest of a few interleaved runs to shed scheduling
+			// and GC noise.
+			fastest := [2]time.Duration{time.Hour, time.Hour}
+			for range 3 {
+				for i, depth := range []int{shallow, deep} {
+					fastest[i] = min(fastest[i], run(depth))
+				}
+			}
+			// Four times the depth should cost about four times as much.
+			// Scope walks made it sixteen; allow some slack for the Go
+			// runtime scanning the deeper goroutine stack.
+			ratio := float64(fastest[1]) / float64(fastest[0])
+			if ratio > 8 {
+				t.Fatalf("depth %d took %v but depth %d took %v (%.1fx), want about 4x", deep, fastest[1], shallow, fastest[0], ratio)
+			}
+			t.Logf("depth %d: %v, depth %d: %v (%.1fx)", shallow, fastest[0], deep, fastest[1], ratio)
+		})
 	}
 }
 
