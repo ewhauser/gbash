@@ -161,7 +161,7 @@ func TestYQConcurrentEvaluationsAcrossRuntimes(t *testing.T) {
 func TestYQAllowsModestArrayIndexAssignment(t *testing.T) {
 	t.Parallel()
 
-	result, _ := runYQWithTimeout(t, newYQRuntime(t), "yq -n -o json -I0 '[1] | .[3] = 2'\n", 30*time.Second, 10*time.Second)
+	result, _ := runYQWithTimeout(t, newYQRuntime(t), "yq -n -o json -I0 '[1] | .[3] = 2'\n", 30*time.Second, 5*time.Second)
 	if result.ExitCode != 0 || result.Stdout != "[1,null,null,2]\n" {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", result.ExitCode, result.Stdout, result.Stderr)
 	}

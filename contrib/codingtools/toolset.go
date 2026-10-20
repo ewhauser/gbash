@@ -439,7 +439,19 @@ func readFileAtMost(ctx context.Context, fsys gbfs.FileSystem, absolutePath stri
 		return nil, err
 	}
 	defer func() { _ = file.Close() }()
-	return io.ReadAll(io.LimitReader(file, int64(limit)+1))
+	reader := io.LimitReader(file, int64(limit)+1)
+	var output []byte
+	buf := make([]byte, 32*1024)
+	for {
+		n, readErr := reader.Read(buf)
+		output = append(output, buf[:n]...)
+		if errors.Is(readErr, io.EOF) {
+			return output, nil
+		}
+		if readErr != nil {
+			return nil, readErr
+		}
+	}
 }
 
 func writeFile(ctx context.Context, fsys gbfs.FileSystem, absolutePath, content string) error {
