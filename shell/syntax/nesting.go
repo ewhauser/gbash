@@ -13,6 +13,14 @@ import (
 // recover from.
 const MaxNestingDepth = 16000
 
+// MaxPatternNestingDepth bounds how deeply patterns nest through the shell
+// code inside them, as in "case x in $(case x in $(...) ...) ...". Pattern
+// parsing re-parses each shell part such as "$(...)" in a pattern with a
+// separate parser, which reads the text of every level inside it again, so
+// such input takes time proportional to its depth times its length. Deeper
+// input fails with a [ParseError] long before [MaxNestingDepth].
+const MaxPatternNestingDepth = 64
+
 // MaxTreeDepth bounds the depth of a parsed syntax tree. Lists such as
 // "a && b && ..." or "1+1+..." are parsed in a loop yet still build one tree
 // level per operator, and the interpreter walks those levels recursively, so
@@ -59,10 +67,20 @@ func nestingErrText(limit int) string {
 	return fmt.Sprintf("nesting exceeds the maximum depth of %d", limit)
 }
 
+// patternNestingErr reports shell code in patterns nested deeper than
+// MaxPatternNestingDepth. Like a nesting error, it stops all retries.
+func (p *Parser) patternNestingErr(pos Pos) {
+	p.posErr(pos, "%s", patternNestingErrText)
+	p.nestingFailed = true
+}
+
+var patternNestingErrText = fmt.Sprintf("shell code nested in patterns exceeds the maximum depth of %d", MaxPatternNestingDepth)
+
 // subParserNesting carries the nesting state into a fresh parser that
 // continues parsing part of the same input, such as a heredoc body.
 func (p *Parser) subParserNesting(sub *Parser) {
 	sub.nestBase = p.nestDepth
+	sub.patternDepth = p.patternDepth
 }
 
 // absorbSubParserNesting records what a sub-parser saw so that this parser's
@@ -72,6 +90,7 @@ func (p *Parser) subParserNesting(sub *Parser) {
 func (p *Parser) absorbSubParserNesting(sub *Parser) {
 	p.nestPeak = max(p.nestPeak, sub.nestPeak)
 	p.nestHigh = max(p.nestHigh, sub.nestHigh)
+	p.patternHigh = max(p.patternHigh, sub.patternHigh)
 	p.chainLinks += sub.chainLinks
 	if sub.nestingFailed {
 		p.errPass(sub.err)
