@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strconv"
 
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 )
@@ -70,9 +71,12 @@ func (g *yqEvalGuard) parse(expression string) (*yqlib.ExpressionNode, error) {
 }
 
 func (g *yqEvalGuard) instrument(node *yqlib.ExpressionNode) {
+	indices := false
 	for ; node != nil; node = node.RHS {
 		g.instrument(node.LHS)
+		isIndices := indices
 		op := node.Operation
+		indices = op != nil && op.OperationType != nil && op.OperationType.Type == "TRAVERSE_ARRAY"
 		if op == nil || op.OperationType == nil || op.OperationType.Handler == nil {
 			continue
 		}
@@ -83,14 +87,17 @@ func (g *yqEvalGuard) instrument(node *yqlib.ExpressionNode) {
 		// globals; give this node its own copy with a guarded handler.
 		opType := *op.OperationType
 		handler := reflect.ValueOf(&opType.Handler).Elem()
-		handler.Set(g.wrapHandler(handler))
+		handler.Set(g.wrapHandler(handler, isIndices))
 		op.OperationType = &opType
 	}
 }
 
 var yqContextType = reflect.TypeFor[yqlib.Context]()
 
-func (g *yqEvalGuard) wrapHandler(handler reflect.Value) reflect.Value {
+// wrapHandler guards one operator handler. When indices is set the handler
+// computes the indices of an array traversal, which yqlib pads up to in
+// update mode, so each index is checked against the budget before use.
+func (g *yqEvalGuard) wrapHandler(handler reflect.Value, indices bool) reflect.Value {
 	original := reflect.ValueOf(handler.Interface())
 	fail := func(err error) []reflect.Value {
 		return []reflect.Value{reflect.Zero(yqContextType), reflect.ValueOf(&err).Elem()}
@@ -112,6 +119,10 @@ func (g *yqEvalGuard) wrapHandler(handler reflect.Value) reflect.Value {
 			return results
 		}
 		if result, ok := results[0].Interface().(yqlib.Context); ok {
+			if indices && g.maxIndex(result.MatchingNodes) > g.maxBytes/yqNodeWeightBytes {
+				g.err = &yqEvalBudgetError{limit: g.maxBytes}
+				return fail(g.err)
+			}
 			if g.size(result.MatchingNodes, g.maxBytes) > g.maxBytes {
 				g.err = &yqEvalBudgetError{limit: g.maxBytes}
 				return fail(g.err)
@@ -177,4 +188,31 @@ func (g *yqEvalGuard) size(nodes *list.List, limit int64) int64 {
 		}
 	}
 	return total
+}
+
+// maxIndex returns the largest integer among the traversal indices in nodes.
+func (g *yqEvalGuard) maxIndex(nodes *list.List) int64 {
+	var largest int64
+	if nodes == nil {
+		return 0
+	}
+	for e := nodes.Front(); e != nil; e = e.Next() {
+		node, ok := e.Value.(*yqlib.CandidateNode)
+		if !ok {
+			continue
+		}
+		candidates := []*yqlib.CandidateNode{node}
+		if node.Kind == yqlib.SequenceNode {
+			candidates = node.Content
+		}
+		for _, c := range candidates {
+			if c == nil || c.Kind != yqlib.ScalarNode {
+				continue
+			}
+			if v, err := strconv.ParseFloat(c.Value, 64); err == nil && v > float64(largest) {
+				largest = int64(min(v, math.MaxInt64))
+			}
+		}
+	}
+	return largest
 }
