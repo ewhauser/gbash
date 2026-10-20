@@ -111,6 +111,16 @@ func (fs *CommandFS) Resolve(name string) string {
 	return gbfs.Resolve(fs.cwd, name)
 }
 
+// ResolveAt resolves name for a filesystem operation. Unlike [CommandFS.Resolve],
+// it applies each ".." after the symlinks before it, as POSIX path resolution
+// does, so "/lnk/../x" names the parent of the link's target.
+func (fs *CommandFS) ResolveAt(ctx context.Context, name string) string {
+	if fs == nil {
+		return gbfs.Clean(name)
+	}
+	return gbfs.ResolvePhysical(ctx, fs.fsys, fs.cwd, name)
+}
+
 // Open opens name for reading after enforcing read policy.
 func (fs *CommandFS) Open(ctx context.Context, name string) (gbfs.File, error) {
 	abs, err := fs.prepare(ctx, policy.FileActionRead, name)
@@ -139,7 +149,7 @@ func (fs *CommandFS) ReadFile(ctx context.Context, name string) ([]byte, error) 
 // OpenFile opens name with the supplied flags after enforcing the necessary
 // read and write policy checks.
 func (fs *CommandFS) OpenFile(ctx context.Context, name string, flag int, perm stdfs.FileMode) (gbfs.File, error) {
-	abs := fs.Resolve(name)
+	abs := fs.ResolveAt(ctx, name)
 	if canRead := flag&(os.O_WRONLY|os.O_RDWR) != os.O_WRONLY; canRead {
 		if err := fs.check(ctx, policy.FileActionRead, abs); err != nil {
 			return nil, err
@@ -154,7 +164,7 @@ func (fs *CommandFS) OpenFile(ctx context.Context, name string, flag int, perm s
 	if err != nil {
 		return nil, wrapCommandError(err)
 	}
-	return file, nil
+	return gbfs.LimitFileSize(file, flag, fs.limits.MaxFileBytes), nil
 }
 
 func openFileHasWriteIntent(flag int) bool {
@@ -258,11 +268,16 @@ func (fs *CommandFS) Symlink(ctx context.Context, target, linkName string) error
 	return nil
 }
 
-// Link creates a hard link from oldName to newName after enforcing the relevant
-// read and write policy checks.
+// Link creates a hard link from oldName to newName after enforcing read and
+// write policy on oldName and write policy on newName.
 func (fs *CommandFS) Link(ctx context.Context, oldName, newName string) error {
 	oldAbs, err := fs.prepare(ctx, policy.FileActionRead, oldName)
 	if err != nil {
+		return err
+	}
+	// The new link shares the source's inode, so writes through it modify
+	// the source. Require write access to the source as well.
+	if err := fs.check(ctx, policy.FileActionWrite, oldAbs); err != nil {
 		return err
 	}
 	newAbs, err := fs.prepare(ctx, policy.FileActionWrite, newName)
@@ -421,7 +436,7 @@ func (fs *CommandFS) maxFileBytes() int64 {
 }
 
 func (fs *CommandFS) prepare(ctx context.Context, action policy.FileAction, name string) (string, error) {
-	abs := fs.Resolve(name)
+	abs := fs.ResolveAt(ctx, name)
 	if err := fs.check(ctx, action, abs); err != nil {
 		return "", err
 	}
@@ -429,7 +444,7 @@ func (fs *CommandFS) prepare(ctx context.Context, action policy.FileAction, name
 }
 
 func (fs *CommandFS) prepareQuiet(ctx context.Context, action policy.FileAction, name string) (string, error) {
-	abs := fs.Resolve(name)
+	abs := fs.ResolveAt(ctx, name)
 	if err := fs.checkQuiet(ctx, action, abs); err != nil {
 		return "", err
 	}

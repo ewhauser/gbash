@@ -66,6 +66,20 @@ func copyPathIntoWithInfo(ctx context.Context, src FileSystem, srcName string, i
 			}
 		}
 		return nil
+	case info.Mode()&stdfs.ModeNamedPipe != 0:
+		// Opening a FIFO to copy its bytes would block for a peer; recreate
+		// the pipe itself instead.
+		if err := mkfifoViaOptional(ctx, dst, absDst, info.Mode().Perm()); err != nil {
+			return err
+		}
+		if hasOwnership {
+			if err := dst.Chown(ctx, absDst, ownership.UID, ownership.GID, false); err != nil {
+				return err
+			}
+		}
+		return nil
+	case !info.Mode().IsRegular():
+		return &os.PathError{Op: "copy", Path: srcName, Err: stdfs.ErrInvalid}
 	default:
 		return copyFileInto(ctx, src, srcName, dst, absDst, info)
 	}

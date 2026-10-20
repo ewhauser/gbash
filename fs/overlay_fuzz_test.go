@@ -38,6 +38,9 @@ func FuzzOverlayFSRealpath(f *testing.F) {
 
 		overlay := NewOverlay(lower)
 		if cursor.Intn(2) == 1 {
+			if err := overlay.Remove(context.Background(), linkPath, false); err != nil {
+				t.Fatalf("Remove(lower link) error = %v", err)
+			}
 			if err := overlay.Symlink(context.Background(), "upper.txt", linkPath); err != nil {
 				t.Fatalf("Symlink(upper override) error = %v", err)
 			}

@@ -187,7 +187,7 @@ func cloneSpecialFile(dst *MemoryFS, dstName string, info stdfs.FileInfo) error 
 
 	node := &memoryNode{
 		id:      dst.newNodeIDLocked(),
-		mode:    info.Mode(),
+		mode:    info.Mode() & (storedPermBits | seedableTypeBits),
 		atime:   now,
 		modTime: now,
 		uid:     DefaultOwnerUID,

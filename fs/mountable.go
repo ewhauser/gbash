@@ -435,10 +435,24 @@ func (m *MountableFS) Rename(ctx context.Context, oldName, newName string) error
 	if newMounted {
 		dst = namespacedFS{mountPoint: newEntry.mountPoint, inner: newEntry.fs}
 	}
+	// A cross-mount rename copies and then removes the source. If either
+	// step fails, remove the new copy so the rename leaves no partial result.
+	_, statErr := dst.Lstat(ctx, newRel)
+	dstExisted := statErr == nil
+	undo := func() {
+		if !dstExisted {
+			_ = dst.Remove(ctx, newRel, true)
+		}
+	}
 	if err := copyPathInto(ctx, src, oldRel, dst, newRel); err != nil {
+		undo()
 		return err
 	}
-	return src.Remove(ctx, oldRel, true)
+	if err := src.Remove(ctx, oldRel, true); err != nil {
+		undo()
+		return err
+	}
+	return nil
 }
 
 func (m *MountableFS) Getwd() string {

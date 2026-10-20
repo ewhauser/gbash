@@ -562,6 +562,9 @@ func (m *core) openHandler(exec *Execution) interp.OpenHandlerFunc {
 		if err != nil {
 			return nil, shellOpenPathError(ctx, state.Stderr, name, err)
 		}
+		if exec.Policy != nil {
+			file = gbfs.LimitFileSize(file, flag, exec.Policy.Limits().MaxFileBytes)
+		}
 		if mutationAction := fileMutationAction(flag); mutationAction != "" {
 			recordFileMutation(exec.Trace, mutationAction, abs, "", "")
 		}

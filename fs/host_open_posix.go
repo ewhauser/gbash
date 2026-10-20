@@ -60,6 +60,13 @@ func openHostFile(ctx context.Context, root *os.Root, rel string, flag int, perm
 	}
 }
 
+// openHostDir opens rel as a directory without blocking. O_DIRECTORY makes
+// open(2) fail with ENOTDIR on a FIFO or other non-directory instead of
+// waiting for a peer.
+func openHostDir(root *os.Root, rel string) (*os.File, error) {
+	return root.OpenFile(rel, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NONBLOCK, 0)
+}
+
 // hostOpenableMode reports whether a host node of this type may be opened:
 // regular files, directories, and named pipes, but no devices or sockets.
 func hostOpenableMode(mode stdfs.FileMode) bool {

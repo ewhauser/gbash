@@ -57,6 +57,11 @@ const maxSymlinkDepth = 40
 // storedPermBits are the mode bits a caller may set on a node: permissions plus
 // setuid, setgid, and sticky. Type bits always come from the operation that
 // creates the node, never from a caller-supplied perm.
+// seedableTypeBits are the file type bits a seeded or cloned file node may
+// carry. Directories and symlinks have their own constructors, and sockets
+// and other host types have no in-memory meaning.
+const seedableTypeBits = stdfs.ModeNamedPipe | stdfs.ModeDevice | stdfs.ModeCharDevice
+
 const storedPermBits = stdfs.ModePerm | stdfs.ModeSetuid | stdfs.ModeSetgid | stdfs.ModeSticky
 
 var errTooManySymlinks = errors.New("too many levels of symbolic links")
@@ -151,6 +156,12 @@ func (m *MemoryFS) seedInitialFileLocked(name string, file InitialFile, now time
 		return &os.PathError{Op: "seed", Path: abs, Err: stdfs.ErrInvalid}
 	}
 	if file.Lazy != nil && file.Content != nil {
+		return &os.PathError{Op: "seed", Path: abs, Err: stdfs.ErrInvalid}
+	}
+	// Seeded entries are regular files, FIFOs, or inert device nodes. Other
+	// type bits would create nodes, such as directories without a children
+	// map, that nothing else can build.
+	if file.Mode.Type()&^seedableTypeBits != 0 {
 		return &os.PathError{Op: "seed", Path: abs, Err: stdfs.ErrInvalid}
 	}
 	if err := m.mkdirAllLocked(parentDir(abs), 0o755); err != nil {
@@ -357,6 +368,13 @@ func (m *MemoryFS) OpenFile(ctx context.Context, name string, flag int, perm std
 		err  error
 	)
 	if flag&os.O_CREATE != 0 {
+		// O_EXCL fails on any existing final entry, a dangling symlink
+		// included, instead of creating the symlink's target.
+		if flag&os.O_EXCL != 0 {
+			if linkAbs, linkNode, linkErr := m.resolvePathLocked(name, false, true); linkErr == nil && linkNode != nil {
+				return nil, &os.PathError{Op: "open", Path: linkAbs, Err: stdfs.ErrExist}
+			}
+		}
 		abs, err = m.resolveCreatePathLocked(requested, 0)
 		if err != nil {
 			return nil, &os.PathError{Op: "open", Path: requested, Err: createParentError(err)}
@@ -988,26 +1006,26 @@ func (f *memoryFile) Read(p []byte) (int, error) {
 	}
 
 	for {
-		f.fs.mu.RLock()
+		f.fs.mu.Lock()
 		node := f.node
 		if isLazyFileNode(node) {
-			f.fs.mu.RUnlock()
+			f.fs.mu.Unlock()
 			if err := f.fs.materializeNode(context.Background(), node); err != nil {
 				return 0, &os.PathError{Op: "read", Path: f.path, Err: err}
 			}
 			continue
 		}
 		if node.mode.IsDir() {
-			f.fs.mu.RUnlock()
+			f.fs.mu.Unlock()
 			return 0, &os.PathError{Op: "read", Path: f.path, Err: stdfs.ErrInvalid}
 		}
 		if f.offset >= int64(len(node.data)) {
-			f.fs.mu.RUnlock()
+			f.fs.mu.Unlock()
 			return 0, io.EOF
 		}
 		n := copy(p, node.data[f.offset:])
 		f.offset += int64(n)
-		f.fs.mu.RUnlock()
+		f.fs.mu.Unlock()
 		return n, nil
 	}
 }

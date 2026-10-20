@@ -305,6 +305,13 @@ func (f *TrieFS) OpenFile(ctx context.Context, name string, flag int, perm stdfs
 		err   error
 	)
 	if flag&os.O_CREATE != 0 {
+		// O_EXCL fails on any existing final entry, a dangling symlink
+		// included, instead of creating the symlink's target.
+		if flag&os.O_EXCL != 0 {
+			if linkAbs, linkEntry, linkErr := f.resolveAbsLocked(requested, false, true, 0); linkErr == nil && linkEntry != nil {
+				return nil, &os.PathError{Op: "open", Path: linkAbs, Err: stdfs.ErrExist}
+			}
+		}
 		abs, err = f.resolveCreatePathLocked(requested, 0)
 		if err != nil {
 			return nil, &os.PathError{Op: "open", Path: requested, Err: createParentError(err)}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestReadWriteFSReadsWritesAndResolvesSymlinks(t *testing.T) {
@@ -581,5 +582,60 @@ func TestReadWriteFSChdirAllowsCurrentLongPathAtHostRoot(t *testing.T) {
 	}
 	if got, want := realpath, filepath.ToSlash(current); got != want {
 		t.Fatalf("Realpath(.) = %q, want %q", got, want)
+	}
+}
+
+func TestReadWriteFSReadCapAppliesToReadWriteOpens(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	fsys, err := NewReadWrite(ReadWriteOptions{Root: root, MaxFileReadBytes: 4})
+	if err != nil {
+		t.Fatalf("NewReadWrite() error = %v", err)
+	}
+	if _, err := fsys.OpenFile(context.Background(), "/big.txt", os.O_RDWR, 0); !errors.Is(err, syscall.EFBIG) {
+		t.Fatalf("OpenFile(O_RDWR) error = %v, want EFBIG", err)
+	}
+	file, err := fsys.OpenFile(context.Background(), "/big.txt", os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatalf("OpenFile(O_WRONLY) error = %v, want nil", err)
+	}
+	_ = file.Close()
+}
+
+func TestHostBackendsReadDirOnFIFODoesNotBlock(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := syscall.Mkfifo(filepath.Join(root, "p"), 0o644); err != nil {
+		t.Fatalf("Mkfifo() error = %v", err)
+	}
+	rw, err := NewReadWrite(ReadWriteOptions{Root: root})
+	if err != nil {
+		t.Fatalf("NewReadWrite() error = %v", err)
+	}
+	host, err := NewHost(HostOptions{Root: root, VirtualRoot: "/mnt"})
+	if err != nil {
+		t.Fatalf("NewHost() error = %v", err)
+	}
+	for name, fsys := range map[string]FileSystem{"readwrite": rw, "host": host} {
+		dir := "/p"
+		if name == "host" {
+			dir = "/mnt/p"
+		}
+		done := make(chan error, 1)
+		go func() {
+			_, err := fsys.ReadDir(context.Background(), dir)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatalf("%s: ReadDir(FIFO) error = nil, want not-a-directory", name)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: ReadDir(FIFO) blocked", name)
+		}
 	}
 }
