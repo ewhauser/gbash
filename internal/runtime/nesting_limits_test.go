@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -90,22 +91,36 @@ func TestFunctionDepthDefaultStopsRecursion(t *testing.T) {
 	}
 }
 
-func TestFunctionDepthDefaultAllowsDeepRecursion(t *testing.T) {
-	t.Parallel()
+func TestFunctionDepthDefaultAllowsDeepRecursion(t *testing.T) { //nolint:paralleltest // timing comparison; parallel tests would skew the runs
 	rt := newRuntime(t, &Config{})
 
-	start := time.Now()
-	result := runNestingScript(t, rt, "n=0; f(){ n=$((n+1)); [ $n -lt 1000 ] && f; }; f; echo $n\n")
-	if result.ExitCode != 0 {
-		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
+	// Each write from a deep function scope used to cost O(depth^2), making
+	// this recursion O(depth^3); it took over ten seconds. Compare two depths
+	// instead of using a wall-clock limit, so a loaded runner slows both runs
+	// alike. Quadruple the depth now costs about 16x (variable lookups still
+	// walk the scope chain), while the old cubic cost was about 64x. The
+	// fastest of a few runs filters out scheduling noise.
+	recurse := func(depth int) time.Duration {
+		best := time.Duration(1<<63 - 1)
+		for range 3 {
+			start := time.Now()
+			result := runNestingScript(t, rt, fmt.Sprintf("n=0; f(){ n=$((n+1)); [ $n -lt %d ] && f; }; f; echo $n\n", depth))
+			elapsed := time.Since(start)
+			if result.ExitCode != 0 {
+				t.Fatalf("depth %d: ExitCode = %d, want 0; stderr=%q", depth, result.ExitCode, result.Stderr)
+			}
+			if got, want := result.Stdout, fmt.Sprintf("%d\n", depth); got != want {
+				t.Fatalf("depth %d: Stdout = %q, want %q", depth, got, want)
+			}
+			best = min(best, elapsed)
+		}
+		return best
 	}
-	if got, want := result.Stdout, "1000\n"; got != want {
-		t.Fatalf("Stdout = %q, want %q", got, want)
-	}
-	// Writes from deep function scopes used to cost O(depth^2), which took
-	// over ten seconds here.
-	if elapsed := time.Since(start); elapsed > 10*time.Second {
-		t.Fatalf("recursion to depth 1000 took %v, want well under 10s", elapsed)
+
+	shallow := recurse(250)
+	deep := recurse(1000)
+	if ratio := float64(deep) / float64(shallow); ratio > 32 {
+		t.Fatalf("depth 1000 took %v, depth 250 took %v (ratio %.1f), want well under the cubic 64", deep, shallow, ratio)
 	}
 }
 
