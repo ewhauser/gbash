@@ -999,6 +999,17 @@ func (r *Runner) posixOptByName(name string) *bool {
 	return nil
 }
 
+// IsSetOption reports whether name is an option accepted by "set -o name",
+// which is how execution startup options are applied.
+func IsSetOption(name string) bool {
+	for _, opt := range &posixOptsTable {
+		if opt.name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Runner) posixOptByFlag(flag byte) *bool {
 	for i, opt := range &posixOptsTable {
 		if opt.flag == flag {

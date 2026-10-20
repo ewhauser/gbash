@@ -8,8 +8,10 @@ import (
 	"math"
 	"net"
 	"os"
+	"os/signal"
 	"path"
 	"strings"
+	"syscall"
 
 	"github.com/ewhauser/gbash"
 	"github.com/ewhauser/gbash/commands"
@@ -148,6 +150,10 @@ func run(ctx context.Context, cfg Config, args []string, stdin io.Reader, stdout
 }
 
 func serveServer(ctx context.Context, rt *gbash.Runtime, name, version string, runtimeOpts *runtimeOptions) error {
+	// SIGINT and SIGTERM stop the server cleanly: running executions are
+	// canceled and the Unix socket file is removed.
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	cfg := gbserver.Config{
 		Runtime: rt,
 		Name:    name,
@@ -157,6 +163,7 @@ func serveServer(ctx context.Context, rt *gbash.Runtime, name, version string, r
 	var listenAddr string
 	if runtimeOpts != nil {
 		cfg.SessionTTL = runtimeOpts.sessionTTL
+		cfg.MaxExecTimeout = runtimeOpts.maxExecTimeout
 		socketPath = strings.TrimSpace(runtimeOpts.socket)
 		listenAddr = strings.TrimSpace(runtimeOpts.listen)
 	}

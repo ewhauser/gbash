@@ -27,23 +27,23 @@ func TestAcquiredSessionCannotBeDestroyedOrReaped(t *testing.T) {
 	t.Parallel()
 	srv := newTestServerState(t, time.Minute)
 
-	session, err := srv.createSession()
+	session, err := srv.createSession("conn-test")
 	if err != nil {
 		t.Fatalf("createSession() error = %v", err)
 	}
 
-	acquired, err := srv.acquireSession(session.id)
+	acquired, err := srv.acquireSession("conn-test", session.id)
 	if err != nil {
 		t.Fatalf("acquireSession(%q) error = %v", session.id, err)
 	}
-	if _, err := srv.acquireSession(session.id); !errors.Is(err, errSessionBusy) {
+	if _, err := srv.acquireSession("conn-test", session.id); !errors.Is(err, errSessionBusy) {
 		t.Fatalf("second acquireSession(%q) error = %v, want errSessionBusy", session.id, err)
 	}
-	if _, err := srv.destroySession(session.id); !errors.Is(err, errSessionBusy) {
+	if _, err := srv.destroySession("conn-test", session.id); !errors.Is(err, errSessionBusy) {
 		t.Fatalf("destroySession(%q) error = %v, want errSessionBusy", session.id, err)
 	}
 	srv.reapExpiredSessions(time.Now().Add(time.Hour))
-	if _, err := srv.lookupSession(session.id); err != nil {
+	if _, err := srv.lookupSession("conn-test", session.id); err != nil {
 		t.Fatalf("lookupSession(%q) after reap error = %v, want session kept", session.id, err)
 	}
 
@@ -55,7 +55,7 @@ func TestAcquiredSessionCannotBeDestroyedOrReaped(t *testing.T) {
 		t.Fatalf("exec() = %+v, want stdout ok and idle session", result)
 	}
 
-	if _, err := srv.destroySession(session.id); err != nil {
+	if _, err := srv.destroySession("conn-test", session.id); err != nil {
 		t.Fatalf("destroySession(%q) after exec error = %v", session.id, err)
 	}
 }
@@ -68,7 +68,7 @@ func TestConcurrentDestroyAndExec(t *testing.T) {
 	srv := newTestServerState(t, time.Minute)
 
 	for range 200 {
-		session, err := srv.createSession()
+		session, err := srv.createSession("conn-test")
 		if err != nil {
 			t.Fatalf("createSession() error = %v", err)
 		}
@@ -78,7 +78,7 @@ func TestConcurrentDestroyAndExec(t *testing.T) {
 		destroyErr := make(chan error, 1)
 		go func() {
 			<-start
-			acquired, err := srv.acquireSession(session.id)
+			acquired, err := srv.acquireSession("conn-test", session.id)
 			if err != nil {
 				execErr <- err
 				return
@@ -96,7 +96,7 @@ func TestConcurrentDestroyAndExec(t *testing.T) {
 		}()
 		go func() {
 			<-start
-			_, err := srv.destroySession(session.id)
+			_, err := srv.destroySession("conn-test", session.id)
 			destroyErr <- err
 		}()
 		close(start)
@@ -111,7 +111,7 @@ func TestConcurrentDestroyAndExec(t *testing.T) {
 			if eErr != nil {
 				t.Fatalf("exec error = %v while destroy reported busy", eErr)
 			}
-			if _, err := srv.destroySession(session.id); err != nil {
+			if _, err := srv.destroySession("conn-test", session.id); err != nil {
 				t.Fatalf("destroySession(%q) cleanup error = %v", session.id, err)
 			}
 		default:

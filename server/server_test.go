@@ -187,8 +187,9 @@ func TestServerSessionLifecycleAndExec(t *testing.T) {
 	}
 
 	exec := client.call("session.exec", map[string]any{
-		"session_id": sessionID,
-		"script":     "printf 'hello\\n'; printf 'warn\\n' >&2; export MODE=debug\n",
+		"session_id":        sessionID,
+		"include_final_env": true,
+		"script":            "printf 'hello\\n'; printf 'warn\\n' >&2; export MODE=debug\n",
 	})
 	mustOK(t, &exec)
 	var execPayload execResult
@@ -267,7 +268,7 @@ func TestServerConcurrentSessionsAndBusy(t *testing.T) {
 	defer client2.Close()
 
 	session1 := mustCreateSession(t, client1)
-	session2 := mustCreateSession(t, client1)
+	session2 := mustCreateSession(t, client2)
 
 	done := make(chan rpcResponse, 1)
 	go func() {
@@ -283,12 +284,13 @@ func TestServerConcurrentSessionsAndBusy(t *testing.T) {
 		t.Fatal("timed out waiting for blocking session to start")
 	}
 
-	busy := client2.call("session.exec", map[string]any{
+	// Sessions are private to the connection that created them.
+	foreign := client2.call("session.exec", map[string]any{
 		"session_id": session1,
 		"script":     "printf 'no\\n'",
 	})
-	if busy.Error == nil || busy.Error.Data == nil || busy.Error.Data.Code != "SESSION_BUSY" {
-		t.Fatalf("busy response = %#v, want SESSION_BUSY", busy)
+	if foreign.Error == nil || foreign.Error.Data == nil || foreign.Error.Data.Code != "SESSION_NOT_FOUND" {
+		t.Fatalf("foreign exec response = %#v, want SESSION_NOT_FOUND", foreign)
 	}
 
 	ok := client2.call("session.exec", map[string]any{
@@ -325,7 +327,8 @@ func TestServerExecReturnsRawOutputsAndFinalEnvWithTraceRedacted(t *testing.T) {
 
 	sessionID := mustCreateSession(t, client)
 	exec := client.call("session.exec", map[string]any{
-		"session_id": sessionID,
+		"session_id":        sessionID,
+		"include_final_env": true,
 		"script": "" +
 			"export API_TOKEN=env-secret\n" +
 			"printf 'stdout:%s\\n' \"$API_TOKEN\"\n" +
@@ -620,103 +623,6 @@ func TestServerParallelStress(t *testing.T) {
 	}
 }
 
-func TestServerParallelExecOnSharedSession(t *testing.T) {
-	t.Parallel()
-	started := make(chan struct{})
-	release := make(chan struct{})
-	srv := startServer(t, gbserver.Config{
-		Name:       "gbash",
-		Version:    "test",
-		SessionTTL: 5 * time.Second,
-	}, gbash.WithRegistry(registryWithCommands(t, newBlockingCommand("blockdone", "done", started, release))))
-
-	setup := dialClient(t, srv.socket)
-	defer setup.Close()
-	sessionID := mustCreateSession(t, setup)
-
-	blocker := dialClient(t, srv.socket)
-	defer blocker.Close()
-
-	blocked := make(chan rpcResponse, 1)
-	go func() {
-		blocked <- blocker.call("session.exec", map[string]any{
-			"session_id": sessionID,
-			"script":     "blockdone",
-		})
-	}()
-
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for blocking exec to start")
-	}
-
-	const numWorkers = 10
-	type result struct {
-		ok   bool
-		busy bool
-		err  string
-	}
-
-	results := make([]result, numWorkers)
-	var wg sync.WaitGroup
-	for i := range numWorkers {
-		wg.Go(func() {
-			c := dialClient(t, srv.socket)
-			defer c.Close()
-			resp := c.call("session.exec", map[string]any{
-				"session_id": sessionID,
-				"script":     "printf 'done\\n'",
-			})
-			if resp.Error != nil {
-				if resp.Error.Data != nil && resp.Error.Data.Code == "SESSION_BUSY" {
-					results[i] = result{busy: true}
-				} else {
-					results[i] = result{err: resp.Error.Message}
-				}
-			} else {
-				results[i] = result{ok: true}
-			}
-		})
-	}
-	wg.Wait()
-	close(release)
-
-	var okCount, busyCount, errCount int
-	for _, r := range results {
-		switch {
-		case r.ok:
-			okCount++
-		case r.busy:
-			busyCount++
-		default:
-			errCount++
-			t.Errorf("unexpected error: %s", r.err)
-		}
-	}
-
-	if okCount != 0 {
-		t.Fatalf("expected competing execs to be rejected, got ok=%d busy=%d err=%d", okCount, busyCount, errCount)
-	}
-	if errCount > 0 {
-		t.Fatalf("unexpected errors: ok=%d busy=%d err=%d", okCount, busyCount, errCount)
-	}
-	if busyCount != numWorkers {
-		t.Fatalf("expected all competing execs to be busy, got ok=%d busy=%d err=%d", okCount, busyCount, errCount)
-	}
-
-	resp := <-blocked
-	mustOK(t, &resp)
-	var payload execResult
-	decodeResult(t, &resp, &payload)
-	if got, want := payload.Stdout, "done\n"; got != want {
-		t.Fatalf("blocking exec stdout = %q, want %q", got, want)
-	}
-	if payload.ExitCode != 0 {
-		t.Fatalf("blocking exec exit_code = %d, want 0", payload.ExitCode)
-	}
-}
-
 func TestServerParallelCreateDestroy(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, gbserver.Config{
@@ -887,8 +793,9 @@ func TestServerExecCarriesSessionStateInResult(t *testing.T) {
 
 	sessionID := mustCreateSession(t, client)
 	resp := client.call("session.exec", map[string]any{
-		"session_id": sessionID,
-		"script":     "cd /tmp\npwd\n",
+		"session_id":        sessionID,
+		"include_final_env": true,
+		"script":            "cd /tmp\npwd\n",
 	})
 	mustOK(t, &resp)
 
