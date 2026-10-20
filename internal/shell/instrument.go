@@ -111,10 +111,6 @@ func loopGuardCall(stmt *syntax.Stmt) *syntax.CallExpr {
 	}
 }
 
-// reservedHelperPrefix marks names the runtime reserves for the commands it
-// inserts. User code may not call them.
-const reservedHelperPrefix = "__jb_"
-
 func wordLiteral(word *syntax.Word) string {
 	if word == nil {
 		return ""

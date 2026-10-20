@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/ewhauser/gbash/policy"
-	"github.com/ewhauser/gbash/shell/expand"
 	"github.com/ewhauser/gbash/shell/syntax"
 	"github.com/ewhauser/gbash/shellvariant"
 )
@@ -85,19 +84,6 @@ func validateExecutionBudgets(program *syntax.File, pol policy.Policy) error {
 	return nil
 }
 
-func estimateProgramGlobOps(program *syntax.File) int64 {
-	if program == nil {
-		return 0
-	}
-	var globOps int64
-	for node := range syntax.All(program) {
-		if word, ok := node.(*syntax.Word); ok {
-			globOps += estimateWordGlobOps(word)
-		}
-	}
-	return globOps
-}
-
 func validateSupportedRedirections(program *syntax.File) error {
 	if program == nil {
 		return nil
@@ -137,7 +123,8 @@ func validateSupportedFunctionDeclarations(program *syntax.File) error {
 }
 
 // validateNoReservedNamesOrCoprocs rejects calls to and definitions of the
-// runtime's reserved helper names, and coprocesses, which are not supported.
+// loop guard helper name, which only the instrumenter may insert, and
+// coprocesses, which are not supported.
 func validateNoReservedNamesOrCoprocs(program *syntax.File) error {
 	if program == nil {
 		return nil
@@ -145,15 +132,15 @@ func validateNoReservedNamesOrCoprocs(program *syntax.File) error {
 	for node := range syntax.All(program) {
 		switch node := node.(type) {
 		case *syntax.CallExpr:
-			if len(node.Args) > 0 && strings.HasPrefix(wordLiteral(node.Args[0]), reservedHelperPrefix) {
+			if len(node.Args) > 0 && wordLiteral(node.Args[0]) == loopIterCommandName {
 				return &shellValidationError{message: fmt.Sprintf("%s: reserved command name", wordLiteral(node.Args[0]))}
 			}
 		case *syntax.FuncDecl:
-			if node.Name != nil && strings.HasPrefix(node.Name.Value, reservedHelperPrefix) {
+			if node.Name != nil && node.Name.Value == loopIterCommandName {
 				return &shellValidationError{message: fmt.Sprintf("%s: reserved function name", node.Name.Value)}
 			}
 			for _, name := range node.Names {
-				if name != nil && strings.HasPrefix(name.Value, reservedHelperPrefix) {
+				if name != nil && name.Value == loopIterCommandName {
 					return &shellValidationError{message: fmt.Sprintf("%s: reserved function name", name.Value)}
 				}
 			}
@@ -208,9 +195,4 @@ func isSupportedRedirectFD(fd string) bool {
 		_, err := strconv.Atoi(fd)
 		return err == nil
 	}
-}
-
-func estimateWordGlobOps(word *syntax.Word) int64 {
-	lit := wordLiteral(word)
-	return expand.EstimateGlobOperations(lit)
 }

@@ -281,6 +281,7 @@ func (m *core) runnerConfig(exec *Execution, budget *executionBudget) *interp.Ru
 		RealpathHandler:  m.realpathHandler(exec),
 		ProcSubstHandler: m.procSubstHandler(exec),
 		LoopGuard:        budget.loopGuard,
+		BeforeGlob:       budget.beforeGlob,
 	}
 	if exec == nil {
 		return cfg
@@ -671,12 +672,12 @@ func (m *core) callHandler(exec *Execution, budget *executionBudget) interp.Call
 		if hc.IsBuiltin(args[0]) {
 			if err := allowBuiltin(ctx, exec.Policy, args[0], args); err != nil {
 				recordPolicyDenied(exec.Trace, err, "", "", args[0], "builtin")
-				return nil, shellFailure(ctx, 126, "%v", err)
+				return nil, shellLimitFailure(ctx, "%v", err)
 			}
 			for _, invocation := range wrappedBuiltinInvocations(hc, args) {
 				if err := allowBuiltin(ctx, exec.Policy, invocation.name, invocation.argv); err != nil {
 					recordPolicyDenied(exec.Trace, err, "", "", invocation.name, "builtin")
-					return nil, shellFailure(ctx, 126, "%v", err)
+					return nil, shellLimitFailure(ctx, "%v", err)
 				}
 			}
 		}
@@ -1643,11 +1644,14 @@ func envSplitStringFields(field string) ([]string, bool) {
 	return strings.Fields(value), true
 }
 
-func shellFailure(ctx context.Context, code int, format string, args ...any) error {
+// shellLimitFailure reports a sandbox limit on the handler's stderr and
+// fails with status 126.
+func shellLimitFailure(ctx context.Context, format string, args ...any) error {
+	var stderr io.Writer
 	if hc, ok := interp.LookupHandlerContext(ctx); ok {
-		return shellFailureToWriter(ctx, hc.Stderr, code, format, args...)
+		stderr = hc.Stderr
 	}
-	return shellFailureToWriter(ctx, nil, code, format, args...)
+	return shellFailureToWriter(ctx, stderr, 126, format, args...)
 }
 
 func shellFailureToWriter(_ context.Context, stderr io.Writer, code int, format string, args ...any) error {
@@ -1847,7 +1851,7 @@ func (b *executionBudget) beforeCommand(ctx context.Context) error {
 	if b.count.Add(1) <= b.maxCommandCount {
 		return nil
 	}
-	return shellFailure(ctx, 126, "too many commands executed (>%d), increase policy.Limits.MaxCommandCount", b.maxCommandCount)
+	return shellLimitFailure(ctx, "too many commands executed (>%d), increase policy.Limits.MaxCommandCount", b.maxCommandCount)
 }
 
 // loopGuard handles a guard call inserted by the instrumenter, identified by
@@ -1881,7 +1885,7 @@ func (b *executionBudget) beforeLoopIteration(ctx context.Context, guard loopGua
 	if count <= b.maxLoopIterations {
 		return nil
 	}
-	return shellFailure(ctx, 126, "%s loop: too many iterations (%d), increase policy.Limits.MaxLoopIterations", guard.kind, b.maxLoopIterations)
+	return shellLimitFailure(ctx, "%s loop: too many iterations (%d), increase policy.Limits.MaxLoopIterations", guard.kind, b.maxLoopIterations)
 }
 
 func (b *executionBudget) beforeGlob(ops int64) error {
@@ -1894,9 +1898,7 @@ func (b *executionBudget) beforeGlob(ops int64) error {
 	if b.globCount.Add(ops) <= b.maxGlobOperations {
 		return nil
 	}
-	return &budgetViolation{
-		message: fmt.Sprintf("Glob operation limit exceeded (%d), increase policy.Limits.MaxGlobOperations", b.maxGlobOperations),
-	}
+	return interp.GlobLimitError{Limit: b.maxGlobOperations}
 }
 
 func (b *executionBudget) nextLoopNamespace() string {

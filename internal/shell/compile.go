@@ -15,9 +15,6 @@ func compileChunk(program *syntax.File, pol policy.Policy, budget *executionBudg
 	if violation := validateExecutionBudgets(program, pol); violation != nil {
 		return nil, violation
 	}
-	if err := budget.beforeGlob(estimateProgramGlobOps(program)); err != nil {
-		return nil, err
-	}
 	synthetic := normalizeExecutionProgram(program)
 	if err := instrumentLoopBudgets(program, pol, budget, loopNamespace); err != nil {
 		return nil, err

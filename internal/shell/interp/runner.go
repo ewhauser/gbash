@@ -205,6 +205,14 @@ func (r *Runner) ExpandProcSubst(ps *syntax.ProcSubst) (string, error) {
 	return "", fmt.Errorf("process substitution unavailable")
 }
 
+// ExpandBeforeGlob implements [expand.GlobBudgetCallbacks].
+func (r *Runner) ExpandBeforeGlob(ops int64) error {
+	if r.beforeGlob == nil {
+		return nil
+	}
+	return r.beforeGlob(ops)
+}
+
 func (r *Runner) ExpandReadDir(path string) ([]fs.DirEntry, error) {
 	return r.readDirHandler(r.handlerCtx(r.ectx, handlerKindReadDir, todoPos), path)
 }
@@ -413,6 +421,7 @@ func (r *Runner) expandErr(err error) {
 		varSizeErr     expand.VariableSizeLimitError
 		braceLimitErr  expand.BraceExpansionLimitError
 		depthLimitErr  SubshellDepthLimitError
+		globLimitErr   GlobLimitError
 	)
 	if errors.As(err, &unsetErr) && unsetErr.Node != nil {
 		if file := r.currentExecFile(); file != "" {
@@ -436,7 +445,7 @@ func (r *Runner) expandErr(err error) {
 	case errors.As(err, &varSizeErr):
 		r.variableLimitHit = true
 		r.applyVariableLimitExit()
-	case errors.As(err, &braceLimitErr):
+	case errors.As(err, &braceLimitErr), errors.As(err, &globLimitErr):
 		// A sandbox resource limit: exit the current shell with the same 126
 		// status as the other policy budgets, or just abort the command when
 		// interactive.

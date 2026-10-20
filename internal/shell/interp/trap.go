@@ -463,6 +463,11 @@ func (r *Runner) dispatchOwnedSignal(caller *Runner, target string, number int) 
 	if !ok {
 		return fmt.Errorf("invalid signal %d", number)
 	}
+	if !info.catchable && number != 0 {
+		// The sandbox cannot force-stop or kill a virtual shell; report it
+		// rather than pretending the signal was delivered.
+		return fmt.Errorf("%s: cannot send %s in the sandbox", target, info.name)
+	}
 	resolveTarget := func(target *Runner, caller *Runner) *Runner {
 		if target == nil {
 			return nil
