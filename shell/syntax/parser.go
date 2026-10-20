@@ -1619,12 +1619,18 @@ func (p *Parser) doHeredocs() {
 					p.pendingHeredocWarningPos = r.Pos()
 					p.pendingHeredocWarningWanted = r.HdocDelim.Value
 				} else {
+					// A missing delimiter word normally already set p.err,
+					// but guard against a nil delimiter all the same.
+					var wanted string
+					if r.HdocDelim != nil {
+						wanted = r.HdocDelim.Value
+					}
 					p.posErrWithMetadata(r.Pos(), parseErrorMetadata{
 						kind:       ParseErrorKindUnclosed,
 						construct:  ParseErrorSymbolHereDocument,
 						unexpected: ParseErrorSymbolEOF,
-						expected:   []ParseErrorSymbol{ParseErrorSymbol(r.HdocDelim.Value)},
-					}, "unclosed here-document %#q", r.HdocDelim.Value)
+						expected:   []ParseErrorSymbol{ParseErrorSymbol(wanted)},
+					}, "unclosed here-document %#q", wanted)
 				}
 			}
 		}
@@ -3238,7 +3244,9 @@ func (p *Parser) unreadSourceTailAppend(dst []byte) ([]byte, error) {
 
 func (p *Parser) loadReplay(pos Pos, src []byte, readErr error) {
 	p.src = bytes.NewReader(nil)
-	p.bs = append(p.bs[:0], src...)
+	// p.bs may be a view into a probe's shared replay buffer (see
+	// [Parser.loadReplayCursorView]), so never write through it.
+	p.bs = append([]byte(nil), src...)
 	p.offs = int64(pos.Offset())
 	p.line = int64(pos.Line())
 	p.col = int64(pos.Col())
@@ -3464,7 +3472,22 @@ func (p *Parser) setSourceReplayView(pos Pos, replay *sourceReplayBuffer) {
 	p.sourceOffs = int64(pos.Offset())
 }
 
-func (p *Parser) detachSourceReplay() {
+// sourceView is the source buffer view that [Parser.sourceBuffer] reads.
+type sourceView struct {
+	replay *sourceReplayBuffer
+	bs     []byte
+	offs   int64
+}
+
+func (p *Parser) saveSourceView() sourceView {
+	return sourceView{replay: p.sourceReplay, bs: p.sourceBs, offs: p.sourceOffs}
+}
+
+// detachSourceReplay stops reading from the probe replay and restores the
+// enclosing source view. Nested probes rely on the restore: once the replay
+// is gone, the enclosing view is the only one that still covers source read
+// before the probe started, because p.bs only holds the latest read chunk.
+func (p *Parser) detachSourceReplay(outer sourceView) {
 	replay := p.sourceReplay
 	if replay == nil {
 		return
@@ -3473,9 +3496,9 @@ func (p *Parser) detachSourceReplay() {
 	if ok && cursor.replay == replay {
 		p.src = newPrependReader(replay.buf[cursor.off:], replay.src)
 	}
-	p.sourceReplay = nil
-	p.sourceBs = nil
-	p.sourceOffs = 0
+	p.sourceReplay = outer.replay
+	p.sourceBs = outer.bs
+	p.sourceOffs = outer.offs
 	p.readErr = nil
 	p.readEOF = false
 }
@@ -3851,6 +3874,7 @@ func (p *Parser) arithmWordPart(salvageTail bool) *ArithmExp {
 }
 
 func (p *Parser) parenAmbiguityWordPart() WordPart {
+	outerView := p.saveSourceView()
 	p.parenAmbiguityProbeDepth++
 	defer func() { p.parenAmbiguityProbeDepth-- }()
 
@@ -3889,7 +3913,7 @@ func (p *Parser) parenAmbiguityWordPart() WordPart {
 		p.loadReplayCursorView(fallbackPos, sourceTailSuffix(fullSrc, len(prefix)-1), replay.cursor(len(fullSrc)))
 		p.setSourceReplayView(start, replay)
 		part := p.cmdSubst()
-		p.detachSourceReplay()
+		p.detachSourceReplay(outerView)
 		return part
 	}
 	fallbackOK := cmd.err == nil && cmd.allowParenAmbiguityFallback(cs.Stmts, cs.Last, cs.Right)
@@ -3900,7 +3924,7 @@ func (p *Parser) parenAmbiguityWordPart() WordPart {
 		p.loadReplayCursorView(fallbackPos, sourceTailSuffix(fullSrc, len(prefix)-1), replay.cursor(len(fullSrc)))
 		p.setSourceReplayView(start, replay)
 		part := p.cmdSubst()
-		p.detachSourceReplay()
+		p.detachSourceReplay(outerView)
 		return part
 	}
 	arithEndedEarly := false
@@ -3922,21 +3946,21 @@ func (p *Parser) parenAmbiguityWordPart() WordPart {
 	p.setSourceReplayView(start, replay)
 	if arithOK && !arithEndedEarly {
 		part := p.arithmWordPart(true)
-		p.detachSourceReplay()
+		p.detachSourceReplay(outerView)
 		return part
 	}
 	if cmd.err == nil && keepParenAmbiguityArithError(cs.Stmts, cs.Last) && !arithEndedEarly && !replay.tailHasNestedDblRightParen(len(prefix)) {
 		part := p.arithmWordPart(false)
-		p.detachSourceReplay()
+		p.detachSourceReplay(outerView)
 		return part
 	}
 	if cmd.err == nil && fallbackTailEnd.IsValid() && replay.tailHasNestedDblRightParen(len(prefix)) {
 		part := p.arithmWordPartTo(true, fallbackTailEnd)
-		p.detachSourceReplay()
+		p.detachSourceReplay(outerView)
 		return part
 	}
 	part = p.arithmWordPart(true)
-	p.detachSourceReplay()
+	p.detachSourceReplay(outerView)
 	return part
 }
 
@@ -7072,6 +7096,7 @@ func (p *Parser) arithmExpCmdWithTail(s *Stmt, salvageTail bool) {
 }
 
 func (p *Parser) parenAmbiguityStmt(s *Stmt) {
+	outerView := p.saveSourceView()
 	p.parenAmbiguityProbeDepth++
 	defer func() { p.parenAmbiguityProbeDepth-- }()
 
@@ -7115,7 +7140,7 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 		p.loadReplayCursorView(fallbackPos, sourceTailSuffix(fullSrc, len(prefix)-1), replay.cursor(len(fullSrc)))
 		p.setSourceReplayView(start, replay)
 		p.subshell(s)
-		p.detachSourceReplay()
+		p.detachSourceReplay(outerView)
 		return
 	}
 	fallbackOK := false
@@ -7128,7 +7153,7 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 			p.loadReplayCursorView(fallbackPos, sourceTailSuffix(fullSrc, len(prefix)-1), replay.cursor(len(fullSrc)))
 			p.setSourceReplayView(start, replay)
 			p.subshell(s)
-			p.detachSourceReplay()
+			p.detachSourceReplay(outerView)
 			return
 		}
 	}
@@ -7156,23 +7181,23 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 	p.setSourceReplayView(start, replay)
 	if arithOK && !arithEndedEarly {
 		p.arithmExpCmdWithTail(s, true)
-		p.detachSourceReplay()
+		p.detachSourceReplay(outerView)
 		return
 	}
 	if sub.err == nil {
 		if outer, ok := probeStmt.Cmd.(*Subshell); ok && keepParenAmbiguityArithError(outer.Stmts, outer.Last) && !arithEndedEarly && !replay.tailHasNestedDblRightParen(len(prefix)) {
 			p.arithmExpCmdWithTail(s, false)
-			p.detachSourceReplay()
+			p.detachSourceReplay(outerView)
 			return
 		}
 	}
 	if sub.err == nil && fallbackTailEnd.IsValid() && replay.tailHasNestedDblRightParen(len(prefix)) {
 		p.arithmExpCmdWithTailTo(s, true, fallbackTailEnd)
-		p.detachSourceReplay()
+		p.detachSourceReplay(outerView)
 		return
 	}
 	p.arithmExpCmdWithTail(s, true)
-	p.detachSourceReplay()
+	p.detachSourceReplay(outerView)
 }
 
 func (p *Parser) arithmExpCmd(s *Stmt) {
