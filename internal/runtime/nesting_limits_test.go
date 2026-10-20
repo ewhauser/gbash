@@ -91,31 +91,18 @@ func TestFunctionDepthDefaultStopsRecursion(t *testing.T) {
 	}
 }
 
-func TestFunctionDepthDefaultAllowsDeepRecursion(t *testing.T) {
-	t.Parallel()
+func TestFunctionDepthDefaultAllowsDeepRecursion(t *testing.T) { //nolint:paralleltest // timing comparison; parallel tests would skew the runs
 	rt := newRuntime(t, &Config{})
 
-	start := time.Now()
-	result := runNestingScript(t, rt, "n=0; f(){ n=$((n+1)); [ $n -lt 1000 ] && f; }; f; echo $n\n")
-	if result.ExitCode != 0 {
-		t.Fatalf("ExitCode = %d, want 0; stderr=%q", result.ExitCode, result.Stderr)
-	}
-	if got, want := result.Stdout, "1000\n"; got != want {
-		t.Fatalf("Stdout = %q, want %q", got, want)
-	}
 	// Variable lookups and writes from deep function scopes used to walk
-	// every scope, which took over ten seconds here without the race detector
-	// and about ten seconds with it in CI. It now takes well under a second.
-	// TestFunctionRecursionCostIsLinearInDepth checks the growth directly.
-	if elapsed := time.Since(start); elapsed > 10*time.Second {
-		t.Fatalf("recursion to depth 1000 took %v, want well under 10s", elapsed)
-	}
-}
-
-func TestFunctionRecursionCostIsLinearInDepth(t *testing.T) { //nolint:paralleltest // timing ratios need the package to themselves
-	rt := newRuntimeWithLimits(t, policy.Limits{MaxFunctionDepth: 2000})
-
-	const shallow, deep = 500, 2000
+	// every scope in between, so quadrupling the depth cost about 16x, and
+	// before that about 64x. Each call now does about the same work at any
+	// depth. Compare two depths instead of using a wall-clock limit, so a
+	// loaded runner slows both runs alike. Allow slack over 4x for fixed
+	// costs in the short run and the Go runtime scanning the deeper goroutine
+	// stack, while staying well under the quadratic 16x. The fastest of a few
+	// interleaved runs filters out scheduling noise.
+	const shallow, deep = 250, 1000
 	for _, tc := range []struct { //nolint:paralleltest // see above
 		name   string
 		script string
@@ -124,31 +111,29 @@ func TestFunctionRecursionCostIsLinearInDepth(t *testing.T) { //nolint:parallelt
 		{"temp bindings", "n=0; f(){ n=$((n+1)); [ $n -lt %d ] && y=$n f; }; f; echo $n\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			run := func(depth int) time.Duration {
+			recurse := func(depth int) time.Duration {
 				start := time.Now()
 				result := runNestingScript(t, rt, fmt.Sprintf(tc.script, depth))
 				elapsed := time.Since(start)
+				if result.ExitCode != 0 {
+					t.Fatalf("depth %d: ExitCode = %d, want 0; stderr=%q", depth, result.ExitCode, result.Stderr)
+				}
 				if got, want := result.Stdout, fmt.Sprintf("%d\n", depth); got != want {
-					t.Fatalf("depth %d: Stdout = %q, want %q; stderr=%q", depth, got, want, result.Stderr)
+					t.Fatalf("depth %d: Stdout = %q, want %q", depth, got, want)
 				}
 				return elapsed
 			}
-			// Take the fastest of a few interleaved runs to shed scheduling
-			// and GC noise.
-			fastest := [2]time.Duration{time.Hour, time.Hour}
+			best := [2]time.Duration{time.Hour, time.Hour}
 			for range 3 {
 				for i, depth := range []int{shallow, deep} {
-					fastest[i] = min(fastest[i], run(depth))
+					best[i] = min(best[i], recurse(depth))
 				}
 			}
-			// Four times the depth should cost about four times as much.
-			// Scope walks made it sixteen; allow some slack for the Go
-			// runtime scanning the deeper goroutine stack.
-			ratio := float64(fastest[1]) / float64(fastest[0])
-			if ratio > 8 {
-				t.Fatalf("depth %d took %v but depth %d took %v (%.1fx), want about 4x", deep, fastest[1], shallow, fastest[0], ratio)
+			ratio := float64(best[1]) / float64(best[0])
+			if ratio > 10 {
+				t.Fatalf("depth %d took %v, depth %d took %v (ratio %.1f), want about 4", deep, best[1], shallow, best[0], ratio)
 			}
-			t.Logf("depth %d: %v, depth %d: %v (%.1fx)", shallow, fastest[0], deep, fastest[1], ratio)
+			t.Logf("depth %d took %v, depth %d took %v (ratio %.1f)", deep, best[1], shallow, best[0], ratio)
 		})
 	}
 }
