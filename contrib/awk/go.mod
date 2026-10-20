@@ -2,7 +2,7 @@ module github.com/ewhauser/gbash/contrib/awk
 
 go 1.26.0
 
-require github.com/ewhauser/gbash v0.0.40
+require github.com/ewhauser/gbash v0.0.41
 
 require (
 	golang.org/x/crypto v0.56.0 // indirect
