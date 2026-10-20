@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ewhauser/gbash"
+	"github.com/ewhauser/gbash/commands"
 	gbserver "github.com/ewhauser/gbash/server"
 )
 
@@ -23,9 +24,14 @@ func TestServerClientDisconnectCancelsRunningExec(t *testing.T) {
 	t.Parallel()
 
 	started := make(chan struct{})
-	never := make(chan struct{})
-	registry := registryWithCommands(t, newBlockingCommand("block", "unreachable", started, never))
-	srv := startServer(t, gbserver.Config{}, gbash.WithRegistry(registry))
+	canceled := make(chan struct{})
+	block := commands.DefineCommand("block", func(ctx context.Context, _ *commands.Invocation) error {
+		close(started)
+		<-ctx.Done()
+		close(canceled)
+		return ctx.Err()
+	})
+	srv := startServer(t, gbserver.Config{}, gbash.WithRegistry(registryWithCommands(t, block)))
 
 	owner := dialClient(t, srv.socket)
 	sessionID := mustCreateSession(t, owner)
@@ -44,21 +50,17 @@ func TestServerClientDisconnectCancelsRunningExec(t *testing.T) {
 	}
 	owner.Close()
 
+	select {
+	case <-canceled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("exec was not canceled after its client disconnected")
+	}
+
 	other := dialClient(t, srv.socket)
 	defer other.Close()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		resp := other.call("session.destroy", map[string]any{"session_id": sessionID})
-		if resp.Error == nil {
-			break
-		}
-		if resp.Error.Data == nil || resp.Error.Data.Code != "SESSION_BUSY" {
-			t.Fatalf("session.destroy error = %+v, want SESSION_BUSY until canceled", resp.Error)
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("session stayed busy after its client disconnected")
-		}
-		time.Sleep(10 * time.Millisecond)
+	resp := other.call("session.get", map[string]any{"session_id": sessionID})
+	if resp.Error == nil || resp.Error.Data == nil || resp.Error.Data.Code != "SESSION_NOT_FOUND" {
+		t.Fatalf("session.get after owner disconnect = %+v, want SESSION_NOT_FOUND", resp.Error)
 	}
 }
 
@@ -363,4 +365,48 @@ func TestServeClosesLiveConnectionsOnAcceptFailure(t *testing.T) {
 	if err := client.dec.Decode(&extra); !errors.Is(err, io.EOF) {
 		t.Fatalf("Decode after Serve exit error = %v, want EOF (connection closed)", err)
 	}
+}
+
+func TestServerFinalEnvIsOptIn(t *testing.T) {
+	t.Parallel()
+
+	srv := startServer(t, gbserver.Config{})
+	client := dialClient(t, srv.socket)
+	defer client.Close()
+	sessionID := mustCreateSession(t, client)
+
+	resp := client.call("session.exec", map[string]any{"session_id": sessionID, "script": "export MODE=debug\n"})
+	mustOK(t, &resp)
+	if strings.Contains(string(resp.Result), "final_env") {
+		t.Fatalf("result = %s, want no final_env unless requested", resp.Result)
+	}
+
+	resp = client.call("session.exec", map[string]any{"session_id": sessionID, "script": "export MODE=debug\n", "include_final_env": true})
+	mustOK(t, &resp)
+	var result execResult
+	decodeResult(t, &resp, &result)
+	if result.FinalEnv["MODE"] != "debug" {
+		t.Fatalf("final_env = %v, want MODE=debug", result.FinalEnv)
+	}
+}
+
+func TestServerExecRejectsBadOptionsAsInvalidArgument(t *testing.T) {
+	t.Parallel()
+
+	srv := startServer(t, gbserver.Config{})
+	client := dialClient(t, srv.socket)
+	defer client.Close()
+	sessionID := mustCreateSession(t, client)
+
+	for _, params := range []map[string]any{
+		{"session_id": sessionID, "script": "echo hi\n", "shell_variant": "weird"},
+		{"session_id": sessionID, "script": "echo hi\n", "startup_options": []string{"bogus"}},
+	} {
+		resp := client.call("session.exec", params)
+		if resp.Error == nil || resp.Error.Code != -32602 || resp.Error.Data == nil || resp.Error.Data.Code != "INVALID_ARGUMENT" {
+			t.Fatalf("session.exec(%v) error = %+v, want -32602 INVALID_ARGUMENT", params, resp.Error)
+		}
+	}
+	resp := client.call("session.exec", map[string]any{"session_id": sessionID, "script": "echo ok\n", "startup_options": []string{"pipefail"}})
+	mustOK(t, &resp)
 }

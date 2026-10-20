@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"maps"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ewhauser/gbash"
+	gbfs "github.com/ewhauser/gbash/fs"
 	"github.com/ewhauser/gbash/internal/builtins"
 	"github.com/ewhauser/gbash/policy"
 )
@@ -32,11 +34,16 @@ type runtimeOptions struct {
 	socket          string
 	listen          string
 	sessionTTL      time.Duration
+	maxExecTimeout  time.Duration
 	systemTempRoots []string
 }
 
+// defaultMaxExecTimeout caps each server session.exec unless
+// --max-exec-timeout says otherwise.
+const defaultMaxExecTimeout = 10 * time.Minute
+
 func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
-	var opts runtimeOptions
+	opts := runtimeOptions{maxExecTimeout: defaultMaxExecTimeout}
 	rest := make([]string, 0, len(args)+1)
 	pendingShellValues := 0
 	commandStringPending := false
@@ -164,6 +171,22 @@ func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
 				return opts, nil, fmt.Errorf("parse --session-ttl: %w", err)
 			}
 			opts.sessionTTL = ttl
+		case arg == "--max-exec-timeout":
+			if i+1 >= len(args) {
+				return opts, nil, fmt.Errorf("--max-exec-timeout requires a duration")
+			}
+			i++
+			timeout, err := parseMaxExecTimeout(args[i])
+			if err != nil {
+				return opts, nil, err
+			}
+			opts.maxExecTimeout = timeout
+		case strings.HasPrefix(arg, "--max-exec-timeout="):
+			timeout, err := parseMaxExecTimeout(strings.TrimPrefix(arg, "--max-exec-timeout="))
+			if err != nil {
+				return opts, nil, err
+			}
+			opts.maxExecTimeout = timeout
 		case arg == "--":
 			rest = append(rest, args[i:]...)
 			return opts, rest, nil
@@ -182,7 +205,21 @@ func parseRuntimeOptions(args []string) (runtimeOptions, []string, error) {
 	return opts, rest, nil
 }
 
+func parseMaxExecTimeout(value string) (time.Duration, error) {
+	timeout, err := time.ParseDuration(strings.TrimSpace(value))
+	if err != nil {
+		return 0, fmt.Errorf("parse --max-exec-timeout: %w", err)
+	}
+	if timeout <= 0 {
+		return 0, fmt.Errorf("--max-exec-timeout must be positive")
+	}
+	return timeout, nil
+}
+
 func bashInvocationValueCount(arg string) int {
+	if arg == "--rcfile" {
+		return 1
+	}
 	if len(arg) < 2 || !strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "--") {
 		return 0
 	}
@@ -308,6 +345,11 @@ func (opts *runtimeOptions) gbashOptions() ([]gbash.Option, error) {
 		if err != nil {
 			return nil, fmt.Errorf("resolve --root: %w", err)
 		}
+		if info, err := os.Stat(root); err != nil {
+			return nil, fmt.Errorf("--root: %w", err)
+		} else if !info.IsDir() {
+			return nil, fmt.Errorf("--root is not a directory: %s", rootValue)
+		}
 		runtimeOpts = append(runtimeOpts, gbash.WithFileSystem(gbash.HostDirectoryFileSystem(root, gbash.HostDirectoryOptions{
 			MaxFileReadBytes: opts.maxFileBytes,
 		})))
@@ -326,11 +368,13 @@ func (opts *runtimeOptions) gbashOptions() ([]gbash.Option, error) {
 		if err != nil {
 			return nil, err
 		}
-		runtimeOpts = append(runtimeOpts,
-			gbash.WithFileSystem(gbash.ReadWriteDirectoryFileSystem(canonicalRoot, gbash.ReadWriteDirectoryOptions{
-				MaxFileReadBytes: opts.maxFileBytes,
-			})),
-		)
+		pinned, err := pinReadWriteRoot(canonicalRoot, gbash.ReadWriteDirectoryFileSystem(canonicalRoot, gbash.ReadWriteDirectoryOptions{
+			MaxFileReadBytes: opts.maxFileBytes,
+		}))
+		if err != nil {
+			return nil, err
+		}
+		runtimeOpts = append(runtimeOpts, gbash.WithFileSystem(pinned))
 		baseEnv = readWriteRootBaseEnv()
 		if cwdValue == "" {
 			cwdValue = "/"
@@ -416,6 +460,54 @@ func inheritSelectedEnv(baseEnv map[string]string, names []string) map[string]st
 
 // ensureReadWriteRootIsTemporary checks that root resolves inside a trusted
 // system temp directory and returns the resolved, symlink-free path.
+// pinnedRootFactory mounts a read-write root only while its path still names
+// the directory validated at startup. The underlying factory opens the path
+// again for every session, so without this check a root renamed and replaced
+// by a symlink would mount the symlink's target read-write.
+type pinnedRootFactory struct {
+	root  string
+	info  os.FileInfo
+	inner gbfs.Factory
+}
+
+func pinReadWriteRoot(root string, cfg gbash.FileSystemConfig) (gbash.FileSystemConfig, error) {
+	info, err := os.Stat(root)
+	if err != nil {
+		return cfg, fmt.Errorf("--readwrite-root: %w", err)
+	}
+	if !info.IsDir() {
+		return cfg, fmt.Errorf("--readwrite-root is not a directory: %s", root)
+	}
+	cfg.Factory = pinnedRootFactory{root: root, info: info, inner: cfg.Factory}
+	return cfg, nil
+}
+
+func (f pinnedRootFactory) checkRoot() error {
+	current, err := os.Stat(f.root)
+	if err != nil {
+		return fmt.Errorf("--readwrite-root: %w", err)
+	}
+	if !os.SameFile(current, f.info) {
+		return fmt.Errorf("--readwrite-root changed since startup: %s", f.root)
+	}
+	return nil
+}
+
+func (f pinnedRootFactory) New(ctx context.Context) (gbfs.FileSystem, error) {
+	if err := f.checkRoot(); err != nil {
+		return nil, err
+	}
+	fsys, err := f.inner.New(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Check again so a swap made while the mount was opening is caught too.
+	if err := f.checkRoot(); err != nil {
+		return nil, err
+	}
+	return fsys, nil
+}
+
 func ensureReadWriteRootIsTemporary(root string, systemTempRoots []string) (string, error) {
 	tempRoots, err := trustedSystemTempRoots(systemTempRoots)
 	if err != nil {
@@ -666,6 +758,8 @@ func renderHelp(w io.Writer, name string) error {
 		"  --server                run the shared gbash JSON-RPC server instead of executing a script\n"+
 		"  --socket PATH           listen on PATH for Unix domain socket clients\n"+
 		"  --listen HOST:PORT      listen on loopback HOST:PORT for TCP clients\n"+
-		"  --session-ttl DURATION  keep idle sessions alive for DURATION before expiry\n")
+		"  --session-ttl DURATION  keep idle sessions alive for DURATION before expiry\n"+
+		"  --max-exec-timeout DURATION\n"+
+		"                          cap each session.exec at DURATION (default 10m)\n")
 	return err
 }

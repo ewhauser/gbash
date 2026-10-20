@@ -70,7 +70,7 @@ Important semantics:
 - `session.exec` runs one non-interactive `Session.Exec` call inside that session
 - a session allows only one active `session.exec` at a time
 - separate sessions can run concurrently
-- shell-local state does not persist across separate `session.exec` calls unless the client carries it forward explicitly using `final_env`
+- shell-local state does not persist across separate `session.exec` calls unless the client carries it forward explicitly using `final_env` (request it with `include_final_env`)
 
 ## JSON-RPC Envelope
 
@@ -186,7 +186,7 @@ Fields:
 - `exit_code`: shell exit status
 - `stdout`, `stderr`: captured execution output
 - `stdout_truncated`, `stderr_truncated`: true when output limits truncated the captured result
-- `final_env`: final shell environment snapshot from the execution
+- `final_env`: final shell variables from the execution, present only when the request sets `"include_final_env": true` (capped at 1 MiB; `final_env_truncated` is set when entries were dropped)
 - `shell_exited`: whether the shell exited explicitly
 - `control_stderr`: runtime-generated diagnostics that are not normal script stderr
 - `started_at`, `finished_at`, `duration_ms`: execution timing metadata
@@ -328,7 +328,7 @@ Error conditions:
 
 ### `session.list`
 
-Lists all non-expired sessions.
+Lists the non-expired sessions created by this connection. Sessions are private to the connection that created them: other connections get `SESSION_NOT_FOUND` for them, and a connection's sessions are destroyed when it closes.
 
 Request:
 

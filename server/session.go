@@ -16,7 +16,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/ewhauser/gbash"
+	"github.com/ewhauser/gbash/internal/shell/interp"
 )
+
+// maxFinalEnvBytes caps the encoded size of final_env in one response.
+const maxFinalEnvBytes = 1 << 20
 
 var (
 	errInvalidArgument = errors.New("invalid argument")
@@ -76,6 +80,26 @@ type sessionExecParams struct {
 	WorkDir        string             `json:"work_dir"`
 	ReplaceEnv     bool               `json:"replace_env"`
 	TimeoutMs      int64              `json:"timeout_ms"`
+	// IncludeFinalEnv asks for final_env in the result. It is off by default
+	// because the shell environment can be large and holds inherited values.
+	IncludeFinalEnv bool `json:"include_final_env"`
+}
+
+// validate rejects client input the runtime would otherwise report as an
+// internal failure.
+func (p *sessionExecParams) validate() error {
+	if !p.ShellVariant.Normalize().Valid() {
+		return fmt.Errorf("%w: invalid shell_variant %q", errInvalidArgument, p.ShellVariant)
+	}
+	for _, option := range p.StartupOptions {
+		if strings.TrimSpace(option) == "" {
+			continue
+		}
+		if !interp.IsSetOption(option) {
+			return fmt.Errorf("%w: invalid startup option %q", errInvalidArgument, option)
+		}
+	}
+	return nil
 }
 
 type sessionExecResult struct {
@@ -91,18 +115,24 @@ type sessionExecResult struct {
 	StdoutTruncated bool              `json:"stdout_truncated"`
 	StderrTruncated bool              `json:"stderr_truncated"`
 	FinalEnv        map[string]string `json:"final_env,omitempty"`
-	ShellExited     bool              `json:"shell_exited"`
-	ControlStderr   string            `json:"control_stderr,omitempty"`
-	StartedAt       string            `json:"started_at,omitempty"`
-	FinishedAt      string            `json:"finished_at,omitempty"`
-	DurationMs      float64           `json:"duration_ms"`
-	Session         sessionSummary    `json:"session"`
+	// FinalEnvTruncated reports that final_env was cut short to stay under
+	// maxFinalEnvBytes.
+	FinalEnvTruncated bool           `json:"final_env_truncated,omitempty"`
+	ShellExited       bool           `json:"shell_exited"`
+	ControlStderr     string         `json:"control_stderr,omitempty"`
+	StartedAt         string         `json:"started_at,omitempty"`
+	FinishedAt        string         `json:"finished_at,omitempty"`
+	DurationMs        float64        `json:"duration_ms"`
+	Session           sessionSummary `json:"session"`
 }
 
 type serverSession struct {
 	server *serverState
 	id     string
-	shell  *gbash.Session
+	// owner is the id of the connection that created the session; only that
+	// connection may see or use it.
+	owner string
+	shell *gbash.Session
 
 	createdAt time.Time
 	updatedAt time.Time
@@ -112,7 +142,7 @@ type serverSession struct {
 	busy bool
 }
 
-func (s *serverState) createSession() (*serverSession, error) {
+func (s *serverState) createSession(owner string) (*serverSession, error) {
 	s.reapExpiredSessions(time.Now().UTC())
 
 	// Check the cap before building a session so a full server does not pay
@@ -135,6 +165,7 @@ func (s *serverState) createSession() (*serverSession, error) {
 	session := &serverSession{
 		server:    s,
 		id:        id,
+		owner:     owner,
 		shell:     sessionShell,
 		createdAt: now,
 		updatedAt: now,
@@ -174,7 +205,7 @@ func newSessionID() (string, error) {
 	return "sess-" + hex.EncodeToString(raw[:]), nil
 }
 
-func (s *serverState) lookupSession(id string) (*serverSession, error) {
+func (s *serverState) lookupSession(owner, id string) (*serverSession, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil, fmt.Errorf("%w: session_id must not be empty", errInvalidArgument)
@@ -185,7 +216,7 @@ func (s *serverState) lookupSession(id string) (*serverSession, error) {
 	s.sessionsMu.Lock()
 	defer s.sessionsMu.Unlock()
 	session, ok := s.sessions[id]
-	if !ok {
+	if !ok || session.owner != owner {
 		return nil, fmt.Errorf("%w: %s", errSessionNotFound, id)
 	}
 	return session, nil
@@ -195,7 +226,7 @@ func (s *serverState) lookupSession(id string) (*serverSession, error) {
 // sessionsMu, so destroySession and reapExpiredSessions (which skip busy
 // sessions under the same lock) cannot remove it before it runs. The caller
 // must call exec on the returned session to release it.
-func (s *serverState) acquireSession(id string) (*serverSession, error) {
+func (s *serverState) acquireSession(owner, id string) (*serverSession, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil, fmt.Errorf("%w: session_id must not be empty", errInvalidArgument)
@@ -206,7 +237,7 @@ func (s *serverState) acquireSession(id string) (*serverSession, error) {
 	s.sessionsMu.Lock()
 	defer s.sessionsMu.Unlock()
 	session, ok := s.sessions[id]
-	if !ok {
+	if !ok || session.owner != owner {
 		return nil, fmt.Errorf("%w: %s", errSessionNotFound, id)
 	}
 	if err := session.markBusy(); err != nil {
@@ -215,11 +246,13 @@ func (s *serverState) acquireSession(id string) (*serverSession, error) {
 	return session, nil
 }
 
-func (s *serverState) listSessions() []sessionSummary {
+func (s *serverState) listSessions(owner string) []sessionSummary {
 	s.sessionsMu.Lock()
 	sessions := make([]*serverSession, 0, len(s.sessions))
 	for _, session := range s.sessions {
-		sessions = append(sessions, session)
+		if session.owner == owner {
+			sessions = append(sessions, session)
+		}
 	}
 	s.sessionsMu.Unlock()
 
@@ -237,7 +270,7 @@ func (s *serverState) listSessions() []sessionSummary {
 	return out
 }
 
-func (s *serverState) destroySession(id string) (*serverSession, error) {
+func (s *serverState) destroySession(owner, id string) (*serverSession, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil, fmt.Errorf("%w: session_id must not be empty", errInvalidArgument)
@@ -245,7 +278,7 @@ func (s *serverState) destroySession(id string) (*serverSession, error) {
 
 	s.sessionsMu.Lock()
 	session, ok := s.sessions[id]
-	if !ok {
+	if !ok || session.owner != owner {
 		s.sessionsMu.Unlock()
 		return nil, fmt.Errorf("%w: %s", errSessionNotFound, id)
 	}
@@ -257,6 +290,18 @@ func (s *serverState) destroySession(id string) (*serverSession, error) {
 	s.sessionsMu.Unlock()
 
 	return session, nil
+}
+
+// dropOwnedSessions removes every session owned by a closed connection,
+// since no other connection can reach them.
+func (s *serverState) dropOwnedSessions(owner string) {
+	s.sessionsMu.Lock()
+	for id, session := range s.sessions {
+		if session.owner == owner {
+			delete(s.sessions, id)
+		}
+	}
+	s.sessionsMu.Unlock()
 }
 
 func (s *serverState) reapExpiredSessions(now time.Time) {
@@ -354,23 +399,49 @@ func (s *serverSession) exec(ctx context.Context, params *sessionExecParams) (*s
 		return nil, fmt.Errorf("execute session script: runtime returned no result")
 	}
 
+	var finalEnv map[string]string
+	var finalEnvTruncated bool
+	if params.IncludeFinalEnv {
+		finalEnv, finalEnvTruncated = limitFinalEnv(result.FinalEnv, maxFinalEnvBytes)
+	}
+
 	return &sessionExecResult{
-		SessionID:       s.id,
-		ExitCode:        result.ExitCode,
-		Stdout:          result.Stdout,
-		Stderr:          result.Stderr,
-		StdoutBase64:    base64IfNotUTF8(result.Stdout),
-		StderrBase64:    base64IfNotUTF8(result.Stderr),
-		StdoutTruncated: result.StdoutTruncated,
-		StderrTruncated: result.StderrTruncated,
-		FinalEnv:        copyStringMap(result.FinalEnv),
-		ShellExited:     result.ShellExited,
-		ControlStderr:   strings.TrimSpace(result.ControlStderr),
-		StartedAt:       formatTime(result.StartedAt),
-		FinishedAt:      formatTime(result.FinishedAt),
-		DurationMs:      durationMilliseconds(result.Duration),
-		Session:         summary,
+		SessionID:         s.id,
+		ExitCode:          result.ExitCode,
+		Stdout:            result.Stdout,
+		Stderr:            result.Stderr,
+		StdoutBase64:      base64IfNotUTF8(result.Stdout),
+		StderrBase64:      base64IfNotUTF8(result.Stderr),
+		StdoutTruncated:   result.StdoutTruncated,
+		StderrTruncated:   result.StderrTruncated,
+		FinalEnv:          finalEnv,
+		FinalEnvTruncated: finalEnvTruncated,
+		ShellExited:       result.ShellExited,
+		ControlStderr:     strings.TrimSpace(result.ControlStderr),
+		StartedAt:         formatTime(result.StartedAt),
+		FinishedAt:        formatTime(result.FinishedAt),
+		DurationMs:        durationMilliseconds(result.Duration),
+		Session:           summary,
 	}, nil
+}
+
+// limitFinalEnv copies env in name order, stopping before the copy would
+// exceed limit bytes of names and values.
+func limitFinalEnv(env map[string]string, limit int) (map[string]string, bool) {
+	if len(env) == 0 {
+		return nil, false
+	}
+	out := make(map[string]string, len(env))
+	used := 0
+	for _, name := range slices.Sorted(maps.Keys(env)) {
+		value := env[name]
+		used += len(name) + len(value)
+		if used > limit {
+			return out, true
+		}
+		out[name] = value
+	}
+	return out, false
 }
 
 // execTimeout applies the server's MaxExecTimeout cap to a requested

@@ -30,27 +30,27 @@ func TestSessionTTLExpiryWithSynctest(t *testing.T) {
 		defer close(done)
 		go srv.reapLoop(done)
 
-		session, err := srv.createSession()
+		session, err := srv.createSession("conn-test")
 		if err != nil {
 			t.Fatalf("createSession() error = %v", err)
 		}
-		if got := len(srv.listSessions()); got != 1 {
+		if got := len(srv.listSessions("conn-test")); got != 1 {
 			t.Fatalf("listSessions() len = %d, want 1", got)
 		}
 
 		time.Sleep(249 * time.Millisecond)
 		synctest.Wait()
-		if got := len(srv.listSessions()); got != 1 {
+		if got := len(srv.listSessions("conn-test")); got != 1 {
 			t.Fatalf("listSessions() len = %d before TTL, want 1", got)
 		}
 
 		time.Sleep(1 * time.Millisecond)
 		synctest.Wait()
-		if got := len(srv.listSessions()); got != 0 {
+		if got := len(srv.listSessions("conn-test")); got != 0 {
 			t.Fatalf("listSessions() len = %d after TTL, want 0", got)
 		}
 
-		_, err = srv.lookupSession(session.id)
+		_, err = srv.lookupSession("conn-test", session.id)
 		if !errors.Is(err, errSessionNotFound) {
 			t.Fatalf("lookupSession(%q) error = %v, want errSessionNotFound", session.id, err)
 		}

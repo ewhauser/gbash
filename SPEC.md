@@ -180,12 +180,16 @@ The normal CLI entrypoint also accepts filesystem selection flags before the she
 - `gbash --copy-script ...` stages the positional host regular file into the sandbox before execution instead of requiring it to already exist in the sandbox namespace
 - `gbash --json ...` emits one JSON object for a non-interactive execution with `stdout`, `stderr`, `exitCode`, truncation flags, timing metadata, and optional trace metadata when tracing is enabled; when a stream is not valid UTF-8, `stdoutBase64` / `stderrBase64` carry its exact bytes and `stdout` / `stderr` hold a lossy U+FFFD copy
 - gbash's own flags are only recognized before the script source: everything after `-c command_string` or a script path is `$0` and the positional parameters, as in bash, so positional args can never inject `--root`, `--readwrite-root`, `--json`, or other gbash flags
-- `--readwrite-root` mounts the symlink-resolved path that passed the system-temp check, so replacing a symlink after startup cannot redirect later server sessions
+- `--readwrite-root` mounts the symlink-resolved path that passed the system-temp check, and every new session first re-checks (`os.SameFile`) that the path still names the directory validated at startup, so neither replacing a symlink nor renaming the root and putting a symlink in its place can redirect later server sessions
+- `--root` must name an existing directory; the CLI fails at startup instead of starting a server whose every session fails
+- `--rcfile FILE` takes a value like `-o`, so gbash flags after it are still recognized
 - `gbash --dump-ast ...` parses the selected non-interactive input and writes the typed JSON `shell/syntax` AST to stdout without executing the script
 - `gbash --dump-ast --detect ...` chooses the AST parser variant from a leading shebang first, then a positional file extension for file-backed inputs, and otherwise falls back to `bash`; `--detect` is not a standalone reporting mode
 - `gbash --server --socket <path>` serves a long-lived JSON-RPC protocol over a Unix domain socket instead of executing a script
 - `gbash --server --listen <host:port>` serves the same protocol over an explicit loopback TCP listener instead of executing a script
 - `gbash --session-ttl <duration>` controls how long idle server sessions survive without active work
+- `gbash --max-exec-timeout <duration>` caps each server `session.exec` (default `10m`; must be positive)
+- the CLI server stops on SIGINT or SIGTERM, canceling running executions and removing its Unix socket file
 - when `--cwd` is omitted, `--root` starts at `/home/agent/project` and `--readwrite-root` starts at `/`
 - when a positional script path is supplied, the CLI resolves and reads it from the configured sandbox filesystem relative to the sandbox working directory, preserving the argv path exactly as provided
 - when that positional script path is an absolute host path underneath `--root` or `--readwrite-root`, the CLI rewrites it to the corresponding sandbox path before execution instead of reading the host file directly
@@ -226,7 +230,9 @@ This matches the agent workflow we care about: a sequence of shell calls operati
 - the shared CLI requires exactly one transport flag: `--socket` or `--listen`
 - the shared CLI restricts `--listen` to loopback hosts because v1 has no authentication layer; `localhost` binds `127.0.0.1` directly rather than trusting `/etc/hosts` or DNS, and the bound address is re-checked to be loopback
 - loopback TCP is still reachable by every local user and by local processes such as browsers, so any local user can drive a TCP server's sessions; prefer `--socket`, whose `0600` socket limits access to the owning user, on multi-user hosts
-- session ids are 128-bit random values (`sess-<32 hex>`), so a client cannot guess another client's session; `session.list` still reveals ids to anyone who can connect
+- session ids are 128-bit random values (`sess-<32 hex>`), so a client cannot guess another client's session
+- sessions belong to the connection that created them: `session.list` returns only that connection's sessions, and `session.get`, `session.exec`, and `session.destroy` report `SESSION_NOT_FOUND` for any other connection's session; when a connection closes, its sessions are destroyed
+- the server serves at most 64 connections at once (`server.MaxConnections`; extra connections are closed on accept), closes a connection that leaves a request incomplete for 30 seconds (idle connections between requests have no deadline), and frees the decoder buffer after each request
 - the server caps concurrent sessions (`Config.MaxSessions`, default 256; `session.create` past the cap fails with `SESSION_LIMIT`) and request size (`Config.MaxRequestBytes`, default 16 MiB; an oversized request gets `REQUEST_TOO_LARGE` and the connection is closed); `Config.MaxExecTimeout` optionally caps every `session.exec` timeout, and `timeout_ms` values too large for a Go duration saturate instead of overflowing
 - `session.exec` runs under a per-connection context: when the client disconnects (or half-closes its write side) the in-flight execution is cancelled and its session returns to idle
 - JSON-RPC notifications (requests without an `id` member) are processed but never answered
@@ -236,10 +242,10 @@ This matches the agent workflow we care about: a sequence of shell calls operati
 - `session_id` maps 1:1 to a persistent `Session`
 - filesystem shape is configured once at server startup through the normal runtime options and is not part of the wire protocol
 - the primary remote operation is `session.exec`, which runs one non-interactive `Session.Exec` call and returns the full execution result in one response
-- multiple sessions may be active concurrently across multiple client connections
+- multiple sessions may be active concurrently across multiple client connections, each owning its own sessions
 - a single session permits at most one active `session.exec` call at a time because `Session.Exec` is serialized
 - `session.exec` looks up and marks its session busy atomically with respect to the session registry, so `session.destroy` and TTL reaping cannot remove a session that is about to run or is running
-- clients are expected to reconnect or open a second socket when they need concurrent requests; v1 does not require multiplexed event streams on one connection
+- a connection handles its requests in order, so clients open one connection per session they need to drive concurrently; v1 does not require multiplexed event streams on one connection
 
 Recommended v1 methods:
 
@@ -252,7 +258,8 @@ Recommended v1 result shape for `session.exec`:
 - `exit_code`, `stdout`, `stderr`
 - `stdout_base64`, `stderr_base64` with the exact bytes, present only when the stream is not valid UTF-8 (`stdout` / `stderr` then hold a lossy U+FFFD copy)
 - `stdout_truncated`, `stderr_truncated`
-- `final_env`, `shell_exited`, `control_stderr`
+- `shell_exited`, `control_stderr`
+- `final_env` only when the request sets `include_final_env: true`, since the shell environment can be large and includes values from `--inherit-env`; it holds the final shell variables (including non-exported ones such as `IFS`) and is capped at 1 MiB of names and values, with `final_env_truncated: true` when entries were dropped
 - timing metadata such as `started_at`, `finished_at`, and `duration_ms`
 - the updated session summary
 
@@ -262,6 +269,8 @@ Recommended v1 `session.exec` params include:
 - `script`
 - optional `shell_variant` with values `auto`, `bash`, `sh`, `mksh`, `zsh`, or `bats`
 - optional argv/env/working-directory fields matching `ExecutionRequest`
+- an unknown `shell_variant` or a `startup_options` entry that `set -o` does not accept is rejected with `INVALID_ARGUMENT` (`-32602`)
+- optional `include_final_env`
 
 Recommended v1 non-goals:
 

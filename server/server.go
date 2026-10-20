@@ -34,6 +34,12 @@ const (
 	// DefaultMaxRequestBytes is the per-request size cap used when
 	// Config.MaxRequestBytes is zero.
 	DefaultMaxRequestBytes = 16 << 20
+	// MaxConnections caps how many client connections are served at once.
+	// Connections past the cap are closed as soon as they are accepted.
+	MaxConnections = 64
+	// defaultFrameTimeout bounds how long a client may take to finish sending
+	// a request once it has started one.
+	defaultFrameTimeout = 30 * time.Second
 
 	rpcParseError     = -32700
 	rpcInvalidRequest = -32600
@@ -146,11 +152,13 @@ func Serve(ctx context.Context, ln net.Listener, cfg Config) error {
 	defer cancel()
 
 	srv := &serverState{
-		ctx:       ctx,
-		cfg:       cfg,
-		transport: listenerTransport(ln),
-		sessions:  make(map[string]*serverSession),
-		conns:     make(map[string]*clientConn),
+		ctx:          ctx,
+		cfg:          cfg,
+		maxConns:     MaxConnections,
+		frameTimeout: defaultFrameTimeout,
+		transport:    listenerTransport(ln),
+		sessions:     make(map[string]*serverSession),
+		conns:        make(map[string]*clientConn),
 	}
 
 	done := make(chan struct{})
@@ -223,6 +231,10 @@ type serverState struct {
 	transport string
 	errorLog  *log.Logger // nil uses log.Default(); overridden in tests
 
+	// maxConns and frameTimeout are fixed in Serve; tests may lower them.
+	maxConns     int
+	frameTimeout time.Duration
+
 	nextID atomic.Uint64
 
 	connsMu sync.RWMutex
@@ -259,28 +271,58 @@ type decodedRequest struct {
 // requestLimitReader bounds how many bytes the JSON decoder may pull from the
 // connection for one message. The decoder reads ahead, so one message is
 // bounded by its buffered remainder plus max.
+//
+// It also arms a read deadline while a message is incomplete, so a client
+// cannot hold a large partial request in memory indefinitely; an idle
+// connection between messages has no deadline.
 type requestLimitReader struct {
 	r         io.Reader
+	conn      net.Conn
+	timeout   time.Duration
 	max       int64
 	remaining int64
+	inFrame   bool
 }
 
-func (l *requestLimitReader) reset() {
+// reset starts a new message. partial reports whether bytes of the next
+// message are already buffered by the decoder.
+func (l *requestLimitReader) reset(partial bool) {
 	l.remaining = l.max
+	l.inFrame = false
+	if l.conn != nil && l.timeout > 0 {
+		_ = l.conn.SetReadDeadline(time.Time{})
+	}
+	if partial {
+		l.startFrame()
+	}
+}
+
+func (l *requestLimitReader) startFrame() {
+	if l.inFrame {
+		return
+	}
+	l.inFrame = true
+	if l.conn != nil && l.timeout > 0 {
+		_ = l.conn.SetReadDeadline(time.Now().Add(l.timeout))
+	}
 }
 
 func (l *requestLimitReader) Read(p []byte) (int, error) {
-	if l.max <= 0 {
-		return l.r.Read(p)
-	}
-	if l.remaining <= 0 {
-		return 0, errRequestTooLarge
-	}
-	if int64(len(p)) > l.remaining {
-		p = p[:l.remaining]
+	if l.max > 0 {
+		if l.remaining <= 0 {
+			return 0, errRequestTooLarge
+		}
+		if int64(len(p)) > l.remaining {
+			p = p[:l.remaining]
+		}
 	}
 	n, err := l.r.Read(p)
-	l.remaining -= int64(n)
+	if l.max > 0 {
+		l.remaining -= int64(n)
+	}
+	if n > 0 && len(bytes.TrimSpace(p[:n])) > 0 {
+		l.startFrame()
+	}
 	return n, err
 }
 
@@ -412,7 +454,16 @@ func (s *serverState) reapLoop(done <-chan struct{}) {
 }
 
 func (s *serverState) addConn(nc net.Conn) {
-	limit := &requestLimitReader{r: nc, max: s.cfg.MaxRequestBytes}
+	s.connsMu.Lock()
+	full := s.maxConns > 0 && len(s.conns) >= s.maxConns
+	s.connsMu.Unlock()
+	if full {
+		s.logf("server: connection limit of %d reached; closing new connection", s.maxConns)
+		_ = nc.Close()
+		return
+	}
+
+	limit := &requestLimitReader{r: nc, conn: nc, timeout: s.frameTimeout, max: s.cfg.MaxRequestBytes}
 	ctx, cancel := context.WithCancel(s.ctx)
 	conn := &clientConn{
 		server: s,
@@ -508,9 +559,12 @@ func (c *clientConn) readLoop() {
 // handed to readLoop so its error reply follows any in-flight response.
 func (c *clientConn) decodeLoop(out chan<- decodedRequest) {
 	for {
-		c.limit.reset()
+		c.limit.reset(hasPendingInput(c.dec))
 		var raw json.RawMessage
 		err := c.dec.Decode(&raw)
+		if err == nil {
+			c.releaseDecoderBuffer()
+		}
 		if err != nil && !isClientInputError(err) {
 			c.cancel()
 			return
@@ -524,6 +578,24 @@ func (c *clientConn) decodeLoop(out chan<- decodedRequest) {
 			return
 		}
 	}
+}
+
+// hasPendingInput reports whether the decoder holds bytes of a message it
+// has not finished reading.
+func hasPendingInput(dec *json.Decoder) bool {
+	buffered, _ := io.ReadAll(dec.Buffered())
+	return len(bytes.TrimSpace(buffered)) > 0
+}
+
+// releaseDecoderBuffer replaces the decoder so the buffer it grew for a large
+// message is freed, carrying over any bytes it already read ahead.
+func (c *clientConn) releaseDecoderBuffer() {
+	pending, _ := io.ReadAll(c.dec.Buffered())
+	var src io.Reader = c.limit
+	if len(pending) > 0 {
+		src = io.MultiReader(bytes.NewReader(pending), c.limit)
+	}
+	c.dec = json.NewDecoder(src)
 }
 
 func isClientInputError(err error) bool {
@@ -626,7 +698,7 @@ func (c *clientConn) handleRequest(req *rpcRequest) *rpcResponse {
 		if _, err := decodeParams[map[string]any](req.Params); err != nil {
 			return invalidParamsResponse(req.ID, err)
 		}
-		session, err := c.server.createSession()
+		session, err := c.server.createSession(c.id)
 		if err != nil {
 			return c.server.appErrorResponse(req.ID, err)
 		}
@@ -636,7 +708,7 @@ func (c *clientConn) handleRequest(req *rpcRequest) *rpcResponse {
 		if err != nil {
 			return invalidParamsResponse(req.ID, err)
 		}
-		session, err := c.server.lookupSession(params.SessionID)
+		session, err := c.server.lookupSession(c.id, params.SessionID)
 		if err != nil {
 			return c.server.appErrorResponse(req.ID, err)
 		}
@@ -646,13 +718,13 @@ func (c *clientConn) handleRequest(req *rpcRequest) *rpcResponse {
 			return invalidParamsResponse(req.ID, err)
 		}
 		c.server.reapExpiredSessions(time.Now().UTC())
-		return newRPCResultResponse(req.ID, sessionListResult{Sessions: c.server.listSessions()})
+		return newRPCResultResponse(req.ID, sessionListResult{Sessions: c.server.listSessions(c.id)})
 	case "session.destroy":
 		params, err := decodeParams[sessionIDParams](req.Params)
 		if err != nil {
 			return invalidParamsResponse(req.ID, err)
 		}
-		session, err := c.server.destroySession(params.SessionID)
+		session, err := c.server.destroySession(c.id, params.SessionID)
 		if err != nil {
 			return c.server.appErrorResponse(req.ID, err)
 		}
@@ -662,7 +734,10 @@ func (c *clientConn) handleRequest(req *rpcRequest) *rpcResponse {
 		if err != nil {
 			return invalidParamsResponse(req.ID, err)
 		}
-		session, err := c.server.acquireSession(params.SessionID)
+		if err := params.validate(); err != nil {
+			return invalidParamsResponse(req.ID, err)
+		}
+		session, err := c.server.acquireSession(c.id, params.SessionID)
 		if err != nil {
 			return c.server.appErrorResponse(req.ID, err)
 		}
@@ -690,6 +765,7 @@ func (c *clientConn) close() {
 		c.cancel()
 		_ = c.conn.Close()
 		c.server.removeConn(c.id)
+		c.server.dropOwnedSessions(c.id)
 	})
 }
 
