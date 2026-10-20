@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	gbruntime "github.com/ewhauser/gbash"
 )
@@ -38,7 +39,13 @@ func TestJQRejectsValuesNestedBeyondDepthLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			result, err := newJQRuntime(t).Run(context.Background(), &gbruntime.ExecutionRequest{
+			// Building these values takes seconds under the race detector, and
+			// the subtests run in parallel. An explicit deadline replaces jq's
+			// 60s default evaluation limit, which a loaded runner can hit
+			// before the depth check does.
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			result, err := newJQRuntime(t).Run(ctx, &gbruntime.ExecutionRequest{
 				Script: tc.script + "\necho after=$?\n",
 			})
 			if err != nil {

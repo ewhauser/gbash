@@ -113,3 +113,37 @@ func TestLongPipelineMemoryIsLinear(t *testing.T) { //nolint:paralleltest // mea
 		t.Fatalf("5000-stage pipeline allocated %d MiB, want < 1 GiB", allocated>>20)
 	}
 }
+
+func TestFunctionScopeLookupsSeeBindingChanges(t *testing.T) {
+	t.Parallel()
+
+	// Lookups and writes from function scopes jump straight to the scope that
+	// binds a name; check they follow bindings that appear and disappear in
+	// the scopes in between. The expected output is bash 5.3's.
+	stdout, stderr, err := runInterpScript(t, `
+x=global
+show(){ echo "show:$x"; }
+inner(){ show; unset x; show; x=inner; show; }
+outer(){ local x=outer; inner; show; }
+outer; show
+deep(){ if [ "$1" -lt 40 ]; then deep $(($1+1)); else show; (show; x=sub; show); show; local x=deep; show; fi; }
+deep 0; show
+tmp(){ show; x=tmpset; show; }
+x=prefix tmp; show
+setg(){ declare -g y=gy; echo "y:$y"; local y=ly; echo "y:$y"; }
+setg; echo "y:$y"
+cnt=0; rec(){ cnt=$((cnt+1)); [ $cnt -lt 5 ] && rec; local z=$cnt; echo "z:$z"; }; rec
+echo "cnt:$cnt z:${z-unset}"
+`)
+	if err != nil {
+		t.Fatalf("runInterpScript() error = %v; stderr=%q", err, stderr)
+	}
+	want := "show:outer\nshow:global\nshow:inner\nshow:inner\nshow:inner\n" +
+		"show:inner\nshow:inner\nshow:sub\nshow:inner\nshow:deep\nshow:inner\n" +
+		"show:prefix\nshow:tmpset\nshow:inner\n" +
+		"y:gy\ny:ly\ny:gy\n" +
+		"z:5\nz:5\nz:5\nz:5\nz:5\ncnt:5 z:unset\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+}

@@ -107,6 +107,7 @@ func forkWriteEnvironWithEpoch(parent expand.WriteEnviron, epoch *envEpoch) expa
 		clone.visibleCache = nil
 		clone.visibleCacheEpoch = 0
 		clone.visibleCacheReady = false
+		clone.resetLookupCaches()
 		return &clone
 	case *shadowWriteEnviron:
 		clone := *parent
@@ -192,6 +193,7 @@ func collapseEnvironChain(top *overlayEnviron, epoch *envEpoch) expand.WriteEnvi
 	globalClone.visibleCache = nil
 	globalClone.visibleCacheEpoch = 0
 	globalClone.visibleCacheReady = false
+	globalClone.resetLookupCaches()
 
 	merged := &overlayEnviron{
 		parent:          &globalClone,
@@ -260,6 +262,16 @@ type overlayEnviron struct {
 	// visibleCacheReady reports whether visibleCache contains a valid snapshot.
 	visibleCacheReady bool
 
+	// lookupCache remembers, per normalized name, which environ further down
+	// the chain answers lookups of that name, so reading a global from deep
+	// inside nested function calls does not walk every scope in between.
+	// See [overlayEnviron.lookupEnv].
+	lookupCache map[string]lookupCacheEntry
+	// writeBarrier caches [overlayEnviron.passThroughBarrier].
+	writeBarrier expand.Environ
+	// tempCandidate caches [overlayEnviron.nextTempCandidate].
+	tempCandidate expand.Environ
+
 	// We need to know if the current scope is a function's scope, because
 	// functions can modify global variables. When true, [parent] must not be nil.
 	funcScope bool
@@ -317,7 +329,32 @@ type visibleBinding struct {
 
 type envEpoch struct {
 	value uint64
+	// keyGens counts, per normalized name, how often a layer sharing this
+	// epoch gained or lost a binding of that name. Lookup caches are only
+	// valid while it is unchanged.
+	keyGens map[string]uint64
 }
+
+func (e *envEpoch) keyGen(normalized string) uint64 {
+	return e.keyGens[normalized]
+}
+
+func (e *envEpoch) bumpKeyGen(normalized string) {
+	if e.keyGens == nil {
+		e.keyGens = make(map[string]uint64)
+	}
+	e.keyGens[normalized]++
+}
+
+type lookupCacheEntry struct {
+	owner *overlayEnviron
+	rest  expand.Environ
+	gen   uint64
+}
+
+// maxLookupCacheEntries bounds the names one layer's lookup cache holds, so
+// looking up many distinct names cannot grow it without bound.
+const maxLookupCacheEntries = 64
 
 var immutableListEnvironType = reflect.TypeOf(expand.ListEnviron())
 
@@ -429,14 +466,145 @@ func (r *Runner) currentWriteEnvCacheToken() (expand.WriteEnviron, uint64, bool)
 }
 
 func (o *overlayEnviron) Get(name string) expand.Variable {
-	normalized := o.normalize(name)
-	if vr, ok := o.values[normalized]; ok {
-		return vr.Variable
+	owner, rest := o.lookupEnv(o.normalize(name))
+	if owner != nil {
+		return owner.values[owner.normalize(name)].Variable
 	}
-	if o.parent != nil {
-		return o.parent.Get(name)
+	if rest != nil {
+		return rest.Get(name)
 	}
 	return expand.Variable{}
+}
+
+func (o *overlayEnviron) resetLookupCaches() {
+	o.lookupCache = nil
+	o.writeBarrier = nil
+	o.tempCandidate = nil
+}
+
+// lookupEnv returns the first overlay, starting at o, that binds normalized.
+// When none does, owner is nil and rest is the first environ in the chain
+// that is not an overlay, which then answers for itself, or nil when the
+// chain ends there.
+//
+// Every function call adds a layer, so walking the chain on each lookup made
+// deep recursion quadratic in its depth. Each layer instead caches the answer
+// from its parent, which stays valid until a layer gains or loses a binding
+// of that name; layers are only ever added above, never between.
+func (o *overlayEnviron) lookupEnv(normalized string) (owner *overlayEnviron, rest expand.Environ) {
+	owner, rest, _ = o.lookupEnvCached(normalized)
+	return owner, rest
+}
+
+// lookupEnvCached is [overlayEnviron.lookupEnv], also reporting whether the
+// answer is safe to cache: every layer walked shares o's epoch, so its key
+// generation covers every binding that could change the answer.
+func (o *overlayEnviron) lookupEnvCached(normalized string) (owner *overlayEnviron, rest expand.Environ, cacheable bool) {
+	if _, ok := o.values[normalized]; ok {
+		return o, nil, true
+	}
+	parent, ok := o.parent.(*overlayEnviron)
+	if !ok || parent == nil {
+		return nil, o.parent, true
+	}
+	epoch := o.ensureEnvEpoch()
+	if parent.ensureEnvEpoch() != epoch || parent.caseInsensitive != o.caseInsensitive {
+		owner, rest, _ = parent.lookupEnvCached(normalized)
+		return owner, rest, false
+	}
+	gen := epoch.keyGen(normalized)
+	if entry, ok := o.lookupCache[normalized]; ok && entry.gen == gen {
+		return entry.owner, entry.rest, true
+	}
+	owner, rest, cacheable = parent.lookupEnvCached(normalized)
+	if cacheable {
+		if o.lookupCache == nil || len(o.lookupCache) >= maxLookupCacheEntries {
+			o.lookupCache = make(map[string]lookupCacheEntry)
+		}
+		o.lookupCache[normalized] = lookupCacheEntry{owner: owner, rest: rest, gen: gen}
+	}
+	return owner, rest, cacheable
+}
+
+// passesThrough reports whether writes to names o does not bind go on to its
+// parent; see [overlayEnviron.Set].
+func (o *overlayEnviron) passesThrough() bool {
+	return o.funcScope || o.tempScope
+}
+
+// passThroughBarrier returns the first environ, starting at o, that does not
+// pass writes of unbound names through to its parent.
+func (o *overlayEnviron) passThroughBarrier() expand.Environ {
+	if !o.passesThrough() {
+		return o
+	}
+	if o.writeBarrier == nil {
+		if parent, ok := o.parent.(*overlayEnviron); ok {
+			o.writeBarrier = parent.passThroughBarrier()
+		} else {
+			o.writeBarrier = o.parent
+		}
+	}
+	return o.writeBarrier
+}
+
+// nextTempCandidate returns the first environ, starting at o, that
+// [currentTempScopeBinding] must inspect: a temp scope, a layer that does not
+// pass writes through, or an environ that is not an overlay. Function scopes
+// in between bind no temp variables, so skipping them keeps declaring locals
+// deep inside nested functions linear.
+func (o *overlayEnviron) nextTempCandidate() expand.Environ {
+	if o.tempScope || !o.passesThrough() {
+		return o
+	}
+	if o.tempCandidate == nil {
+		if parent, ok := o.parent.(*overlayEnviron); ok {
+			o.tempCandidate = parent.nextTempCandidate()
+		} else {
+			o.tempCandidate = o.parent
+		}
+	}
+	return o.tempCandidate
+}
+
+// enableTempScope makes o a temp scope once its bindings are populated. No
+// layer sits above o yet, so only o's own caches depend on the change.
+func (o *overlayEnviron) enableTempScope() {
+	o.tempScope = true
+	o.writeBarrier = nil
+	o.tempCandidate = nil
+}
+
+// passThroughTarget returns the environ that a write of normalized, which o
+// passes through, would first stop at if it walked the chain layer by layer:
+// the nearest layer that binds it, or the nearest that does not pass it on.
+// Jumping straight there keeps writes from deep function scopes linear.
+func (o *overlayEnviron) passThroughTarget(normalized string) expand.WriteEnviron {
+	parent, ok := o.parent.(*overlayEnviron)
+	if !ok {
+		return o.parent.(expand.WriteEnviron)
+	}
+	owner, _ := parent.lookupEnv(normalized)
+	barrier := parent.passThroughBarrier()
+	b, ok := barrier.(*overlayEnviron)
+	if !ok || b == nil {
+		// The barrier is the first environ that is not an overlay, which is
+		// also where the lookup stops unless an overlay before it binds the
+		// name.
+		if owner != nil {
+			return owner
+		}
+		return barrier.(expand.WriteEnviron)
+	}
+	if owner == nil || b == owner {
+		return b
+	}
+	// The barrier is no further than the owner exactly when looking up from
+	// the barrier finds the same owner.
+	if fromBarrier, _ := b.lookupEnv(normalized); fromBarrier == owner {
+		return b
+	}
+	return owner
 }
 
 func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
@@ -448,14 +616,14 @@ func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 	if o.funcScope && !vr.Local && !inOverlay {
 		// Functions use dynamic scope: writes to non-local names should walk
 		// outward until they reach the defining scope, including caller locals.
-		return o.parent.(expand.WriteEnviron).Set(name, vr)
+		return o.passThroughTarget(normalized).Set(name, vr)
 	}
 	if o.tempScope && !vr.Local && !inOverlay {
 		// Temp scope: variables not originally bound in this overlay pass
 		// through to the parent so that assignments and unsets inside eval,
 		// source, or function calls are not silently swallowed when the
 		// overlay is discarded.
-		return o.parent.(expand.WriteEnviron).Set(name, vr)
+		return o.passThroughTarget(normalized).Set(name, vr)
 	}
 	if o.tempScope && inOverlay && o.tempUnset[normalized] {
 		// A temp binding was explicitly unset; pass writes through to the
@@ -470,6 +638,9 @@ func (o *overlayEnviron) Set(name string, vr expand.Variable) error {
 	o.values = cloneMapOnWrite(o.values, &o.valuesShared)
 	if o.values == nil {
 		o.values = make(map[string]namedVariable)
+	}
+	if !inOverlay {
+		o.ensureEnvEpoch().bumpKeyGen(normalized)
 	}
 	if vr.Kind == expand.KeepValue {
 		vr.Kind = prev.Kind
@@ -620,14 +791,21 @@ func currentScopeBinding(env expand.WriteEnviron, name string) (expand.WriteEnvi
 func currentTempScopeBinding(env expand.WriteEnviron, name string) (expand.WriteEnviron, expand.Variable, bool) {
 	switch env := env.(type) {
 	case *overlayEnviron:
-		normalized := env.normalize(name)
-		if env.tempScope {
-			if vr, ok := env.values[normalized]; ok {
-				return env, vr.Variable, true
+		next := env.nextTempCandidate()
+		candidate, ok := next.(*overlayEnviron)
+		if !ok {
+			if parent, ok := next.(expand.WriteEnviron); ok {
+				return currentTempScopeBinding(parent, name)
+			}
+			return nil, expand.Variable{}, false
+		}
+		if candidate.tempScope {
+			if vr, ok := candidate.values[candidate.normalize(name)]; ok {
+				return candidate, vr.Variable, true
 			}
 		}
-		parent, ok := env.parent.(expand.WriteEnviron)
-		if !ok || (!env.funcScope && !env.tempScope) {
+		parent, ok := candidate.parent.(expand.WriteEnviron)
+		if !ok || !candidate.passesThrough() {
 			return nil, expand.Variable{}, false
 		}
 		return currentTempScopeBinding(parent, name)
@@ -666,16 +844,14 @@ func currentScopeVars(env expand.WriteEnviron) expand.VarSeq {
 func visibleBindingWriteEnv(env expand.WriteEnviron, name string) (expand.WriteEnviron, expand.Variable, bool) {
 	switch env := env.(type) {
 	case *overlayEnviron:
-		normalized := env.normalize(name)
-		vr, ok := env.values[normalized]
-		if ok {
-			return env, vr.Variable, true
+		owner, rest := env.lookupEnv(env.normalize(name))
+		if owner != nil {
+			return owner, owner.values[owner.normalize(name)].Variable, true
 		}
-		parent, ok := env.parent.(expand.WriteEnviron)
-		if !ok {
-			return nil, expand.Variable{}, false
+		if shadow, ok := rest.(*shadowWriteEnviron); ok && shadow != nil {
+			return visibleBindingWriteEnv(shadow, name)
 		}
-		return visibleBindingWriteEnv(parent, name)
+		return nil, expand.Variable{}, false
 	case *shadowWriteEnviron:
 		if env.shadowSet && name == env.shadowName {
 			return env, env.shadow, true
@@ -709,18 +885,17 @@ func (r *Runner) currentGetoptsState() *getopts {
 func visibleSecondsBinding(env expand.WriteEnviron) (expand.WriteEnviron, expand.Variable, bool) {
 	switch env := env.(type) {
 	case *overlayEnviron:
-		normalized := env.normalize("SECONDS")
-		if vr, ok := env.values[normalized]; ok {
-			if vr.Variable.Declared() {
-				return env, vr.Variable, true
+		owner, rest := env.lookupEnv(env.normalize("SECONDS"))
+		if owner != nil {
+			if vr := owner.values[owner.normalize("SECONDS")]; vr.Variable.Declared() {
+				return owner, vr.Variable, true
 			}
 			return nil, expand.Variable{}, false
 		}
-		parent, ok := env.parent.(expand.WriteEnviron)
-		if !ok {
-			return nil, expand.Variable{}, false
+		if shadow, ok := rest.(*shadowWriteEnviron); ok && shadow != nil {
+			return visibleSecondsBinding(shadow)
 		}
-		return visibleSecondsBinding(parent)
+		return nil, expand.Variable{}, false
 	case *shadowWriteEnviron:
 		if env.shadowSet && env.shadowName == "SECONDS" {
 			if env.shadow.Declared() {
@@ -773,6 +948,7 @@ func deleteCurrentScopeVar(env expand.WriteEnviron, name string) bool {
 		}
 		env.values = cloneMapOnWrite(env.values, &env.valuesShared)
 		delete(env.values, normalized)
+		env.ensureEnvEpoch().bumpKeyGen(normalized)
 		env.valueBytes -= storedVariableBytes(prev.Variable)
 		if env.tempScope {
 			env.tempUnset = cloneMapOnWrite(env.tempUnset, &env.tempUnsetShared)
