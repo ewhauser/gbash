@@ -113,3 +113,44 @@ func TestAWKTimeBudgetExcludesWaitingOnStdinAndSystem(t *testing.T) {
 		t.Fatalf("Stdout = %q, want %q; stderr=%q", got, want, result.Stderr)
 	}
 }
+
+func TestAWKRejectsDeepNestingWithoutCrashing(t *testing.T) {
+	t.Parallel()
+
+	program := "BEGIN { x = " + strings.Repeat("(", 300000) + "1" + strings.Repeat(")", 300000) + " }"
+	result, err := newAWKRuntimeWithMaxDuration(t, 0).Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: "awk '" + program + "'\necho after=$?\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !strings.Contains(result.Stdout, "after=1") || !strings.Contains(result.Stderr, "nesting") {
+		t.Fatalf("stdout=%q stderr=%q, want nesting parse error", result.Stdout, result.Stderr)
+	}
+}
+
+func TestAWKBoundsSystemWithoutRequestDeadline(t *testing.T) {
+	t.Parallel()
+
+	registry := gbruntime.DefaultRegistry()
+	if err := registry.Register(&AWK{maxNestedDuration: 300 * time.Millisecond}); err != nil {
+		t.Fatalf("Register(awk) error = %v", err)
+	}
+	rt, err := gbruntime.New(gbruntime.WithConfig(&gbruntime.Config{Registry: registry}))
+	if err != nil {
+		t.Fatalf("runtime.New() error = %v", err)
+	}
+	start := time.Now()
+	result, err := rt.Run(context.Background(), &gbruntime.ExecutionRequest{
+		Script: "awk 'BEGIN { system(\"cat /dev/zero >/dev/null\"); print \"unreached\" }'\necho after=$?\n",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("awk ran for %s past a 300ms nested limit", elapsed)
+	}
+	if !strings.Contains(result.Stdout, "after=2") || !strings.Contains(result.Stderr, "time limit") {
+		t.Fatalf("stdout=%q stderr=%q, want time limit error", result.Stdout, result.Stderr)
+	}
+}

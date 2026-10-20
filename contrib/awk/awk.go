@@ -22,6 +22,8 @@ import (
 type AWK struct {
 	// maxDuration overrides awkDefaultMaxDuration; tests set it.
 	maxDuration time.Duration
+	// maxNestedDuration overrides awkDefaultMaxNestedDuration; tests set it.
+	maxNestedDuration time.Duration
 }
 
 type awkOptions struct {
@@ -90,6 +92,9 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 	limits := awkMemoryLimits(inv)
 	nativeState := &awkNativeState{}
 	funcs := newAWKFuncs(inv, nativeState, limits.maxStringBytes)
+	if err := checkAWKNesting(programSource); err != nil {
+		return exitCodef(inv, 1, "awk: parse error: %v", err)
+	}
 	compiled, err := parser.ParseProgram([]byte(programSource), &parser.ParserConfig{
 		Funcs: funcs,
 	})
@@ -97,7 +102,7 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 		return exitCodef(inv, 1, "awk: parse error: %v", err)
 	}
 
-	ctx, budget := newAWKTimeBudget(ctx, c.maxDuration)
+	ctx, budget := newAWKTimeBudget(ctx, c.maxDuration, c.maxNestedDuration)
 	defer budget.stop()
 	stdin := newLazyAWKStdin(ctx, inv, budget)
 
@@ -126,6 +131,9 @@ func (c *AWK) Run(ctx context.Context, inv *commands.Invocation) error {
 		return exitf(inv, "awk: %v", err)
 	}
 	status, err := program.ExecuteContext(ctx, config)
+	if err == nil && budget.exceeded(ctx) {
+		err = errAWKTimeLimit
+	}
 	if err != nil {
 		if budget.exceeded(ctx) {
 			return exitf(inv, "awk: execution exceeded the %s time limit", awkDefaultMaxDuration)
@@ -484,11 +492,16 @@ func newAWKShellRunner(ctx context.Context, inv *commands.Invocation, budget *aw
 		}
 		budget.pause()
 		defer budget.resume()
+		nestedCtx, done := budget.startNested(ctx)
+		defer done()
 		req := newAWKShellRequest(code)
 		req.Stdin = stdin
 		req.Stdout = stdout
 		req.Stderr = stderr
-		result, err := inv.Exec(ctx, req)
+		result, err := inv.Exec(nestedCtx, req)
+		if budget.exceeded(ctx) {
+			return -1, errAWKTimeLimit
+		}
 		if err != nil {
 			if result != nil {
 				return result.ExitCode, nil
@@ -1018,3 +1031,35 @@ func exitCodef(inv *commands.Invocation, code int, format string, args ...any) e
 }
 
 var _ commands.Command = (*AWK)(nil)
+
+// awkMaxNesting bounds bracket nesting in program text. goawk's recursive
+// descent parser otherwise overflows the Go stack on deeply nested input.
+const awkMaxNesting = 1000
+
+func checkAWKNesting(src string) error {
+	depth := 0
+	for i := 0; i < len(src); i++ {
+		switch ch := src[i]; ch {
+		case '#':
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+		case '"':
+			for i++; i < len(src) && src[i] != '"' && src[i] != '\n'; i++ {
+				if src[i] == '\\' {
+					i++
+				}
+			}
+		case '(', '[', '{':
+			depth++
+			if depth > awkMaxNesting {
+				return fmt.Errorf("nesting deeper than %d levels", awkMaxNesting)
+			}
+		case ')', ']', '}':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return nil
+}
