@@ -164,6 +164,15 @@ func (sl *stringLexer) peekNext() byte {
 	return sl.s[sl.i]
 }
 
+// escapedRune returns the whole rune whose first byte next just returned,
+// consuming its remaining bytes.
+func (sl *stringLexer) escapedRune() string {
+	start := sl.i - 1
+	_, size := utf8.DecodeRuneInString(sl.s[start:])
+	sl.i = start + size
+	return sl.s[start:sl.i]
+}
+
 func (sl *stringLexer) peekRest() string {
 	return sl.s[sl.i:]
 }
@@ -265,11 +274,10 @@ func regexpNext(sb *strings.Builder, sl *stringLexer, mode Mode) error {
 			sb.WriteByte('.')
 		}
 	case '\\':
-		c = sl.next()
-		if c == '\x00' {
+		if c = sl.next(); c == '\x00' {
 			return &SyntaxError{msg: `\ at end of pattern`}
 		}
-		sb.WriteString(regexp.QuoteMeta(string(c)))
+		sb.WriteString(regexp.QuoteMeta(sl.escapedRune()))
 	case '[':
 		if mode&Filenames != 0 {
 			for i, c := range sl.peekRest() {
@@ -316,11 +324,12 @@ func regexpNext(sb *strings.Builder, sl *stringLexer, mode Mode) error {
 				sb.WriteByte(c)
 				prev = c
 			case '\\':
-				sb.WriteByte(c)
 				if c = sl.next(); c == '\x00' {
 					return &SyntaxError{msg: "[ was not matched with a closing ]"}
 				}
-				sb.WriteByte(c)
+				// Quote the escaped character so sequences like \w or
+				// \d stay literal instead of becoming regexp classes.
+				sb.WriteString(quoteClassChar(sl.escapedRune()))
 				prev = c
 			case '-':
 				sb.WriteByte(c)
@@ -435,4 +444,14 @@ loop:
 		sb.WriteRune(r)
 	}
 	return sb.String()
+}
+
+// quoteClassChar escapes an escaped bracket-expression character for use
+// inside a Go regexp character class. ASCII punctuation is backslashed;
+// letters, digits and other runes are written as-is.
+func quoteClassChar(s string) string {
+	if len(s) == 1 && s[0] < utf8.RuneSelf && strings.IndexByte(`!"#$%&'()*+,-./:;<=>?@[\]^_{|}~`+"`", s[0]) >= 0 {
+		return `\` + s
+	}
+	return s
 }

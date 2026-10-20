@@ -2736,7 +2736,7 @@ func (cfg *Config) paramExp(pe *syntax.ParamExp, ql quoteLevel) (string, error) 
 					}
 					str = cfg.joinArrayElemsForString(pe, elems)
 				default:
-					panic(fmt.Sprintf("unexpected @%s param expansion", arg))
+					return "", badSubstitution(pe)
 				}
 			}
 		}

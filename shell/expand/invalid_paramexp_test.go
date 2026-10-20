@@ -14,3 +14,14 @@ func TestInvalidParamExpReportsBadSubstitution(t *testing.T) {
 		}
 	}
 }
+
+// The parser accepts trailing text after an @ operator, as in ${x@Q"abc"};
+// expansion used to panic on the unknown operator.
+func TestUnknownAtOperatorReportsBadSubstitution(t *testing.T) {
+	t.Parallel()
+	env := testEnv{"x": {Set: true, Kind: String, Str: "abc"}}
+	_, err := Fields(&Config{Env: env}, parseCommandWord(t, `${x@Q"abc"}`))
+	if err == nil || err.Error() != `${x@Q"abc"}: bad substitution` {
+		t.Fatalf("Fields error = %v, want bad substitution", err)
+	}
+}

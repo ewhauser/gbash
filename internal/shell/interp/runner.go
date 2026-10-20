@@ -1780,8 +1780,7 @@ func (r *Runner) patternMatch(pat, name string) bool {
 		mode |= shellpattern.NoGlobCase
 	}
 	ok, err := shellpattern.Match(pat, name, mode)
-	_ = err // TODO: report these errors
-	return ok
+	return ok || err != nil && pat == name // an uncompilable pattern matches only itself
 }
 
 func elapsedString(d time.Duration, posix bool) string {
