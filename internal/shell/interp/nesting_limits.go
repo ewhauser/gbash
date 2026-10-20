@@ -16,6 +16,16 @@ func (e SubshellDepthLimitError) Error() string {
 	return fmt.Sprintf("subshell nesting limit exceeded (%d), increase policy.Limits.MaxSubstitutionDepth", e.Limit)
 }
 
+// GlobLimitError reports that pathname expansion used up the glob
+// operation budget.
+type GlobLimitError struct {
+	Limit int64
+}
+
+func (e GlobLimitError) Error() string {
+	return fmt.Sprintf("Glob operation limit exceeded (%d), increase policy.Limits.MaxGlobOperations", e.Limit)
+}
+
 // subshellDepthExceeded reports whether starting a command substitution,
 // subshell or process substitution from r would nest too deeply.
 func (r *Runner) subshellDepthExceeded() bool {

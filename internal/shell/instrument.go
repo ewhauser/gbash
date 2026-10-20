@@ -11,8 +11,8 @@ import (
 
 const loopIterCommandName = "__jb_loop_iter"
 
-func instrumentLoopBudgets(program *syntax.File, pol policy.Policy, loopNamespace string) error {
-	if program == nil || pol == nil || pol.Limits().MaxLoopIterations <= 0 {
+func instrumentLoopBudgets(program *syntax.File, pol policy.Policy, budget *executionBudget, loopNamespace string) error {
+	if program == nil || pol == nil || budget == nil || pol.Limits().MaxLoopIterations <= 0 {
 		return nil
 	}
 
@@ -20,20 +20,20 @@ func instrumentLoopBudgets(program *syntax.File, pol policy.Policy, loopNamespac
 	for node := range syntax.All(program) {
 		switch node := node.(type) {
 		case *syntax.WhileClause:
-			if hasLoopGuard(node.Do) {
+			if budget.hasLoopGuard(node.Do) {
 				continue
 			}
-			guard, err := newLoopGuardStmt(loopKind(node), loopGuardID(loopNamespace, nextLoopID))
+			guard, err := budget.newLoopGuardStmt(loopKind(node), loopGuardID(loopNamespace, nextLoopID))
 			if err != nil {
 				return err
 			}
 			nextLoopID++
 			node.Do = append([]*syntax.Stmt{guard}, node.Do...)
 		case *syntax.ForClause:
-			if hasLoopGuard(node.Do) {
+			if budget.hasLoopGuard(node.Do) {
 				continue
 			}
-			guard, err := newLoopGuardStmt("for", loopGuardID(loopNamespace, nextLoopID))
+			guard, err := budget.newLoopGuardStmt("for", loopGuardID(loopNamespace, nextLoopID))
 			if err != nil {
 				return err
 			}
@@ -60,14 +60,22 @@ func loopKind(clause *syntax.WhileClause) string {
 	return "while"
 }
 
-func hasLoopGuard(stmts []*syntax.Stmt) bool {
+// hasLoopGuard reports whether stmts already starts with a guard this budget
+// inserted. Guards are recognized by node identity, so a user-written call to
+// the helper name never counts as one.
+func (b *executionBudget) hasLoopGuard(stmts []*syntax.Stmt) bool {
 	if len(stmts) == 0 || stmts[0] == nil {
 		return false
 	}
-	return stmtStartsWithLoopGuard(stmts[0])
+	call := loopGuardCall(stmts[0])
+	if call == nil {
+		return false
+	}
+	_, ok := b.loopGuards.Load(call)
+	return ok
 }
 
-func newLoopGuardStmt(kind, id string) (*syntax.Stmt, error) {
+func (b *executionBudget) newLoopGuardStmt(kind, id string) (*syntax.Stmt, error) {
 	file, err := syntax.NewParser().Parse(strings.NewReader(fmt.Sprintf("%s %s %s || exit $?\n", loopIterCommandName, kind, id)), "loop-guard")
 	if err != nil {
 		return nil, err
@@ -75,7 +83,32 @@ func newLoopGuardStmt(kind, id string) (*syntax.Stmt, error) {
 	if len(file.Stmts) != 1 {
 		return nil, fmt.Errorf("unexpected loop guard statement count: %d", len(file.Stmts))
 	}
+	call := loopGuardCall(file.Stmts[0])
+	if call == nil {
+		return nil, fmt.Errorf("unexpected loop guard statement shape")
+	}
+	b.loopGuards.Store(call, loopGuard{kind: kind, id: id})
 	return file.Stmts[0], nil
+}
+
+type loopGuard struct {
+	kind string
+	id   string
+}
+
+// loopGuardCall returns the guard call at the head of a guard statement.
+func loopGuardCall(stmt *syntax.Stmt) *syntax.CallExpr {
+	if stmt == nil {
+		return nil
+	}
+	switch cmd := stmt.Cmd.(type) {
+	case *syntax.CallExpr:
+		return cmd
+	case *syntax.BinaryCmd:
+		return loopGuardCall(cmd.X)
+	default:
+		return nil
+	}
 }
 
 func wordLiteral(word *syntax.Word) string {
@@ -83,26 +116,4 @@ func wordLiteral(word *syntax.Word) string {
 		return ""
 	}
 	return word.Lit()
-}
-
-func stmtStartsWithLoopGuard(stmt *syntax.Stmt) bool {
-	if stmt == nil || stmt.Cmd == nil {
-		return false
-	}
-
-	switch cmd := stmt.Cmd.(type) {
-	case *syntax.CallExpr:
-		return callStartsWithLoopGuard(cmd)
-	case *syntax.BinaryCmd:
-		return stmtStartsWithLoopGuard(cmd.X)
-	default:
-		return false
-	}
-}
-
-func callStartsWithLoopGuard(call *syntax.CallExpr) bool {
-	if call == nil || len(call.Args) == 0 {
-		return false
-	}
-	return wordLiteral(call.Args[0]) == loopIterCommandName
 }

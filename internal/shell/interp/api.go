@@ -300,6 +300,13 @@ type Runner struct {
 	maxFunctionDepth int64
 	funcDepth        int64
 
+	nestedChunkTransform ChunkTransformer
+	loopGuard            LoopGuardFunc
+	beforeGlob           func(ops int64) error
+
+	// jobs is shared by this runner and its subshells; see [Runner.StopJobs].
+	jobs *jobGroup
+
 	origDir     string
 	origParams  []string
 	origArg0    string
@@ -639,6 +646,20 @@ type RunnerConfig struct {
 
 	// MaxFunctionDepth caps nested function calls. Zero means unlimited.
 	MaxFunctionDepth int64
+
+	// NestedChunkTransformer compiles chunks parsed at run time by eval,
+	// source and trap actions, like the transformer passed to
+	// [Runner.RunReaderWithMetadata] does for top-level chunks.
+	NestedChunkTransformer ChunkTransformer
+
+	// LoopGuard runs instead of a call the chunk transformer inserted as a
+	// loop guard. It reports whether call is such a guard; the guard is
+	// identified by the call node itself, never by its command name.
+	LoopGuard LoopGuardFunc
+
+	// BeforeGlob is charged with the cost of each pathname expansion; it
+	// returns a [GlobLimitError] once the budget is spent.
+	BeforeGlob func(ops int64) error
 }
 
 func newRunnerBase() *Runner {
@@ -738,6 +759,7 @@ func NewRunner(cfg *RunnerConfig) (*Runner, error) {
 		cfg = &RunnerConfig{}
 	}
 	r := newRunnerBase()
+	r.jobs = newJobGroup()
 	r.applyShellVariant(cfg.ShellVariant)
 	r.Env = cfg.Env
 	r.platform = normalizePlatform(cfg.Platform)
@@ -748,6 +770,9 @@ func NewRunner(cfg *RunnerConfig) (*Runner, error) {
 	r.maxSubshellDepth = cfg.MaxSubshellDepth
 	r.baseSubshellDepth = cfg.SubshellDepth
 	r.maxFunctionDepth = cfg.MaxFunctionDepth
+	r.nestedChunkTransform = cfg.NestedChunkTransformer
+	r.loopGuard = cfg.LoopGuard
+	r.beforeGlob = cfg.BeforeGlob
 	r.Dir = cfg.Dir
 	r.startupVisibleDir = cfg.VisibleDir
 	r.analysis = newAnalysisState(cfg.AnalysisObserver, cfg.AnalysisRun)
@@ -1300,6 +1325,11 @@ func (r *Runner) Reset() {
 		baseSubshellDepth: r.baseSubshellDepth,
 		maxFunctionDepth:  r.maxFunctionDepth,
 
+		nestedChunkTransform: r.nestedChunkTransform,
+		loopGuard:            r.loopGuard,
+		beforeGlob:           r.beforeGlob,
+		jobs:                 r.jobs,
+
 		// These can be set by functions like [Dir] or [Params], but
 		// builtins can overwrite them; reset the fields to whatever the
 		// constructor set up.
@@ -1630,6 +1660,10 @@ func (r *Runner) subshell(_ bool) *Runner {
 		subshellDepth:             r.subshellDepth,
 		baseSubshellDepth:         r.baseSubshellDepth,
 		maxFunctionDepth:          r.maxFunctionDepth,
+		nestedChunkTransform:      r.nestedChunkTransform,
+		loopGuard:                 r.loopGuard,
+		beforeGlob:                r.beforeGlob,
+		jobs:                      r.jobs,
 		funcDepth:                 r.funcDepth,
 		origStart:                 r.origStart,
 		origShellStart:            r.origShellStart,

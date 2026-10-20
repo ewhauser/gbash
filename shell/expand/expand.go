@@ -186,6 +186,13 @@ type RuntimeCallbacks interface {
 	ExpandReadDir(string) ([]fs.DirEntry, error)
 }
 
+// GlobBudgetCallbacks is an optional [RuntimeCallbacks] extension that is
+// charged before each pathname expansion with the cost reported by
+// [EstimateGlobOperations]. A non-nil error aborts the expansion.
+type GlobBudgetCallbacks interface {
+	ExpandBeforeGlob(ops int64) error
+}
+
 const paramPatternCacheSize = 128
 
 type paramPatternExprCacheKey struct {
@@ -1641,6 +1648,11 @@ func (cfg *Config) expandPathField(dir string, field []fieldPart) ([]string, err
 	globPath, doGlob := cfg.escapedGlobField(globField)
 	if !doGlob || !cfg.canReadDir() {
 		return []string{literal}, nil
+	}
+	if budget, ok := cfg.Runtime.(GlobBudgetCallbacks); ok {
+		if err := budget.ExpandBeforeGlob(EstimateGlobOperations(globPath)); err != nil {
+			return nil, err
+		}
 	}
 	matches, err := cfg.glob(dir, globPath)
 	if err != nil {

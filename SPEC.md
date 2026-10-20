@@ -716,8 +716,13 @@ Implementation detail for the current runtime:
 - the default `MaxCommandCount` is `10000` per execution
 - the counter resets on each `Session.Exec` or `Runtime.Run`
 - commands inside subshells and pipelines count toward the same execution budget
-- loop iteration limits are enforced by AST instrumentation that prepends an internal guard command to loop bodies before execution
-- command substitution depth and glob-operation budgets are enforced from the shell-core compile pipeline, and glob-operation counts accumulate across all parsed chunks in one execution
+- loop iteration limits are enforced by AST instrumentation that prepends an internal guard command to loop bodies before execution; the interpreter recognizes a guard by its AST node, not its name, so user code cannot call or spoof it (a literal `__jb_loop_iter` call or function is rejected at validation, and a dynamic one is an ordinary, budget-charged command lookup)
+- chunks parsed at run time by `eval`, `source` and trap actions go through the same compile pipeline (validation, pipeline normalization, loop instrumentation with a fresh loop namespace) as top-level chunks
+- command substitution depth is enforced from the shell-core compile pipeline; the glob-operation budget is charged by the expander each time a pathname expansion runs, so repeated and dynamically built patterns count, and it accumulates across all chunks in one execution
+- `eval` and `source` frames count toward `MaxFunctionDepth` like function calls
+- at most 256 background jobs run at once per shell family; starting another prints `fork: background job limit reached (256)` and fails with status `1`
+- background jobs do not outlive the execution: when the top-level run ends they are canceled, the shell side of every process-substitution pipe is closed, and all jobs and process substitutions are joined before the call returns; `exec > >(cmd)` therefore lets `cmd` drain its input at shell exit instead of blocking the `exec` statement
+- `coproc` and mksh `|&` coprocesses are rejected at validation; `kill` with a non-catchable signal (`SIGKILL`, `SIGSTOP`) fails with an error instead of being silently ignored
 - the variable-size budget is checked in the interpreter's single variable-write path rather than at each assignment form, and a command substitution whose output overflows it is cancelled right away so producers that ignore write errors stop
 - the brace-expansion word budget is counted while words are expanded rather than estimated at compile time, so the actual generated word count is what is bounded, including inside `eval` and `source`
 - request-level timeouts and caller cancellation are enforced via execution contexts and normalized into shell-style exit codes

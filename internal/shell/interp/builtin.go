@@ -890,9 +890,15 @@ func (r *Runner) evalBuiltin(ctx context.Context, args []string) (exit exitStatu
 		CallLine: r.currentStmtLine,
 	})
 	defer r.analysisScopeExit(r.AnalysisStatus())
+	if r.maxFunctionDepth > 0 && r.funcDepth >= r.maxFunctionDepth {
+		r.functionDepthLimitExceeded("eval")
+		return r.exit
+	}
+	r.funcDepth++
 	r.evalDepth++
 	defer func() {
 		r.evalDepth--
+		r.funcDepth--
 	}()
 	err := r.runShellReader(ctx, strings.NewReader(src), "", nil)
 	if err != nil {
@@ -2355,6 +2361,10 @@ func (r *Runner) sourceBuiltin(ctx context.Context, pos syntax.Pos, name string,
 		return exit
 	}
 	defer f.Close()
+	if r.maxFunctionDepth > 0 && r.funcDepth >= r.maxFunctionDepth {
+		r.functionDepthLimitExceeded(name)
+		return r.exit
+	}
 	oldParams := r.Params
 	oldSourceSetParams := r.sourceSetParams
 	oldInSource := r.inSource
@@ -2381,8 +2391,10 @@ func (r *Runner) sourceBuiltin(ctx context.Context, pos syntax.Pos, name string,
 		allowDebug:  r.opts[optFuncTrace],
 		allowReturn: true,
 	}
+	r.funcDepth++
 	r.inSource = true
 	runErr := r.runShellReader(ctx, f, sourceName, frame)
+	r.funcDepth--
 	if !r.exit.fatalExit && !r.exit.exiting {
 		sourceTrapStatus := preSourceStatus
 		if !r.exit.returning {

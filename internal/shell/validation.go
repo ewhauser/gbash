@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/ewhauser/gbash/policy"
-	"github.com/ewhauser/gbash/shell/expand"
 	"github.com/ewhauser/gbash/shell/syntax"
 	"github.com/ewhauser/gbash/shellvariant"
 )
@@ -33,6 +32,9 @@ func validateInterpreterSafety(program *syntax.File, variant shellvariant.ShellV
 		return invalid
 	}
 	if invalid := validateSupportedFunctionDeclarations(program); invalid != nil {
+		return invalid
+	}
+	if invalid := validateNoReservedNamesOrCoprocs(program); invalid != nil {
 		return invalid
 	}
 	return validateSupportedVariantCommands(program, variant)
@@ -82,19 +84,6 @@ func validateExecutionBudgets(program *syntax.File, pol policy.Policy) error {
 	return nil
 }
 
-func estimateProgramGlobOps(program *syntax.File) int64 {
-	if program == nil {
-		return 0
-	}
-	var globOps int64
-	for node := range syntax.All(program) {
-		if word, ok := node.(*syntax.Word); ok {
-			globOps += estimateWordGlobOps(word)
-		}
-	}
-	return globOps
-}
-
 func validateSupportedRedirections(program *syntax.File) error {
 	if program == nil {
 		return nil
@@ -128,6 +117,39 @@ func validateSupportedFunctionDeclarations(program *syntax.File) error {
 		}
 		if fn.Body == nil || !hasSupportedFunctionName(fn) {
 			return &shellValidationError{message: "invalid function declaration"}
+		}
+	}
+	return nil
+}
+
+// validateNoReservedNamesOrCoprocs rejects calls to and definitions of the
+// loop guard helper name, which only the instrumenter may insert, and
+// coprocesses, which are not supported.
+func validateNoReservedNamesOrCoprocs(program *syntax.File) error {
+	if program == nil {
+		return nil
+	}
+	for node := range syntax.All(program) {
+		switch node := node.(type) {
+		case *syntax.CallExpr:
+			if len(node.Args) > 0 && wordLiteral(node.Args[0]) == loopIterCommandName {
+				return &shellValidationError{message: fmt.Sprintf("%s: reserved command name", wordLiteral(node.Args[0]))}
+			}
+		case *syntax.FuncDecl:
+			if node.Name != nil && node.Name.Value == loopIterCommandName {
+				return &shellValidationError{message: fmt.Sprintf("%s: reserved function name", node.Name.Value)}
+			}
+			for _, name := range node.Names {
+				if name != nil && name.Value == loopIterCommandName {
+					return &shellValidationError{message: fmt.Sprintf("%s: reserved function name", name.Value)}
+				}
+			}
+		case *syntax.CoprocClause:
+			return &shellValidationError{message: "coproc: coprocesses are not supported"}
+		case *syntax.Stmt:
+			if node.Coprocess {
+				return &shellValidationError{message: "|&: coprocesses are not supported"}
+			}
 		}
 	}
 	return nil
@@ -173,9 +195,4 @@ func isSupportedRedirectFD(fd string) bool {
 		_, err := strconv.Atoi(fd)
 		return err == nil
 	}
-}
-
-func estimateWordGlobOps(word *syntax.Word) int64 {
-	lit := wordLiteral(word)
-	return expand.EstimateGlobOperations(lit)
 }

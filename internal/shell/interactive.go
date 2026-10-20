@@ -56,6 +56,7 @@ func (m *core) Interact(ctx context.Context, exec *Execution) (*InteractiveResul
 	if err != nil {
 		return nil, err
 	}
+	defer runner.StopJobs(runnerExec.procSubst.Close)
 	runner.AnalysisRunStart()
 	exitCode := 0
 	analysisFinished := false
