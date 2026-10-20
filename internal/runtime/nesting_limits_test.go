@@ -103,9 +103,11 @@ func TestFunctionDepthDefaultAllowsDeepRecursion(t *testing.T) {
 		t.Fatalf("Stdout = %q, want %q", got, want)
 	}
 	// Writes from deep function scopes used to cost O(depth^2), which took
-	// over ten seconds here.
-	if elapsed := time.Since(start); elapsed > 10*time.Second {
-		t.Fatalf("recursion to depth 1000 took %v, want well under 10s", elapsed)
+	// over ten seconds here without the race detector. It now takes under a
+	// second, but CI runs this with -race next to the rest of the package,
+	// which stretches it to about ten seconds, so allow more than that.
+	if elapsed := time.Since(start); elapsed > 25*time.Second {
+		t.Fatalf("recursion to depth 1000 took %v, want well under 25s", elapsed)
 	}
 }
 
