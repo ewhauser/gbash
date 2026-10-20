@@ -66,14 +66,15 @@ func TestCasePatternsPastReadBuffer(t *testing.T) {
 }
 
 // Deeply nested case statements in command substitutions in case patterns
-// parse, however far they run past the read buffer.
+// parse up to MaxPatternNestingDepth, however far they run past the read
+// buffer.
 func TestDeepCasePatternsPastReadBuffer(t *testing.T) {
 	t.Parallel()
 	for _, item := range []string{
 		"case x in $(X) ) ;; esac",
 		"case x in @($(X))) ;; esac",
 	} {
-		const n = 1000
+		const n = MaxPatternNestingDepth
 		src := nestCaseInCmdSubst(n, item) + "\n"
 		f, err := NewParser().Parse(strings.NewReader(src), "")
 		if err != nil {
