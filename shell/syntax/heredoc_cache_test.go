@@ -137,3 +137,16 @@ func TestHeredocBodyErrorKeepsFirstError(t *testing.T) {
 		}
 	}
 }
+
+// An unclosed here-document must report an error, not dereference a missing
+// delimiter.
+func TestParseUnclosedHeredocNoPanic(t *testing.T) {
+	t.Parallel()
+	for _, src := range []string{"`<<\"`\"", "`<<\\\"`\\\"", "$(<<\")\"", "cat <<"} {
+		for _, lang := range []LangVariant{LangPOSIX, LangBash} {
+			if _, err := NewParser(Variant(lang)).Parse(strings.NewReader(src), ""); err == nil {
+				t.Errorf("%v: Parse(%q) returned no error", lang, src)
+			}
+		}
+	}
+}
