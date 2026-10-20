@@ -143,6 +143,9 @@ func (c *Python) RunParsed(ctx context.Context, inv *commands.Invocation, matche
 }
 
 func (c *Python) runSource(ctx context.Context, inv *commands.Invocation, source pythonSource) error {
+	if err := pythonCheckNesting(source.code); err != nil {
+		return commands.Exitf(inv, 1, "%s: %v", c.Name(), err)
+	}
 	runner, err := monty.New(source.code, monty.CompileOptions{
 		ScriptName: source.entryPath,
 	})
@@ -245,7 +248,7 @@ func (c *Python) runRepl(ctx context.Context, inv *commands.Invocation, source p
 	for {
 		_, _ = io.WriteString(inv.Stdout, prompt)
 
-		line, readErr := reader.ReadString('\n')
+		line, readErr := pythonReadReplLine(ctx, reader)
 		if line == "" && errors.Is(readErr, io.EOF) && pending.Len() == 0 && !usingTerminalInput {
 			terminal, closer, ttyPath, err := c.terminalReader(ctx, inv)
 			if err != nil {
@@ -255,8 +258,11 @@ func (c *Python) runRepl(ctx context.Context, inv *commands.Invocation, source p
 				reader = bufio.NewReader(terminal)
 				terminalCloser = closer
 				usingTerminalInput = true
-				line, readErr = reader.ReadString('\n')
+				line, readErr = pythonReadReplLine(ctx, reader)
 			}
+		}
+		if errors.Is(readErr, errPythonReplLineTooLong) {
+			return commands.Exitf(inv, 1, "%s: input line too long", c.Name())
 		}
 		if readErr != nil && !errors.Is(readErr, io.EOF) {
 			return readErr
@@ -265,7 +271,21 @@ func (c *Python) runRepl(ctx context.Context, inv *commands.Invocation, source p
 			return nil
 		}
 		if line != "" {
+			if pending.Len()+len(line) > pythonReplMaxPending {
+				return commands.Exitf(inv, 1, "%s: input too long", c.Name())
+			}
 			pending.WriteString(line)
+		}
+		if pending.Len() > 0 {
+			if err := pythonCheckNesting(pending.String()); err != nil {
+				pending.Reset()
+				prompt = pythonReplPrompt
+				_, _ = io.WriteString(inv.Stderr, err.Error()+"\n")
+				if errors.Is(readErr, io.EOF) {
+					return nil
+				}
+				continue
+			}
 		}
 		if pending.Len() == 0 {
 			if errors.Is(readErr, io.EOF) {
@@ -457,13 +477,6 @@ func pythonTTYReader(reader io.Reader) io.Reader {
 	}
 	if meta, ok := reader.(commandutil.RedirectMetadata); ok {
 		if pythonRecognizedTTYPath(meta.RedirectPath()) {
-			return reader
-		}
-	}
-	if statter, ok := reader.(interface {
-		Stat() (stdfs.FileInfo, error)
-	}); ok {
-		if info, err := statter.Stat(); err == nil && info.Mode()&stdfs.ModeCharDevice != 0 {
 			return reader
 		}
 	}
@@ -1002,4 +1015,66 @@ func (w *pythonGatedWriter) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	return w.w.Write(p)
+}
+
+const (
+	// pythonMaxNesting mirrors CPython's parser limit on bracket nesting.
+	// Monty's recursive parser crashes the host on much deeper input.
+	pythonMaxNesting = 200
+	// pythonReplMaxLine caps one REPL line so endless input without a
+	// newline (for example /dev/zero) cannot grow memory without bound.
+	pythonReplMaxLine    = 1 << 20
+	pythonReplMaxPending = 4 << 20
+)
+
+var errPythonReplLineTooLong = errors.New("python: input line too long")
+
+// pythonCheckNesting rejects source whose bracket nesting exceeds
+// pythonMaxNesting. Brackets inside string literals and comments are skipped.
+func pythonCheckNesting(code string) error {
+	depth := 0
+	for i := 0; i < len(code); i++ {
+		switch ch := code[i]; ch {
+		case '#':
+			for i < len(code) && code[i] != '\n' {
+				i++
+			}
+		case '\'', '"':
+			for i++; i < len(code) && code[i] != ch && code[i] != '\n'; i++ {
+				if code[i] == '\\' {
+					i++
+				}
+			}
+		case '(', '[', '{':
+			depth++
+			if depth > pythonMaxNesting {
+				return errors.New("SyntaxError: too many nested parentheses")
+			}
+		case ')', ']', '}':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return nil
+}
+
+// pythonReadReplLine reads one line, checking ctx between reads and capping
+// the line length.
+func pythonReadReplLine(ctx context.Context, reader *bufio.Reader) (string, error) {
+	var line []byte
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		chunk, err := reader.ReadSlice('\n')
+		line = append(line, chunk...)
+		if len(line) > pythonReplMaxLine {
+			return "", errPythonReplLineTooLong
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		return string(line), err
+	}
 }

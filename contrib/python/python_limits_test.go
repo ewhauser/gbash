@@ -3,7 +3,9 @@
 package python
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -205,5 +207,41 @@ func TestPythonTTYEnvDoesNotForceREPLForPipedInput(t *testing.T) {
 	}
 	if got, want := result.Stdout, "42\n"; got != want {
 		t.Fatalf("Stdout = %q, want %q (no REPL prompts)", got, want)
+	}
+}
+
+func TestPythonRejectsDeepNestingWithoutCrashing(t *testing.T) {
+	t.Parallel()
+
+	script := "python3 -c 'x = " + strings.Repeat("(", 5000) + "1" + strings.Repeat(")", 5000) + "'\n"
+	result := runPythonLimitScript(t, script, 30*time.Second)
+	if result.ExitCode == 0 {
+		t.Fatalf("ExitCode = 0, want failure")
+	}
+	if !strings.Contains(result.Stderr, "nested") {
+		t.Fatalf("Stderr = %q, want nesting error", result.Stderr)
+	}
+
+	ok := runPythonLimitScript(t, "python3 -c 'print(\"((((\", "+strings.Repeat("(", 50)+"1"+strings.Repeat(")", 50)+")'\n", 30*time.Second)
+	if ok.ExitCode != 0 || ok.Stdout != "(((( 1\n" {
+		t.Fatalf("shallow nesting: exit=%d stdout=%q stderr=%q", ok.ExitCode, ok.Stdout, ok.Stderr)
+	}
+}
+
+func TestPythonDevZeroStdinIsNotREPL(t *testing.T) {
+	t.Parallel()
+
+	result := runPythonLimitScript(t, "python3 < /dev/zero\n", 20*time.Second)
+	if strings.Contains(result.Stdout, ">>>") {
+		t.Fatalf("Stdout = %q, /dev/zero must not start the REPL", result.Stdout)
+	}
+}
+
+func TestPythonReplLineIsCapped(t *testing.T) {
+	t.Parallel()
+
+	reader := bufio.NewReader(strings.NewReader(strings.Repeat("a", pythonReplMaxLine+10)))
+	if _, err := pythonReadReplLine(context.Background(), reader); !errors.Is(err, errPythonReplLineTooLong) {
+		t.Fatalf("err = %v, want errPythonReplLineTooLong", err)
 	}
 }
