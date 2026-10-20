@@ -729,7 +729,9 @@ type Parser struct {
 	// hdocCache memoizes repeated heredoc work; see [heredocCache]. Probes
 	// and heredoc body sub-parsers share the cache of the parser that
 	// created it, which ownsHdocCache marks.
-	hdocCache     *heredocCache
+	hdocCache *heredocCache
+	// probeMemo memoizes nested parses of probes; see [probeMemo].
+	probeMemo     *probeMemo
 	ownsHdocCache bool
 
 	// inputCut reports that this parser scans text that may be cut off at
@@ -3527,6 +3529,9 @@ func copyAliasActive(src map[string]int) map[string]int {
 }
 
 func (p *Parser) parenAmbiguityClone() *Parser {
+	if p.probeMemo == nil {
+		p.probeMemo = &probeMemo{}
+	}
 	clone := *p
 	clone.err = nil
 	clone.readErr = nil
@@ -3865,7 +3870,9 @@ func (p *Parser) arithmWordPartTo(salvageTail bool, tailEnd Pos) *ArithmExp {
 		ar.Right = p.arithmEndExpr(&expr, dollDblParen, ar.Left, old, salvageTail, tailEnd)
 		ar.X = expr
 	}
-	ar.Source = p.arithmInnerSource(ar.Left, ar.Right, ar.Bracket)
+	if !p.parenAmbiguityDisabled { // see arithmExpCmdWithTailTo
+		ar.Source = p.arithmInnerSource(ar.Left, ar.Right, ar.Bracket)
+	}
 	return ar
 }
 
@@ -4001,7 +4008,10 @@ func (p *Parser) wordPart() WordPart {
 		p.ensureNoNested(p.pos)
 		if p.tok == dollDblParen {
 			if p.parenAmbiguityDisabled {
-				return p.arithmWordPart(true)
+				part, _ := p.memoProbe(probeMemoArithmExp, func() Node {
+					return p.arithmWordPart(true)
+				}).(WordPart)
+				return part
 			}
 			return p.parenAmbiguityWordPart()
 		}
@@ -7087,7 +7097,11 @@ func (p *Parser) arithmExpCmdWithTailTo(s *Stmt, salvageTail bool, tailEnd Pos) 
 	expr := ar.X
 	ar.Right = p.arithmEndExpr(&expr, dblLeftParen, ar.Left, old, salvageTail, tailEnd)
 	ar.X = expr
-	ar.Source = p.arithmCmdSource(ar.Left, ar.Right)
+	if !p.parenAmbiguityDisabled {
+		// Probes throw their trees away and each copies the rest of the
+		// input here at every nested level, so only the final parse does.
+		ar.Source = p.arithmCmdSource(ar.Left, ar.Right)
+	}
 	s.Cmd = ar
 }
 
@@ -7202,7 +7216,11 @@ func (p *Parser) parenAmbiguityStmt(s *Stmt) {
 
 func (p *Parser) arithmExpCmd(s *Stmt) {
 	if p.parenAmbiguityDisabled && p.parenAmbiguityProbeDepth > 1 {
-		p.arithmExpCmdWithTail(s, true)
+		cmd, _ := p.memoProbe(probeMemoArithmCmd, func() Node {
+			p.arithmExpCmdWithTail(s, true)
+			return s.Cmd
+		}).(Command)
+		s.Cmd = cmd
 		return
 	}
 	p.parenAmbiguityStmt(s)
