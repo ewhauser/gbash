@@ -52,3 +52,24 @@ func TestNodeJSMkdirModeOnlyHonorsPermissionBits(t *testing.T) {
 		t.Fatalf("Stdout = %q, want %q; stderr=%q", result.Stdout, want, result.Stderr)
 	}
 }
+
+func TestNodeJSUnlinkAndRmdirCheckFileType(t *testing.T) {
+	t.Parallel()
+
+	result := runNodeScript(t, strings.Join([]string{
+		`const fs = require('fs');`,
+		`fs.mkdirSync('/tmp/dir');`,
+		`fs.writeFileSync('/tmp/file', 'x');`,
+		`try { fs.unlinkSync('/tmp/dir'); console.log('unlinked dir'); } catch (e) { console.log('unlink dir rejected'); }`,
+		`try { fs.rmdirSync('/tmp/file'); console.log('rmdir file'); } catch (e) { console.log('rmdir file rejected'); }`,
+		`console.log(fs.existsSync('/tmp/dir'), fs.existsSync('/tmp/file'));`,
+		`const S_IFMT = 0o170000;`,
+		`console.log((fs.statSync('/tmp/dir').mode & S_IFMT) === 0o040000, (fs.statSync('/tmp/file').mode & S_IFMT) === 0o100000);`,
+		`fs.unlinkSync('/tmp/file'); fs.rmdirSync('/tmp/dir');`,
+		`console.log(fs.existsSync('/tmp/dir'), fs.existsSync('/tmp/file'));`,
+	}, "\n")+"\n")
+	want := "unlink dir rejected\nrmdir file rejected\ntrue true\ntrue true\nfalse false\nafter=0\n"
+	if result.Stdout != want {
+		t.Fatalf("Stdout = %q, want %q; stderr=%q", result.Stdout, want, result.Stderr)
+	}
+}
