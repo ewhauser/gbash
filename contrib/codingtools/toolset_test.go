@@ -1053,3 +1053,20 @@ func (f *guardedReadFile) Close() error {
 func (f *guardedReadFile) Stat() (stdfs.FileInfo, error) {
 	return f.info, nil
 }
+
+func TestEditRejectsOversizedFile(t *testing.T) {
+	t.Parallel()
+
+	fsys := gbfs.NewMemory()
+	mustWriteVirtualFile(t, fsys, "/workspace/big.txt", "needle\n"+strings.Repeat("x", MaxEditBytes))
+	tools := New(Config{FS: fsys, WorkingDir: "/workspace"})
+
+	_, err := tools.Edit(context.Background(), EditRequest{Path: "big.txt", OldText: "needle", NewText: "pin"})
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("Edit() error = %v, want too large", err)
+	}
+	_, err = tools.Edit(context.Background(), EditRequest{Path: "big.txt", OldText: "needle", NewText: strings.Repeat("y", MaxEditBytes+1)})
+	if err == nil || !strings.Contains(err.Error(), "at most") {
+		t.Fatalf("Edit() error = %v, want newText size error", err)
+	}
+}
