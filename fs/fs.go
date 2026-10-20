@@ -112,6 +112,43 @@ func Resolve(dir, name string) string {
 	return Clean(path.Join(dir, name))
 }
 
+// ResolvePhysical resolves name against dir like [Resolve], but applies each
+// ".." to the physical directory reached so far, as POSIX path resolution
+// does. When the prefix before a ".." runs through a symlink, it is first
+// resolved with fsys.Realpath, so "/lnk/../x" names the parent of the link's
+// target, not "/x". Names without ".." resolve exactly as [Resolve].
+func ResolvePhysical(ctx context.Context, fsys FileSystem, dir, name string) string {
+	if fsys == nil || !hasDotDotComponent(name) {
+		return Resolve(dir, name)
+	}
+	current := "/"
+	if !strings.HasPrefix(name, "/") {
+		current = Clean(dir)
+	}
+	for part := range strings.SplitSeq(name, "/") {
+		switch part {
+		case "", ".":
+		case "..":
+			if resolved, err := fsys.Realpath(ctx, current); err == nil {
+				current = Clean(resolved)
+			}
+			current = parentDir(current)
+		default:
+			current = joinClean(current, part)
+		}
+	}
+	return current
+}
+
+func hasDotDotComponent(name string) bool {
+	for part := range strings.SplitSeq(name, "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 // joinClean concatenates a clean absolute directory path with a single path
 // component. Both inputs must be pre-validated: dir is a clean absolute path
 // (as returned by Clean or Resolve) and name is a single entry with no

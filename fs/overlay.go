@@ -212,9 +212,12 @@ func (o *OverlayFS) Realpath(ctx context.Context, name string) (string, error) {
 
 func (o *OverlayFS) Symlink(ctx context.Context, target, linkName string) error {
 	requested := o.resolve(linkName)
-	abs, _, _, err := o.resolveMergedPath(ctx, requested, false, overlayMissingFinal)
+	abs, info, _, err := o.resolveMergedPath(ctx, requested, false, overlayMissingFinal)
 	if err != nil {
 		return toPathError("symlink", requested, createParentError(err))
+	}
+	if info != nil {
+		return &os.PathError{Op: "symlink", Path: abs, Err: stdfs.ErrExist}
 	}
 	if err := o.copyUpAncestors(ctx, abs); err != nil {
 		return toPathError("symlink", abs, err)

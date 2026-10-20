@@ -32,6 +32,11 @@ type memoryFIFO struct {
 	writerEpoch uint64
 }
 
+// memoryFIFOCapacity bounds the bytes buffered in an in-memory FIFO. Writers
+// block while the buffer is full, like a host pipe, so an unread FIFO cannot
+// grow without limit.
+const memoryFIFOCapacity = 64 << 10
+
 func newMemoryFIFO() *memoryFIFO {
 	fifo := &memoryFIFO{}
 	fifo.cond = sync.NewCond(&fifo.mu)
@@ -163,23 +168,28 @@ func (f *memoryFIFOFile) Write(p []byte) (int, error) {
 	f.fifo.mu.Lock()
 	defer f.fifo.mu.Unlock()
 
-	for f.fifo.readers == 0 {
-		if f.closed.Load() {
-			return 0, stdfs.ErrClosed
+	written := 0
+	for written < len(p) {
+		for f.fifo.readers == 0 || len(f.fifo.buf) >= memoryFIFOCapacity {
+			if f.closed.Load() {
+				return written, stdfs.ErrClosed
+			}
+			if f.fifo.readers == 0 && (f.sawReader || f.fifo.readerEpoch != f.readerEpoch) {
+				return written, &os.PathError{Op: "write", Path: f.path, Err: io.ErrClosedPipe}
+			}
+			if err := f.ctxErr(); err != nil {
+				return written, &os.PathError{Op: "write", Path: f.path, Err: err}
+			}
+			f.fifo.cond.Wait()
 		}
-		if f.sawReader || f.fifo.readerEpoch != f.readerEpoch {
-			return 0, &os.PathError{Op: "write", Path: f.path, Err: io.ErrClosedPipe}
-		}
-		if err := f.ctxErr(); err != nil {
-			return 0, &os.PathError{Op: "write", Path: f.path, Err: err}
-		}
-		f.fifo.cond.Wait()
+		f.sawReader = true
+		f.readerEpoch = f.fifo.readerEpoch
+		chunk := min(len(p)-written, memoryFIFOCapacity-len(f.fifo.buf))
+		f.fifo.buf = append(f.fifo.buf, p[written:written+chunk]...)
+		written += chunk
+		f.fifo.cond.Broadcast()
 	}
-	f.sawReader = true
-	f.readerEpoch = f.fifo.readerEpoch
-	f.fifo.buf = append(f.fifo.buf, p...)
-	f.fifo.cond.Broadcast()
-	return len(p), nil
+	return written, nil
 }
 
 func (f *memoryFIFOFile) Close() error {

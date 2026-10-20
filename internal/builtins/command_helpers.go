@@ -34,8 +34,18 @@ func allowPath(inv *Invocation, name string) string {
 	return inv.FS.Resolve(name)
 }
 
+// allowPathAt is allowPath for an operation that has a context: it applies
+// ".." after symlinks physically, as the kernel does.
+func allowPathAt(ctx context.Context, inv *Invocation, name string) string {
+	name = remapCompatHostPath(inv, name)
+	if inv == nil || inv.FS == nil {
+		return gbfs.Clean(name)
+	}
+	return inv.FS.ResolveAt(ctx, name)
+}
+
 func openRead(ctx context.Context, inv *Invocation, name string) (gbfs.File, string, error) {
-	abs := allowPath(inv, name)
+	abs := allowPathAt(ctx, inv, name)
 	file, err := inv.FS.Open(ctx, abs)
 	if err != nil {
 		return nil, "", err
@@ -71,7 +81,7 @@ func lstatPath(ctx context.Context, inv *Invocation, name string) (stdfs.FileInf
 }
 
 func statMaybe(ctx context.Context, inv *Invocation, name string) (info stdfs.FileInfo, abs string, exists bool, err error) {
-	abs = allowPath(inv, name)
+	abs = allowPathAt(ctx, inv, name)
 	info, err = inv.FS.Stat(ctx, abs)
 	if err != nil {
 		if errors.Is(err, stdfs.ErrNotExist) {
@@ -83,7 +93,7 @@ func statMaybe(ctx context.Context, inv *Invocation, name string) (info stdfs.Fi
 }
 
 func lstatMaybe(ctx context.Context, inv *Invocation, name string) (info stdfs.FileInfo, abs string, exists bool, err error) {
-	abs = allowPath(inv, name)
+	abs = allowPathAt(ctx, inv, name)
 	info, err = inv.FS.Lstat(ctx, abs)
 	if err != nil {
 		if errors.Is(err, stdfs.ErrNotExist) {

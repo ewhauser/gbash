@@ -9,6 +9,7 @@ import (
 	"time"
 
 	gbash "github.com/ewhauser/gbash"
+	gbfs "github.com/ewhauser/gbash/fs"
 	"github.com/ewhauser/gbash/policy"
 )
 
@@ -886,7 +887,15 @@ func TestWCFiles0FromStreamingHonorsMaxFileBytes(t *testing.T) {
 
 func TestWCFiles0FromMaterializedReportsMaxFileBytes(t *testing.T) {
 	t.Parallel()
+	// Writes are capped at MaxFileBytes too, so seed the oversized names file.
 	session := newSession(t, &Config{
+		FileSystem: gbash.FileSystemConfig{
+			Factory: gbfs.SeededMemory(gbfs.InitialFiles{
+				"/tmp/a.txt": {Content: []byte("a\n")},
+				"/tmp/names": {Content: []byte("/tmp/a.txt\x00")},
+			}),
+			WorkingDir: "/",
+		},
 		Policy: policy.NewStatic(&policy.Config{
 			ReadRoots:  []string{"/"},
 			WriteRoots: []string{"/"},
@@ -896,12 +905,7 @@ func TestWCFiles0FromMaterializedReportsMaxFileBytes(t *testing.T) {
 		}),
 	})
 
-	result := mustExecSession(t, session, strings.Join([]string{
-		"printf 'a\\n' > /tmp/a.txt",
-		"printf '/tmp/a.txt\\0' > /tmp/names",
-		"wc --files0-from=/tmp/names",
-		"",
-	}, "\n"))
+	result := mustExecSession(t, session, "wc --files0-from=/tmp/names\n")
 	if result.ExitCode != 1 {
 		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
 	}

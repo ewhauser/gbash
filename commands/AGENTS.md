@@ -43,6 +43,7 @@ Creates `Invocation` instances and exposes the policy-enforced filesystem wrappe
 - `NewInvocation(opts)` — builds an `Invocation` from `InvocationOptions`
 - `InvocationOptions` — inputs for constructing an invocation
 - `CommandFS` — wraps `gbfs.FileSystem` with policy-aware filesystem operations
+- `(*CommandFS).ResolveAt(ctx, name)` — resolve a path applying `..` after symlinks, as POSIX does
 - `(*CommandFS).ReadFile(ctx, name)` — slurp a file while enforcing `Limits.MaxFileBytes`
 - `FetchFunc` — network callback type using `network.Request` / `network.Response`
 

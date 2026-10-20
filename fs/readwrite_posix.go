@@ -100,7 +100,7 @@ func (h *ReadWriteFS) OpenFile(ctx context.Context, name string, flag int, perm 
 	if err != nil {
 		return nil, h.pathError("open", abs, err)
 	}
-	if !hasWriteIntent(flag) {
+	if canRead(flag) {
 		if err := h.checkFileSize(info); err != nil {
 			_ = file.Close()
 			return nil, h.pathError("open", abs, err)
@@ -150,7 +150,7 @@ func (h *ReadWriteFS) ReadDir(_ context.Context, name string) ([]stdfs.DirEntry,
 	}
 	defer func() { _ = root.Close() }()
 
-	file, err := root.Open(rootRelativeOpenPath(resolved.rel))
+	file, err := openHostDir(root, rootRelativeOpenPath(resolved.rel))
 	if err != nil {
 		return nil, h.pathError("readdir", abs, err)
 	}

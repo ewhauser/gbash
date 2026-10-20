@@ -191,7 +191,7 @@ func (h *HostFS) ReadDir(_ context.Context, name string) ([]stdfs.DirEntry, erro
 		}
 		defer func() { _ = root.Close() }()
 
-		file, err := root.Open(rootRelativeOpenPath(resolved.rel))
+		file, err := openHostDir(root, rootRelativeOpenPath(resolved.rel))
 		if err != nil {
 			return nil, h.pathError("readdir", abs, err)
 		}
