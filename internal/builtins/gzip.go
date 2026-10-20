@@ -153,7 +153,7 @@ func runGzipItem(ctx context.Context, inv *Invocation, opts *gzipOptions, name, 
 
 	if opts.toStdout || name == "-" {
 		if opts.decompress {
-			if err := gunzipStream(ctx, reader, inv.Stdout, 0); err != nil {
+			if err := gunzipStream(ctx, reader, inv.Stdout, fileSizeLimit(inv)); err != nil {
 				return gzipExitf(inv, opts.quiet, "%s: %v", commandName, err)
 			}
 		} else {
@@ -271,7 +271,7 @@ func gzipInputError(inv *Invocation, quiet bool, name string, err error) error {
 }
 
 func gzipTestStream(ctx context.Context, inv *Invocation, verbose bool, displayName string, reader io.Reader) error {
-	err := gunzipStream(ctx, reader, io.Discard, 0)
+	err := gunzipStream(ctx, reader, io.Discard, fileSizeLimit(inv))
 	if err != nil {
 		return exitf(inv, 1, "gzip: %v", err)
 	}

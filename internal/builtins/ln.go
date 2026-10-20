@@ -265,6 +265,9 @@ func lnPrepareDestination(ctx context.Context, inv *Invocation, opts *lnOptions,
 		if err != nil {
 			return err
 		}
+		if backupAbs == lnTargetAbs(inv, opts, target, linkAbs) {
+			return exitf(inv, 1, "ln: backing up %s might destroy source;  %s not created", quoteGNUOperand(linkName), quoteGNUOperand(linkName))
+		}
 		if _, _, backupExists, err := lstatMaybe(ctx, inv, backupAbs); err != nil {
 			return err
 		} else if backupExists {
@@ -337,3 +340,12 @@ func lnErrText(err error) string {
 var _ Command = (*LN)(nil)
 var _ SpecProvider = (*LN)(nil)
 var _ ParsedRunner = (*LN)(nil)
+
+// lnTargetAbs resolves the link target the way the created link would see
+// it: symlink targets are relative to the link's directory.
+func lnTargetAbs(inv *Invocation, opts *lnOptions, target, linkAbs string) string {
+	if opts.symbolic && !path.IsAbs(target) {
+		return path.Join(path.Dir(linkAbs), target)
+	}
+	return allowPath(inv, target)
+}

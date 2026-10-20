@@ -392,6 +392,9 @@ func mvMoveOne(ctx context.Context, inv *Invocation, sourceArg, destArg string, 
 		if err != nil {
 			return mvMoveOutcomeSkipped, err
 		}
+		if backupAbs == srcAbs {
+			return mvMoveOutcomeSkipped, exitf(inv, 1, "mv: backing up %s might destroy source;  %s not moved", quoteGNUOperand(dest.display), quoteGNUOperand(sourceArg))
+		}
 		if err := mvRemoveIfExists(ctx, inv, backupAbs, dest.display); err != nil {
 			return mvMoveOutcomeSkipped, err
 		}

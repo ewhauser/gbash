@@ -2,8 +2,8 @@ package builtins
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	stdfs "io/fs"
 	"os"
 	"path"
@@ -47,7 +47,10 @@ func copyFileContents(ctx context.Context, inv *Invocation, srcAbs, dstAbs strin
 	}
 	defer func() { _ = dstFile.Close() }()
 
-	if _, err := io.Copy(dstFile, srcFile); err != nil {
+	if err := copyBounded(ctx, dstFile, srcFile, fileSizeLimit(inv)); err != nil {
+		if errors.Is(err, errFileTooLarge) {
+			return exitf(inv, 1, "cp: error writing %s: %v", quoteGNUOperand(dstAbs), err)
+		}
 		return &ExitError{Code: 1, Err: err}
 	}
 	recordFileMutation(inv.TraceRecorder(), "copy", dstAbs, srcAbs, dstAbs)

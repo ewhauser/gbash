@@ -3,8 +3,8 @@ package builtins
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	stdfs "io/fs"
 	"os"
 	"path"
@@ -370,7 +370,7 @@ func installOne(ctx context.Context, inv *Invocation, db *permissionIdentityDB, 
 		}
 	}
 
-	backupAbs, err := installPrepareDestination(ctx, inv, opts, destAbs, destLstat, destExists)
+	backupAbs, err := installPrepareDestination(ctx, inv, opts, sourceArg, sourceAbs, destAbs, destLstat, destExists)
 	if err != nil {
 		return err
 	}
@@ -428,7 +428,7 @@ func installNeedsCopy(ctx context.Context, inv *Invocation, opts *installOptions
 	return !bytes.Equal(sourceData, destData), nil
 }
 
-func installPrepareDestination(ctx context.Context, inv *Invocation, opts *installOptions, destAbs string, destLstat stdfs.FileInfo, destExists bool) (string, error) {
+func installPrepareDestination(ctx context.Context, inv *Invocation, opts *installOptions, sourceArg, sourceAbs, destAbs string, destLstat stdfs.FileInfo, destExists bool) (string, error) {
 	if !destExists {
 		return "", nil
 	}
@@ -441,6 +441,9 @@ func installPrepareDestination(ctx context.Context, inv *Invocation, opts *insta
 		backupAbs, err := backupPath(ctx, inv, opts.backupMode, destAbs, opts.backupSuffix)
 		if err != nil {
 			return "", err
+		}
+		if backupAbs == sourceAbs {
+			return "", exitf(inv, 1, "install: backing up %s might destroy source;  %s not copied", quoteGNUOperand(destAbs), quoteGNUOperand(sourceArg))
 		}
 		if _, _, exists, err := lstatMaybe(ctx, inv, backupAbs); err != nil {
 			return "", err
@@ -477,8 +480,11 @@ func installCopyFile(ctx context.Context, inv *Invocation, sourceAbs, destAbs st
 	}
 	defer func() { _ = dst.Close() }()
 
-	if _, err := io.Copy(dst, src); err != nil {
+	if err := copyBounded(ctx, dst, src, fileSizeLimit(inv)); err != nil {
 		_ = inv.FS.Remove(ctx, destAbs, false)
+		if errors.Is(err, errFileTooLarge) {
+			return exitf(inv, 1, "install: error writing %s: %v", quoteGNUOperand(destAbs), err)
+		}
 		return &ExitError{Code: 1, Err: err}
 	}
 	recordFileMutation(inv.TraceRecorder(), "copy", destAbs, sourceAbs, destAbs)

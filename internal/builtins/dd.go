@@ -1092,7 +1092,7 @@ func openDdInput(ctx context.Context, inv *Invocation, settings *ddSettings) (*d
 	}
 	if skipBytes > 0 {
 		if !ddSeekCurrent(reader, skipBytes) {
-			discarded, err := ddDiscard(reader, skipBytes)
+			discarded, err := ddDiscard(ctx, reader, skipBytes)
 			if err != nil {
 				if closer != nil {
 					_ = closer.Close()
@@ -1361,12 +1361,15 @@ func readDdBlock(reader io.Reader, size int, fullblock bool) ([]byte, ddReadStat
 	return buf, ddReadStats{recordsComplete: 1, bytesTotal: uint64(size)}, false, nil
 }
 
-func ddDiscard(reader io.Reader, bytesToSkip uint64) (uint64, error) {
+func ddDiscard(ctx context.Context, reader io.Reader, bytesToSkip uint64) (uint64, error) {
 	var (
 		discarded uint64
 		buf       = make([]byte, 32*1024)
 	)
 	for discarded < bytesToSkip {
+		if err := ctx.Err(); err != nil {
+			return discarded, err
+		}
 		want := len(buf)
 		if remaining := bytesToSkip - discarded; remaining < uint64(want) {
 			want = int(remaining)
