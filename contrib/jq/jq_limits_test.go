@@ -122,3 +122,42 @@ func TestJQHonorsRequestTimeout(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want %d; stderr=%q", got, want, result.Stderr)
 	}
 }
+
+func TestJQSetpathRespectsArrayLimit(t *testing.T) {
+	t.Parallel()
+
+	for _, filter := range []string{`[1] | .[100000000] = 1`, `setpath([100000000]; 1) | length`} {
+		result := runJQLimitScript(t, "jq -n '"+filter+"'")
+		if got, want := result.Stdout, "after=5\n"; got != want {
+			t.Fatalf("%s: Stdout = %.200q, want %q; stderr=%.200q", filter, got, want, result.Stderr)
+		}
+		if !strings.Contains(result.Stderr, "exceeds size limit") {
+			t.Fatalf("%s: Stderr = %.200q, want size limit error", filter, result.Stderr)
+		}
+	}
+}
+
+func TestJQRejectsDeeplyNestedFilter(t *testing.T) {
+	t.Parallel()
+
+	filter := strings.Repeat("(", 1_000_000) + "1" + strings.Repeat(")", 1_000_000)
+	result := runJQLimitScript(t, "jq -n '"+filter+"'")
+	if !strings.Contains(result.Stdout, "after=") || strings.Contains(result.Stdout, "after=0") {
+		t.Fatalf("Stdout = %.200q, want failure; stderr=%.200q", result.Stdout, result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "depth limit") {
+		t.Fatalf("Stderr = %.200q, want depth limit error", result.Stderr)
+	}
+}
+
+func TestJQStreamBoundsPathCopies(t *testing.T) {
+	t.Parallel()
+
+	result := runJQLimitScript(t, "jq -nc 'reduce range(3000) as $i ([range(3000)]; [.])' | jq --stream -c . >/dev/null")
+	if got, want := result.Stdout, "after=5\n"; got != want {
+		t.Fatalf("Stdout = %q, want %q; stderr=%.200q", got, want, result.Stderr)
+	}
+	if !strings.Contains(result.Stderr, "path elements") {
+		t.Fatalf("Stderr = %.200q, want stream budget error", result.Stderr)
+	}
+}

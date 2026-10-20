@@ -13,6 +13,8 @@ type lexer struct {
 	tokenType int
 	inString  bool
 	err       error
+	depth     int
+	depthErr  error
 }
 
 func newLexer(src string) *lexer {
@@ -45,7 +47,27 @@ var keywords = map[string]int{
 	"foreach": tokForeach,
 }
 
-func (l *lexer) Lex(lval *yySymType) (tokenType int) {
+// Lex tracks bracket nesting so that deeply nested queries fail to parse
+// instead of overflowing the Go stack in the recursive compiler.
+func (l *lexer) Lex(lval *yySymType) int {
+	tok := l.lex(lval)
+	switch tok {
+	case '(', '[', '{', tokIf:
+		l.depth++
+		if l.depth > MaxDepth {
+			l.depthErr = &DepthLimitError{Op: "parse"}
+			l.tokenType = tokInvalid
+			return tokInvalid
+		}
+	case ')', ']', '}', tokEnd:
+		if l.depth > 0 {
+			l.depth--
+		}
+	}
+	return tok
+}
+
+func (l *lexer) lex(lval *yySymType) (tokenType int) {
 	defer func() { l.tokenType = tokenType }()
 	if len(l.source) == l.offset {
 		l.token = ""

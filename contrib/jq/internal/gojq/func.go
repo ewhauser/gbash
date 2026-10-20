@@ -1718,6 +1718,7 @@ func updateArrayIndex(v []any, i int, path []any, n any, a allocator) (any, erro
 		if i >= 0x20000000 {
 			return nil, &arrayIndexTooLargeError{i}
 		}
+		checkArrayLength("setpath", i+1)
 	}
 	u, err := update(x, path, n, a)
 	if err != nil {
@@ -1732,7 +1733,7 @@ func updateArrayIndex(v []any, i int, path []any, n any, a allocator) (any, erro
 			v[i] = u
 			return v, nil
 		}
-		c *= 2
+		c = min(c*2, MaxArrayLength)
 	}
 	if i >= l {
 		l = i + 1

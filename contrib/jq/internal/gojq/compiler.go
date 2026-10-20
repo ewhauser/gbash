@@ -16,6 +16,7 @@ type compiler struct {
 	customFuncs   map[string]function
 	inputIter     Iter
 	codes         []*code
+	nesting       int
 	codeinfos     []codeinfo
 	builtinScope  *scopeinfo
 	scopes        []*scopeinfo
@@ -369,6 +370,11 @@ func (c *compiler) compileFuncDef(e *FuncDef, builtin bool) error {
 }
 
 func (c *compiler) compileQuery(e *Query) error {
+	c.nesting++
+	defer func() { c.nesting-- }()
+	if c.nesting > MaxDepth {
+		return &DepthLimitError{Op: "compile"}
+	}
 	for _, fd := range e.FuncDefs {
 		if err := c.compileFuncDef(fd, false); err != nil {
 			return err
@@ -797,6 +803,11 @@ func funcBreak(label string) func(any, []any) any {
 }
 
 func (c *compiler) compileTerm(e *Term) error {
+	c.nesting++
+	defer func() { c.nesting-- }()
+	if c.nesting > MaxDepth {
+		return &DepthLimitError{Op: "compile"}
+	}
 	if len(e.SuffixList) > 0 {
 		s := e.SuffixList[len(e.SuffixList)-1]
 		t := *e // clone without changing e

@@ -417,7 +417,16 @@ type jqJSONStream struct {
 	decoder *json.Decoder
 	path    []any
 	states  []int
+	// copied counts path elements emitted so far; see jqMaxStreamPathElements.
+	copied int
 }
+
+// jqMaxStreamPathElements bounds the path elements one --stream input may
+// emit. Each event copies the full path, so a deeply nested document costs
+// tokens × depth memory, which a 100 KiB input can push into gigabytes.
+const jqMaxStreamPathElements = 1 << 23
+
+var errJQStreamTooLarge = fmt.Errorf("--stream output exceeds %d path elements", jqMaxStreamPathElements)
 
 func newJQJSONStream(decoder *json.Decoder) *jqJSONStream {
 	return &jqJSONStream{
@@ -441,6 +450,14 @@ const (
 )
 
 func (s *jqJSONStream) next() (any, error) {
+	value, err := s.nextEvent()
+	if err == nil && s.copied > jqMaxStreamPathElements {
+		return nil, errJQStreamTooLarge
+	}
+	return value, err
+}
+
+func (s *jqJSONStream) nextEvent() (any, error) {
 	switch s.states[len(s.states)-1] {
 	case jqJSONStateArrayEnd, jqJSONStateObjectEnd:
 		s.path = s.path[:len(s.path)-1]
@@ -524,6 +541,7 @@ func (s *jqJSONStream) errorPath() []any {
 }
 
 func (s *jqJSONStream) copyPath() []any {
+	s.copied += len(s.path)
 	path := make([]any, len(s.path))
 	copy(path, s.path)
 	return path
