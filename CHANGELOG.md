@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.42](https://github.com/ewhauser/gbash/compare/v0.0.41...v0.0.42) (2026-10-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency next to v16.4.1 [security] ([#895](https://github.com/ewhauser/gbash/issues/895)) ([64eb596](https://github.com/ewhauser/gbash/commit/64eb59678c116708f96c9172da15a0ed52dd8daf))
+
 ## [0.0.41](https://github.com/ewhauser/gbash/compare/v0.0.40...v0.0.41) (2026-10-20)
 
 
