@@ -29,7 +29,7 @@ jobs:
           - shard: shard-5
             make_var: FUZZ_FULL_SHARD_5
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
@@ -84,7 +84,7 @@ jobs:
           - name: sqlite3
             targets: ./contrib/sqlite3:FuzzSQLiteCommands ./contrib/sqlite3:FuzzSQLiteFileCommands
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
         with:
