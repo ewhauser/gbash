@@ -51,7 +51,7 @@ jobs:
 
       - name: Upload fuzz corpus artifacts
         if: steps.collect_fuzz_artifacts.outputs.has_files == 'true'
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fuzz-full-${{ matrix.shard }}-corpus
           if-no-files-found: error
@@ -106,7 +106,7 @@ jobs:
 
       - name: Upload fuzz corpus artifacts
         if: steps.collect_fuzz_artifacts.outputs.has_files == 'true'
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fuzz-contrib-${{ matrix.name }}-corpus
           if-no-files-found: error
