@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/ewhauser/gbash/policy"
 )
 
 func TestCatSupportsLongAndShortNumberFlags(t *testing.T) {
@@ -121,7 +123,33 @@ func TestCatReportsMissingFilesLikeBash(t *testing.T) {
 
 func TestCatReportsMissingInputWhenStdoutIsAHostFile(t *testing.T) {
 	t.Parallel()
-	rt := newRuntime(t, &Config{})
+	code, stderr := runCatToHostFile(t, &Config{}, "cat /tmp/missing\n")
+	if code != 1 {
+		t.Fatalf("ExitCode = %d, want 1", code)
+	}
+	if want := "cat: /tmp/missing: No such file or directory\n"; stderr != want {
+		t.Fatalf("Stderr = %q, want %q", stderr, want)
+	}
+}
+
+func TestCatReportsPolicyDenialOnceWhenStdoutIsAHostFile(t *testing.T) {
+	t.Parallel()
+	code, stderr := runCatToHostFile(t, &Config{
+		Policy: policy.NewStatic(&policy.Config{ReadRoots: []string{"/tmp", "/usr/bin", "/bin"}}),
+	}, "cat /etc/secret\n")
+	if code != 126 {
+		t.Fatalf("ExitCode = %d, want 126; stderr=%q", code, stderr)
+	}
+	if n := strings.Count(stderr, "denied:"); n != 1 {
+		t.Fatalf("Stderr = %q, want exactly one denial", stderr)
+	}
+}
+
+// runCatToHostFile runs script with an os.Pipe as stdout, which takes cat's
+// host-file self-overwrite check.
+func runCatToHostFile(t *testing.T, cfg *Config, script string) (int, string) {
+	t.Helper()
+	rt := newRuntime(t, cfg)
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -130,19 +158,10 @@ func TestCatReportsMissingInputWhenStdoutIsAHostFile(t *testing.T) {
 	go func() { _, _ = io.Copy(io.Discard, r) }()
 	var stderr strings.Builder
 
-	result, err := rt.Run(context.Background(), &ExecutionRequest{
-		Script: "cat /tmp/missing\n",
-		Stdout: w,
-		Stderr: &stderr,
-	})
+	result, err := rt.Run(context.Background(), &ExecutionRequest{Script: script, Stdout: w, Stderr: &stderr})
 	_ = w.Close()
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result.ExitCode != 1 {
-		t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
-	}
-	if got, want := stderr.String(), "cat: /tmp/missing: No such file or directory\n"; got != want {
-		t.Fatalf("Stderr = %q, want %q", got, want)
-	}
+	return result.ExitCode, stderr.String()
 }

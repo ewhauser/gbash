@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/ewhauser/gbash/internal/commandutil"
+	"github.com/ewhauser/gbash/policy"
 )
 
 type Cat struct{}
@@ -227,6 +228,9 @@ func catWouldUnsafeOverwrite(ctx context.Context, inv *Invocation, name string) 
 
 	info, _, err := statPath(ctx, inv, name)
 	if err != nil {
+		if policy.IsDenied(err) {
+			return false, err
+		}
 		// Let the read below report a missing or unreadable input.
 		return false, nil
 	}
@@ -243,6 +247,9 @@ func catWouldUnsafeOverwrite(ctx context.Context, inv *Invocation, name string) 
 	if !testSameFile(info, outputInfo) {
 		file, _, openErr := openRead(ctx, inv, name)
 		if openErr != nil {
+			if policy.IsDenied(openErr) {
+				return false, openErr
+			}
 			return false, nil
 		}
 		defer func() { _ = file.Close() }()
