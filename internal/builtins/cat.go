@@ -227,7 +227,8 @@ func catWouldUnsafeOverwrite(ctx context.Context, inv *Invocation, name string) 
 
 	info, _, err := statPath(ctx, inv, name)
 	if err != nil {
-		return false, err
+		// Let the read below report a missing or unreadable input.
+		return false, nil
 	}
 	outputInfo, err := outputHost.Stat()
 	if err != nil {
@@ -242,7 +243,7 @@ func catWouldUnsafeOverwrite(ctx context.Context, inv *Invocation, name string) 
 	if !testSameFile(info, outputInfo) {
 		file, _, openErr := openRead(ctx, inv, name)
 		if openErr != nil {
-			return false, openErr
+			return false, nil
 		}
 		defer func() { _ = file.Close() }()
 		info, err = file.Stat()

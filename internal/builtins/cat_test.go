@@ -2,6 +2,9 @@ package builtins_test
 
 import (
 	"context"
+	"io"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -112,6 +115,34 @@ func TestCatReportsMissingFilesLikeBash(t *testing.T) {
 		t.Fatalf("ExitCode = %d, want 1; stderr=%q", result.ExitCode, result.Stderr)
 	}
 	if got, want := result.Stderr, "cat: missing.txt: No such file or directory\n"; got != want {
+		t.Fatalf("Stderr = %q, want %q", got, want)
+	}
+}
+
+func TestCatReportsMissingInputWhenStdoutIsAHostFile(t *testing.T) {
+	t.Parallel()
+	rt := newRuntime(t, &Config{})
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	go func() { _, _ = io.Copy(io.Discard, r) }()
+	var stderr strings.Builder
+
+	result, err := rt.Run(context.Background(), &ExecutionRequest{
+		Script: "cat /tmp/missing\n",
+		Stdout: w,
+		Stderr: &stderr,
+	})
+	_ = w.Close()
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 1 {
+		t.Fatalf("ExitCode = %d, want 1", result.ExitCode)
+	}
+	if got, want := stderr.String(), "cat: /tmp/missing: No such file or directory\n"; got != want {
 		t.Fatalf("Stderr = %q, want %q", got, want)
 	}
 }
